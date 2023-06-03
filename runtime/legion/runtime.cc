@@ -13001,6 +13001,11 @@ namespace Legion {
                                                     remote_address_space);
               break;
             }
+          case SEND_EQUIVALENCE_SET_CREATION:
+            {
+              runtime->handle_equivalence_set_creation(derez);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REQUEST:
             {
               runtime->handle_equivalence_set_request(derez); 
@@ -23065,6 +23070,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_creation(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_EQUIVALENCE_SET_CREATION>(
+          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_response(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25343,8 +25357,8 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_compute_equivalence_sets_response(derez, this, 
-                                                               source);
+      InnerContext::handle_compute_equivalence_sets_response(derez, this, 
+                                                             source);
     }
 
     //--------------------------------------------------------------------------
@@ -25361,6 +25375,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EqSetTracker::handle_finish_subscription(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_creation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker::handle_equivalence_set_creation(derez, this);
     }
 
     //--------------------------------------------------------------------------

@@ -6350,6 +6350,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceExpression* EqKDTreeT<DIM,T>::create_from_rectangles(
+               RegionTreeForest *forest, const std::vector<Domain> &rects) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!rects.empty());
+#endif
+      std::vector<Rect<DIM,T> > rectangles(rects.size());
+      for (unsigned idx = 0; idx < rects.size(); idx++)
+        rectangles[idx] = rects[idx];
+      return new InstanceExpression<DIM,T>(&rectangles.front(), 
+                                           rectangles.size(), forest);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     EqKDNode<DIM,T>::EqKDNode(const Rect<DIM,T> &rect)
       : EqKDTreeT<DIM,T>(rect), lefts(NULL), rights(NULL), current(NULL),
         previous(NULL), pending_set_creations(NULL), subscriptions(NULL)

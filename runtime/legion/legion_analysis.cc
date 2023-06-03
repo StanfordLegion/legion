@@ -22941,10 +22941,7 @@ namespace Legion {
                   rez.serialize(node->handle);
                 rez.serialize(set->tree_id);
                 context->pack_task_context(rez);
-                if (mapping != NULL)
-                  mapping->pack(rez);
-                else
-                  CollectiveMapping::pack_null(rez);
+                mapping->pack(rez);
                 rez.serialize<size_t>(to_notify.size());
                 for (LegionMap<AddressSpaceID,
                                FieldMaskSet<EqKDTree> >::const_iterator nit =
@@ -22992,6 +22989,133 @@ namespace Legion {
         else
           pending_equivalence_sets.swap(pending_sets);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EqSetTracker::handle_equivalence_set_creation(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      EqSetTracker *owner;
+      derez.deserialize(owner);
+      DistributedID did;
+      derez.deserialize(did);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      std::vector<Domain> rectangles;
+      if (!handle.exists())
+      {
+        size_t num_rectangles;
+        derez.deserialize(num_rectangles);
+        rectangles.resize(num_rectangles);
+        for (unsigned idx = 0; idx < num_rectangles; idx++)
+          derez.deserialize(rectangles[idx]);
+      }
+      RegionTreeID tid;
+      derez.deserialize(tid);
+      RtEvent ctx_ready;
+      InnerContext *context =
+        InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+      derez.deserialize(num_spaces);
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+      for (unsigned idx1 = 0; idx1 < num_spaces; idx1++)
+      {
+        AddressSpaceID space;
+        derez.deserialize(space);
+        FieldMaskSet<EqKDTree> &trees = to_notify[space];
+        size_t num_trees;
+        derez.deserialize(num_trees);
+        for (unsigned idx2 = 0; idx2 < num_trees; idx2++)
+        {
+          EqKDTree *tree;
+          derez.deserialize(tree);
+          FieldMask mask;
+          derez.deserialize(mask);
+          trees.insert(tree, mask);
+        }
+      }
+      RtUserEvent ready_event;
+      derez.deserialize(ready_event);
+
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator local_finder =
+        to_notify.find(runtime->address_space);
+#ifdef DEBUG_LEGION
+      assert(local_finder != to_notify.end());
+#endif
+      // Send it off to any children nodes
+      std::vector<RtEvent> ready_events;
+      std::vector<AddressSpaceID> children;
+      const AddressSpaceID root = runtime->determine_owner(did);
+      mapping->get_children(root, runtime->address_space, children);
+      for (std::vector<AddressSpaceID>::const_iterator cit =
+            children.begin(); cit != children.end(); cit++)
+      {
+        const RtUserEvent notified = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(owner);
+          rez.serialize(did);
+          rez.serialize(handle);
+          if (!handle.exists())
+          {
+            rez.serialize<size_t>(rectangles.size());
+            for (unsigned idx = 0; idx < rectangles.size(); idx++)
+              rez.serialize(rectangles[idx]);
+          }
+          rez.serialize(tid);
+          if (ctx_ready.exists() && !ctx_ready.has_triggered())
+          {
+            ctx_ready.wait();
+            ctx_ready = RtEvent::NO_RT_EVENT;
+          }
+          context->pack_task_context(rez);
+          mapping->pack(rez);
+          rez.serialize<size_t>(to_notify.size() - 1);
+          for (LegionMap<AddressSpaceID,
+                         FieldMaskSet<EqKDTree> >::const_iterator nit =
+                to_notify.begin(); nit != to_notify.end(); nit++)
+          {
+            if (nit == local_finder)
+              continue;
+            rez.serialize(nit->first);
+            rez.serialize(nit->second.size());
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  nit->second.begin(); it != nit->second.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+          }
+          rez.serialize(notified);
+        }
+        runtime->send_equivalence_set_creation(*cit, rez);
+        ready_events.push_back(notified);
+      }
+      // Make the equivalence set
+      IndexSpaceExpression *expr = handle.exists() ? 
+        runtime->forest->get_node(handle) :
+        local_finder->second.begin()->first->create_from_rectangles(
+                                          runtime->forest, rectangles);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
+      EquivalenceSet *set = new EquivalenceSet(runtime, did, root, expr,
+                            tid, context, true/*register now*/, mapping);
+      // Register it with any local trees 
+      for (FieldMaskSet<EqKDTree>::const_iterator it =
+            local_finder->second.begin(); it != 
+            local_finder->second.end(); it++)
+        it->first->record_equivalence_set(set, it->second, owner, root);
+      to_notify.erase(local_finder);
+      // Trigger the event that we're done
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready_event,Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready_event);
     }
 
     //--------------------------------------------------------------------------

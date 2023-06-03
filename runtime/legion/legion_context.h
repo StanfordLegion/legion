@@ -1773,6 +1773,8 @@ namespace Legion {
     public:
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
+      static void handle_compute_equivalence_sets_response(Deserializer &derez,
+                                     Runtime *runtime, AddressSpaceID source);
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);

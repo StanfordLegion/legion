@@ -3794,11 +3794,44 @@ namespace Legion {
           creation_rects, remote_shard_rects);
 #ifdef DEBUG_LEGION
       assert(remote_shard_rects.empty());
+      assert(to_create.size() == creation_rects.size());
 #endif
       if (target_space != local_space)
       {
         // Send a message back to the target node with the results
-        
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(target);
+          rez.serialize(mask);
+          rez.serialize<size_t>(eq_sets.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                eq_sets.begin(); it != eq_sets.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize<size_t>(subscriptions.size());
+          for (unsigned idx = 0; idx < subscriptions.size(); idx++)
+            rez.serialize(subscriptions[idx]);
+          rez.serialize(to_create.size());
+          for (FieldMaskSet<EqKDTree>::const_iterator it =
+                to_create.begin(); it != to_create.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(creation_rects.find(it->first) != creation_rects.end());
+#endif
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+            rez.serialize(creation_rects[it->first]);
+          }
+          rez.serialize<size_t>(1); // expected_responses
+          rez.serialize(ready_event);
+        }
+        runtime->send_compute_equivalence_sets_response(target_space, rez);
+        pending_sets.push_back(ready_event);
       }
       else
       {
@@ -3812,6 +3845,71 @@ namespace Legion {
         return Runtime::merge_events(pending_sets);
       else
         return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_compute_equivalence_sets_response(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ctx_ready;
+      InnerContext *context = 
+        runtime->find_or_request_inner_context(did, ctx_ready);
+      EqSetTracker *target;
+      derez.deserialize(target);
+      FieldMask mask;
+      derez.deserialize(mask);
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      FieldMaskSet<EquivalenceSet> eq_sets;
+      std::vector<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready);
+        if (ready.exists())
+          ready_events.push_back(ready);
+        FieldMask set_mask;
+        derez.deserialize(set_mask);
+        eq_sets.insert(set, set_mask);
+      }
+      size_t num_subscriptions;
+      derez.deserialize(num_subscriptions);
+      std::vector<EqKDTree*> subscriptions(num_subscriptions);
+      for (unsigned idx = 0; idx < num_subscriptions; idx++)
+        derez.deserialize(subscriptions[idx]);
+      size_t num_creations;
+      derez.deserialize(num_creations);
+      FieldMaskSet<EqKDTree> to_create;
+      std::map<EqKDTree*,Domain> creation_rects;
+      for (unsigned idx = 0; idx < num_creations; idx++)
+      {
+        EqKDTree *tree;
+        derez.deserialize(tree);
+        FieldMask tree_mask;
+        derez.deserialize(tree_mask);
+        to_create.insert(tree, tree_mask);
+        derez.deserialize(creation_rects[tree]);
+      }
+      size_t expected_responses;
+      derez.deserialize(expected_responses);
+      RtUserEvent ready_event;
+      derez.deserialize(ready_event);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
+      target->record_equivalence_sets(context, mask, eq_sets, to_create,
+                                  creation_rects, subscriptions, source,
+                                  expected_responses, ready_events);
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready_event,Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready_event);
     }
 
     //--------------------------------------------------------------------------

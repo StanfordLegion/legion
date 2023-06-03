@@ -3758,6 +3758,7 @@ namespace Legion {
                                                        AddressSpaceID source);
       void handle_finish_equivalence_sets_subscription(Deserializer &derez,
                                                        AddressSpaceID source);
+      void handle_equivalence_set_creation(Deserializer &derez);
       void handle_equivalence_set_request(Deserializer &derez);
       void handle_equivalence_set_response(Deserializer &derez);
       void handle_equivalence_set_invalidate_trackers(Deserializer &derez);
@@ -6120,6 +6121,8 @@ namespace Legion {
         case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
           break;
         case SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION:
+          break;
+        case SEND_EQUIVALENCE_SET_CREATION:
           break;
         case SEND_EQUIVALENCE_SET_REQUEST:
           break;

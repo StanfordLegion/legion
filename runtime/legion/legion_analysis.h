@@ -3480,6 +3480,8 @@ namespace Legion {
           Runtime *runtime, AddressSpaceID source);
       static void handle_finish_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
+      static void handle_equivalence_set_creation(Deserializer &derez,
+                                                  Runtime *runtime);
     protected:
       LocalLock &tracker_lock;
       FieldMaskSet<EquivalenceSet> equivalence_sets;
@@ -4200,8 +4202,10 @@ namespace Legion {
                                     const FieldMask &mask,
                                     const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events);
+#if 0
       static void handle_compute_equivalence_sets_response(
                   Deserializer &derez, Runtime *runtime, AddressSpaceID source);
+#endif
       // Call these from region nodes
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
                              FieldMask &parent_mask);

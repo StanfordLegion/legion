@@ -2994,6 +2994,10 @@ namespace Legion {
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space) = 0;
+      // Just use this method of indirecting into template land
+      virtual IndexSpaceExpression* create_from_rectangles(
+                          RegionTreeForest *forest, 
+                          const std::vector<Domain> &rectangles) const = 0;
     public:
       template<int DIM, typename T>
       inline EqKDTreeT<DIM,T>* as_eq_kd_tree(void);
@@ -3023,6 +3027,10 @@ namespace Legion {
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space) = 0;
+      // Just use this method of indirecting into template land
+      virtual IndexSpaceExpression* create_from_rectangles(
+                          RegionTreeForest *forest,
+                          const std::vector<Domain> &rectangles) const;
     public:
       const Rect<DIM,T> bounds;
     };
