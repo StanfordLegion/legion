@@ -495,7 +495,7 @@ if(Legion_USE_HIP)
     if("${Legion_HIP_ARCH}" STREQUAL "")
       set(HIP_GENCODE "")
     else()
-      set(HIP_GENCODE "--offload-target=${Legion_HIP_ARCH}")
+      set(HIP_GENCODE "--offload-arch=${Legion_HIP_ARCH}")
     endif()
   endif()
 
@@ -677,12 +677,17 @@ if(Legion_USE_NVTX)
   endif()
 endif()
 
-#------------------------------------------------------------------------------#
 # Backtrace configuration
 #------------------------------------------------------------------------------#
 option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
 if(Legion_BACKTRACE_USE_UNWIND)
   set(REALM_USE_UNWIND ON)
+endif()
+
+option(Legion_BACKTRACE_USE_LIBDW "Use libdw to analyze backtrace" OFF)
+if(Legion_BACKTRACE_USE_LIBDW)
+  find_package(LIBDW)
+  set(REALM_USE_LIBDW ON)
 endif()
 
 #------------------------------------------------------------------------------#

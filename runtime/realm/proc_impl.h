@@ -21,11 +21,13 @@
 #include "realm/processor.h"
 #include "realm/id.h"
 
+#include "realm/atomics.h"
 #include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 #include "realm/sampling.h"
 
+#include "realm/runtime_impl.h"
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
 
@@ -77,8 +79,14 @@ namespace Realm {
       // runs an internal Realm operation on this processor
       virtual void add_internal_task(InternalTask *task);
 
+      GenEventImpl *create_genevent();
+      void free_genevent(GenEventImpl *);
+
     protected:
       friend class Task;
+
+      // Event free list cache variables
+      LocalEventTableAllocator::FreeList free_local_events;
 
       virtual void execute_task(Processor::TaskFuncID func_id,
 				const ByteArrayRef& task_args);

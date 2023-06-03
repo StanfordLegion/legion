@@ -2407,8 +2407,6 @@ namespace Legion {
       const InstanceRef &idx_target = idx_targets[0];
       across->initialize_source_indirections(this, src_records, src_req,
           idx_req, idx_target, gather_is_range, possible_src_out_of_range);
-      across->src_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_unique_event();
       // Initialize the destination fields
       const bool exclusive_redop =
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
@@ -2556,8 +2554,6 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, idx_req, idx_target, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-      across->dst_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_unique_event();
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -2704,8 +2700,6 @@ namespace Legion {
       const InstanceRef &src_idx_target = src_idx_targets[0];
       across->initialize_source_indirections(this, src_records, src_req,
         src_idx_req, src_idx_target, both_are_range, possible_src_out_of_range);
-      across->src_indirect_instance_event = 
-       src_idx_target.get_physical_manager()->get_unique_event();
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -2715,8 +2709,6 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, dst_idx_req, dst_idx_target, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-      across->dst_indirect_instance_event = 
-        dst_idx_target.get_physical_manager()->get_unique_event();
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -6437,8 +6429,7 @@ namespace Legion {
           copy_mask.set_bit(*it);
           PhysicalManager *manager = ref.get_physical_manager();
           manager->compute_copy_offsets(copy_mask, src_fields);
-          src_unique_events.push_back(
-              ref.get_physical_manager()->get_unique_event());
+          src_unique_events.push_back(manager->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -6481,8 +6472,7 @@ namespace Legion {
           copy_mask.set_bit(*it);
           PhysicalManager *manager = ref.get_physical_manager();
           manager->compute_copy_offsets(copy_mask, dst_fields);
-          dst_unique_events.push_back(
-              ref.get_physical_manager()->get_unique_event());
+          dst_unique_events.push_back(manager->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -6513,8 +6503,9 @@ namespace Legion {
 #endif
       src_indirections.swap(records);
       src_indirect_field = *(idx_req.privilege_fields.begin());
-      src_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance();
+      PhysicalManager *manager = indirect_instance.get_physical_manager();
+      src_indirect_instance = manager->get_instance();
+      src_indirect_instance_event = manager->get_unique_event();
       src_indirect_type = src_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_src_out_of_range = possible_out_of_range;
@@ -6543,8 +6534,9 @@ namespace Legion {
 #endif
       dst_indirections.swap(records);
       dst_indirect_field = *(idx_req.privilege_fields.begin());
-      dst_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance();
+      PhysicalManager *manager = indirect_instance.get_physical_manager();
+      dst_indirect_instance = manager->get_instance();
+      dst_indirect_instance_event = manager->get_unique_event();
       dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_dst_out_of_range = possible_out_of_range;
@@ -6563,106 +6555,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyAcrossUnstructured::log_across_profiling(LgEvent copy_post,
-                                                      int preimage) const
+    LgEvent CopyAcrossUnstructured::find_instance_name(
+                                                PhysicalInstance instance) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime->profiler != NULL);
-      assert(src_fields.size() == dst_fields.size());
-#endif
-      if (0 <= preimage)
-      {
-#ifdef DEBUG_LEGION
-        assert(((unsigned)preimage) < nonempty_indexes.size());
-        assert(src_indirections.empty() != dst_indirections.empty());
-#endif
-        runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-        const unsigned index = nonempty_indexes[preimage];
-        if (src_indirections.empty())
-        {
-          // Scatter
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(src_fields[idx].field_id,
-                dst_fields[idx].field_id, src_fields[idx].inst,
-                dst_indirections[index].instances[idx], src_unique_events[idx],
-                dst_indirections[index].instance_events[idx], copy_post);
-        }
-        else
-        {
-          // Gather
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(
-                src_fields[idx].field_id, dst_fields[idx].field_id,
-                src_indirections[index].instances[idx], dst_fields[idx].inst,
-                src_indirections[index].instance_events[idx], 
-                dst_unique_events[idx], copy_post);
-        }
-      }
-      else if (src_indirections.empty())
-      {
-        if (dst_indirections.empty())
-        {
-          // Normal across
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(
-                src_fields[idx].field_id, dst_fields[idx].field_id,
-                src_fields[idx].inst, dst_fields[idx].inst,
-                src_unique_events[idx], dst_unique_events[idx], copy_post);
-        }
-        else
-        {
-          // Scatter
-          runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            for (std::vector<IndirectRecord>::const_iterator it =
-                  dst_indirections.begin(); it != dst_indirections.end(); it++)
-              runtime->profiler->record_copy_instances(
-                  src_fields[idx].field_id, dst_fields[idx].field_id,
-                  src_fields[idx].inst, it->instances[idx],
-                  src_unique_events[idx], it->instance_events[idx], copy_post);
-        }
-      }
-      else
-      {
-        if (dst_indirections.empty())
-        {
-          // Gather
-          runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            for (std::vector<IndirectRecord>::const_iterator it =
-                  src_indirections.begin(); it != src_indirections.end(); it++)
-              runtime->profiler->record_copy_instances(
-                  src_fields[idx].field_id, dst_fields[idx].field_id,
-                  it->instances[idx], dst_fields[idx].inst,
-                  it->instance_events[idx], dst_unique_events[idx], copy_post);
-        }
-        else
-        {
-          // Full indirection
-          runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            for (std::vector<IndirectRecord>::const_iterator src_it =
-                  src_indirections.begin(); src_it !=
-                  src_indirections.end(); src_it++)
-              for (std::vector<IndirectRecord>::const_iterator dst_it =
-                    dst_indirections.begin(); dst_it !=
-                    dst_indirections.end(); dst_it++)
-                runtime->profiler->record_copy_instances(
-                    src_fields[idx].field_id, dst_fields[idx].field_id,
-                    src_it->instances[idx], dst_it->instances[idx],
-                    src_it->instance_events[idx], 
-                    dst_it->instance_events[idx], copy_post);
-        }
-      }
+      if (instance == src_indirect_instance)
+        return src_indirect_instance_event;
+      if (instance == dst_indirect_instance)
+        return dst_indirect_instance_event;
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        if (src_fields[idx].inst == instance)
+          return src_unique_events[idx];
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        if (dst_fields[idx].inst == instance)
+          return dst_unique_events[idx];
+      for (std::vector<IndirectRecord>::const_iterator it =
+            src_indirections.begin(); it != src_indirections.end(); it++)
+        for (unsigned idx = 0; idx < it->instances.size(); idx++)
+          if (it->instances[idx] == instance)
+            return it->instance_events[idx];
+      for (std::vector<IndirectRecord>::const_iterator it =
+            dst_indirections.begin(); it != dst_indirections.end(); it++)
+        for (unsigned idx = 0; idx < it->instances.size(); idx++)
+          if (it->instances[idx] == instance)
+            return it->instance_events[idx];
+      // Should always have found it before this
+      assert(false);
+      return src_indirect_instance_event;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9202,7 +9121,7 @@ namespace Legion {
             rez.serialize(total_children_volume);
             rez.serialize(total_intersection_volume);
           }
-          runtime->send_index_partition_disjoint_update(target, rez);
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
         }
       }
       else
@@ -9469,6 +9388,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID IndexPartNode::find_color_creator_space(LegionColor color,
+                                        CollectiveMapping *&child_mapping) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(child_mapping == NULL);
+#endif
+      if (collective_mapping == NULL)
+      {
+        if (is_owner())
+          return local_space;
+        else
+          return owner_space;
+      }
+      else
+      {
+        // See whether the children are sharded or replicated
+        if (((LegionColor)collective_mapping->size()) <= total_children)
+        {
+          // Sharded, so figure out which space to send the request to
+          const size_t chunk = (max_linearized_color + 
+              collective_mapping->size() - 1) / collective_mapping->size();
+          const unsigned offset = color / chunk;
+#ifdef DEBUG_LEGION
+          assert(offset < collective_mapping->size());
+#endif
+          return (*collective_mapping)[offset];
+        }
+        else
+        {
+          // Replicated so find the child collective mapping
+          std::vector<AddressSpaceID> child_spaces;
+          const unsigned offset = color_space->compute_color_offset(color); 
+#ifdef DEBUG_LEGION
+          assert(offset < collective_mapping->size());
+#endif
+          for (unsigned idx = offset; 
+                idx < collective_mapping->size(); idx += total_children)
+            child_spaces.push_back((*collective_mapping)[idx]);
+#ifdef DEBUG_LEGION
+          assert(!child_spaces.empty());
+#endif
+          child_mapping = new CollectiveMapping(child_spaces, 
+              context->runtime->legion_collective_radix);
+          if (child_mapping->contains(local_space))
+            return local_space;
+          else
+            return child_mapping->find_nearest(local_space);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceNode* IndexPartNode::get_child(const LegionColor c,RtEvent *defer)
     //--------------------------------------------------------------------------
     {
@@ -9510,48 +9482,8 @@ namespace Legion {
       {
         // See if we need to send a request to get the handle for this
         CollectiveMapping *child_mapping = NULL;
-        AddressSpaceID creator_space = local_space;
-        if (collective_mapping == NULL)
-        {
-          if (!is_owner())
-            creator_space = owner_space;
-        }
-        else
-        {
-          // See whether the children are sharded or replicated
-          if (((LegionColor)collective_mapping->size()) <= total_children)
-          {
-            // Sharded, so figure out which space to send the request to
-            const size_t chunk = (max_linearized_color + 
-                collective_mapping->size() - 1) / collective_mapping->size();
-            const unsigned offset = c / chunk;
-#ifdef DEBUG_LEGION
-            assert(offset < collective_mapping->size());
-#endif
-            creator_space = (*collective_mapping)[offset];
-          }
-          else
-          {
-            // Replicated so find the child collective mapping
-            std::vector<AddressSpaceID> child_spaces;
-            const unsigned offset = color_space->compute_color_offset(c); 
-#ifdef DEBUG_LEGION
-            assert(offset < collective_mapping->size());
-#endif
-            for (unsigned idx = offset; 
-                  idx < collective_mapping->size(); idx += total_children)
-              child_spaces.push_back((*collective_mapping)[idx]);
-#ifdef DEBUG_LEGION
-            assert(!child_spaces.empty());
-#endif
-            child_mapping = new CollectiveMapping(child_spaces, 
-                context->runtime->legion_collective_radix);
-            if (child_mapping->contains(local_space))
-              creator_space = local_space;
-            else
-              creator_space = child_mapping->find_nearest(local_space);
-          }
-        }
+        AddressSpaceID creator_space = 
+          find_color_creator_space(c, child_mapping);
         if (creator_space != local_space)
         {
           if (child_mapping != NULL)
@@ -10099,7 +10031,7 @@ namespace Legion {
             rez.serialize(total_children_volume);
             rez.serialize(total_intersection_volume);
           }
-          runtime->send_index_partition_disjoint_update(target, rez);
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
         }
       }
       return false;
@@ -10188,7 +10120,7 @@ namespace Legion {
               rez.serialize(it->second);
             }
           }
-          runtime->send_index_partition_disjoint_update(target, rez);
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
           total_children_volumes.clear();
           total_intersection_volumes.clear();
         }
@@ -11057,30 +10989,6 @@ namespace Legion {
       // Compute our local shard rectangles
       if (find_local_shard_rects())
         assert(false); // should never delete ourselves
-#if 0
-      if (children.empty())
-      {
-        if (!is_owner())
-        {
-          // Pack up the rectangles and send them upstream to the parent
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize<bool>(true); // up
-            pack_shard_rects(rez, true/*clear*/);
-          }
-          context->runtime->send_index_partition_shard_rects_response(
-              collective_mapping->get_parent(owner_space, local_space), rez);
-        }
-        else
-        {
-          Runtime::trigger_event(shard_rects_ready);
-          if (remove_base_gc_ref(RUNTIME_REF))
-            assert(false); // should never hit this
-        }
-      }
-#endif
       return shard_rects_ready;
     }
 
@@ -11247,16 +11155,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode::RemoteKDTracker::RemoteKDTracker(std::set<LegionColor> &c, 
-                                                    Runtime *rt)
-      : colors(c), runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT),
-        remaining(0)
+    IndexPartNode::RemoteKDTracker::RemoteKDTracker(Runtime *rt)
+      : runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT), remaining(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::RemoteKDTracker::find_remote_interfering(
+    RtEvent IndexPartNode::RemoteKDTracker::find_remote_interfering(
         const std::set<AddressSpaceID> &targets, IndexPartition handle,
         IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
@@ -11275,7 +11181,7 @@ namespace Legion {
           assert(remaining.load() > 0);
 #endif
           if (remaining.fetch_sub(1) == 1)
-            return;
+            return RtEvent::NO_RT_EVENT;
           continue;
         }
         Serializer rez;
@@ -11291,12 +11197,26 @@ namespace Legion {
       {
         AutoLock t_lock(tracker_lock);
         if (remaining.load() == 0)
-          return;
+          return RtEvent::NO_RT_EVENT;
         done_event = Runtime::create_rt_user_event();
         wait_on = done_event;
       }
-      if (!wait_on.has_triggered())
-        wait_on.wait();
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::RemoteKDTracker::get_remote_interfering(
+                                                  std::set<LegionColor> &colors)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock since we're done at this point
+      if (!remote_colors.empty())
+      {
+        if (colors.empty())
+          colors.swap(remote_colors);
+        else
+          colors.insert(remote_colors.begin(), remote_colors.end());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11312,7 +11232,7 @@ namespace Legion {
       {
         LegionColor color;
         derez.deserialize(color);
-        colors.insert(color);
+        remote_colors.insert(color);
       }
 #ifdef DEBUG_LEGION
       assert(remaining.load() > 0);

@@ -4557,18 +4557,11 @@ namespace Legion {
               is_output_global(idx), is_output_valid(idx));
 
         // Initialize any region tree contexts
-        std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
-                                version_infos, unmap_events, execution_events);
+                                                  version_infos, unmap_events);
         // Update the physical regions with any padding they might have
         if (variant->needs_padding)
           execution_context->record_padded_fields(variant);
-        // Execution events come from copying over virtual mapping state
-        // which needs to be done before the child task starts
-        if (!execution_events.empty())
-          for (std::set<RtEvent>::const_iterator it = 
-                execution_events.begin(); it != execution_events.end(); it++)
-            wait_on_events.insert(ApEvent(*it));
       }
       // If we have a predicate event then merge that in here as well
       if (true_guard.exists())
@@ -5375,12 +5368,12 @@ namespace Legion {
       this->redop = rhs->redop;
       if (this->redop != 0)
       {
+        this->reduction_op = rhs->reduction_op;
         this->deterministic_redop = rhs->deterministic_redop;
         if (!this->deterministic_redop)
         {
           // Only need to initialize this if we're not doing a 
           // deterministic reduction operation
-          this->reduction_op = rhs->reduction_op;
           this->serdez_redop_fns = rhs->serdez_redop_fns;
         }
       }
@@ -5572,12 +5565,12 @@ namespace Legion {
       derez.deserialize(redop);
       if (redop > 0)
       {
+        reduction_op = Runtime::get_reduction_op(redop);
         derez.deserialize(deterministic_redop);
-        // Only need to fill these in if we're not doing a 
-        // deterministic reduction operation
         if (!deterministic_redop)
         {
-          reduction_op = Runtime::get_reduction_op(redop);
+          // Only need to fill this in if we're not doing a 
+          // deterministic reduction operation
           serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
         }
       }

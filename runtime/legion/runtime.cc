@@ -2989,7 +2989,11 @@ namespace Legion {
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
-          runtime->profiler->add_fill_request(requests, op);
+        {
+          SmallNameClosure<1> *closure = new SmallNameClosure<1>();
+          closure->record_instance_name(dst_inst, ready_event);
+          runtime->profiler->add_fill_request(requests, closure, op);
+        }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
@@ -2999,9 +3003,6 @@ namespace Legion {
                 Runtime::merge_events(NULL, read_events)));
         else
           result = ApEvent(rect.copy(srcs, dsts, requests));
-        if (runtime->profiler != NULL)
-          runtime->profiler->record_fill_instance(0/*fid*/, dst_inst,
-                                                  ready_event, result);
         if (own_inst)
         {
           if (result.exists())
@@ -3046,7 +3047,12 @@ namespace Legion {
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
-          runtime->profiler->add_copy_request(requests, op);
+        {
+          SmallNameClosure<2> *closure = new SmallNameClosure<2>();
+          closure->record_instance_name(src_inst, source->ready_event);
+          closure->record_instance_name(dst_inst, ready_event);
+          runtime->profiler->add_copy_request(requests, closure, op);
+        }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
@@ -3058,10 +3064,6 @@ namespace Legion {
           result = ApEvent(rect.copy(srcs, dsts, requests, 
                   source->get_ready(check_source_ready)));
         source->record_read_event(result);
-        if (runtime->profiler != NULL)
-          runtime->profiler->record_copy_instances(0/*src field*/,
-              0/*dst_field*/, src_inst, dst_inst,
-              source->ready_event, ready_event, result);
         RtEvent protect;
         if (own_src)
         {
@@ -3121,7 +3123,12 @@ namespace Legion {
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
-          runtime->profiler->add_copy_request(requests, op);
+        {
+          SmallNameClosure<2> *closure = new SmallNameClosure<2>();
+          closure->record_instance_name(src_inst, source->ready_event);
+          closure->record_instance_name(dst_inst, ready_event);
+          runtime->profiler->add_copy_request(requests, closure, op);
+        }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
@@ -3132,10 +3139,6 @@ namespace Legion {
         else
           result = ApEvent(rect.copy(srcs, dsts, requests, src_ready));
         source->record_read_event(result);
-        if (runtime->profiler != NULL)
-          runtime->profiler->record_copy_instances(0/*src field*/,
-              0/*dst_field*/, src_inst, dst_inst,
-              source->ready_event, ready_event, result);
         RtEvent protect;
         if (own_src)
         {
@@ -21549,12 +21552,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_disjoint_update(AddressSpaceID target,
-                                                       Serializer &rez)
+                                          Serializer &rez, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-        SEND_INDEX_PARTITION_DISJOINT_UPDATE>(rez, 
-                  true/*flush*/, true/*response*/); 
+        SEND_INDEX_PARTITION_DISJOINT_UPDATE>(rez, true/*flush*/, 
+            true/*response*/, false/*shutdown*/, precondition); 
     }
 
     //--------------------------------------------------------------------------

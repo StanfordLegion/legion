@@ -19,11 +19,12 @@ if [[ "$LMOD_SYSTEM_NAME" = crusher ]]; then
     cat >>env.sh <<EOF
 module load PrgEnv-gnu
 module load rocm/$ROCM_VERSION
+export HIP_PATH="\$ROCM_PATH/hip"
 export CC=cc
 export CXX=CC
 if [[ "\$REALM_NETWORKS" != "" ]]; then
     RANKS_PER_NODE=4
-    export LAUNCHER="srun -n\$(( RANKS_PER_NODE * SLURM_JOB_NUM_NODES )) --cpus-per-task \$(( 64 / RANKS_PER_NODE )) --gpus-per-task 1 --cpu-bind cores"
+    export LAUNCHER="srun -n\$(( RANKS_PER_NODE * SLURM_JOB_NUM_NODES )) --cpus-per-task \$(( 56 / RANKS_PER_NODE )) --gpus-per-task 1 --cpu-bind cores"
 fi
 EOF
 else
@@ -38,14 +39,18 @@ set -x
 # download and build Terra
 (
     pushd language
+    wget -nv https://github.com/terralang/llvm-build/releases/download/llvm-16.0.3/clang+llvm-16.0.3-x86_64-linux-gnu.tar.xz
+    tar xf clang+llvm-16.0.3-x86_64-linux-gnu.tar.xz
+    export CMAKE_PREFIX_PATH="$PWD/clang+llvm-16.0.3-x86_64-linux-gnu:$CMAKE_PREFIX_PATH"
     git clone https://github.com/terralang/terra.git terra.build
     ln -s terra.build terra
-    cd terra.build/build
+    pushd terra.build/build
     export CC=gcc
     export CXX=g++
-    export CMAKE_PREFIX_PATH="$PROJWORK/csc335/ci-software/llvm/install:$CMAKE_PREFIX_PATH"
     cmake -DCMAKE_INSTALL_PREFIX=$PWD/../release ..
     make install -j${THREADS:-16}
+    popd
+    rm -rf clang+llvm-16.0.3-x86_64-linux-gnu*
     popd
 )
 

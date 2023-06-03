@@ -61,25 +61,18 @@ top_level = threading.local()
 # up in any python process created by legion python
 _cleanup_items = list()
 
-# This variable stores the set of loaded modules at the point when the latest
-# cleanup item was added. It allows us to compute the set of modules loaded
-# between cleanup items, so that at shutdown time we know to wait before
-# removing a module until all cleanup items that may need it have completed.
-_curr_modules = None
+# This variable stores the set of modules that were already loaded at entry to
+# legion mode. At shutdown we will only remove any modules that were loaded
+# since then.
+_starting_modules = None
 
 
-def add_delta_module_cleanup():
-    global _curr_modules
-    prev_modules = _curr_modules
-    def cleanup():
-        for mod in set(sys.modules.keys()) - prev_modules:
-            del sys.modules[mod]
-    _cleanup_items.append(cleanup)
-    _curr_modules = set(sys.modules.keys())
+def remove_added_modules():
+    for mod in set(sys.modules.keys()) - _starting_modules:
+        del sys.modules[mod]
 
 
 def add_cleanup_item(item):
-    add_delta_module_cleanup()
     _cleanup_items.append(item)
 
 
@@ -242,7 +235,7 @@ def remove_all_aliases(to_delete):
         del sys.modules[name]
 
 
-def run_cmd(cmd, run_name=None):
+def run_cmd(cmd, run_name):
     import imp
     module = imp.new_module(run_name)
     setattr(module, '__name__', run_name)
@@ -282,7 +275,7 @@ def run_cmd(cmd, run_name=None):
 # We can't use runpy for this since runpy is aggressive about
 # cleaning up after itself and removes the module before execution
 # has completed.
-def run_path(filename, run_name=None):
+def run_path(filename, run_name):
     import imp
     module = imp.new_module(run_name)
     setattr(module, '__name__', run_name)
@@ -394,8 +387,9 @@ def import_global(module, check_depth=True, block=True):
 
 
 def legion_python_main(raw_args, user_data, proc):
-    global _curr_modules
-    _curr_modules = set(sys.modules.keys())
+    # record modules loaded at the beginning of the run
+    global _starting_modules
+    _starting_modules = set(sys.modules.keys())
 
     raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
     raw_arg_size = len(raw_args)
@@ -438,7 +432,7 @@ def legion_python_main(raw_args, user_data, proc):
     elif args[start] == '-c':
         if len(args) > (start+1):
             sys.argv = ['-c'] + list(args[start+2:])
-            run_cmd(args[start+1], run_name='__main__')
+            run_cmd(args[start+1], '__main__')
         else:
             print('Argument expected for the -c option')
             c.legion_runtime_set_return_code(1)
@@ -466,7 +460,7 @@ def legion_python_main(raw_args, user_data, proc):
                 else:
                     continue
                 sys.argv = [module] + list(args[start+2:])
-                run_path(module, run_name='__main__')
+                run_path(module, '__main__')
                 found = True
                 break
             if not found:
@@ -478,15 +472,14 @@ def legion_python_main(raw_args, user_data, proc):
     else:
         assert start < len(args)
         sys.argv = list(args[start:])
-        run_path(args[start], run_name='__main__')
-
-    add_delta_module_cleanup()
+        run_path(args[start], '__main__')
 
     if local_cleanup:
         # If we were control replicated then we just need to do our cleanup
         # Do it in reverse order so modules get FILO properties
         for cleanup in reversed(_cleanup_items):
             cleanup()
+        remove_added_modules()
     else:
         # Otherwise, run a task on every node to perform the cleanup
         mapper = c.legion_runtime_generate_library_mapper_ids(
@@ -553,6 +546,7 @@ def legion_python_cleanup(raw_args, user_data, proc):
     # Do it in reverse order so modules get FILO properties
     for cleanup in reversed(_cleanup_items):
         cleanup()
+    remove_added_modules()
 
     del top_level.runtime
     del top_level.context
@@ -615,8 +609,9 @@ _legion_inited = False
 
 
 def legion_canonical_python_main(sys_argv=None):
-    global _curr_modules
-    _curr_modules = set(sys.modules.keys())
+    # record modules loaded at the beginning of the run
+    global _starting_modules
+    _starting_modules = set(sys.modules.keys())
 
     # Do not init top level task if it has been initialized
     global _top_level_counter
@@ -650,9 +645,9 @@ def legion_canonical_python_cleanup():
     c.legion_future_wait(future, True, ffi.NULL)
     c.legion_future_destroy(future)
     # clean up modules
-    add_delta_module_cleanup()
     for cleanup in reversed(_cleanup_items):
         cleanup()
+    remove_added_modules()
     # clean up context
     c.legion_context_destroy(top_level.context[0])
     c.legion_canonical_python_end_top_level_task()

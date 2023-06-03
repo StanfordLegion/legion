@@ -1,6 +1,12 @@
 #include "realm.h"
 #include "multiaffine.h"
 
+#ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
+#include "realm/hip/hiphijack_api.h"
+#endif
+
+
 using namespace Realm;
 
 template <typename T>
@@ -54,7 +60,11 @@ void ptr_write_task_gpu(const void *args, size_t arglen,
 
   dim3 grid_dim(bx, by, bz);
   dim3 blk_dim(tx, ty, tz);
-  ptr_write_task_kernel<<<grid_dim, blk_dim>>>(targs.space, acc);
+  ptr_write_task_kernel<<<grid_dim, blk_dim
+#ifdef REALM_USE_HIP
+                          , 0, hipGetTaskStream()
+#endif
+                       >>>(targs.space, acc);
 }
 
 void register_multiaffine_gpu_tasks()

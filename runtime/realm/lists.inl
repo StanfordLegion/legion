@@ -368,7 +368,6 @@ namespace Realm {
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_back(T *new_entry)
   {
     lock.lock();
-    lock.unlock();
 #ifdef DEBUG_REALM_LISTS
     // entry being added should be unentangled
     assert(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri == 0);
@@ -400,13 +399,13 @@ namespace Realm {
     size_t act_size = size();
     assert(exp_size == act_size);
 #endif
+    lock.unlock();
   }
 
   template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_front(T *new_entry)
   {
     lock.lock();
-    lock.unlock();
 #ifdef DEBUG_REALM_LISTS
     // entry being added should be unentangled
     assert(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri == 0);
@@ -443,6 +442,7 @@ namespace Realm {
     size_t act_size = size();
     assert(exp_size == act_size);
 #endif
+    lock.unlock();
   }
 
   template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>

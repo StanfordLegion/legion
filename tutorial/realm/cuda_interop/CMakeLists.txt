@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 NVIDIA Corp.
+# Copyright 2023 NVIDIA Corp., Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,6 +28,14 @@ endif()
 
 if (REALM_USE_CUDA)
   cuda_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+elseif(Legion_USE_HIP)
+  if(Legion_HIP_TARGET STREQUAL "CUDA")
+    cuda_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+    target_compile_definitions(realm_cuda_interop PRIVATE __HIP_PLATFORM_NVIDIA__)
+  elseif(Legion_HIP_TARGET STREQUAL "ROCM")
+    hip_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+    target_compile_definitions(realm_cuda_interop PRIVATE __HIP_PLATFORM_AMD__)
+  endif()
 endif()
 
 target_link_libraries(realm_cuda_interop Legion::Realm)

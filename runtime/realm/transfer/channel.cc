@@ -675,7 +675,7 @@ namespace Realm {
     size_t new_wp = write_pointer + entries_needed;
     if(new_wp > MAX_ENTRIES) {
       // have to wrap around
-      if(read_pointer <= entries_needed)
+      if((read_pointer <= entries_needed) || (write_pointer < read_pointer))
 	return 0;
 
       // fill remaining entries with 0's so reader skips over them

@@ -876,6 +876,8 @@ namespace Legion {
       sharding_function = NULL;
       serdez_redop_collective = NULL;
       all_reduce_collective = NULL;
+      reduction_collective = NULL;
+      broadcast_collective = NULL;
       output_size_collective = NULL;
       collective_check_id = 0;
       slice_sharding_output = false;
@@ -896,6 +898,10 @@ namespace Legion {
         delete serdez_redop_collective;
       if (all_reduce_collective != NULL)
         delete all_reduce_collective;
+      if (reduction_collective != NULL)
+        delete reduction_collective;
+      if (broadcast_collective != NULL)
+        delete broadcast_collective;
       if (output_size_collective != NULL)
         delete output_size_collective;
       if (concurrent_validator != NULL)
@@ -1341,7 +1347,8 @@ namespace Legion {
       else
       {
 #ifdef DEBUG_LEGION
-        assert(all_reduce_collective != NULL);
+        assert((all_reduce_collective != NULL) ||
+            ((reduction_collective != NULL) && (broadcast_collective != NULL)));
         assert(!reduction_instances.empty());
         assert(reduction_instance == reduction_instances.front());
 #endif
@@ -1351,8 +1358,21 @@ namespace Legion {
           local_precondition = Runtime::merge_events(NULL, reduction_effects);
           reduction_effects.clear();
         }
-        const RtEvent collective_done = all_reduce_collective->async_reduce(
-                                    reduction_instance, local_precondition);
+        RtEvent collective_done;
+        if (all_reduce_collective == NULL)
+        {
+          reduction_collective->async_reduce(reduction_instance, 
+                                             local_precondition);
+          local_precondition = broadcast_collective->finished;
+          if (broadcast_collective->is_origin())
+            collective_done = reduction_collective->get_done_event();
+          else
+            collective_done = 
+              broadcast_collective->async_broadcast(reduction_instance);
+        }
+        else
+          collective_done = all_reduce_collective->async_reduce(
+                          reduction_instance, local_precondition);
         if (local_precondition.exists())
           reduction_effects.push_back(local_precondition);
         // No need to do anything with the output local precondition
@@ -1424,6 +1444,10 @@ namespace Legion {
           serdez_redop_collective->elide_collective();
         if (all_reduce_collective != NULL)
           all_reduce_collective->elide_collective();
+        if (reduction_collective != NULL)
+          reduction_collective->elide_collective();
+        if (broadcast_collective != NULL)
+          broadcast_collective->elide_collective();
       }
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
@@ -1439,13 +1463,26 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_collective == NULL);
       assert(all_reduce_collective == NULL);
+      assert(reduction_collective == NULL);
+      assert(broadcast_collective == NULL);
 #endif
       // If we have a reduction op then we need an exchange
       if (redop > 0)
       {
         if (serdez_redop_fns == NULL)
-          all_reduce_collective = new FutureAllReduceCollective(this,
-           COLLECTIVE_LOC_53, ctx, redop, reduction_op, deterministic_redop);
+        {
+          if (deterministic_redop)
+          {
+            broadcast_collective = new FutureBroadcastCollective(ctx,
+                COLLECTIVE_LOC_63, 0/*origin shard*/, this);
+            reduction_collective = new FutureReductionCollective(ctx,
+                COLLECTIVE_LOC_64, 0/*origin shard*/, this,
+                broadcast_collective, reduction_op, redop);
+          }
+          else
+            all_reduce_collective = new FutureAllReduceCollective(this,
+                COLLECTIVE_LOC_53, ctx, redop, reduction_op);
+        }
         else
           serdez_redop_collective = new BufferExchange(ctx, COLLECTIVE_LOC_53);
       }
@@ -3249,7 +3286,8 @@ namespace Legion {
                                        sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].
+                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3265,7 +3303,8 @@ namespace Legion {
           req.privilege = LEGION_READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, req, 
                                                      projection_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].
+                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3273,7 +3312,6 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -3282,13 +3320,13 @@ namespace Legion {
                                          sharding_function, sharding_space); 
           runtime->forest->perform_dependence_analysis(this, offset + idx, req,
                                                  projection_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].
+                                                  gather->privilege_path,
                                                  logical_analysis);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         const size_t offset = src_requirements.size() +
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3298,7 +3336,8 @@ namespace Legion {
                                          sharding_function, sharding_space);
           runtime->forest->perform_dependence_analysis(this, offset + idx, req,
                                                  projection_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].
+                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3512,7 +3551,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].
+                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3528,7 +3568,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].
+                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3536,7 +3577,6 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         const unsigned offset = 
           src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
@@ -3546,13 +3586,13 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].
+                                                  gather->privilege_path,
                                                  logical_analysis);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         const unsigned offset = src_requirements.size() + 
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
@@ -3562,7 +3602,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].
+                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3804,13 +3845,13 @@ namespace Legion {
           }
         }
 #ifdef DEBUG_LEGION
-        assert(index < src_indirect_records.size());
-        assert(src_indirect_records[index].size() < points.size());
+        assert(index < copies.size());
+        assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        src_indirect_records[index].emplace_back(
+        copies[index].src_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts));
         exchange.src_records.push_back(&records);
-        if (src_indirect_records[index].size() == points.size())
+        if (copies[index].src_indirect_records.size() == points.size())
           return finalize_exchange(index, true/*sources*/);
         return exchange.src_ready;
       }
@@ -3856,13 +3897,13 @@ namespace Legion {
           }
         }
 #ifdef DEBUG_LEGION
-        assert(index < dst_indirect_records.size());
-        assert(dst_indirect_records[index].size() < points.size());
+        assert(index < copies.size());
+        assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        dst_indirect_records[index].emplace_back(
+        copies[index].dst_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts));
         exchange.dst_records.push_back(&records);
-        if (dst_indirect_records[index].size() == points.size())
+        if (copies[index].dst_indirect_records.size() == points.size())
           return finalize_exchange(index, false/*sources*/);
         return exchange.dst_ready;
       }
@@ -3880,7 +3921,7 @@ namespace Legion {
         assert(index < src_collectives.size());
 #endif
         const RtEvent ready = src_collectives[index]->exchange_records(
-                      exchange.src_records, src_indirect_records[index]);
+                      exchange.src_records, copies[index].src_indirect_records);
         if (exchange.src_ready.exists())
         {
           Runtime::trigger_event(exchange.src_ready, ready);
@@ -3895,7 +3936,7 @@ namespace Legion {
         assert(index < dst_collectives.size());
 #endif
         const RtEvent ready = dst_collectives[index]->exchange_records(
-                      exchange.dst_records, dst_indirect_records[index]);
+                      exchange.dst_records, copies[index].dst_indirect_records);
         if (exchange.dst_ready.exists())
         {
           Runtime::trigger_event(exchange.dst_ready, ready);
@@ -6088,12 +6129,26 @@ namespace Legion {
       assert(redop != NULL);
       assert(serdez_redop_collective == NULL);
       assert(all_reduce_collective == NULL);
+      assert(reduction_collective == NULL);
+      assert(broadcast_collective == NULL);
 #endif
-      if (serdez_redop_fns != NULL)
-        serdez_redop_collective = new BufferExchange(ctx, COLLECTIVE_LOC_97);
+      if (serdez_redop_fns == NULL)
+      {
+        if (deterministic)
+        {
+          broadcast_collective = new FutureBroadcastCollective(ctx,
+              COLLECTIVE_LOC_65, 0/*origin shard*/, this);
+          reduction_collective = new FutureReductionCollective(ctx,
+              COLLECTIVE_LOC_66, 0/*origin shard*/, this,
+              broadcast_collective, redop, redop_id);
+        }
+        else
+          all_reduce_collective = new FutureAllReduceCollective(this,
+              COLLECTIVE_LOC_97, ctx, redop_id, redop);
+      }
       else
-        all_reduce_collective = new FutureAllReduceCollective(this,
-            COLLECTIVE_LOC_97, ctx, redop_id, redop, deterministic);
+        serdez_redop_collective = new BufferExchange(ctx, COLLECTIVE_LOC_97);
+        
     }
 
     //--------------------------------------------------------------------------
@@ -6103,6 +6158,8 @@ namespace Legion {
       AllReduceOp::activate();
       serdez_redop_collective = NULL;
       all_reduce_collective = NULL;
+      reduction_collective = NULL;
+      broadcast_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -6114,6 +6171,10 @@ namespace Legion {
         delete serdez_redop_collective;
       if (all_reduce_collective != NULL)
         delete all_reduce_collective;
+      if (reduction_collective != NULL)
+        delete reduction_collective;
+      if (broadcast_collective != NULL)
+        delete broadcast_collective;
       if (freeop)
         runtime->free_repl_all_reduce_op(this);
     }
@@ -6293,8 +6354,21 @@ namespace Legion {
         if (!postconditions.empty())
           local_precondition = Runtime::merge_events(NULL, postconditions);
       }
-      const RtEvent collective_done =
-       all_reduce_collective->async_reduce(targets.front(), local_precondition);
+      RtEvent collective_done;
+      if (all_reduce_collective == NULL)
+      {
+        reduction_collective->async_reduce(targets.front(), 
+                                           local_precondition);
+        local_precondition = broadcast_collective->finished;
+        if (broadcast_collective->is_origin())
+          collective_done = reduction_collective->get_done_event();
+        else
+          collective_done = 
+            broadcast_collective->async_broadcast(targets.front());
+      }
+      else
+        collective_done = all_reduce_collective->async_reduce(targets.front(),
+                                                          local_precondition);
       // Finally do the copy out to all the other targets
       if (targets.size() > 1)
       {
@@ -11639,6 +11713,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void BroadcastCollective::elide_collective(void)
+    //--------------------------------------------------------------------------
+    {
+      if (done_event.exists())
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent BroadcastCollective::get_done_event(void) const
     //--------------------------------------------------------------------------
     {
@@ -12297,10 +12379,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureAllReduceCollective::FutureAllReduceCollective(Operation *o,
                          CollectiveIndexLocation loc, ReplicateContext *ctx, 
-                         ReductionOpID id, const ReductionOp *op, bool determin)
+                         ReductionOpID id, const ReductionOp *op)
       : AllGatherCollective(loc, ctx), op(o), redop(op), redop_id(id),
-        deterministic(determin), finished(Runtime::create_ap_user_event(NULL)),
-        instance(NULL), shadow_instance(NULL), last_stage_sends(0),
+        finished(Runtime::create_ap_user_event(NULL)), instance(NULL),
+        shadow_instance(NULL), last_stage_sends(0),
         current_stage(-1), pack_shadow(false)
     //--------------------------------------------------------------------------
     {
@@ -12309,10 +12391,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureAllReduceCollective::FutureAllReduceCollective(Operation *o,
         ReplicateContext *ctx, CollectiveID rid, ReductionOpID id,
-        const ReductionOp* op, bool determin)
+        const ReductionOp* op)
       : AllGatherCollective(ctx, id), op(o), redop(op), redop_id(rid),
-        deterministic(determin), finished(Runtime::create_ap_user_event(NULL)),
-        instance(NULL), shadow_instance(NULL), last_stage_sends(0),
+        finished(Runtime::create_ap_user_event(NULL)), instance(NULL),
+        shadow_instance(NULL), last_stage_sends(0),
         current_stage(-1), pack_shadow(false)
     //--------------------------------------------------------------------------
     {
@@ -12594,35 +12676,175 @@ namespace Legion {
                     const std::map<ShardID,FutureInstance*> &pending_reductions)
     //--------------------------------------------------------------------------
     {
-      ApEvent new_instance_ready;
-      if (deterministic)
+      std::vector<ApEvent> postconditions;
+      for (std::map<ShardID,FutureInstance*>::const_iterator it =
+            pending_reductions.begin(); it != pending_reductions.end(); it++)
       {
-        new_instance_ready = instance_ready;
-        for (std::map<ShardID,FutureInstance*>::const_iterator it =
-              pending_reductions.begin(); it != pending_reductions.end(); it++)
-        {
-          new_instance_ready = instance->reduce_from(it->second,
-              op, redop_id, redop, true/*exclusive*/, new_instance_ready);
-          delete it->second;
-        }
+        ApEvent post;
+        post = instance->reduce_from(it->second,
+          op, redop_id, redop, false/*exclusive*/, instance_ready);
+        delete it->second;
+        if (post.exists())
+          postconditions.push_back(post);
+      }
+      if (!postconditions.empty())
+        return Runtime::merge_events(NULL, postconditions);
+      else
+        return ApEvent::NO_AP_EVENT;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Future Broadcast Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureBroadcastCollective::FutureBroadcastCollective(ReplicateContext *ctx,
+                        CollectiveIndexLocation loc, ShardID orig, Operation *o)
+      : BroadcastCollective(loc, ctx, orig), op(o),
+        finished(Runtime::create_ap_user_event(NULL)), instance(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FutureBroadcastCollective::~FutureBroadcastCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcastCollective::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      instance->pack_instance(rez, false/*pack ownership*/,
+                              true/*other ready*/, finished);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcastCollective::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FutureInstance *source = 
+        FutureInstance::unpack_instance(derez, context->runtime);
+      Runtime::trigger_event(NULL, finished, instance->copy_from(source, op));
+      delete source;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcastCollective::elide_collective(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::trigger_event(NULL, finished);
+      BroadcastCollective::elide_collective();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent FutureBroadcastCollective::async_broadcast(FutureInstance *inst,
+                                                       ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance == NULL);
+#endif
+      instance = inst;
+      if (is_origin())
+      {
+        Runtime::trigger_event(NULL, finished, precondition);
+        perform_collective_async();
+        return RtEvent::NO_RT_EVENT;
       }
       else
       {
-        std::set<ApEvent> postconditions;
-        for (std::map<ShardID,FutureInstance*>::const_iterator it =
-              pending_reductions.begin(); it != pending_reductions.end(); it++)
-        {
-          ApEvent post;
-          post = instance->reduce_from(it->second,
-            op, redop_id, redop, false/*exclusive*/, instance_ready);
-          delete it->second;
-          if (post.exists())
-            postconditions.insert(post);
-        }
-        if (!postconditions.empty())
-          new_instance_ready = Runtime::merge_events(NULL, postconditions);
+#ifdef DEBUG_LEGION
+        assert(!precondition.exists());
+#endif
+        return perform_collective_wait(false/*block*/);
       }
-      return new_instance_ready;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Future Reduction Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureReductionCollective::FutureReductionCollective(ReplicateContext *ctx,
+        CollectiveIndexLocation loc, ShardID orig, Operation *o, 
+        FutureBroadcastCollective *broad, const ReductionOp *red,
+        ReductionOpID redid)
+      : GatherCollective(loc, ctx, orig), op(o), broadcast(broad), redop(red),
+        redop_id(redid), instance(NULL)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target == broadcast->origin);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    FutureReductionCollective::~FutureReductionCollective(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<ShardID,FutureInstance*>::const_iterator it =
+            pending_reductions.begin(); it != pending_reductions.end(); it++)
+        delete it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureReductionCollective::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      if (!pending_reductions.empty())
+        perform_reductions();
+      rez.serialize(local_shard);
+      instance->pack_instance(rez, false/*pack ownership*/,
+                              true/*other ready*/, ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureReductionCollective::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardID shard;
+      derez.deserialize(shard);
+      pending_reductions[shard] = 
+        FutureInstance::unpack_instance(derez, context->runtime);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent FutureReductionCollective::post_gather(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_target())
+      {
+        perform_reductions();
+        return broadcast->async_broadcast(instance, ready);
+      }
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureReductionCollective::async_reduce(FutureInstance *inst,
+                                                 ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance == NULL);
+#endif
+      instance = inst;
+      ready = precondition;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureReductionCollective::perform_reductions(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Do these in order for determinism
+      for (std::map<ShardID,FutureInstance*>::const_iterator it =
+            pending_reductions.begin(); it != pending_reductions.end(); it++)
+        ready = instance->reduce_from(it->second, op, redop_id, redop,
+                                      true/*exclusive*/, ready);
     }
 
     /////////////////////////////////////////////////////////////
