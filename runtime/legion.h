@@ -7402,15 +7402,21 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @param redop ID for the reduction op to use for reducing return values
-       * @param deterministic request that the reduced future value be computed 
-       *        in a deterministic way (more expensive than non-deterministic)
+       * @param ordered request that the reduced future value be computed 
+       *        in an ordered way so that all shards see a consistent result,
+       *        this is more expensive than unordered which allows for the 
+       *        creation of a butterfly all-reduce network across the shards,
+       *        integer reductions should be safe to use with the unordered
+       *        mode and still give the same result on each shard whereas
+       *        floating point reductions may produce different answers on 
+       *        each shard if ordered is set to false
        * @param outputs optional output requirements
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
       Future execute_index_space(
                                Context ctx, const IndexTaskLauncher &launcher,
-                               ReductionOpID redop, bool deterministic = false,
+                               ReductionOpID redop, bool ordered = true,
                                std::vector<OutputRequirement> *outputs = NULL);
 
       /**
@@ -7421,8 +7427,14 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param future_map the future map to reduct the value
        * @param redop ID for the reduction op to use for reducing values
-       * @param deterministic request that the reduced future be computed
-       *        in a deterministic way (more expensive than non-deterministic)
+       * @param ordered request that the reduced future value be computed 
+       *        in an ordered way so that all shards see a consistent result,
+       *        this is more expensive than unordered which allows for the 
+       *        creation of a butterfly all-reduce network across the shards,
+       *        integer reductions should be safe to use with the unordered
+       *        mode and still give the same result on each shard whereas
+       *        floating point reductions may produce different answers on 
+       *        each shard if ordered is set to false
        * @param map_id mapper to use for deciding where to map the output future
        * @param tag pass-through value to the mapper for application context
        * @param provenance an optional string for describing the provenance
@@ -7431,7 +7443,7 @@ namespace Legion {
        *         values in the future map
        */
       Future reduce_future_map(Context ctx, const FutureMap &future_map,
-                               ReductionOpID redop, bool deterministic = false,
+                               ReductionOpID redop, bool ordered = true,
                                MapperID map_id = 0, MappingTagID tag = 0,
                                const char *provenance = NULL);
 
