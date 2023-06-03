@@ -19624,6 +19624,7 @@ namespace Legion {
         (*it)->migrate_logical_state(src, dst, merge);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_version_state(ContextID src, ContextID dst,
                              std::set<RtEvent> &applied_events, bool merge,
@@ -19650,6 +19651,7 @@ namespace Legion {
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_version_state(src, dst, applied_events, merge);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_logical_state(ContextID ctx, Serializer &rez,
@@ -19685,6 +19687,7 @@ namespace Legion {
         it->second->unpack_logical_state(ctx, derez);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
                        const bool invalidate, std::set<RtEvent> &applied_events)
@@ -19705,6 +19708,7 @@ namespace Legion {
           delete it->second;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::unpack_version_state(ContextID ctx, 
@@ -20868,6 +20872,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
                                    bool self, InnerContext &source_context,
@@ -20895,6 +20900,7 @@ namespace Legion {
           delete it->first;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,

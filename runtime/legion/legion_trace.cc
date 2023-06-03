@@ -4207,8 +4207,8 @@ namespace Legion {
                    RegionTreeForest *f, unsigned parent_req_idx, 
                    IndexSpaceExpression *expr,
                    const FieldMask &mask, RegionTreeID tid)
-      : context(trace->logical_trace->context), forest(f),
-        condition_expr(expr), condition_mask(mask), tree_id(tid),
+      : EqSetTracker(set_lock), context(trace->logical_trace->context),
+        forest(f), condition_expr(expr), condition_mask(mask), tree_id(tid),
         parent_req_index(parent_req_idx), invalid_mask(mask),
         precondition_views(NULL), anticondition_views(NULL),
         postcondition_views(NULL)
@@ -4222,7 +4222,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(current_sets.empty());
+      assert(equivalence_sets.empty());
 #endif
       for (LegionMap<IndexSpaceExpression*,
                      FieldMaskSet<LogicalView> >::const_iterator eit =
@@ -4272,6 +4272,7 @@ namespace Legion {
         delete postcondition_views;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void TraceConditionSet::record_subscription(VersionManager *owner,
                                                 AddressSpaceID space)
@@ -4288,15 +4289,16 @@ namespace Legion {
       else
         finder->second++;
     }
+#endif
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::finish_subscription(VersionManager *owner,
+    bool TraceConditionSet::finish_subscription(EqKDTree *owner,
                                                 AddressSpaceID space)
     //--------------------------------------------------------------------------
     {
-      const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
+      const std::pair<EqKDTree*,AddressSpaceID> key(owner,space);
       AutoLock s_lock(set_lock);
-      std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
+      std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::iterator
         finder = subscription_owners.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != subscription_owners.end());
@@ -4309,6 +4311,7 @@ namespace Legion {
       return remove_reference();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void TraceConditionSet::record_equivalence_set(EquivalenceSet *set,
                                                    const FieldMask &mask)
@@ -4327,6 +4330,7 @@ namespace Legion {
       AutoLock s_lock(set_lock);
       pending_sets.insert(set, mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::invalidate_equivalence_sets(const FieldMask &mask)
@@ -4338,7 +4342,7 @@ namespace Legion {
       invalid_mask |= mask;
       std::vector<EquivalenceSet*> to_delete;
       for (FieldMaskSet<EquivalenceSet>::iterator it =
-            current_sets.begin(); it != current_sets.end(); it++)
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
       {
         it.filter(mask);
         if (!it->second)
@@ -4347,13 +4351,14 @@ namespace Legion {
       for (std::vector<EquivalenceSet*>::const_iterator it =
             to_delete.begin(); it != to_delete.end(); it++)
       {
-        current_sets.erase(*it);
+        equivalence_sets.erase(*it);
         if ((*it)->remove_base_resource_ref(TRACE_REF))
           assert(false); // should never end up deleting this here
       }
-      current_sets.tighten_valid_mask();
+      equivalence_sets.tighten_valid_mask();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void TraceConditionSet::invalidate_equivalence_sets(void)
     //--------------------------------------------------------------------------
@@ -4365,7 +4370,7 @@ namespace Legion {
         if (subscription_owners.empty())
         {
 #ifdef DEBUG_LEGION
-          assert(current_sets.empty());
+          assert(equivalence_sets.empty());
 #endif
           return;
         }
@@ -4375,7 +4380,7 @@ namespace Legion {
               const_iterator it = subscription_owners.begin(); 
               it != subscription_owners.end(); it++)
           to_cancel[it->first.second].push_back(it->first.first);
-        to_remove.swap(current_sets);
+        to_remove.swap(equivalence_sets);
       }
       cancel_subscriptions(context->runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -4383,6 +4388,7 @@ namespace Legion {
         if (it->first->remove_base_resource_ref(TRACE_REF))
           delete it->first;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::capture(EquivalenceSet *set, const FieldMask &mask,
@@ -4595,7 +4601,7 @@ namespace Legion {
         precondition_analyses.push_back(analysis);
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              current_sets.begin(); it != current_sets.end(); it++)
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
@@ -4622,7 +4628,7 @@ namespace Legion {
         anticondition_analyses.push_back(analysis);
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              current_sets.begin(); it != current_sets.end(); it++)
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
@@ -4726,7 +4732,7 @@ namespace Legion {
         analysis->add_reference();
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              current_sets.begin(); it != current_sets.end(); it++)
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
@@ -4795,13 +4801,14 @@ namespace Legion {
     {
       // Don't need the lock here, there's only one thing looking at these
       // data structures at this point
-      if (pending_sets.empty())
+      if (pending_equivalence_sets.empty())
         return;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            pending_sets.begin(); it != pending_sets.end(); it++)
-        if (current_sets.insert(it->first, it->second))
+            pending_equivalence_sets.begin(); it != 
+            pending_equivalence_sets.end(); it++)
+        if (equivalence_sets.insert(it->first, it->second))
           it->first->add_base_resource_ref(TRACE_REF);
-      pending_sets.clear();
+      pending_equivalence_sets.clear();
     }
 
     /////////////////////////////////////////////////////////////

@@ -22601,12 +22601,406 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    EqSetTracker::EqSetTracker(LocalLock &lock)
+      : tracker_lock(lock)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_equivalence_sets(InnerContext *context,
+                                const FieldMask &mask,
+                                FieldMaskSet<EquivalenceSet> &eq_sets,
+                                FieldMaskSet<EqKDTree> &to_create,
+                                std::map<EqKDTree*,Domain> &creation_rects,
+                                std::vector<EqKDTree*> &subscriptions,
+                                AddressSpaceID source, unsigned total_responses,
+                                std::vector<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(total_responses > 0);
+#endif
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > create_now;
+      LegionMap<Domain,FieldMask> create_now_rectangles;
+      // If we have just one response, we can just move things over
+      if ((total_responses == 1) && !to_create.empty())
+      {
+        for (std::map<EqKDTree*,Domain>::const_iterator it =
+              creation_rects.begin(); it != creation_rects.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(to_create.find(it->first) != to_create.end());
+#endif
+          LegionMap<Domain,FieldMask>::iterator finder = 
+            create_now_rectangles.find(it->second);
+          if (finder != create_now_rectangles.end())
+            finder->second |= to_create[it->first];
+          else
+            create_now_rectangles[it->second] = to_create[it->first];
+        }
+        create_now[source].swap(to_create);
+      }
+      Runtime *runtime = context->runtime;
+      {
+        AutoLock t_lock(tracker_lock);
+        // Record pending equivalence sets
+        if (!eq_sets.empty())
+        {
+          if (!pending_equivalence_sets.empty())
+          {
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  eq_sets.begin(); it != eq_sets.end(); it++)
+              pending_equivalence_sets.insert(it->first, it->second);
+          }
+          else
+            pending_equivalence_sets.swap(eq_sets);
+        }
+        // Record subscription owners
+        if (!subscriptions.empty())
+        {
+          if (subscription_owners.empty())
+            add_subscription_reference();
+          for (std::vector<EqKDTree*>::const_iterator it =
+                subscriptions.begin(); it != subscriptions.end(); it++)
+          {
+            const std::pair<EqKDTree*,AddressSpaceID> key(*it, source);
+            std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::iterator
+              finder = subscription_owners.find(key);
+            if (finder == subscription_owners.end())
+              subscription_owners[key] = 1;
+            else
+              finder->second++;
+          }
+        }
+        // Record any creations that we need to perform
+        if (total_responses > 1)
+        {
+          if (!to_create.empty())
+          {
+            // Save these into the creation requests 
+            for (std::map<EqKDTree*,Domain>::const_iterator it =
+                  creation_rects.begin(); it != creation_rects.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(to_create.find(it->first) != to_create.end());
+#endif
+              LegionMap<Domain,FieldMask>::iterator finder = 
+                creation_rectangles.find(it->second);
+              if (finder != creation_rectangles.end())
+                finder->second |= to_create[it->first];
+              else
+                creation_rectangles[it->second] = to_create[it->first];
+            }
+            FieldMaskSet<EqKDTree> &requests = creation_requests[source];
+            if (!requests.empty())
+            {
+              for (FieldMaskSet<EqKDTree>::const_iterator it =
+                    to_create.begin(); it != to_create.end(); it++)
+                requests.insert(it->first, it->second);
+            }
+            else
+              requests.swap(to_create);
+          }
+          // Now see which fields are done
+          FieldMask remaining = mask;
+          for (LegionMap<unsigned,FieldMask>::iterator it = 
+                remaining_responses.begin(); it != 
+                remaining_responses.end(); /*nothing*/)
+          {
+            const FieldMask overlap = remaining & it->second;
+            if (!overlap)
+            {
+              it++;
+              continue;
+            }
+            if (it->first == 1)
+            {
+              // We've seen the last response for these fields
+              // so we can now merge things over to be handled
+              const size_t outstanding_requests = count_outstanding_requests();
+#ifdef DEBUG_LEGION
+              assert(outstanding_requests > 0);
+#endif
+              if (outstanding_requests > 1)
+              {
+                // Pull out the entries just for our fields
+                for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+                      cit = creation_requests.begin(); 
+                      cit != creation_requests.end(); /*nothing*/)
+                {
+                  if (mask * cit->second.get_valid_mask())
+                    cit++;
+                  else if (mask == cit->second.get_valid_mask())
+                  {
+                    create_now[cit->first].swap(cit->second);
+                    LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+                      to_delete = cit++;
+                    creation_requests.erase(to_delete);
+                  }
+                  else
+                  {
+                    std::vector<EqKDTree*> to_delete;
+                    for (FieldMaskSet<EqKDTree>::iterator it =
+                          cit->second.begin(); it != cit->second.end(); it++)
+                    {
+                      const FieldMask overlap = mask & it->second;
+                      if (!overlap)
+                        continue;
+                      create_now[cit->first].insert(it->first, overlap);
+                      it.filter(overlap);
+                      if (!it->second)
+                        to_delete.push_back(it->first);
+                    }
+                    for (std::vector<EqKDTree*>::const_iterator it =
+                          to_delete.begin(); it != to_delete.end(); it++)
+                      cit->second.erase(*it);
+                    if (cit->second.empty())
+                    {
+                      LegionMap<AddressSpaceID,
+                        FieldMaskSet<EqKDTree> >::iterator to_delete = cit++;
+                      creation_requests.erase(to_delete);
+                    }
+                    else
+                      cit++;
+                  }
+                }
+                for (LegionMap<Domain,FieldMask>::iterator it =
+                      creation_rectangles.begin(); it != 
+                      creation_rectangles.end(); /*nothing*/)
+                {
+                  const FieldMask overlap = mask & it->second;
+                  if (!overlap)
+                    continue;
+                  create_now_rectangles[it->first] = overlap;
+                  it->second -= overlap;
+                  if (!it->second)
+                  {
+                    LegionMap<Domain,FieldMask>::iterator to_delete = it++;
+                    creation_rectangles.erase(to_delete);
+                  }
+                  else
+                    it++;
+                }
+              }
+              else
+              {
+                // If we're just doing one compute call then we
+                // know we're going to do this for everything
+                create_now.swap(creation_requests);
+                create_now_rectangles.swap(creation_rectangles); 
+              }
+            }
+            else
+            {
+              // Update it lower down the entries
+              LegionMap<unsigned,FieldMask>::iterator finder =
+                remaining_responses.find(it->first-1);
+              if (finder != remaining_responses.end())
+                finder->second |= overlap;
+              else
+                remaining_responses[it->first-1] = overlap;
+            }
+            it->second -= overlap;
+            if (!it->second)
+            {
+              LegionMap<unsigned,FieldMask>::iterator to_delete = it++;
+              remaining_responses.erase(to_delete);
+            }
+            else
+              it++;
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
+          if (!!remaining)
+            remaining_responses[total_responses-1] = remaining;
+        }
+      }
+      // See if we have any equivalence sets for us to create right now
+      if (!create_now.empty())
+      {
+        // Sort the rectangles into field sets and make an equivlaence set
+        // for each of them
+        LegionList<FieldSet<Domain> > rectangle_sets;
+        compute_field_sets(mask, create_now_rectangles, rectangle_sets);
+        FieldMaskSet<EquivalenceSet> pending_sets;
+        for (LegionList<FieldSet<Domain> >::const_iterator rit =
+              rectangle_sets.begin(); rit != rectangle_sets.end(); rit++)
+        {
+#ifdef DEBUG_LEGION
+          assert(!rit->elements.empty());
+#endif
+          // First we need an expression for this equivalence set
+          // If the total volume of all the rectangles is the same as the
+          // volume of our index space then we know that its the same as
+          // our index space so we can reuse it, otherwise we'll need to
+          // create a new index space expression to use for the set
+          IndexSpaceExpression *tracker_expr = get_tracker_expression();
+          IndexSpaceExpression *expr =
+            tracker_expr->create_from_rectangles(rit->elements);
+          // Next compute the CollectiveMapping for the equivalence set
+          std::vector<AddressSpaceID> spaces;
+          for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+                it = create_now.begin(); it != create_now.end(); it++)
+            if (!(rit->set_mask * it->second.get_valid_mask()))
+              spaces.push_back(it->first);
+          // Make sure we include our local space too
+          if (!spaces.empty() && !std::binary_search(spaces.begin(), 
+                              spaces.end(), runtime->address_space))
+          {
+            spaces.push_back(runtime->address_space);
+            std::sort(spaces.begin(), spaces.end());
+          }
+          CollectiveMapping *mapping = NULL;
+          if (spaces.size() > 1)
+            mapping = 
+              new CollectiveMapping(spaces, runtime->legion_collective_radix);
+          const DistributedID did = runtime->get_available_distributed_id();
+          EquivalenceSet *set = new EquivalenceSet(runtime, did,
+              runtime->address_space/*logical owner*/, expr, 
+              get_region_tree_id(), context, true/*register*/, mapping);
+          pending_sets.insert(set, rit->set_mask);
+          if (mapping != NULL)
+          {
+            // Broadcast this out to all the spaces and have them notify
+            // their EqKDTree objects
+            std::vector<AddressSpaceID> children;
+            mapping->get_children(runtime->address_space, 
+                                  runtime->address_space, children);
+#ifdef DEBUG_LEGION
+            assert(!children.empty());
+#endif
+            LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+            if (rectangle_sets.size() > 1)
+            {
+              // Selectively pack targets
+              for (LegionMap<AddressSpaceID,
+                             FieldMaskSet<EqKDTree> >::iterator cit =
+                    create_now.begin(); cit != create_now.end(); cit++)
+              {
+                if (cit->first == runtime->address_space)
+                  continue;
+                if (rit->set_mask * cit->second.get_valid_mask())
+                  continue;
+                FieldMaskSet<EqKDTree> &notify = to_notify[cit->first];
+                if (rit->set_mask != cit->second.get_valid_mask())
+                {
+                  for (FieldMaskSet<EqKDTree>::const_iterator it =
+                        cit->second.begin(); it != cit->second.end(); it++)
+                  {
+                    const FieldMask overlap = rit->set_mask & it->second;
+                    if (!overlap)
+                      continue;
+                    notify.insert(it->first, overlap);
+                  }
+                }
+                else
+                  notify.swap(cit->second);
+              }
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(rit->set_mask == mask);
+#endif
+              to_notify.swap(create_now);
+              // But swap our local space back out if there is one
+              LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator 
+                finder = to_notify.find(runtime->address_space);
+              if (finder != to_notify.end())
+              {
+                create_now[runtime->address_space].swap(finder->second);
+                to_notify.erase(finder);
+              }
+            }
+            // See if this is an index space node for easy packing
+            // otherwise we're going to pack all the rectangles so
+            // we can make an expression on the remote nodes
+            IndexSpaceNode *node = NULL;
+            if (expr == tracker_expr)
+              node = dynamic_cast<IndexSpaceNode*>(expr);
+            for (std::vector<AddressSpaceID>::const_iterator cit =
+                  children.begin(); cit != children.end(); cit++)
+            {
+              const RtUserEvent notified = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(this);
+                rez.serialize(did);
+                if (node == NULL)
+                {
+                  rez.serialize(IndexSpace::NO_SPACE);
+                  rez.serialize(rit->elements.size());
+                  for (std::set<Domain>::const_iterator it =
+                        rit->elements.begin(); it != rit->elements.end(); it++)
+                    rez.serialize(*it);
+                }
+                else
+                  rez.serialize(node->handle);
+                rez.serialize(set->tree_id);
+                context->pack_task_context(rez);
+                if (mapping != NULL)
+                  mapping->pack(rez);
+                else
+                  CollectiveMapping::pack_null(rez);
+                rez.serialize<size_t>(to_notify.size());
+                for (LegionMap<AddressSpaceID,
+                               FieldMaskSet<EqKDTree> >::const_iterator nit =
+                      to_notify.begin(); nit != to_notify.end(); nit++)
+                {
+                  rez.serialize(nit->first);
+                  rez.serialize(nit->second.size());
+                  for (FieldMaskSet<EqKDTree>::const_iterator it =
+                        nit->second.begin(); it != nit->second.end(); it++)
+                  {
+                    rez.serialize(it->first);
+                    rez.serialize(it->second);
+                  }
+                }
+                rez.serialize(notified);
+              }
+              runtime->send_equivalence_set_creation(*cit, rez);
+              ready_events.push_back(notified);
+            }
+          }
+          // Notify any local EqKDTree objects
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+            finder = create_now.find(runtime->address_space);
+          if (finder != create_now.end())
+          {
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              const FieldMask overlap = rit->set_mask & it->second;
+              if (!overlap)
+                continue;
+              it->first->record_equivalence_set(set, overlap, this,
+                                            runtime->address_space);
+            }
+          }
+        }
+        // Retake the lock and record these pending equivalence sets
+        AutoLock t_lock(tracker_lock); 
+        if (!pending_equivalence_sets.empty())
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                pending_sets.begin(); it != pending_sets.end(); it++)
+            pending_equivalence_sets.insert(it->first, it->second);
+        }
+        else
+          pending_equivalence_sets.swap(pending_sets);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EqSetTracker::cancel_subscriptions(Runtime *runtime,
-        const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel)
+        const std::map<AddressSpaceID,std::vector<EqKDTree*> > &to_cancel)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID local_space = runtime->address_space;
-      for (std::map<AddressSpaceID,std::vector<VersionManager*> >::
+      for (std::map<AddressSpaceID,std::vector<EqKDTree*> >::
             const_iterator ait = to_cancel.begin(); 
             ait != to_cancel.end(); ait++)
       {
@@ -22617,7 +23011,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(this);
             rez.serialize<size_t>(ait->second.size());
-            for (std::vector<VersionManager*>::const_iterator it =
+            for (std::vector<EqKDTree*>::const_iterator it =
                   ait->second.begin(); it != ait->second.end(); it++)
               rez.serialize(*it);
           }
@@ -22625,7 +23019,7 @@ namespace Legion {
         }
         else
         {
-          for (std::vector<VersionManager*>::const_iterator it =
+          for (std::vector<EqKDTree*>::const_iterator it =
                 ait->second.begin(); it != ait->second.end(); it++)
             if ((*it)->cancel_subscription(this, local_space) &&
                 finish_subscription(*it, local_space))
@@ -22644,10 +23038,10 @@ namespace Legion {
       derez.deserialize(subscriber);
       size_t num_owners;
       derez.deserialize(num_owners);
-      std::vector<VersionManager*> to_finish;
+      std::vector<EqKDTree*> to_finish;
       for (unsigned idx = 0; idx < num_owners; idx++)
       {
-        VersionManager *owner;
+        EqKDTree *owner;
         derez.deserialize(owner);
         if (owner->cancel_subscription(subscriber, source))
           to_finish.push_back(owner);
@@ -22660,7 +23054,7 @@ namespace Legion {
           rez.serialize<size_t>(0); // nothing to filter
           rez.serialize(subscriber);
           rez.serialize<size_t>(to_finish.size());
-          for (std::vector<VersionManager*>::const_iterator it =
+          for (std::vector<EqKDTree*>::const_iterator it =
                 to_finish.begin(); it != to_finish.end(); it++)
             rez.serialize(*it);
         }
@@ -22670,7 +23064,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EqSetTracker::finish_subscriptions(
-        Runtime *runtime, VersionManager &manager,
+        Runtime *runtime, EqKDTree &owner,
         LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
         std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -22689,7 +23083,7 @@ namespace Legion {
             assert(!ait->second.subscribers.empty());
 #endif
             rez.serialize<size_t>(ait->second.subscribers.size());
-            rez.serialize<VersionManager*>(&manager);
+            rez.serialize<EqKDTree*>(&owner);
             rez.serialize(applied);
             if (ait->second.delete_all)
               rez.serialize<size_t>(ait->second.subscribers.size());
@@ -22721,13 +23115,13 @@ namespace Legion {
           {
             it->first->invalidate_equivalence_sets(it->second);
             if (ait->second.delete_all && 
-                it->first->finish_subscription(&manager, local_space))
+                it->first->finish_subscription(&owner, local_space))
               delete it->first;
           }
           for (std::vector<EqSetTracker*>::const_iterator it =
                 ait->second.finished.begin(); it != 
                 ait->second.finished.end(); it++)
-            if ((*it)->finish_subscription(&manager, local_space))
+            if ((*it)->finish_subscription(&owner, local_space))
               delete *it;
         }
       }
@@ -22743,7 +23137,7 @@ namespace Legion {
       derez.deserialize(num_subscribers);
       if (num_subscribers > 0)
       {
-        VersionManager *owner;
+        EqKDTree *owner;
         derez.deserialize(owner);
         RtUserEvent done;
         derez.deserialize(done);
@@ -22780,7 +23174,7 @@ namespace Legion {
         derez.deserialize(num_owners);
         for (unsigned idx = 0; idx < num_owners; idx++)
         {
-          VersionManager *owner;
+          EqKDTree *owner;
           derez.deserialize(owner);
           if (subscriber->finish_subscription(owner, source))
             delete subscriber;
@@ -22794,7 +23188,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *n, ContextID c)
-      : ctx(c), node(n), runtime(n->context->runtime)
+      : EqSetTracker(manager_lock), ctx(c), node(n),runtime(n->context->runtime)
     //--------------------------------------------------------------------------
     {
     }
@@ -22934,8 +23328,9 @@ namespace Legion {
         else
           finalize_equivalence_sets(compute_event);
       }
-    }
+    } 
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::record_equivalence_sets(VersionInfo *version_info,
                   const FieldMask &mask, IndexSpaceExpression *expr,
@@ -22980,17 +23375,42 @@ namespace Legion {
       if (add_reference)
         node->add_base_resource_ref(VERSION_MANAGER_REF);
     }
+#endif
 
     //--------------------------------------------------------------------------
-    bool VersionManager::finish_subscription(VersionManager *owner,
+    RegionTreeID VersionManager::get_region_tree_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return node->get_tree_id();
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* VersionManager::get_tracker_expression(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+#endif
+      return node->as_region_node()->row_source;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t VersionManager::count_outstanding_requests(void) const
+    //--------------------------------------------------------------------------
+    {
+      return equivalence_sets_ready.size();
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::finish_subscription(EqKDTree *owner,
                                              AddressSpaceID space)
     //--------------------------------------------------------------------------
     {
       bool remove_reference;
       {
-        const std::pair<VersionManager*,AddressSpaceID> key(owner, space);
+        const std::pair<EqKDTree*,AddressSpaceID> key(owner, space);
         AutoLock m_lock(manager_lock);
-        std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
+        std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::iterator
           finder = subscription_owners.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != subscription_owners.end());
@@ -23008,6 +23428,7 @@ namespace Legion {
       return false;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool VersionManager::cancel_subscription(EqSetTracker *subscriber,
                                              AddressSpaceID space)
@@ -23049,6 +23470,7 @@ namespace Legion {
 #endif
       pending_equivalence_sets.insert(set, mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_equivalence_sets(const FieldMask &mask)
@@ -23162,7 +23584,7 @@ namespace Legion {
     {
       // We need to remove any tracked equivalence sets that we have
       FieldMaskSet<EquivalenceSet> to_remove;
-      std::map<AddressSpaceID,std::vector<VersionManager*> > to_cancel;
+      std::map<AddressSpaceID,std::vector<EqKDTree*> > to_cancel;
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -23179,7 +23601,7 @@ namespace Legion {
           to_remove.swap(equivalence_sets);
         else if (subscription_owners.empty())
           return;
-        for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
+        for (std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::
               const_iterator it = subscription_owners.begin();
               it != subscription_owners.end(); it++)
           to_cancel[it->first.second].push_back(it->first.first);
@@ -23273,6 +23695,7 @@ namespace Legion {
         }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(IndexSpaceExpression *expr,
                                           EqSetTracker *target,
@@ -23421,7 +23844,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const ContextID ctx,
                                           IndexSpaceExpression *expr,
@@ -23678,7 +24100,6 @@ namespace Legion {
           target->record_equivalence_set(it->first, it->second);
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::handle_compute_equivalence_sets_response(
@@ -23723,6 +24144,7 @@ namespace Legion {
       else
         Runtime::trigger_event(done_event);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::record_refinement(EquivalenceSet *set, 

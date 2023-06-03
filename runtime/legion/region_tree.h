@@ -1331,6 +1331,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
       virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const
@@ -1464,6 +1466,9 @@ namespace Legion {
       inline bool meets_layout_expression_internal(
                          IndexSpaceExpression *space_expr, bool tight_bounds,
                          const Rect<DIM,T> *piece_list, size_t piece_list_size);
+      template<int DIM, typename T>
+      inline IndexSpaceExpression* create_from_rectangles_internal(
+                       RegionTreeForest *forest, const std::set<Domain> &rects);
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
@@ -1636,6 +1641,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0);
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
@@ -2155,6 +2162,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized,Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
       virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const;
@@ -2357,6 +2366,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized,Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0);
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
@@ -2981,6 +2992,8 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+      virtual bool cancel_subscription(EqSetTracker *tracker,
+                                       AddressSpaceID space) = 0;
     public:
       template<int DIM, typename T>
       inline EqKDTreeT<DIM,T>* as_eq_kd_tree(void);
@@ -3008,6 +3021,8 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+      virtual bool cancel_subscription(EqSetTracker *tracker,
+                                       AddressSpaceID space) = 0;
     public:
       const Rect<DIM,T> bounds;
     };
@@ -3020,7 +3035,10 @@ namespace Legion {
     class EqKDNode : public EqKDTreeT<DIM,T> {
     public:
       EqKDNode(const Rect<DIM,T> &bounds);
+      EqKDNode(const EqKDNode &rhs) = delete;
       virtual ~EqKDNode(void);
+    public:
+      EqKDNode& operator=(const EqKDNode &rhs) = delete;
     public:
       virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
@@ -3035,6 +3053,8 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space);
+      virtual bool cancel_subscription(EqSetTracker *tracker,
+                                       AddressSpaceID space);
     protected:
       void record_subscription(EqSetTracker *tracker, 
           AddressSpaceID tracker_space, const FieldMask &mask);

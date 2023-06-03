@@ -854,15 +854,15 @@ namespace Legion {
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
     public:
-      virtual void record_subscription(VersionManager *owner,
+      virtual void add_subscription_reference(void);
+      virtual bool remote_subscription_reference(void);
+      virtual RegionTreeID get_region_tree_id(void) const
+        { return tree_id; }
+      virtual IndexSpaceExpression* get_tracker_expression(void) const
+        { return condition_expr; }
+      virtual size_t count_outstanding_requests(void) const { return 1; }
+      virtual bool finish_subscription(EqKDTree *owner,
                                        AddressSpaceID space);
-      virtual bool finish_subscription(VersionManager *owner,
-                                       AddressSpaceID space);
-    public:
-      virtual void record_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
-      virtual void record_pending_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
       virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void invalidate_equivalence_sets(void);
@@ -897,8 +897,6 @@ namespace Legion {
       const unsigned parent_req_index;
     private:
       mutable LocalLock set_lock;
-      FieldMaskSet<EquivalenceSet> current_sets;
-      FieldMaskSet<EquivalenceSet> pending_sets;
       FieldMask invalid_mask;
     private:
       TraceViewSet *precondition_views;
@@ -917,15 +915,6 @@ namespace Legion {
     private:
       std::vector<InvalidInstAnalysis*> precondition_analyses;
       std::vector<AntivalidInstAnalysis*> anticondition_analyses;
-    private:
-      // Keep track of our subscription owners
-      // Note that from the owners perspective it only has at most one
-      // reference to this subscriber at a time, but in practice the
-      // removal of references can be delayed arbitrarily so we need to
-      // keep a count of how many outstanding references there are for
-      // each owner so we know when it is done
-      std::map<std::pair<VersionManager*,AddressSpaceID>,
-               unsigned> subscription_owners;
     };
 
     /**

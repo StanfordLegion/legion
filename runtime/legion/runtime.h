@@ -3408,6 +3408,7 @@ namespace Legion {
                                                      Serializer &rez);
       void send_finish_equivalence_sets_subscription(AddressSpaceID target,
                                                      Serializer &rez);
+      void send_equivalence_set_creation(AddressSpaceID target,Serializer &rez);
       void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
       void send_equivalence_set_replication_request(AddressSpaceID target,
                                                     Serializer &rez);

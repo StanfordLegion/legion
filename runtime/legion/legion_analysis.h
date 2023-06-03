@@ -3448,28 +3448,55 @@ namespace Legion {
      */
     class EqSetTracker {
     public:
+      EqSetTracker(LocalLock &lock);
       virtual ~EqSetTracker(void) { }
     public:
-      virtual void record_subscription(VersionManager *owner,
-                                       AddressSpaceID space) = 0;
-      virtual bool finish_subscription(VersionManager *owner,
+      void record_equivalence_sets(
+          InnerContext *context, const FieldMask &mask,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::vector<EqKDTree*> &subscriptions,
+          AddressSpaceID source, unsigned expected_responses,
+          std::vector<RtEvent> &ready_events);
+    public:
+      virtual void add_subscription_reference(void) = 0;
+      virtual bool remote_subscription_reference(void) = 0;
+      virtual bool finish_subscription(EqKDTree *owner,
                                        AddressSpaceID space) = 0;
     public:
-      virtual void record_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask) = 0;
-      virtual void record_pending_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask) = 0;
+      virtual RegionTreeID get_region_tree_id(void) const = 0;
+      virtual IndexSpaceExpression* get_tracker_expression(void) const = 0;
+      virtual size_t count_outstanding_requests(void) const = 0;
+    public:
       virtual void invalidate_equivalence_sets(const FieldMask &mask) = 0;
     public:
       void cancel_subscriptions(Runtime *runtime,
-       const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel);
-      static void finish_subscriptions(Runtime *runtime, VersionManager &source,
+       const std::map<AddressSpaceID,std::vector<EqKDTree*> > &to_cancel);
+      static void finish_subscriptions(Runtime *runtime, EqKDTree &source,
           LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
           std::set<RtEvent> &applied_events);
       static void handle_cancel_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
       static void handle_finish_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
+    protected:
+      LocalLock &tracker_lock;
+      FieldMaskSet<EquivalenceSet> equivalence_sets;
+      FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
+      // Keep track of our subscription owners
+      // Note that from the owners perspective it only has at most one
+      // reference to this subscriber at a time, but in practice the
+      // removal of references can be delayed arbitrarily so we need to
+      // keep a count of how many outstanding references there are for
+      // each owner so we know when it is done
+      std::map<
+        std::pair<EqKDTree*,AddressSpaceID>,unsigned> subscription_owners;
+      // These all help with the creation of equivalence sets for which we
+      // are the first request to access them 
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > creation_requests;
+      LegionMap<Domain,FieldMask>                     creation_rectangles;
+      LegionMap<unsigned,FieldMask>                   remaining_responses;
     };
 
     /**
@@ -4143,15 +4170,13 @@ namespace Legion {
                                    const bool expr_covers,
                                    std::set<RtEvent> &ready_events) const;
     public:
-      virtual void record_subscription(VersionManager *owner,
+      virtual void add_subscription_reference(void);
+      virtual bool remote_subscription_reference(void);
+      virtual RegionTreeID get_region_tree_id(void) const;
+      virtual IndexSpaceExpression* get_tracker_expression(void) const;
+      virtual size_t count_outstanding_requests(void) const;
+      virtual bool finish_subscription(EqKDTree *owner,
                                        AddressSpaceID space);
-      virtual bool finish_subscription(VersionManager *owner,
-                                       AddressSpaceID space);
-      bool cancel_subscription(EqSetTracker *tracker, AddressSpaceID space);
-      virtual void record_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
-      virtual void record_pending_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
       virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void finalize_equivalence_sets(RtUserEvent done_event);                           
@@ -4230,8 +4255,6 @@ namespace Legion {
     protected:
       mutable LocalLock manager_lock;
     protected: 
-      FieldMaskSet<EquivalenceSet> equivalence_sets;
-      FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
       LegionList<WaitingVersionInfo> waiting_infos;
       LegionMap<RtUserEvent,FieldMask> equivalence_sets_ready;
     protected:
@@ -4255,14 +4278,6 @@ namespace Legion {
       // between fields and equivalence sets in a node represeting a refinement
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EqSetTracker> > refinement_subscriptions;
-      // Keep track of our subscription owners
-      // Note that from the owners perspective it only has at most one
-      // reference to this subscriber at a time, but in practice the
-      // removal of references can be delayed arbitrarily so we need to
-      // keep a count of how many outstanding references there are for
-      // each owner so we know when it is done
-      std::map<std::pair<VersionManager*,AddressSpaceID>,
-               unsigned> subscription_owners;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 

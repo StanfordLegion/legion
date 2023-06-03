@@ -3798,14 +3798,20 @@ namespace Legion {
       if (target_space != local_space)
       {
         // Send a message back to the target node with the results
-
+        
       }
       else
       {
         // We can report the results back immediately
-
+        // Do the creation ones first if there are any to get them in flight
+        target->record_equivalence_sets(this, mask, eq_sets, to_create, 
+            creation_rects, subscriptions, local_space, 
+            1/*excpected responses*/, pending_sets);
       }
-      return RtEvent::NO_RT_EVENT;
+      if (!pending_sets.empty())
+        return Runtime::merge_events(pending_sets);
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------

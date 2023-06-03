@@ -857,6 +857,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    inline IndexSpaceExpression* 
+              IndexSpaceExpression::create_from_rectangles_internal(
+                        RegionTreeForest *forest, const std::set<Domain> &rects)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!rects.empty());
+#endif
+      size_t total_volume = 0;
+      std::vector<Rect<DIM,T> > rectangles;
+      rectangles.reserve(rects.size());
+      // We're just assuming that all the rectangles here are non-overlapping
+      for (std::set<Domain>::const_iterator it =
+            rects.begin(); it != rects.end(); it++)
+      {
+        Rect<DIM,T> rect = *it;
+        total_volume += rect.volume();
+        rectangles.push_back(rect);
+      }
+#ifdef DEBUG_LEGION
+      assert(total_volume <= get_volume());
+#endif
+      // If all the points add up to the same as our volume then the 
+      // expressions match and we can reuse this as the expression
+      if (total_volume == get_volume())
+        return this;
+      return new InstanceExpression<DIM,T>(&rectangles.front(), 
+                                           rectangles.size(), forest);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     inline IndexSpaceExpression*
               IndexSpaceExpression::find_congruent_expression_internal(
                                    std::set<IndexSpaceExpression*> &expressions)
@@ -1218,6 +1250,15 @@ namespace Legion {
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
                           collective_mapping, true/*add root ref*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::create_from_rectangles(
+                                                  const std::set<Domain> &rects)
+    //--------------------------------------------------------------------------
+    {
+      return create_from_rectangles_internal<DIM,T>(context, rects);
     }
 
     //--------------------------------------------------------------------------
@@ -2537,6 +2578,15 @@ namespace Legion {
                               NULL/*parent*/, 0/*color*/, did, initialized,
                               provenance, ready, new_expr_id,
                               collective_mapping, true/*add root reference*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::create_from_rectangles(
+                                                  const std::set<Domain> &rects)
+    //--------------------------------------------------------------------------
+    {
+      return create_from_rectangles_internal<DIM,T>(context, rects);
     }
 
     //--------------------------------------------------------------------------
@@ -6494,23 +6544,22 @@ namespace Legion {
                 // edge of the rectangle falls closest to the halfway point
                 T split = 0;
                 int dim = -1;
-                size_t largest = 0;
+                T largest = 0;
                 for (int d = 0; d < DIM; d++)
                 {
                   if (this->bounds.lo[d] == this->bounds.hi[d])
                     continue;
-                   T mid = (this->bounds.lo[d] + this->bounds.hi[d]) / 2;
-                   if ((rect.hi[d] <= mid) || (mid < rect.lo[d]))
-                   {
-                      size_t extent = 
-                        (this->bounds.hi[d] - this->bounds.lo[d]) + 1;
-                      if ((dim < 0) || (largest < extent))
-                      {
-                        dim = d;
-                        split = mid;
-                        largest = extent;
-                      }
-                   }
+                  T diff = this->bounds.hi[d] - this->bounds.lo[d];
+                  T mid = this->bounds.lo[d] + (diff / 2);
+                  if ((rect.hi[d] <= mid) || (mid < rect.lo[d]))
+                  {
+                    if ((dim < 0) || (largest < diff))
+                    {
+                      dim = d;
+                      split = mid;
+                      largest = diff;
+                    }
+                  }
                 }
                 if (dim < 0)
                 {
@@ -6524,7 +6573,8 @@ namespace Legion {
                   {
                     if (this->bounds.lo[d] == this->bounds.hi[d])
                       continue;
-                    T mid = (this->bounds.lo[d] + this->bounds.hi[d]) / 2;
+                    T diff = this->bounds.hi[d] - this->bounds.lo[d];
+                    T mid = this->bounds.lo[d] + (diff / 2);
                     if (this->bounds.lo[d] < rect.lo[d])
                     {
                       T dist = ((rect.lo[d]-1) <= mid) ?
@@ -6601,7 +6651,7 @@ namespace Legion {
                 {
                   // If we still have remaining fields, then we need to
                   // make new left and right nodes
-                  EqKDNode<DIM,T> *new_left = 
+                  EqKDNode<DIM,T> *new_left =
                     new EqKDNode<DIM,T>(left_bounds);
                   EqKDNode<DIM,T> *new_right =
                     new EqKDNode<DIM,T>(right_bounds);
