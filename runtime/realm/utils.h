@@ -27,6 +27,7 @@
 #include <vector>
 #include <map>
 #include <cassert>
+#include <cstdint>
 #include <sstream>
 
 namespace Realm {
@@ -239,7 +240,7 @@ namespace Realm {
   // helpers to pretty-print containers
 
   template <typename T>
-  class PrettyVector {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE PrettyVector {
   public:
     explicit PrettyVector(const T *_data, size_t _size,
 			  const char *_delim = ", ",

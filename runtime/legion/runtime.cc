@@ -10211,6 +10211,7 @@ namespace Legion {
              && dimension_constraints == rhs.dimension_constraints
              && tiling_constraints == rhs.tiling_constraints
              && offset_constraints == rhs.offset_constraints
+             && padding_constraint == rhs.padding_constraint
              && pointer_constraint == rhs.pointer_constraint;
     }
 
@@ -10227,6 +10228,7 @@ namespace Legion {
              && dimension_constraints == rhs.dimension_constraints
              && tiling_constraints == rhs.tiling_constraints
              && offset_constraints == rhs.offset_constraints
+             && padding_constraint == rhs.padding_constraint
              && pointer_constraint == rhs.pointer_constraint;
     }
 
@@ -21671,12 +21673,6 @@ namespace Legion {
           return "Detach Op";
         case MESSAGE_BUFFER_ALLOC:
           return "Message Buffer";
-        case EXECUTING_CHILD_ALLOC:
-          return "Executing Children";
-        case EXECUTED_CHILD_ALLOC:
-          return "Executed Children";
-        case COMPLETE_CHILD_ALLOC:
-          return "Complete Children";
         case PHYSICAL_MANAGER_ALLOC:
           return "Physical Managers";
         case LOGICAL_VIEW_ALLOC:

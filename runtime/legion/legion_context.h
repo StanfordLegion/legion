@@ -455,41 +455,6 @@ namespace Legion {
       virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
       virtual Future get_predicate_future(const Predicate &p) = 0;
     public:
-      // The following set of operations correspond directly
-      // to the complete_mapping, complete_operation, and
-      // commit_operations performed by an operation.  Every
-      // one of those calls invokes the corresponding one of
-      // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
-               const std::vector<StaticDependence> *dependences) = 0;
-      virtual size_t register_new_close_operation(CloseOp *op) = 0;
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual bool add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false) = 0;
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance = 
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false) = 0;
-      virtual void register_executing_child(Operation *op) = 0;
-      virtual void register_child_executed(Operation *op) = 0;
-      virtual void register_child_complete(Operation *op) = 0;
-      virtual void register_child_commit(Operation *op) = 0; 
-      virtual ApEvent register_implicit_dependences(Operation *op) = 0;
-    public:
-      virtual RtEvent get_current_mapping_fence_event(void) = 0;
-      virtual ApEvent get_current_execution_fence_event(void) = 0;
-      // Break this into two pieces since we know that there are some
-      // kinds of operations (like deletions) that want to act like 
-      // one-sided fences (e.g. waiting on everything before) but not
-      // preventing re-ordering for things afterwards
-      virtual void perform_fence_analysis(Operation *op, 
-          std::set<ApEvent> &preconditions, bool mapping, bool execution) = 0;
-      virtual void update_current_fence(FenceOp *op, 
-                                        bool mapping, bool execution) = 0;
-      virtual void update_current_implicit(Operation *op) = 0;
-    public:
       virtual void begin_trace(TraceID tid, bool logical_only,
         bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
         const char *provenance) = 0;
@@ -737,6 +702,23 @@ namespace Legion {
 
     class InnerContext : public TaskContext,
                          public LegionHeapify<InnerContext> {
+    public:
+      enum PipelineStage {
+        EXECUTING_STAGE,
+        EXECUTED_STAGE,
+        COMPLETED_STAGE,
+        COMMITTED_STAGE,
+      };
+      struct ReorderBufferEntry {
+      public:
+        inline ReorderBufferEntry(Operation *op)
+          : operation(op), operation_index(op->get_ctx_index()),
+            stage(EXECUTING_STAGE) { }
+      public:
+        Operation *operation;
+        size_t operation_index;
+        PipelineStage stage;
+      };
     public:
       // Prepipeline stages need to hold a reference since the
       // logical analysis could clean the context up before it runs
@@ -1410,15 +1392,15 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
+      size_t register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
-      virtual size_t register_new_close_operation(CloseOp *op);
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
+      size_t register_new_close_operation(CloseOp *op);
+      size_t register_new_summary_operation(TraceSummaryOp *op);
     public:
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
     public:
-      virtual bool add_to_dependence_queue(Operation *op, 
+      bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false);
       void process_dependence_stage(void);
     public:
@@ -1466,27 +1448,32 @@ namespace Legion {
                                         bool deactivate);
       bool process_deferred_commit_queue(void);
     public:
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false);
+      void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                                  const void *result, size_t size, 
+                                  PhysicalInstance instance =
+                                    PhysicalInstance::NO_INST,
+                                  FutureFunctor *callback_functor=NULL,
+                                  bool own_functor = false);
       bool process_post_end_tasks(void);
     public:
-      virtual void register_executing_child(Operation *op);
-      virtual void register_child_executed(Operation *op);
-      virtual void register_child_complete(Operation *op);
-      virtual void register_child_commit(Operation *op); 
-      virtual ApEvent register_implicit_dependences(Operation *op);
+      void register_executing_child(Operation *op);
+      void register_child_executed(Operation *op);
+      void register_child_complete(Operation *op);
+      void register_child_commit(Operation *op); 
+      ReorderBufferEntry& find_rob_entry(Operation *op);
+      ApEvent register_implicit_dependences(Operation *op);
     public:
-      virtual RtEvent get_current_mapping_fence_event(void);
-      virtual ApEvent get_current_execution_fence_event(void);
-      virtual void perform_fence_analysis(Operation *op, 
+      RtEvent get_current_mapping_fence_event(void);
+      ApEvent get_current_execution_fence_event(void);
+      // Break this into two pieces since we know that there are some
+      // kinds of operations (like deletions) that want to act like 
+      // one-sided fences (e.g. waiting on everything before) but not
+      // preventing re-ordering for things afterwards
+      void perform_fence_analysis(Operation *op, 
           std::set<ApEvent> &preconditions, bool mapping, bool execution);
-      virtual void update_current_fence(FenceOp *op,
+      void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      virtual void update_current_implicit(Operation *op);
+      void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
@@ -1653,25 +1640,16 @@ namespace Legion {
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
       size_t total_children_count; // total number of sub-operations
+      size_t executing_children_count;
+      size_t executed_children_count;
       size_t total_close_count; 
       size_t total_summary_count;
-      std::atomic<size_t> outstanding_children_count;
-      LegionMap<Operation*,GenerationID,
-                EXECUTING_CHILD_ALLOC> executing_children;
-      LegionMap<Operation*,GenerationID,
-                EXECUTED_CHILD_ALLOC> executed_children;
-      LegionMap<Operation*,GenerationID,
-                COMPLETE_CHILD_ALLOC> complete_children; 
+      std::atomic<size_t> outstanding_children_count; 
+      std::deque<ReorderBufferEntry> reorder_buffer;
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted
       // into the stream of operations from the task
       std::vector<Operation*> unordered_ops;
-#ifdef DEBUG_LEGION
-      // In debug mode also keep track of them in context order so
-      // we can see what the longest outstanding operation is which
-      // is often useful when things hang
-      std::map<unsigned,Operation*> outstanding_children;
-#endif
 #ifdef LEGION_SPY
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
@@ -2320,37 +2298,6 @@ namespace Legion {
                                       const char *provenance);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p);
-    public:
-      // The following set of operations correspond directly
-      // to the complete_mapping, complete_operation, and
-      // commit_operations performed by an operation.  Every
-      // one of those calls invokes the corresponding one of
-      // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
-                const std::vector<StaticDependence> *dependences);
-      virtual size_t register_new_close_operation(CloseOp *op);
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual bool add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false);
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false);
-      virtual void register_executing_child(Operation *op);
-      virtual void register_child_executed(Operation *op);
-      virtual void register_child_complete(Operation *op);
-      virtual void register_child_commit(Operation *op); 
-      virtual ApEvent register_implicit_dependences(Operation *op);
-    public:
-      virtual RtEvent get_current_mapping_fence_event(void);
-      virtual ApEvent get_current_execution_fence_event(void);
-      virtual void perform_fence_analysis(Operation *op,
-          std::set<ApEvent> &preconditions, bool mapping, bool execution);
-      virtual void update_current_fence(FenceOp *op,
-                                        bool mapping, bool execution);
-      virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,

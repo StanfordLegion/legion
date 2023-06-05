@@ -668,6 +668,11 @@ if(REALM_USE_NVTX)
   target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
 endif()
 
+if(Legion_BACKTRACE_USE_LIBDW)
+  target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
+  target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
+endif()
+
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
 
 target_include_directories(RealmRuntime

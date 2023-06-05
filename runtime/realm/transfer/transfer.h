@@ -326,6 +326,10 @@ namespace Realm {
 
     virtual RegionInstance get_pointer_instance(void) const = 0;
 
+    virtual const std::vector<RegionInstance>* get_instances(void) const = 0;
+
+    virtual FieldID get_field(void) const = 0;
+
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
 
     virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,

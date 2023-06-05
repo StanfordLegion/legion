@@ -1123,6 +1123,17 @@ namespace Realm {
                                  const void *data, size_t datalen);
     };
 
+    class GPUReplHeapListener : public ReplicatedHeap::Listener {
+    public:
+      GPUReplHeapListener(HipModule *_module);
+
+      virtual void chunk_created(void *base, size_t bytes);
+      virtual void chunk_destroyed(void *base, size_t bytes);
+
+    protected:
+      HipModule *module;
+    };
+
   }; // namespace Hip
   
 }; // namespace Realm 

@@ -18,6 +18,7 @@
 from __future__ import print_function
 import argparse, datetime, glob, json, multiprocessing, os, platform, shlex, shutil, subprocess, sys, traceback, tempfile
 import signal
+from pathlib import Path
 
 make_exe = os.environ.get('MAKE', 'make')
 
@@ -78,10 +79,37 @@ legion_cxx_tests = [
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
     ['test/legion_stl/test_stl', []],
+
+    # Tutorial/realm
+    ['tutorial/realm/hello_world/realm_hello_world', []],
+    ['tutorial/realm/machine_model/realm_machine_model', []],
+    ['tutorial/realm/events/realm_events', []],
+    ['tutorial/realm/region_instances/realm_region_instances', []],
+    ['tutorial/realm/deferred_allocation/realm_deferred_allocation', []],
+    ['tutorial/realm/index_space_ops/realm_index_space_ops', []],
+    ['tutorial/realm/index_space_copy_fill/realm_index_space_copy_fill', []],
+    ['tutorial/realm/reductions/realm_reductions', []],
+    ['tutorial/realm/barrier/realm_barrier', []],
+    ['tutorial/realm/subgraph/realm_subgraph', []],
+    ['tutorial/realm/reservation/realm_reservation', []],
+    ['tutorial/realm/completion_queue/realm_completion_queue', []],
+    ['tutorial/realm/profiling/realm_profiling', []],
 ]
 
-legion_cxx_provenance_tests = [
+if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == 1:
+    legion_cxx_tests += [
+        ['tutorial/realm/cuda_interop/realm_cuda_interop', []],
+    ]
+
+legion_cxx_prof_tests = [
     ['examples/provenance/provenance', []],
+    ['test/gather_perf/gather_perf', ['-m', '1']],
+    ['test/gather_perf/gather_perf', ['-m', '2']],
+    ['test/gather_perf/gather_perf', ['-m', '3']],
+    ['test/gather_perf/gather_perf', ['-m', '4']],
+    ['test/gather_perf/gather_perf', ['-m', '5']],
+    ['test/gather_perf/gather_perf', ['-m', '6']],
+    ['test/gather_perf/gather_perf', ['-m', '7']],
 ]
 
 legion_fortran_tests = [
@@ -355,16 +383,15 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     cmd(canonical_python_test_cmd, env=env)
     cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
-def run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
-    run_cxx(legion_cxx_provenance_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
-    provenance_test_dir = os.path.join(root_dir, 'examples', 'provenance')
-    test_cmd = [sys.executable, 'test.py']
-    env = dict(list(env.items()) + [
-        ('LEGION_DIR', root_dir),
-        ('TMP_DIR', tmp_dir),
-    ])
-    cmd(test_cmd, env=env, cwd=provenance_test_dir)
+    from tools.test_prof import run_prof_test
+    for test_file, test_flags in legion_cxx_prof_tests:
+        prof_test = [[test_file, test_flags],]
+        run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+        test_file_path = Path(os.path.join(root_dir, test_file))
+        test_dir = test_file_path.parent.absolute()
+        run_prof_test(root_dir, test_dir, tmp_dir)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
@@ -784,6 +811,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_BOUNDS_CHECKS=%s' % ('ON' if env['BOUNDS_CHECKS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_PRIVILEGE_CHECKS=%s' % ('ON' if env['PRIVILEGE_CHECKS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_REDOP_COMPLEX=%s' % ('ON' if env['USE_COMPLEX'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_BACKTRACE_USE_LIBDW=%s' % ('ON' if env['REALM_BACKTRACE_USE_LIBDW'] == '1' else 'OFF'))
     if 'LEGION_WARNINGS_FATAL' in env:
         cmdline.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
@@ -791,7 +819,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         if 'LAUNCHER' in env:
             cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
         if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
-            cmdline.append('-DLegion_TEST_ARGS=-ll:gpu 1')
+            cmdline.append('-DLegion_TEST_ARGS=-ll:gpu 1 -ll:fsize 1024')
     else:
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
@@ -898,7 +926,7 @@ def report_mode(debug, max_dim, launcher,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir, use_nvtx, cxx_standard):
+                use_gcov, use_cmake, use_rdir, use_nvtx, use_libdw, cxx_standard):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -941,6 +969,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
     print('###   * NVTX:       %s' % use_nvtx)
+    print('###   * LIBDW:      %s' % use_libdw)
     print('###   * Max DIM:    %s' % max_dim)
     print('###   * CXX STD:    %s' % cxx_standard)
     print('#'*60)
@@ -1013,6 +1042,7 @@ def run_tests(test_modules=None,
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
     use_nvtx = feature_enabled('nvtx', False)
+    use_libdw = feature_enabled('libdw', False, prefix='REALM_BACKTRACE_USE_')
     use_shared_objects = feature_enabled('shared', False,
                                          envname='SHARED_OBJECTS')
 
@@ -1045,7 +1075,11 @@ def run_tests(test_modules=None,
     cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
     if use_cmake == False:
-        os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
+        if cxx_standard != '':
+            if 'CXX_STANDARD' in os.environ:                
+                os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
+            else:
+                os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
@@ -1062,7 +1096,7 @@ def run_tests(test_modules=None,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir, use_nvtx, cxx_standard)
+                use_gcov, use_cmake, use_rdir, use_nvtx, use_libdw, cxx_standard)
 
     if not tmp_dir:
         tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -1106,6 +1140,7 @@ def run_tests(test_modules=None,
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('USE_NVTX', '1' if use_nvtx else '0'),
+        ('REALM_BACKTRACE_USE_LIBDW', '1' if use_libdw else '0'),
         ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
         ('DEFINE_HEADERS_DIR', os.path.join(root_dir, 'runtime')),
@@ -1153,7 +1188,7 @@ def run_tests(test_modules=None,
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_prof:
-                    run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                    run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if networks:
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:

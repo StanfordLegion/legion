@@ -922,6 +922,7 @@ namespace Realm {
 					     bool local_only /*= true*/) const
     {
       int count = 0;
+      result.clear();
 
       {
 	// TODO: consider using a reader/writer lock here instead
@@ -1005,6 +1006,8 @@ namespace Realm {
 					  Memory restrict_mem2 /*= Memory::NO_MEMORY*/,
 					  bool local_only /*= true*/) const
     {
+      // Clear the vector in case it has old data
+      result.clear();
       // Handle the case for same memories
       if (restrict_mem1.exists() && (restrict_mem1 == restrict_mem2))
       {

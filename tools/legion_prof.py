@@ -249,8 +249,8 @@ def conditional_check(lhs: Any, rhs: Any, # type: ignore
 
 @typecheck
 def data_tsv_str(level: int, level_ready: Optional[int], 
-                 ready: Optional[float], 
-                 start: float, end: float, 
+                 ready: Optional[int], 
+                 start: int, end: int, 
                  color: str, opacity: str, title: str,
                  initiation: Union[int, str, None], 
                  _in: Optional[str], 
@@ -268,9 +268,9 @@ def data_tsv_str(level: int, level_ready: Optional[int],
         else:
             return str(s)
     return [xstr(level), xstr(level_ready),
-            xstr('%.3f' % ready if ready else ready),
-            xstr('%.3f' % start if start else start),
-            xstr('%.3f' % end if end else end),
+            xstr('%.3f' % (ready / 1000.0) if ready else ready),
+            xstr('%.3f' % (start / 1000.0) if start else start),
+            xstr('%.3f' % (end / 1000.0) if end else end),
             xstr(color), xstr(opacity), xstr(title),
             xstr(initiation), xstr(_in), xstr(out),
             xstr(children), xstr(parents), xstr(prof_uid),
@@ -359,7 +359,7 @@ def size_pretty(size: Optional[int]) -> str:
 class PathRange(object):
     __slots__ = ['start', 'stop', 'path']
     @typecheck
-    def __init__(self, start: float, stop: float, path: List) -> None:
+    def __init__(self, start: int, stop: int, path: List) -> None:
         assert start <= stop
         self.start = start
         self.stop = stop
@@ -404,7 +404,7 @@ class Dependencies(ABC):
         self.deps: Dict[str, Set] = {"in": set(), "out": set(), "parents": set(), "children" : set()}
 
         # for critical path analysis
-        self.path = PathRange(0.0, 0.0, [])
+        self.path = PathRange(0, 0, [])
         self.visited = False
     
     @abstractmethod
@@ -546,18 +546,18 @@ class TimeRange(ABC):
 
     @typecheck
     def __init__(self, 
-                 create: Optional[float], 
-                 ready: Optional[float], 
-                 start: Optional[float],
-                 stop: Optional[float]
+                 create: Optional[int], 
+                 ready: Optional[int], 
+                 start: Optional[int],
+                 stop: Optional[int]
     ) -> None:
         assert create is None or (create is not None and ready is not None and create <= ready)
         assert ready is None or (ready is not None and start is not None and ready <= start)
         assert start is None or (start is not None and stop is not None and start <= stop)
-        self.create: Optional[float] = create
-        self.ready: Optional[float] = ready
-        self.start: Optional[float] = start
-        self.stop: Optional[float] = stop
+        self.create: Optional[int] = create
+        self.ready: Optional[int] = ready
+        self.start: Optional[int] = start
+        self.stop: Optional[int] = stop
         self.trimmed = False
         self.was_removed = False
 
@@ -592,12 +592,12 @@ class TimeRange(ABC):
                 self.queue_time(), self.start, self.stop, self.total_time())
 
     @typecheck
-    def total_time(self) -> float:
+    def total_time(self) -> int:
         assert self.start is not None and self.stop is not None
         return self.stop - self.start
 
     @typecheck
-    def queue_time(self) -> float:
+    def queue_time(self) -> int:
         assert self.start is not None and self.ready is not None
         return self.start - self.ready
 
@@ -607,8 +607,8 @@ class TimeRange(ABC):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Optional[float],
-                        stop: Optional[float]
+                        start: Optional[int],
+                        stop: Optional[int]
     ) -> bool:
         if self.trimmed:
             return not self.was_removed
@@ -756,14 +756,14 @@ class StatObject(object):
     ]
     def __init__(self) -> None:
         self.total_calls: Dict[Processor, int] = collections.defaultdict(int)
-        self.total_execution_time: Dict[Processor, float] = collections.defaultdict(float)
-        self.all_calls: Dict[Processor, List[float]] = collections.defaultdict(list)
-        self.max_call: Dict[Processor, float] = collections.defaultdict(float)
-        self.min_call: Dict[Processor, float] = collections.defaultdict(lambda: sys.maxsize)
+        self.total_execution_time: Dict[Processor, int] = collections.defaultdict(int)
+        self.all_calls: Dict[Processor, List[int]] = collections.defaultdict(list)
+        self.max_call: Dict[Processor, int] = collections.defaultdict(int)
+        self.min_call: Dict[Processor, int] = collections.defaultdict(lambda: sys.maxsize)
 
     @typecheck
-    def get_total_execution_time(self) -> float:
-        total_execution_time = 0.0
+    def get_total_execution_time(self) -> int:
+        total_execution_time = 0
         for proc_exec_time in self.total_execution_time.values():
             total_execution_time += proc_exec_time
         return total_execution_time
@@ -776,7 +776,7 @@ class StatObject(object):
         return total_calls
 
     @typeassert(exec_time=float)
-    def increment_calls(self, exec_time: float, proc: "Processor") -> None:
+    def increment_calls(self, exec_time: int, proc: "Processor") -> None:
         self.total_calls[proc] += 1
         self.total_execution_time[proc] += exec_time
         self.all_calls[proc].append(exec_time)
@@ -806,7 +806,7 @@ class StatObject(object):
     @typecheck
     def print_stats(self, verbose: bool) -> None:
         procs = sorted(self.total_calls.keys())
-        total_execution_time = self.get_total_execution_time()
+        total_execution_time = float(self.get_total_execution_time())
         total_calls = self.get_total_calls()
 
         avg = float(total_execution_time) / float(total_calls)
@@ -826,8 +826,8 @@ class StatObject(object):
         min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
 
         print('  '+repr(self))
-        self.print_task_stat(total_calls, total_execution_time,
-                max_call, max_dev, min_call, min_dev, median, stddev)
+        self.print_task_stat(total_calls, total_execution_time / 1000.0,
+                max_call / 1000.0, max_dev / 1000.0, min_call / 1000.0, min_dev / 1000.0, median / 1000.0, stddev / 1000.0)
         print()
 
         if verbose and len(procs) > 1:
@@ -848,9 +848,9 @@ class StatObject(object):
 
                 print('    On ' + repr(proc))
                 self.print_task_stat(self.total_calls[proc],
-                        self.total_execution_time[proc],
-                        self.max_call[proc], max_dev,
-                        self.min_call[proc], min_dev,
+                        self.total_execution_time[proc] / 1000.0,
+                        self.max_call[proc] / 1000.0, max_dev / 1000.0,
+                        self.min_call[proc] / 1000.0, min_dev / 1000.0,
                         median, stddev)
                 print()
 
@@ -1162,7 +1162,7 @@ class WaitInterval(object):
     __slots__ = ['start', 'ready', 'end']
 
     @typecheck
-    def __init__(self, start: float, ready: float, end: float) -> None:
+    def __init__(self, start: int, ready: int, end: int) -> None:
         self.start = start
         self.ready = ready
         self.end = end
@@ -1176,15 +1176,15 @@ class HasWaiters(ABC):
 
     @typecheck    
     def add_wait_interval(self, 
-                          start: float, 
-                          ready: float, 
-                          end: float
+                          start: int, 
+                          ready: int, 
+                          end: int
     ) -> None:
         self.wait_intervals.append(WaitInterval(start, ready, end))
 
     @typecheck
-    def active_time(self) -> float:
-        active_time = 0.0
+    def active_time(self) -> int:
+        active_time = 0
         if not isinstance(self, (TimeRange)):
             assert 0, "Type is: " +  str(type(self)) + ", is not Task or MetaTask."
         start = self.start
@@ -1510,10 +1510,10 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
     def __init__(self, 
                  variant: Variant, 
                  op: Operation, 
-                 create: float, 
-                 ready: float, 
-                 start: float, 
-                 stop: float
+                 create: int, 
+                 ready: int, 
+                 start: int, 
+                 stop: int
     ) -> None:
         HasWaiters.__init__(self)
         TimeRange.__init__(self, create, ready, start, stop)
@@ -1575,20 +1575,20 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         return info
 
     @typecheck
-    def active_time(self) -> float:
+    def active_time(self) -> int:
         return HasWaiters.active_time(self)
 
     @typecheck
-    def application_time(self) -> float:
+    def application_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def meta_time(self) -> float:
-        return 0.0
+    def meta_time(self) -> int:
+        return 0
 
     @typecheck
-    def mapper_time(self) -> float:
-        return 0.0
+    def mapper_time(self) -> int:
+        return 0
 
     @typecheck
     def __repr__(self) -> str:
@@ -1604,10 +1604,10 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
     def __init__(self, 
                  variant: Variant, 
                  initiation_op: Operation, 
-                 create: float, 
-                 ready: float, 
-                 start: float, 
-                 stop: float
+                 create: int, 
+                 ready: int, 
+                 start: int, 
+                 stop: int
     ) -> None:
         HasWaiters.__init__(self)
         TimeRange.__init__(self, create, ready, start, stop)
@@ -1625,20 +1625,20 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
         return self.variant.color
 
     @typecheck
-    def active_time(self) -> float:
+    def active_time(self) -> int:
         return HasWaiters.active_time(self)
 
     @typecheck
-    def application_time(self) -> float:
+    def application_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def meta_time(self) -> float:
-        return 0.0
+    def meta_time(self) -> int:
+        return 0
 
     @typecheck
-    def mapper_time(self) -> float:
-        return 0.0
+    def mapper_time(self) -> int:
+        return 0
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
@@ -1667,10 +1667,10 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
     @typecheck
     def __init__(self, 
                  op_id: int, 
-                 create: float, 
-                 ready: float, 
-                 start: float, 
-                 stop: float
+                 create: int, 
+                 ready: int, 
+                 start: int, 
+                 stop: int
     ) -> None:
         ProcOperation.__init__(self)
         HasNoDependencies.__init__(self)
@@ -1684,20 +1684,20 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
         return self.color
 
     @typecheck
-    def active_time(self) -> float:
+    def active_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def application_time(self) -> float:
-        return 0.0
+    def application_time(self) -> int:
+        return 0
 
     @typecheck
-    def meta_time(self) -> float:
+    def meta_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def mapper_time(self) -> float:
-        return 0.0
+    def mapper_time(self) -> int:
+        return 0
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
@@ -1770,7 +1770,7 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __init__(self, kind: MapperCallKind, initiation_op: Operation, 
-                 start: float, stop: float
+                 start: int, stop: int
     ) -> None:
         ProcOperation.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
@@ -1823,19 +1823,19 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
         tsv_file.writerow(tsv_line)
 
     @typecheck
-    def active_time(self) -> float:
+    def active_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def application_time(self) -> float:
-        return 0.0
+    def application_time(self) -> int:
+        return 0
 
     @typecheck
-    def meta_time(self) -> float:
-        return 0.0
+    def meta_time(self) -> int:
+        return 0
 
     @typecheck
-    def mapper_time(self) -> float:
+    def mapper_time(self) -> int:
         return self.total_time()
 
     @typecheck
@@ -1875,7 +1875,7 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
     
     @typecheck
     def __init__(self, kind: RuntimeCallKind, 
-                 start: float, stop: float
+                 start: int, stop: int
     ) -> None:
         ProcOperation.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
@@ -1922,20 +1922,20 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
         tsv_file.writerow(tsv_line)
 
     @typecheck
-    def active_time(self) -> float:
+    def active_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def application_time(self) -> float:
-        return 0.0
+    def application_time(self) -> int:
+        return 0
 
     @typecheck
-    def meta_time(self) -> float:
+    def meta_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def mapper_time(self) -> float:
-        return 0.0
+    def mapper_time(self) -> int:
+        return 0
 
     @typecheck
     def __repr__(self) -> str:
@@ -1945,7 +1945,7 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['name', 'color', 'is_task']
 
     @typecheck
-    def __init__(self, name: str, start: float, stop: float) -> None:
+    def __init__(self, name: str, start: int, stop: int) -> None:
         Base.__init__(self)
         HasNoDependencies.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
@@ -1958,20 +1958,20 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
         return self.color
 
     @typecheck
-    def active_time(self) -> float:
+    def active_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def application_time(self) -> float:
-        return 0.0
+    def application_time(self) -> int:
+        return 0
 
     @typecheck
-    def meta_time(self) -> float:
+    def meta_time(self) -> int:
         return self.total_time()
 
     @typecheck
-    def mapper_time(self) -> float:
-        return 0.0
+    def mapper_time(self) -> int:
+        return 0
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
@@ -2031,7 +2031,7 @@ class ChanOperation(Base):
 
 class CopyInstInfo(object):
     __slots__ = [
-        'src', 'dst', 'src_fid', 'dst_fid', 'src_inst_uid', 'dst_inst_uid', 'fevent', 'indirect',
+        'src', 'dst', 'src_fid', 'dst_fid', 'src_inst_uid', 'dst_inst_uid', 'fevent', 'num_hops', 'indirect',
         'src_instance', 'dst_instance'
         ]
 
@@ -2042,7 +2042,7 @@ class CopyInstInfo(object):
                  dst: Optional[Memory],
                  src_fid: int, dst_fid: int,
                  src_inst_uid: int, dst_inst_uid: int, 
-                 fevent: int, indirect: bool
+                 fevent: int, num_hops: int, indirect: bool
     ) -> None:
         self.src = src
         self.dst = dst
@@ -2051,6 +2051,7 @@ class CopyInstInfo(object):
         self.src_inst_uid = src_inst_uid
         self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
+        self.num_hops = num_hops
         self.indirect = indirect
         # if gather dst = None, if scatter, src = None
         self.src_instance: Optional["Instance"] = None
@@ -2089,12 +2090,12 @@ class CopyInstInfo(object):
             dst_inst_id = hex(self.dst_instance.inst_id)
         if self.indirect == False:
             assert (self.src_inst_uid != 0) and (self.dst_inst_uid != 0)
-            return 'src_inst=%s, dst_inst=%s' % (src_inst_id, dst_inst_id)
+            return 'src_inst=%s, src_fid=%s, dst_inst=%s, dst_fid=%s, num_hops=%s' % (src_inst_id, self.src_fid, dst_inst_id, self.dst_fid, self.num_hops)
         else:
             if self.src_inst_uid == 0:
-                return 'Scatter: dst_indirect_inst=%s' % (dst_inst_id)
+                return 'Scatter: dst_indirect_inst=%s, fid=%s' % (dst_inst_id, self.dst_fid)
             elif self.dst_inst_uid == 0:
-                return 'Gather: src_indirect_inst=%s' % (src_inst_id)
+                return 'Gather: src_indirect_inst=%s, fid=%s' % (src_inst_id, self.src_fid)
             else:
                 print(self.src_inst_uid, self.dst_inst_uid)
                 assert 0
@@ -2104,38 +2105,27 @@ class CopyInstInfo(object):
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
     
     @typecheck
-    def __init__(self, fevent: int) -> None:
+    def __init__(self, initiation_op: Operation, size: int, 
+                 create: int, ready: int, 
+                 start: int, stop: int, 
+                 request_type: int,
+                 fevent: int
+    ) -> None:
         ChanOperation.__init__(self)
         TimeRange.__init__(self, None, None, None, None)
-        assert isinstance(EMPTY_OP, Operation)
-        HasInitiationDependencies.__init__(self, EMPTY_OP)
-        self.size = 0
-        self.num_hops = 0
-        self.request_type = 0
-        self.fevent = fevent
-        self.copy_kind: Optional[CopyKind] = None
-        self.copy_inst_infos: List[CopyInstInfo] = list()
-
-    @typecheck
-    def add_copy_info(self, initiation_op: Operation, size: int, 
-                      create: float, ready: float, 
-                      start: float, stop: float, 
-                      num_hops: int, request_type: int
-    ) -> None:
-        # sanity check
-        assert self.initiation_op == EMPTY_OP 
+        HasInitiationDependencies.__init__(self, initiation_op)
         self.size = size
-        self.num_hops = num_hops
         self.request_type = request_type
         self.create = create
         self.ready = ready
         self.start = start
         self.stop = stop
-        self.initiation_op = initiation_op
-        self.initiation = initiation_op.op_id
+        self.fevent = fevent
+        self.copy_kind: Optional[CopyKind] = None
+        self.copy_inst_infos: List[CopyInstInfo] = list()
 
     @typecheck
     def add_copy_inst_info(self, copy_inst_info: CopyInstInfo
@@ -2308,29 +2298,21 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'fill_inst_infos']
 
     @typecheck
-    def __init__(self, fevent: int) -> None:
+    def __init__(self, initiation_op: Operation, size: int,
+                 create: int, ready: int, 
+                 start: int, stop: int,
+                 fevent: int
+    ) -> None:
         ChanOperation.__init__(self)
         TimeRange.__init__(self, None, None, None, None)
-        assert isinstance(EMPTY_OP, Operation)
-        HasInitiationDependencies.__init__(self, EMPTY_OP)
-        self.size = 0
-        self.fevent = fevent
-        self.fill_inst_infos: List[FillInstInfo] = list()
-
-    @typecheck
-    def add_fill_info(self, initiation_op: Operation, size: int,
-                      create: float, ready: float, 
-                      start: float, stop: float
-    ) -> None:
-        # sanity check
-        assert self.initiation_op == EMPTY_OP 
+        HasInitiationDependencies.__init__(self, initiation_op)
         self.size = size
         self.create = create
         self.ready = ready
         self.start = start
         self.stop = stop
-        self.initiation_op = initiation_op
-        self.initiation = initiation_op.op_id
+        self.fevent = fevent
+        self.fill_inst_infos: List[FillInstInfo] = list()
 
     @typecheck
     def add_fill_inst_info(self, 
@@ -2413,8 +2395,8 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
     
     @typecheck
     def __init__(self, part_op: int, initiation_op: Operation, 
-                 create: float, ready: float, 
-                 start: float, stop: float
+                 create: int, ready: int, 
+                 start: int, stop: int
     ) -> None:
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
@@ -2504,7 +2486,7 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
 
     def add_instance_info(self, inst_id: int, 
                           mem: "Memory", size: int,
-                          create: float, ready: float, destroy: float, 
+                          create: int, ready: int, destroy: int, 
                           initiation_op: Operation) -> None:
         self.inst_id = inst_id
         self.mem = mem
@@ -2692,13 +2674,13 @@ class TimePoint(object):
 
     @typecheck
     def __init__(self, 
-                 time: float, 
+                 time: int, 
                  thing: Union[Task, ProfTask, MetaTask, Instance, DepPart, MapperCall, Copy, Fill], 
                  first: bool, 
-                 secondary_sort_key: Union[int, float]
+                 secondary_sort_key: int
     ) -> None:
         assert time != None
-        self.time = time
+        self.time = time # nanosecond
         self.thing = thing
         self.first = first
         # secondary_sort_key is a parameter used for breaking ties in sorting.
@@ -2737,7 +2719,7 @@ class Processor(object):
         self.proc_in_node = (proc_id) & ((1 << 12) - 1)
         self.kind = kind
         self.visible = True
-        self.last_time: Optional[float] = None
+        self.last_time: Optional[int] = None
         self.tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
         self.max_levels = 0
         self.max_levels_ready = 0
@@ -2767,8 +2749,8 @@ class Processor(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Optional[float],
-                        stop: Optional[float]
+                        start: Optional[int],
+                        stop: Optional[int]
     ) -> None:
         trimmed_tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
         for task in self.tasks:
@@ -2780,23 +2762,23 @@ class Processor(object):
         time_points_all: List[TimePoint] = list()
         for task in self.tasks:
             assert task.start is not None and task.stop is not None
-            if (task.stop-task.start > 10 and task.ready != None):
+            if (task.stop - task.start > 10000 and task.ready != None):
                 time_points_all.append(TimePoint(task.ready, task, True, task.start))
                 time_points_all.append(TimePoint(task.stop, task, False, 0))
             else:
-                time_points_all.append(TimePoint(task.start, task, True, 0))
+                time_points_all.append(TimePoint(task.start, task, True, UINT_MAX-task.stop))
                 time_points_all.append(TimePoint(task.stop, task, False, 0))
 
-            self.time_points.append(TimePoint(task.start, task, True, 0))
+            self.time_points.append(TimePoint(task.start, task, True, UINT_MAX-task.stop))
             self.time_points.append(TimePoint(task.stop, task, False, 0))
 
-            self.util_time_points.append(TimePoint(task.start, task, True, 0))
+            self.util_time_points.append(TimePoint(task.start, task, True, UINT_MAX-task.stop))
             self.util_time_points.append(TimePoint(task.stop, task, False, 0))
             if isinstance(task, HasWaiters):
                 # wait intervals don't count for the util graph
                 for wait_interval in task.wait_intervals:
                     self.util_time_points.append(TimePoint(wait_interval.start, 
-                                                           task, False, 0))
+                                                           task, False, UINT_MAX-task.stop-wait_interval.end))
                     self.util_time_points.append(TimePoint(wait_interval.end, 
                                                            task, True, 0))
 
@@ -2871,35 +2853,35 @@ class Processor(object):
 
     @typecheck
     def total_time(self) -> float:
-        total = 0.0
+        total = 0
         for task in self.tasks:
             total += task.total_time()
         return total
 
     @typecheck
     def active_time(self) -> float:
-        total = 0.0
+        total = 0
         for task in self.tasks:
             total += task.active_time()
         return total
 
     @typecheck
     def application_time(self) -> float:
-        total = 0.0
+        total = 0
         for task in self.tasks:
             total += task.application_time()
         return total
 
     @typecheck
     def meta_time(self) -> float:
-        total = 0.0
+        total = 0
         for task in self.tasks:
             total += task.meta_time()
         return total
 
     @typecheck
     def mapper_time(self) -> float:
-        total = 0.0
+        total = 0
         for task in self.tasks:
             total += task.mapper_time()
         return total
@@ -2907,10 +2889,10 @@ class Processor(object):
     @typecheck
     def print_stats(self, verbose: bool) -> None:
         total_time = self.total_time()
-        active_time = 0.0
-        application_time = 0.0
-        meta_time = 0.0
-        mapper_time = 0.0
+        active_time = 0
+        application_time = 0
+        meta_time = 0
+        mapper_time = 0
         active_ratio = 0.0
         application_ratio = 0.0
         meta_ratio = 0.0
@@ -2926,11 +2908,11 @@ class Processor(object):
             mapper_ratio = 100.0*float(mapper_time)/float(total_time)
         if total_time != 0 or verbose:
             print(self)
-            print("    Total time: %d us" % total_time)
-            print("    Active time: %d us (%.3f%%)" % (active_time, active_ratio))
-            print("    Application time: %d us (%.3f%%)" % (application_time, application_ratio))
-            print("    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio))
-            print("    Mapper time: %d us (%.3f%%)" % (mapper_time, mapper_ratio))
+            print("    Total time: %d us" % (total_time / 1000.0))
+            print("    Active time: %d us (%.3f%%)" % ((active_time / 1000.0), active_ratio))
+            print("    Application time: %d us (%.3f%%)" % ((application_time / 1000.0), application_ratio))
+            print("    Meta time: %d us (%.3f%%)" % ((meta_time / 1000.0), meta_ratio))
+            print("    Mapper time: %d us (%.3f%%)" % ((mapper_time / 1000.0), mapper_ratio))
             print()
 
     @typecheck
@@ -3007,7 +2989,7 @@ class Memory(object):
         self.instances: Set[Instance] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_instances = 0
-        self.last_time: Optional[float] = None
+        self.last_time: Optional[int] = None
         self.affinity: Optional[MemProcAffinity] = None
 
     def get_short_text(self) -> str:
@@ -3026,7 +3008,7 @@ class Memory(object):
         self.affinity = affinity
 
     @typecheck
-    def init_time_range(self, last_time: float) -> None:
+    def init_time_range(self, last_time: int) -> None:
         # Fill in any of our instances that are not complete with the last time
         for inst in self.instances:
             if inst.stop is None:
@@ -3035,8 +3017,8 @@ class Memory(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Optional[float], 
-                        stop: Optional[float]
+                        start: Optional[int], 
+                        stop: Optional[int]
     ) -> None:
         trimmed_instances = set()
         for inst in self.instances:
@@ -3050,10 +3032,11 @@ class Memory(object):
         # but we need to use create to stop for calculating levels
         time_points_level = list()
         for inst in self.instances:
-            self.time_points.append(TimePoint(inst.ready, inst, True, 0))
+            assert inst.stop is not None
+            self.time_points.append(TimePoint(inst.ready, inst, True, UINT_MAX-inst.stop))
             self.time_points.append(TimePoint(inst.stop, inst, False, 0))
 
-            time_points_level.append(TimePoint(inst.create, inst, True, 0))
+            time_points_level.append(TimePoint(inst.create, inst, True, UINT_MAX-inst.stop))
             time_points_level.append(TimePoint(inst.stop, inst, False, 0))
 
         # Keep track of which levels are free
@@ -3113,7 +3096,7 @@ class Memory(object):
         average_usage = 0.0
         max_usage = 0.0
         current_size = 0
-        previous_time = 0.0
+        previous_time = 0
         for point in sorted(self.time_points,key=lambda p: p.time_key):
             # First do the math for the previous interval
             usage = float(current_size)/float(self.capacity) if self.capacity != 0 else 0
@@ -3174,7 +3157,7 @@ class Channel(object):
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_copies = 0
-        self.last_time: Optional[float] = None
+        self.last_time: Optional[int] = None
 
     @typecheck
     def node_id(self) -> Optional[int]:
@@ -3263,13 +3246,13 @@ class Channel(object):
         self.copies.add(copy)
 
     @typecheck
-    def init_time_range(self, last_time: float) -> None:
+    def init_time_range(self, last_time: int) -> None:
         self.last_time = last_time
 
     @typecheck
     def trim_time_range(self, 
-                        start: Optional[float], 
-                        stop: Optional[float]
+                        start: Optional[int], 
+                        stop: Optional[int]
     ) -> None:
         trimmed_copies = set()
         for copy in self.copies:
@@ -3280,7 +3263,8 @@ class Channel(object):
     def sort_time_range(self) -> None:
         self.max_live_copies = 0 
         for copy in self.copies:
-            self.time_points.append(TimePoint(copy.start, copy, True, 0))
+            assert copy.stop is not None
+            self.time_points.append(TimePoint(copy.start, copy, True, UINT_MAX-copy.stop))
             self.time_points.append(TimePoint(copy.stop, copy, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
@@ -3336,7 +3320,7 @@ class Channel(object):
         total_usage_time = 0.0
         max_transfers = 0
         current_transfers = 0
-        previous_time = 0.0
+        previous_time = 0
         for point in sorted(self.time_points,key=lambda p: p.time_key):
             if point.first:
                 if current_transfers == 0:
@@ -3480,7 +3464,7 @@ class State(object):
         self.multi_tasks: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.first_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.last_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
-        self.last_time = 0.0
+        self.last_time = 0
         self.mapper_call_kinds: Dict[int, MapperCallKind] = {}
         self.mapper_calls: Dict[int, MapperCall] = {}
         self.runtime_call_kinds: Dict[int, RuntimeCallKind] = {}
@@ -3695,8 +3679,8 @@ class State(object):
     @typecheck
     def log_task_info(self, op_id: int, task_id: int, 
                       variant_id: int, proc_id: int,
-                      create: float, ready: float, 
-                      start: float, stop: float
+                      create: int, ready: int, 
+                      start: int, stop: int
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, start, stop)
@@ -3709,10 +3693,15 @@ class State(object):
     @typecheck
     def log_gpu_task_info(self, op_id: int, task_id: int, 
                           variant_id: int, proc_id: int,
-                          create: float, ready: float, 
-                          start: float, stop: float, 
-                          gpu_start: float, gpu_stop: float
+                          create: int, ready: int, 
+                          start: int, stop: int, 
+                          gpu_start: int, gpu_stop: int
     ) -> None:
+        # it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled, 
+        # because the cuda event completions of these two timestamp may be out of order when
+        # they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
+        if gpu_start > gpu_stop:
+            gpu_start = gpu_stop - 1
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, gpu_start, gpu_stop)
 
@@ -3725,8 +3714,8 @@ class State(object):
     @typecheck
     def log_meta_info(self, op_id: int, lg_id: int, 
                       proc_id: int, 
-                      create: float, ready: float, 
-                      start: float, stop: float
+                      create: int, ready: int, 
+                      start: int, stop: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
@@ -3745,14 +3734,13 @@ class State(object):
     # CopyInfo
     @typecheck
     def log_copy_info(self, op_id: int, size: int,
-                      create: float, ready: float, 
-                      start: float, stop: float,
-                      num_hops: int, request_type: int,
+                      create: int, ready: int, 
+                      start: int, stop: int,
+                      request_type: int,
                       fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        copy = self.find_or_create_copy(fevent)
-        copy.add_copy_info(op, size, create, ready, start, stop, num_hops, request_type)
+        copy = self.create_copy(op, size, create, ready, start, stop, request_type, fevent)
         if stop > self.last_time:
             self.last_time = stop
 
@@ -3761,18 +3749,19 @@ class State(object):
     def log_copy_inst_info(self, src: int, dst: int,
                            src_fid: int, dst_fid: int,
                            src_inst: int, dst_inst: int, 
-                           fevent: int, indirect: int
+                           fevent: int, num_hops: int, 
+                           indirect: int
     ) -> None:
         # src_inst and dst_inst are inst_uid
         indirect = bool(indirect)
-        copy = self.find_or_create_copy(fevent)
+        copy = self.find_copy(fevent)
         src_mem = None
         if src != 0:
             src_mem = self.find_or_create_memory(src)
         dst_mem = None
         if dst != 0:
             dst_mem = self.find_or_create_memory(dst)
-        copy_inst_info = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy_inst_info = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, num_hops, indirect)
         copy.add_copy_inst_info(copy_inst_info)
 
     @typecheck
@@ -3784,13 +3773,12 @@ class State(object):
     # FillInfo
     @typecheck
     def log_fill_info(self, op_id: int, size: int,
-                      create: float, ready: float, 
-                      start: float, stop: float,
+                      create: int, ready: int, 
+                      start: int, stop: int,
                       fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        fill = self.find_or_create_fill(fevent)
-        fill.add_fill_info(op, size, create, ready, start, stop)
+        fill = self.create_fill(op, size, create, ready, start, stop, fevent)
         if stop > self.last_time:
             self.last_time = stop
 
@@ -3800,7 +3788,7 @@ class State(object):
                            dst_inst: int, fevent: int
     ) -> None:
         # dst_inst are inst_uid
-        fill = self.find_or_create_fill(fevent)
+        fill = self.find_fill(fevent)
         dst_mem = self.find_or_create_memory(dst)
         fill_inst_info = self.create_fill_inst_info(dst_mem, fid, dst_inst, fevent)
         fill.add_fill_inst_info(fill_inst_info)
@@ -3809,7 +3797,7 @@ class State(object):
     @typecheck
     def log_inst_timeline(self, inst_uid: int, inst_id: int,
                           mem_id: int, size: int, op_id: int,
-                          create: float, ready: float, destroy: float
+                          create: int, ready: int, destroy: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         inst = self.find_or_create_instance(inst_uid)
@@ -3822,8 +3810,8 @@ class State(object):
     # PartitionInfo
     @typecheck
     def log_partition_info(self, op_id: int, part_op: int, 
-                           create: float, ready: float, 
-                           start: float, stop: float
+                           create: int, ready: int, 
+                           start: int, stop: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         deppart = self.create_deppart(part_op, op, create, ready, start, stop)
@@ -3835,7 +3823,7 @@ class State(object):
     # UserInfo (Not used?)
     @typecheck
     def log_user_info(self, proc_id: int, 
-                      start: float, stop: float, name: str
+                      start: int, stop: int, name: str
     ) -> None:
         proc = self.find_or_create_processor(proc_id)
         user = self.create_user_marker(name)
@@ -3848,7 +3836,7 @@ class State(object):
     # TaskWaitInfo
     @typecheck
     def log_task_wait_info(self, op_id: int, task_id: int, variant_id: int, 
-                           wait_start: float, wait_ready: float, wait_end: float
+                           wait_start: int, wait_ready: int, wait_end: int
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant)
@@ -3860,7 +3848,7 @@ class State(object):
     # MetaWaitInfo
     @typecheck
     def log_meta_wait_info(self, op_id: int, lg_id: int, 
-                           wait_start: float, wait_ready: float, wait_end: float
+                           wait_start: int, wait_ready: int, wait_end: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
@@ -3986,12 +3974,12 @@ class State(object):
     # MapperCallInfo
     @typecheck
     def log_mapper_call_info(self, kind: int, proc_id: int, 
-                             op_id: int, start: float, stop: float
+                             op_id: int, start: int, stop: int
     ) -> None:
         assert start <= stop
         assert kind in self.mapper_call_kinds
         # For now we'll only add very expensive mapper calls (more than 100 us)
-        if (stop - start) < 100:
+        if (stop - start) < 100000:
             return 
         if stop > self.last_time:
             self.last_time = stop
@@ -4011,7 +3999,7 @@ class State(object):
     # RuntimeCallInfo
     @typecheck
     def log_runtime_call_info(self, kind: int, proc_id: int, 
-                              start: float, stop: float
+                              start: int, stop: int
     ) -> None:
         assert start <= stop
         assert kind in self.runtime_call_kinds
@@ -4024,7 +4012,7 @@ class State(object):
     # ProfTaskInfo
     @typecheck
     def log_proftask_info(self, proc_id: int, op_id: int, 
-                          start: float, stop: float
+                          start: int, stop: int
     ) -> None:
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
@@ -4142,10 +4130,10 @@ class State(object):
 
     @typecheck
     def find_or_create_task(self, op_id: int, variant: Variant, 
-                            create: Optional[float] = None, 
-                            ready: Optional[float] = None, 
-                            start: Optional[float] = None, 
-                            stop: Optional[float] = None
+                            create: Optional[int] = None, 
+                            ready: Optional[int] = None, 
+                            start: Optional[int] = None, 
+                            stop: Optional[int] = None
     ) -> Task:
         task = self.find_or_create_op(op_id)
         # Upgrade this operation to a task if necessary
@@ -4164,23 +4152,48 @@ class State(object):
         return task
 
     @typecheck
-    def find_or_create_copy(self, fevent: int) -> Copy:
+    def create_copy(self, op: Operation, size: int,
+                    create: int, ready: int, 
+                    start: int, stop: int,
+                    request_type: int,
+                    fevent: int
+    ) -> Copy:
         key = fevent
         if key not in self.copy_map:
-            copy = Copy(fevent)
+            copy = Copy(op, size, create, ready, start, stop, request_type, fevent)
             self.add_copy_map(fevent,copy)
             # update prof_uid map
             self.prof_uid_map[copy.prof_uid] = copy
         return self.copy_map[key]
+    
+    @typecheck
+    def find_copy(self, fevent: int) -> Copy:
+        key = fevent
+        if key not in self.copy_map:
+            print("Can not find copy" + str(fevent))
+            assert 0
+        return self.copy_map[key]
 
     @typecheck
-    def find_or_create_fill(self, fevent: int) -> Fill:
+    def create_fill(self, op: Operation, size: int,
+                    create: int, ready: int, 
+                    start: int, stop: int,
+                    fevent: int
+    ) -> Fill:
         key = fevent
         if key not in self.fill_map:
-            fill = Fill(fevent)
+            fill = Fill(op, size, create, ready, start, stop, fevent)
             self.add_fill_map(fevent,fill)
             # update prof_uid map
             self.prof_uid_map[fill.prof_uid] = fill
+        return self.fill_map[key]
+
+    @typecheck
+    def find_fill(self, fevent: int) -> Fill:
+        key = fevent
+        if key not in self.fill_map:
+            print("Can not find fill" + str(fevent))
+            assert 0
         return self.fill_map[key]
 
     @typecheck
@@ -4326,8 +4339,8 @@ class State(object):
 
     @typecheck
     def create_meta(self, variant: Variant, op: Operation, 
-                    create: float, ready: float, 
-                    start: float, stop: float
+                    create: int, ready: int, 
+                    start: int, stop: int
     ) -> MetaTask:
         meta = MetaTask(variant, op, create, ready, start, stop)
         if op.op_id not in variant.ops:
@@ -4349,9 +4362,9 @@ class State(object):
                               dst: Optional[Memory],
                               src_fid: int, dst_fid: int,
                               src_inst: int, dst_inst: int, 
-                              fevent: int, indirect: bool
+                              fevent: int, num_hops: int, indirect: bool
     ) -> CopyInstInfo:
-        copy_inst_info =  CopyInstInfo(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy_inst_info =  CopyInstInfo(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, num_hops, indirect)
         return copy_inst_info
 
     @typecheck
@@ -4363,8 +4376,8 @@ class State(object):
 
     @typecheck
     def create_deppart(self, part_op: int, op: Operation, 
-                       create: float, ready: float, 
-                       start: float, stop: float
+                       create: int, ready: int, 
+                       start: int, stop: int
     ) ->DepPart:
         deppart = DepPart(part_op, op, create, ready, start, stop)
         # update the prof_uid map
@@ -4395,7 +4408,7 @@ class State(object):
                 fill.add_channel(self)
 
     @typecheck
-    def trim_time_ranges(self, start: float, stop: float) -> None:
+    def trim_time_ranges(self, start: int, stop: int) -> None:
         assert self.last_time is not None
         if start < 0:
             start = None #type: ignore
@@ -4585,7 +4598,7 @@ class State(object):
                 bandwidth = 0.0
                 channel = self.find_or_create_copy_channel(src, dst)
                 for copy in channel.copies:
-                    time = copy.stop - copy.start
+                    time = float(copy.stop - copy.start) / 1000.0
                     sum = sum + time * 1e-6
                     bandwidth = bandwidth + copy.size / time
                     cnt = cnt + 1
@@ -4632,7 +4645,7 @@ class State(object):
     def calculate_utilization_data(self, timepoints: List[TimePoint], 
                                    owners: Union[List[Processor], List[Memory], List[Channel]], 
                                    count: int
-    ) -> List[Tuple[float, float]]:
+    ) -> List[Tuple[int, float]]:
         # we assume that the timepoints are sorted before this step
 
         # loop through all the timepoints. Get the earliest. If it's first,
@@ -4659,7 +4672,7 @@ class State(object):
             assert isMemory
             max_count = self.calculate_dynamic_memory_size(timepoints)
 
-        utilization: List[Tuple[float, float]] = list()
+        utilization: List[Tuple[int, float]] = list()
         count = 0
         last_time = None
         for point in timepoints:
@@ -4863,7 +4876,7 @@ class State(object):
                 util_csvwriter.writerow(["time", "count"])
                 util_csvwriter.writerow(["0.000", "0.00"]) # initial point
                 for util_point in utilization:
-                    util_csvwriter.writerow(["%.3f" % util_point[0], "%.2f" % util_point[1]])
+                    util_csvwriter.writerow(["%.3f" % (util_point[0] / 1000.0), "%.2f" % util_point[1]])
 
     @typecheck
     def simplify_op(self, 
@@ -5115,7 +5128,7 @@ class State(object):
     def traverse_op_for_critical_path(self, 
                                       op: Dependencies
     ) -> PathRange:
-        cur_path  = PathRange(0.0, 0.0, [])
+        cur_path  = PathRange(0, 0, [])
         if isinstance(op, Dependencies):
             if op.visited:
                 cur_path = op.path
@@ -5296,7 +5309,7 @@ class State(object):
         channel_levels = {}
         memory_levels = {}
         base_level = 0
-        last_time = 0.0
+        last_time = 0
 
         ops_file_name = os.path.join(output_dirname, 
                                      "legion_prof_ops.tsv")
@@ -5458,7 +5471,7 @@ class State(object):
 
         scale_data = {
             'start': 0.0,
-            'end': math.ceil(last_time * 10. * 1.01) / 10.,
+            'end': math.ceil(last_time / 1000.0 * 10. * 1.01) / 10. ,
             'stats_levels': stats_levels,
             'max_level': base_level + 1
         }
@@ -5667,12 +5680,12 @@ def main() -> None:
     if (start_trim > 0) or (stop_trim > 0):
         if start_trim > 0 and stop_trim > 0:
             if stop_trim > start_trim:
-                state.trim_time_ranges(float(start_trim), float(stop_trim))
+                state.trim_time_ranges(start_trim * 1000, stop_trim * 1000)
             else:
                 print('WARNING: Ignoring invalid trim ranges because stop trim time ('+
                     str(stop_trim)+') comes before start trim time ('+str(start_trim)+')')
         else:
-            state.trim_time_ranges(float(start_trim), float(stop_trim))
+            state.trim_time_ranges(start_trim * 1000, stop_trim * 1000)
 
     # Once we are done loading everything, do the sorting
     state.sort_time_ranges()

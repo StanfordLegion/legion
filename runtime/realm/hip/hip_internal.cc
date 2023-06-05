@@ -23,6 +23,7 @@ namespace Realm {
 
   namespace Hip {
     
+    extern Logger log_gpu;
     extern Logger log_stream;
     extern Logger log_gpudma;
 
@@ -1640,6 +1641,54 @@ namespace Realm {
                                       total_bytes, src_frags, dst_frags,
                                       kind_ret, bw_ret, lat_ret);
       }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUReplHeapListener
+    //
+
+    GPUReplHeapListener::GPUReplHeapListener(HipModule *_module)
+      : module(_module)
+    {}
+
+    void GPUReplHeapListener::chunk_created(void *base, size_t bytes)
+    {
+      if(!module->gpus.empty()) {
+        log_gpu.info() << "registering replicated heap chunk: base=" << base
+                       << " size=" << bytes;
+
+        hipError_t ret;
+        {
+          AutoGPUContext agc(module->gpus[0]);
+          ret = hipHostRegister(base, bytes,
+                                hipHostRegisterPortable |
+                                hipHostRegisterMapped);
+        }
+        if(ret != hipSuccess) {
+          log_gpu.fatal() << "failed to register replicated heap chunk: base=" << base
+                          << " size=" << bytes << " ret=" << ret;
+          abort();
+        }
+      }
+    }
+
+    void GPUReplHeapListener::chunk_destroyed(void *base, size_t bytes)
+    {
+      if(!module->gpus.empty()) {
+	log_gpu.info() << "unregistering replicated heap chunk: base=" << base
+                       << " size=" << bytes;
+
+        hipError_t ret;
+        {
+          AutoGPUContext agc(module->gpus[0]);
+          ret = hipHostUnregister(base);
+        }
+        if(ret != hipSuccess)
+          log_gpu.warning() << "failed to unregister replicated heap chunk: base=" << base
+                            << " size=" << bytes << " ret=" << ret;
+      }
+    }
 
 
   }; // namespace Hip

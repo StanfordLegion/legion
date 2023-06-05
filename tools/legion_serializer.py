@@ -104,10 +104,6 @@ class LegionDeserializer(ABC):
         return True
 
 @typecheck
-def read_time(string: str) -> float:
-    return int(string) / 1000
-
-@typecheck
 def read_max_dim(string: str) -> int:
     global max_dim_val
     max_dim_val = int(string)
@@ -162,8 +158,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+)'),
         "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<num_hops>[0-9]+) (?P<request_type>[0-9]+) (?P<fevent>[a-f0-9]+)'),
-        "CopyInstInfo": re.compile(prefix + r'Prof Copy Inst Info (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<src_fid>[a-f0-9]+) (?P<dst_fid>[a-f0-9]+) (?P<src_inst>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+) (?P<indirect>[0-1])'),
+        "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<request_type>[0-9]+) (?P<fevent>[a-f0-9]+)'),
+        "CopyInstInfo": re.compile(prefix + r'Prof Copy Inst Info (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<src_fid>[a-f0-9]+) (?P<dst_fid>[a-f0-9]+) (?P<src_inst>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+) (?P<num_hops>[0-9]+) (?P<indirect>[0-1])'),
         "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[a-f0-9]+)'),
         "FillInstInfo": re.compile(prefix + r'Prof Fill Inst Info (?P<dst>[a-f0-9]+) (?P<fid>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+)'),
         "InstTimelineInfo": re.compile(prefix + r'Prof Inst Timeline (?P<inst_uid>[a-f0-9]+) (?P<inst_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<size>[0-9]+) (?P<op_id>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<destroy>[0-9]+)'),
@@ -217,17 +213,17 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_uid": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
         "indirect": int, 
-        "create": read_time,
-        "destroy": read_time,
-        "start": read_time,
-        "ready": read_time,
-        "stop": read_time,
-        "end": read_time,
-        "gpu_start": read_time,
-        "gpu_stop": read_time,
-        "wait_start": read_time,
-        "wait_ready": read_time,
-        "wait_end": read_time,
+        "create": int,
+        "destroy": int,
+        "start": int,
+        "ready": int,
+        "stop": int,
+        "end": int,
+        "gpu_start": int,
+        "gpu_stop": int,
+        "wait_start": int,
+        "wait_ready": int,
+        "wait_end": int,
         "align_desc": int,
         "eqk": int,
         "dim_kind": int,
@@ -397,8 +393,6 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                 global max_dim_val
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
-                if param_type == "timestamp_t":
-                    val = val / 1000
                 if param_type == "maxdim":
                     max_dim_val = val
                 return val

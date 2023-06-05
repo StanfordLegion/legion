@@ -1069,7 +1069,7 @@ namespace Realm {
     {
       // if we don't have any framebuffer memory, we can't do any DMAs
       if(!fbmem)
-	return;
+        return;
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
@@ -1078,67 +1078,55 @@ namespace Realm {
       // treat managed mem like pinned sysmem on the assumption that most data
       //  is usually in system memory
       if(!pinned_sysmems.empty() || !managed_mems.empty()) {
-	r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
-	r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
 
-	// TODO: move into the dma channels themselves
-	for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
-	    it != pinned_sysmems.end();
-	    ++it) {
-	  // don't create affinities for IB memories right now
-	  if(!ID(*it).is_memory()) continue;
+        // TODO: move into the dma channels themselves
+        for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
+            it != pinned_sysmems.end(); ++it) {
+          // don't create affinities for IB memories right now
+          if(!ID(*it).is_memory())
+            continue;
 
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = fbmem->me;
-	  mma.m2 = *it;
-	  mma.bandwidth = 20; // "medium"
-	  mma.latency = 200;  // "bad"
-	  r->add_mem_mem_affinity(mma);
-	}
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = *it;
+          mma.bandwidth = info->pci_bandwidth; // "medium"
+          mma.latency = 200;                   // "bad"
+          r->add_mem_mem_affinity(mma);
+        }
 
-	for(std::set<Memory>::const_iterator it = managed_mems.begin();
-	    it != managed_mems.end();
-	    ++it) {
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = fbmem->me;
-	  mma.m2 = *it;
-	  mma.bandwidth = 20; // "medium"
-	  mma.latency = 300;  // "worse" (pessimistically assume faults)
-	  r->add_mem_mem_affinity(mma);
-	}
+        for(std::set<Memory>::const_iterator it = managed_mems.begin();
+            it != managed_mems.end(); ++it) {
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = *it;
+          mma.bandwidth = info->pci_bandwidth; // "medium"
+          mma.latency = 300;                   // "worse" (pessimistically assume faults)
+          r->add_mem_mem_affinity(mma);
+        }
       } else {
-	log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
+        log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
 
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
-	r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
 
-	// TODO: move into the dma channels themselves
-	for(std::set<Memory>::const_iterator it = peer_fbs.begin();
-	    it != peer_fbs.end();
-	    ++it) {
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = fbmem->me;
-	  mma.m2 = *it;
-	  mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-	  mma.latency = 400;  // ~twice the latency as zcmem
-	  r->add_mem_mem_affinity(mma);
-	}
-
-	for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
-	    it != cudaipc_mappings.end();
-	    ++it) {
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = fbmem->me;
-	  mma.m2 = it->mem;
-	  mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-	  mma.latency = 400;  // ~twice the latency as zcmem
-	  r->add_mem_mem_affinity(mma);
-	}
+        for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
+            it != cudaipc_mappings.end(); ++it) {
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = it->mem;
+          // TODO: replace with the peer bandwidth calculation done earlier (this means we
+          // need to know the GPU that owns the cudaipc mapping, and it needs to be
+          // enumerated in our process).
+          mma.bandwidth = info->pci_bandwidth;
+          mma.latency = 400;
+          r->add_mem_mem_affinity(mma);
+        }
       }
     }
-
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1257,10 +1245,8 @@ namespace Realm {
       current_size = init_size;
       total_size = init_size;
 
-      // TODO: measure how much benefit is derived from CU_EVENT_DISABLE_TIMING and
-      //  consider using them for completion callbacks
       for(int i = 0; i < init_size; i++)
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DEFAULT) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DISABLE_TIMING) );
     }
 
     void GPUEventPool::empty_pool(void)
@@ -1295,7 +1281,7 @@ namespace Realm {
 	available_events.resize(total_size);
 
 	for(int i = 0; i < batch_size; i++)
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DEFAULT) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DISABLE_TIMING) );
       }
 
       if(external)
@@ -2961,48 +2947,12 @@ namespace Realm {
     }
     
 #ifdef REALM_USE_CUDART_HIJACK
-    void GPUProcessor::event_create(CUevent *event, int flags)
-    {
-      // int cu_flags = CU_EVENT_DEFAULT;
-      // if((flags & cudaEventBlockingSync) != 0)
-      // 	cu_flags |= CU_EVENT_BLOCKING_SYNC;
-      // if((flags & cudaEventDisableTiming) != 0)
-      // 	cu_flags |= CU_EVENT_DISABLE_TIMING;
-
-      // get an event from our event pool (ignoring the flags for now)
-      CUevent e = gpu->event_pool.get_event(true/*external*/);
-      *event = e;
-    }
-
-    void GPUProcessor::event_destroy(CUevent event)
-    {
-      // assume the event is one of ours and put it back in the pool
-      CUevent e = event;
-      if(e)
-	gpu->event_pool.return_event(e, true/*external*/);
-    }
-
     void GPUProcessor::event_record(CUevent event, CUstream stream)
     {
       CUevent e = event;
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
-    }
-
-    void GPUProcessor::event_synchronize(CUevent event)
-    {
-      // TODO: consider suspending task rather than busy-waiting here...
-      CUevent e = event;
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventSynchronize)(e) );
-    }
-      
-    void GPUProcessor::event_elapsed_time(float *ms, CUevent start, CUevent end)
-    {
-      // TODO: consider suspending task rather than busy-waiting here...
-      CUevent e1 = start;
-      CUevent e2 = end;
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventElapsedTime)(ms, e1, e2) );
     }
       
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
@@ -3344,118 +3294,115 @@ namespace Realm {
     void GPU::create_processor(RuntimeImpl *runtime, size_t stack_size)
     {
       Processor p = runtime->next_local_processor_id();
-      proc = new GPUProcessor(this, p,
-			      runtime->core_reservation_set(),
-			      stack_size);
+      proc = new GPUProcessor(this, p, runtime->core_reservation_set(), stack_size);
       runtime->add_processor(proc);
 
       // this processor is able to access its own FB and the ZC mem (if any)
       if(fbmem) {
-	Machine::ProcessorMemoryAffinity pma;
-	pma.p = p;
-	pma.m = fbmem->me;
-	pma.bandwidth = 200;  // "big"
-	pma.latency = 5;      // "ok"
-	runtime->add_proc_mem_affinity(pma);
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = fbmem->me;
+        pma.bandwidth = info->logical_peer_bandwidth[info->index];
+        pma.latency   = info->logical_peer_latency[info->index];
+        runtime->add_proc_mem_affinity(pma);
       }
 
       for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
-          it != pinned_sysmems.end();
-          ++it) {
+          it != pinned_sysmems.end(); ++it) {
         // no processor affinity to IB memories
-        if(!ID(*it).is_memory()) continue;
+        if(!ID(*it).is_memory())
+          continue;
 
-	Machine::ProcessorMemoryAffinity pma;
-	pma.p = p;
-	pma.m = *it;
-	pma.bandwidth = 20; // "medium"
-	pma.latency = 200;  // "bad"
-	runtime->add_proc_mem_affinity(pma);
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = *it;
+        pma.bandwidth = info->pci_bandwidth;
+        pma.latency = 200; // "bad"
+        runtime->add_proc_mem_affinity(pma);
       }
 
       for(std::set<Memory>::const_iterator it = managed_mems.begin();
-          it != managed_mems.end();
-          ++it) {
+          it != managed_mems.end(); ++it) {
         // no processor affinity to IB memories
-        if(!ID(*it).is_memory()) continue;
+        if(!ID(*it).is_memory())
+          continue;
 
-	Machine::ProcessorMemoryAffinity pma;
-	pma.p = p;
-	pma.m = *it;
-	pma.bandwidth = 20; // "medium"
-        pma.latency = 300;  // "worse" (pessimistically assume faults)
-	runtime->add_proc_mem_affinity(pma);
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = *it;
+        pma.bandwidth = info->pci_bandwidth; // Not quite correct, but be pessimistic here
+        pma.latency = 300;                   // "worse" (pessimistically assume faults)
+        runtime->add_proc_mem_affinity(pma);
       }
 
       // peer access
-      for(std::vector<GPU *>::iterator it = module->gpus.begin();
-	  it != module->gpus.end();
-	  it++) {
-	// ignore ourselves
-	if(*it == this) continue;
+      for(size_t i = 0; i < module->gpus.size(); i++) {
+        GPU *peer_gpu = module->gpus[i];
+        // ignore ourselves
+        if(peer_gpu == this)
+          continue;
 
-	// ignore gpus that we don't expect to be able to peer with
-	if(info->peers.count((*it)->info->device) == 0)
-	  continue;
+        // ignore gpus that we don't expect to be able to peer with
+        if(info->peers.count(peer_gpu->info->device) == 0)
+          continue;
 
-	// ignore gpus with no fb
-	if(!((*it)->fbmem))
-	  continue;
+        // ignore gpus with no fb
+        if(peer_gpu->fbmem == nullptr)
+          continue;
 
-	// enable peer access (it's ok if it's already been enabled)
+        // enable peer access (it's ok if it's already been enabled)
         //  (don't try if it's the same physical device underneath)
-	if(info != (*it)->info) {
-	  AutoGPUContext agc(this);
+        if(info != peer_gpu->info) {
+          AutoGPUContext agc(this);
 
-          CUresult ret = CUDA_DRIVER_FNPTR(cuCtxEnablePeerAccess)((*it)->context, 0);
-          if((ret != CUDA_SUCCESS) &&
-             (ret != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED))
+          CUresult ret = CUDA_DRIVER_FNPTR(cuCtxEnablePeerAccess)(peer_gpu->context, 0);
+          if((ret != CUDA_SUCCESS) && (ret != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED))
             REPORT_CU_ERROR("cuCtxEnablePeerAccess((*it)->context, 0)", ret);
-	}
-	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
-	peer_fbs.insert((*it)->fbmem->me);
+        }
+        log_gpu.info() << "peer access enabled from GPU " << p << " to FB "
+                       << peer_gpu->fbmem->me;
+        peer_fbs.insert(peer_gpu->fbmem->me);
+        
+        {
+          Machine::ProcessorMemoryAffinity pma;
+          pma.p = p;
+          pma.m = peer_gpu->fbmem->me;
+          pma.bandwidth = info->logical_peer_bandwidth[i];
+          pma.latency = info->logical_peer_latency[i];
+          runtime->add_proc_mem_affinity(pma);
+        }
+        if (fbmem != nullptr) {
+          Machine::MemoryMemoryAffinity pma;
+          pma.m1 = fbmem->me;
+          pma.m2 = peer_gpu->fbmem->me;
+          pma.bandwidth = info->logical_peer_bandwidth[i];
+          pma.latency = info->logical_peer_latency[i];
+          runtime->add_mem_mem_affinity(pma);
+        }
 
-        if((*it)->fb_ibmem)
-          peer_fbs.insert((*it)->fb_ibmem->me);
-
-	{
-	  Machine::ProcessorMemoryAffinity pma;
-	  pma.p = p;
-	  pma.m = (*it)->fbmem->me;
-	  pma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-	  pma.latency = 400;  // ~twice the latency as zcmem
-	  runtime->add_proc_mem_affinity(pma);
-	}
+        if(peer_gpu->fb_ibmem != nullptr) {
+          // Don't add fb_ibmem to affinity topology as this is an internal
+          // memory
+          peer_fbs.insert(peer_gpu->fb_ibmem->me);
+        }
       }
 
       // look for any other local memories that belong to our context or
       //  peer-able contexts
-      const Node& n = get_runtime()->nodes[Network::my_node_id];
+      const Node &n = get_runtime()->nodes[Network::my_node_id];
       for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
-          it != n.memories.end();
-          ++it) {
+          it != n.memories.end(); ++it) {
         CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
-        if(!cdm) continue;
-        if(cdm->context == context) {
+        if(!cdm)
+          continue;
+        if(cdm->gpu && (info->peers.count(cdm->gpu->info->device) > 0)) {
           Machine::ProcessorMemoryAffinity pma;
           pma.p = p;
           pma.m = (*it)->me;
-          pma.bandwidth = 200;  // "big"
-          pma.latency = 5;      // "ok"
+          pma.bandwidth = info->logical_peer_bandwidth[cdm->gpu->info->index];
+          pma.latency = info->logical_peer_latency[cdm->gpu->info->index];
+
           runtime->add_proc_mem_affinity(pma);
-        } else {
-          // if the other context is associated with a gpu and we've got peer
-          //  access, use it
-          // TODO: add option to enable peer access at this point?  might be
-          //  expensive...
-          if(cdm->gpu && (info->peers.count(cdm->gpu->info->device) > 0)) {
-            Machine::ProcessorMemoryAffinity pma;
-            pma.p = p;
-            pma.m = (*it)->me;
-            pma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-            pma.latency = 400;  // ~twice the latency as zcmem
-            runtime->add_proc_mem_affinity(pma);
-          }
         }
       }
     }
@@ -3836,7 +3783,7 @@ namespace Realm {
       // driver symbols have to come from a dynamic libcuda
 #ifdef REALM_USE_DLFCN
       log_gpu.info() << "dynamically loading libcuda.so";
-      void *libcuda = dlopen("libcuda.so", RTLD_NOW);
+      void *libcuda = dlopen("libcuda.so.1", RTLD_NOW);
       if(!libcuda) {
         if(required) {
           log_gpu.fatal() << "could not open libcuda.so: " << strerror(errno);
@@ -3895,7 +3842,7 @@ namespace Realm {
       if (nvml_api_fnptrs_loaded)
         return true;
       log_gpu.info() << "dynamically loading libnvidia-ml.so";
-      libnvml = dlopen("libnvidia-ml.so", RTLD_NOW);
+      libnvml = dlopen("libnvidia-ml.so.1", RTLD_NOW);
       if (libnvml == NULL) {
         log_gpu.info() << "could not open libnvidia-ml.so" << strerror(errno);
         return false;
@@ -3908,7 +3855,6 @@ namespace Realm {
         if (!sym) {                                                                \
           log_gpu.info() << "symbol '" STRINGIFY(                                  \
               name) " missing from libnvidia-ml.so!";                              \
-          return false;                                                            \
         }                                                                          \
         name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
       } while (0)
@@ -4026,25 +3972,61 @@ namespace Realm {
             CHECK_CU(
                 CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&info->totalGlobalMem, info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetUuid)(&info->uuid, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &info->major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &info->minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &info->pci_busid, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &info->pci_deviceid, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &info->pci_domainid, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, info->device));
+            // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
+            // systems
+            info->pci_bandwidth = 8000;
+            info->logical_peer_bandwidth.resize(num_devices, 0);
+            info->logical_peer_latency.resize(num_devices, SIZE_MAX);
+
             info->has_numa_preference = false;
             memset(info->numa_node_affinity, 0xff, sizeof(info->numa_node_affinity));
+
             if(nvml_initialized) {
               // Convert uuid bytes to uuid string for nvml
               std::string uuid = convert_uuid(info->uuid);
               CHECK_NVML(
                   NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev));
+              unsigned int gen, buswidth;
+              // Rates in MB/s from https://en.wikipedia.org/wiki/PCI_Express
+              static const unsigned int rates[] = {250,  500,  985,  1969,
+                                                   3938, 7563, 15125};
+              static const unsigned int rates_len =
+                  sizeof(rates) / sizeof(rates[0]);
+              // Use the max pcie link information here, as when the GPU is not in use,
+              // the OS may power down some links to conserve power, but we want to
+              // estimate the bandwidth when in use.
+              CHECK_NVML(
+                  NVML_FNPTR(nvmlDeviceGetMaxPcieLinkGeneration)(info->nvml_dev, &gen));
+              CHECK_NVML(
+                  NVML_FNPTR(nvmlDeviceGetMaxPcieLinkWidth)(info->nvml_dev, &buswidth));
+              if (gen >= sizeof(rates) / sizeof(rates[0])) {
+                log_gpu.warning() << "Unknown PCIe generation version '" << gen
+                                  << "', assuming '" << rates_len << '\'';
+                gen = rates_len;
+              }
+              info->pci_bandwidth = (rates[gen - 1] * buswidth);
+
 #if !defined(_WIN32) && NVML_API_VERSION >= 11
               memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
               CHECK_NVML(NVML_FNPTR(nvmlDeviceGetMemoryAffinity)(
-                  info->nvml_dev,
-                  info->MAX_NUMA_NODE_LEN,
-                  info->numa_node_affinity, NVML_AFFINITY_SCOPE_NODE));
+                  info->nvml_dev, info->MAX_NUMA_NODE_LEN, info->numa_node_affinity,
+                  NVML_AFFINITY_SCOPE_NODE));
 #endif
             }
 
             // For fast lookups, check if we actually have a numa preference
-            for (size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
-              if (info->numa_node_affinity[i] != (unsigned long)-1) {
+            for(size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
+              if(info->numa_node_affinity[i] != (unsigned long)-1) {
                 info->has_numa_preference = true;
                 break;
               }
@@ -4058,31 +4040,146 @@ namespace Realm {
           }
         }
 
-        // query peer-to-peer access (all pairs)
-	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
-	    it1 != infos.end();
-	    it1++)
-	  for(std::vector<GPUInfo *>::iterator it2 = infos.begin();
-	      it2 != infos.end();
-	      it2++)
-	    if(it1 != it2) {
-	      int can_access;
-	      CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceCanAccessPeer)(&can_access,
-                                                                 (*it1)->device,
-                                                                 (*it2)->device) );
-	      if(can_access) {
-		log_gpu.info() << "p2p access from device " << (*it1)->index
-			       << " to device " << (*it2)->index;
-		(*it1)->peers.insert((*it2)->device);
-	      }
-	    } else {
-              // two contexts on the same device can always "peer to peer"
-              (*it1)->peers.insert((*it2)->device);
+        size_t nvswitch_bandwidth = 0;
+        for(std::vector<GPUInfo *>::iterator it = infos.begin(); it != infos.end();
+            ++it) {
+          GPUInfo *info = *it;
+          // NVLINK link rates (in MB/s) based off
+          // https://en.wikipedia.org/wiki/NVLink
+          static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
+                                                          23610};
+          // Iterate each of the links for this GPU and find what's on the other end
+          // of the link, adding this link's bandwidth to the accumulated peer pair
+          // bandwidth.
+          for(size_t i = 0; i < NVML_NVLINK_MAX_LINKS; i++) {
+            nvmlIntNvLinkDeviceType_t dev_type;
+            nvmlEnableState_t link_state;
+            nvmlPciInfo_t pci_info;
+            unsigned int nvlink_version;
+            nvmlReturn_t status =
+                NVML_FNPTR(nvmlDeviceGetNvLinkState)(info->nvml_dev, i, &link_state);
+            if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
+              continue;
             }
-      }
 
-      // give the gpu info we assembled to the module
-      m->gpu_info.swap(infos);
+            CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
+                                                              &nvlink_version));
+            if(nvlink_version >
+               sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0])) {
+              // Found an unknown nvlink version, so assume the newest version we know
+              nvlink_version =
+                  sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
+            }
+
+            if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
+              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType)(info->nvml_dev,
+                                                                         i, &dev_type));
+            } else {
+              // GetNvLinkRemoteDeviceType not found, probably an older nvml driver, so
+              // assume GPU
+              dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
+            }
+
+            unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
+            if ((info->major == 8) && (info->minor > 2)) {
+              // NVML has no way of querying the minor version of nvlink, but
+              // nvlink 3.1 used with non-GA100 ampere systems has significantly
+              // less bandwidth per lane
+              nvlink_bandwidth = 14063;
+            }
+
+            if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
+              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemotePciInfo)(info->nvml_dev, i,
+                                                                      &pci_info));
+              // Unfortunately NVML doesn't give a way to return a GPU handle for a remote
+              // end point, so we have to search for the remote GPU using the PCIe
+              // information...
+              int peer_gpu_idx = 0;
+              for(peer_gpu_idx = 0; peer_gpu_idx < num_devices; peer_gpu_idx++) {
+                if(infos[peer_gpu_idx]->pci_busid == static_cast<int>(pci_info.bus) &&
+                   infos[peer_gpu_idx]->pci_deviceid == static_cast<int>(pci_info.device) &&
+                   infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
+                  // Found the peer device on the other end of the link!  Add this link's
+                  // bandwidth to the logical peer link
+                  info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
+                  info->logical_peer_latency[peer_gpu_idx] = 100;
+                  break;
+                }
+              }
+
+              if(peer_gpu_idx == num_devices) {
+                // We can't make any assumptions about this link, since we don't know
+                // what's on the other side.  This could be a GPU that was removed via
+                // CUDA_VISIBLE_DEVICES, or NVSWITCH / P9 NPU on a system with an slightly
+                // older driver that doesn't support "GetNvlinkRemotePciInfo"
+                log_gpu.info() << "GPU " << info->index
+                               << " has active NVLINK to unknown device "
+                               << pci_info.busId << "(" << std::hex
+                               << pci_info.pciDeviceId << "), ignoring...";
+              }
+            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
+              // Accumulate the link bandwidth for one gpu and assume symmetry
+              // across all GPUs, and all GPus have access to the NVSWITCH fabric
+              nvswitch_bandwidth += nvlink_bandwidth;
+            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
+              // TODO: use the npu_bandwidth for sysmem affinities
+              // npu_bandwidth += nvlink_bandwidth;
+            }
+          }
+        }
+
+        // query peer-to-peer access (all pairs)
+        for(size_t i = 0; i < infos.size(); i++) {
+          // two contexts on the same device can always "peer to peer"
+          infos[i]->peers.insert(infos[i]->device);
+          {
+            // Gather the framebuffer bandwidth and latency from CUDA
+            int memclk /*kHz*/, buswidth;
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &memclk, CU_DEVICE_ATTRIBUTE_MEMORY_CLOCK_RATE,
+                infos[i]->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &buswidth, CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH,
+                infos[i]->device));
+            infos[i]->logical_peer_bandwidth[i] =
+                (125ULL * memclk * buswidth) / 1000000ULL;
+            infos[i]->logical_peer_latency[i] =
+                std::max(1ULL, 10000000ULL / memclk);
+            log_gpu.info() << "GPU #" << i << " local memory: "
+                           << infos[i]->logical_peer_bandwidth[i] << " MB/s, "
+                           << infos[i]->logical_peer_latency[i] << " ns";
+          }
+          for (size_t j = 0; j < infos.size(); j++) {
+            int can_access;
+            if (i == j) {
+              continue;
+            }
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceCanAccessPeer)(
+                &can_access, infos[i]->device, infos[j]->device));
+            if (can_access) {
+              infos[i]->peers.insert(infos[j]->device);
+              if (infos[i]->logical_peer_bandwidth[j] == 0) {
+                // Not nvlink (otherwise this would have been enumerated
+                // earlier), so assume this is NVSWITCH (if we detected nvswitch
+                // earlier) or PCIe
+                infos[i]->logical_peer_bandwidth[j] = std::max(
+                    nvswitch_bandwidth,
+                    std::min(infos[i]->pci_bandwidth, infos[j]->pci_bandwidth));
+                infos[i]->logical_peer_latency[j] = 400;
+              }
+              log_gpu.info()
+                  << "p2p access from device " << infos[i]->index
+                  << " to device " << infos[j]->index
+                  << " bandwidth: " << infos[i]->logical_peer_bandwidth[j]
+                  << " MB/s"
+                  << " latency: " << infos[i]->logical_peer_latency[j] << " ns";
+            }
+          }
+        }
+
+        // give the gpu info we assembled to the module
+        m->gpu_info.swap(infos);
+      }
 
       return m;
     }
@@ -4095,13 +4192,13 @@ namespace Realm {
 
       // if we are using a shared worker, create that next
       if(cfg_use_shared_worker) {
-	shared_worker = new GPUWorker;
+        shared_worker = new GPUWorker;
 
-	if(cfg_use_worker_threads)
-	  shared_worker->start_background_thread(runtime->core_reservation_set(),
-						 1 << 20); // hardcoded worker stack size
-	else
-	  shared_worker->add_to_manager(&(runtime->bgwork));
+        if(cfg_use_worker_threads)
+          shared_worker->start_background_thread(runtime->core_reservation_set(),
+                                                 1 << 20); // hardcoded worker stack size
+        else
+          shared_worker->add_to_manager(&(runtime->bgwork));
       }
 
       // decode specific device id list if given
@@ -4118,13 +4215,15 @@ namespace Realm {
             v = (v * 10) + (*p++ - '0');
           } while(isdigit(*p));
           if(v >= gpu_info.size()) {
-            log_gpu.fatal() << "requested cuda device id out of range: " << v << " >= " << gpu_info.size();
+            log_gpu.fatal() << "requested cuda device id out of range: " << v
+                            << " >= " << gpu_info.size();
             abort();
           }
           fixed_indices.push_back(v);
-          if(!*p) break;
+          if(!*p)
+            break;
           if(*p == ',') {
-            p++;  // skip comma and parse another integer
+            p++; // skip comma and parse another integer
           } else {
             log_gpu.fatal() << "invalid separator in cuda device list: '" << p << "'";
             abort();
@@ -4147,28 +4246,28 @@ namespace Realm {
       unsigned gpu_count = 0;
       // try to get cfg_num_gpus, working through the list in order
       for(size_t i = cfg_skip_gpu_count;
-          (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
-          i++) {
+          (i < gpu_info.size()) && (gpu_count < cfg_num_gpus); i++) {
         int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
 
-	// try to create a context and possibly check available memory - in order
-	//  to be compatible with an application's use of the cuda runtime, we
-	//  need this to be the device's "primary context"
+        // try to create a context and possibly check available memory - in order
+        //  to be compatible with an application's use of the cuda runtime, we
+        //  need this to be the device's "primary context"
 
-	// set context flags before we create it, but it's ok to be told that
-	//  it's too late (unless lmem resize is wrong)
-	{
+        // set context flags before we create it, but it's ok to be told that
+        //  it's too late (unless lmem resize is wrong)
+        {
           unsigned flags = CU_CTX_SCHED_BLOCKING_SYNC;
           if(cfg_lmem_resize_to_max)
             flags |= CU_CTX_LMEM_RESIZE_TO_MAX;
 
-	  CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxSetFlags)(gpu_info[idx]->device, flags);
+          CUresult res =
+              CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxSetFlags)(gpu_info[idx]->device, flags);
           if(res != CUDA_SUCCESS) {
             bool lmem_ok;
             if(res == CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE) {
               if(cfg_lmem_resize_to_max) {
                 unsigned act_flags = 0;
-                CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxGetFlags)(&act_flags) );
+                CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxGetFlags)(&act_flags));
                 lmem_ok = ((act_flags & CU_CTX_LMEM_RESIZE_TO_MAX) != 0);
               } else
                 lmem_ok = true;
@@ -4178,61 +4277,66 @@ namespace Realm {
             if(!lmem_ok)
               REPORT_CU_ERROR("cuDevicePrimaryCtxSetFlags", res);
           }
-	}
+        }
 
-	CUcontext context;
-	CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRetain)(&context,
-                                                                   gpu_info[idx]->device);
-	// a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
-	if((res == CUDA_ERROR_INVALID_DEVICE) ||
-	   (res == CUDA_ERROR_OUT_OF_MEMORY)) {
-	  if(cfg_skip_busy_gpus) {
-	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " appears to be busy (res=" << res << ") - skipping";
-	    continue;
-	  } else {
-	    log_gpu.fatal() << "GPU " << gpu_info[idx]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
-	    abort();
-	  }
-	}
-	// any other error is a (unknown) problem
-	CHECK_CU(res);
+        CUcontext context;
+        CUresult res =
+            CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRetain)(&context, gpu_info[idx]->device);
+        // a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
+        if((res == CUDA_ERROR_INVALID_DEVICE) || (res == CUDA_ERROR_OUT_OF_MEMORY)) {
+          if(cfg_skip_busy_gpus) {
+            log_gpu.info() << "GPU " << gpu_info[idx]->device
+                           << " appears to be busy (res=" << res << ") - skipping";
+            continue;
+          } else {
+            log_gpu.fatal() << "GPU " << gpu_info[idx]->device
+                            << " appears to be in use - use CUDA_VISIBLE_DEVICES, "
+                               "-cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
+            abort();
+          }
+        }
+        // any other error is a (unknown) problem
+        CHECK_CU(res);
 
-	if(cfg_min_avail_mem > 0) {
-	  size_t total_mem, avail_mem;
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem) );
-	  if(avail_mem < cfg_min_avail_mem) {
-	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(gpu_info[idx]->device) );
-	    continue;
-	  }
-	}
+        if(cfg_min_avail_mem > 0) {
+          size_t total_mem, avail_mem;
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem));
+          if(avail_mem < cfg_min_avail_mem) {
+            log_gpu.info() << "GPU " << gpu_info[idx]->device
+                           << " does not have enough available memory (" << avail_mem
+                           << " < " << cfg_min_avail_mem << ") - skipping";
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(gpu_info[idx]->device));
+            continue;
+          }
+        }
 
-	// either create a worker for this GPU or use the shared one
-	GPUWorker *worker;
-	if(cfg_use_shared_worker) {
-	  worker = shared_worker;
-	} else {
-	  worker = new GPUWorker;
+        // either create a worker for this GPU or use the shared one
+        GPUWorker *worker;
+        if(cfg_use_shared_worker) {
+          worker = shared_worker;
+        } else {
+          worker = new GPUWorker;
 
-	  if(cfg_use_worker_threads)
-	    worker->start_background_thread(runtime->core_reservation_set(),
-					    1 << 20); // hardcoded worker stack size
-	  else
-	    worker->add_to_manager(&(runtime->bgwork));
-	}
+          if(cfg_use_worker_threads)
+            worker->start_background_thread(runtime->core_reservation_set(),
+                                            1 << 20); // hardcoded worker stack size
+          else
+            worker->add_to_manager(&(runtime->bgwork));
+        }
 
-	GPU *g = new GPU(this, gpu_info[idx], worker, context);
+        GPU *g = new GPU(this, gpu_info[idx], worker, context);
 
-	if(!cfg_use_shared_worker)
-	  dedicated_workers[g] = worker;
+        if(!cfg_use_shared_worker)
+          dedicated_workers[g] = worker;
 
-	gpus[gpu_count++] = g;
+        gpus[gpu_count++] = g;
       }
 
       // did we actually get the requested number of GPUs?
       if(gpu_count < cfg_num_gpus) {
-	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
-	assert(false);
+        log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count
+                        << " available!";
+        assert(false);
       }
 
       // make sure we hear about any changes to the size of the replicated
@@ -4248,165 +4352,155 @@ namespace Realm {
 
       // each GPU needs its FB memory
       if(cfg_fb_mem_size > 0)
-	for(std::vector<GPU *>::iterator it = gpus.begin();
-	    it != gpus.end();
-	    it++)
-	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
+        for(std::vector<GPU *>::iterator it = gpus.begin(); it != gpus.end(); it++)
+          (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
 
       if(cfg_use_dynamic_fb)
-	for(std::vector<GPU *>::iterator it = gpus.begin();
-	    it != gpus.end();
-	    it++)
-	  (*it)->create_dynamic_fb_memory(runtime, cfg_dynfb_max_size);
+        for(std::vector<GPU *>::iterator it = gpus.begin(); it != gpus.end(); it++)
+          (*it)->create_dynamic_fb_memory(runtime, cfg_dynfb_max_size);
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size > 0) && !gpus.empty()) {
-	CUdeviceptr zcmem_gpu_base;
-	// borrow GPU 0's context for the allocation call
-	{
-	  AutoGPUContext agc(gpus[0]);
-
-	  CUresult ret = CUDA_DRIVER_FNPTR(cuMemHostAlloc)(&zcmem_cpu_base,
-                                                           cfg_zc_mem_size,
-                                                           CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
-	  if(ret != CUDA_SUCCESS) {
-	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
-	      log_gpu.fatal() << "insufficient device-mappable host memory: "
-			      << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
-	    } else {
-	      const char *errstring = "error message not available";
-#if CUDA_VERSION >= 6050
-	      CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
-#endif
-	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
-			      << " (" << errstring << ")";
-	    }
-	    abort();
-	  }
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)
-                    (&zcmem_gpu_base,
-                     zcmem_cpu_base,
-                     0) );
-	  // right now there are asssumptions in several places that unified addressing keeps
-	  //  the CPU and GPU addresses the same
-	  assert(zcmem_cpu_base == (void *)zcmem_gpu_base);
-	}
-
-	Memory m = runtime->next_local_memory_id();
-	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-				cfg_zc_mem_size,
-                                MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
-	runtime->add_memory(zcmem);
-
-	// add the ZC memory as a pinned memory to all GPUs
-	for(unsigned i = 0; i < gpus.size(); i++) {
-	  CUdeviceptr gpuptr;
-	  CUresult ret;
-	  {
-	    AutoGPUContext agc(gpus[i]);
-	    ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr,
-                                                               zcmem_cpu_base,
-                                                               0);
-	  }
-	  if((ret == CUDA_SUCCESS) && (gpuptr == zcmem_gpu_base)) {
-	    gpus[i]->pinned_sysmems.insert(zcmem->me);
-	  } else {
-	    log_gpu.warning() << "GPU #" << i << " has an unexpected mapping for ZC memory!";
-	  }
-	}
-      }
-
-      // allocate intermediate buffers in ZC memory for DMA engine
-      if ((cfg_zc_ib_size > 0) && !gpus.empty()) {
-        CUdeviceptr zcib_gpu_base;
+        CUdeviceptr zcmem_gpu_base;
+        // borrow GPU 0's context for the allocation call
         {
           AutoGPUContext agc(gpus[0]);
-          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostAlloc)
-                    (&zcib_cpu_base,
-                     cfg_zc_ib_size,
-                     CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
-          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)
-                    (&zcib_gpu_base, zcib_cpu_base, 0) );
-          // right now there are asssumptions in several places that unified addressing keeps
+
+          CUresult ret = CUDA_DRIVER_FNPTR(cuMemHostAlloc)(
+              &zcmem_cpu_base, cfg_zc_mem_size,
+              CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
+          if(ret != CUDA_SUCCESS) {
+            if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+              log_gpu.fatal() << "insufficient device-mappable host memory: "
+                              << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
+            } else {
+              const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+              CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+#endif
+              log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
+                              << " (" << errstring << ")";
+            }
+            abort();
+          }
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&zcmem_gpu_base,
+                                                                zcmem_cpu_base, 0));
+          // right now there are asssumptions in several places that unified addressing
+          // keeps
           //  the CPU and GPU addresses the same
-          assert(zcib_cpu_base == (void *)zcib_gpu_base); 
+          assert(zcmem_cpu_base == (void *)zcmem_gpu_base);
         }
-        Memory m = runtime->next_local_ib_memory_id();
-        IBMemory* ib_mem;
-        ib_mem = new IBMemory(m, cfg_zc_ib_size,
-			      MemoryImpl::MKIND_ZEROCOPY, Memory::Z_COPY_MEM,
-			      zcib_cpu_base, 0);
-        runtime->add_ib_memory(ib_mem);
+
+        Memory m = runtime->next_local_memory_id();
+        zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, cfg_zc_mem_size,
+                                MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
+        runtime->add_memory(zcmem);
+
         // add the ZC memory as a pinned memory to all GPUs
-        for (unsigned i = 0; i < gpus.size(); i++) {
+        for(unsigned i = 0; i < gpus.size(); i++) {
           CUdeviceptr gpuptr;
           CUresult ret;
           {
             AutoGPUContext agc(gpus[i]);
-            ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr,
-                                                               zcib_cpu_base,
-                                                               0);
+            ret =
+                CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr, zcmem_cpu_base, 0);
           }
-          if ((ret == CUDA_SUCCESS) && (gpuptr == zcib_gpu_base)) {
+          if((ret == CUDA_SUCCESS) && (gpuptr == zcmem_gpu_base)) {
+            gpus[i]->pinned_sysmems.insert(zcmem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i
+                              << " has an unexpected mapping for ZC memory!";
+          }
+        }
+      }
+
+      // allocate intermediate buffers in ZC memory for DMA engine
+      if((cfg_zc_ib_size > 0) && !gpus.empty()) {
+        CUdeviceptr zcib_gpu_base;
+        {
+          AutoGPUContext agc(gpus[0]);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostAlloc)(&zcib_cpu_base, cfg_zc_ib_size,
+                                                     CU_MEMHOSTALLOC_PORTABLE |
+                                                         CU_MEMHOSTALLOC_DEVICEMAP));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&zcib_gpu_base,
+                                                                zcib_cpu_base, 0));
+          // right now there are asssumptions in several places that unified addressing
+          // keeps
+          //  the CPU and GPU addresses the same
+          assert(zcib_cpu_base == (void *)zcib_gpu_base);
+        }
+        Memory m = runtime->next_local_ib_memory_id();
+        IBMemory *ib_mem;
+        ib_mem = new IBMemory(m, cfg_zc_ib_size, MemoryImpl::MKIND_ZEROCOPY,
+                              Memory::Z_COPY_MEM, zcib_cpu_base, 0);
+        runtime->add_ib_memory(ib_mem);
+        // add the ZC memory as a pinned memory to all GPUs
+        for(unsigned i = 0; i < gpus.size(); i++) {
+          CUdeviceptr gpuptr;
+          CUresult ret;
+          {
+            AutoGPUContext agc(gpus[i]);
+            ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr, zcib_cpu_base, 0);
+          }
+          if((ret == CUDA_SUCCESS) && (gpuptr == zcib_gpu_base)) {
             gpus[i]->pinned_sysmems.insert(ib_mem->me);
           } else {
             log_gpu.warning() << "GPU #" << i << "has an unexpected mapping for"
-            << " intermediate buffers in ZC memory!";
+                              << " intermediate buffers in ZC memory!";
           }
         }
       }
 
       // a single unified (managed) memory for everybody
       if((cfg_uvm_mem_size > 0) && !gpus.empty()) {
-	CUdeviceptr uvm_gpu_base;
-	// borrow GPU 0's context for the allocation call
-	{
-	  AutoGPUContext agc(gpus[0]);
+        CUdeviceptr uvm_gpu_base;
+        // borrow GPU 0's context for the allocation call
+        {
+          AutoGPUContext agc(gpus[0]);
 
-          CUresult ret = CUDA_DRIVER_FNPTR(cuMemAllocManaged)(&uvm_gpu_base,
-                                                              cfg_uvm_mem_size,
-                                                              CU_MEM_ATTACH_GLOBAL);
-	  if(ret != CUDA_SUCCESS) {
-	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
-	      log_gpu.fatal() << "unable to allocate managed memory: "
-			      << cfg_uvm_mem_size << " bytes needed (from -ll:msize)";
-	    } else {
-	      const char *errstring = "error message not available";
+          CUresult ret = CUDA_DRIVER_FNPTR(cuMemAllocManaged)(
+              &uvm_gpu_base, cfg_uvm_mem_size, CU_MEM_ATTACH_GLOBAL);
+          if(ret != CUDA_SUCCESS) {
+            if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+              log_gpu.fatal() << "unable to allocate managed memory: " << cfg_uvm_mem_size
+                              << " bytes needed (from -ll:msize)";
+            } else {
+              const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
-	      CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+              CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
 #endif
-	      log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
-			      << " (" << errstring << ")";
-	    }
-	    abort();
-	  }
+              log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
+                              << " (" << errstring << ")";
+            }
+            abort();
+          }
         }
 
         uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
-	Memory m = runtime->next_local_memory_id();
-	uvmmem = new GPUZCMemory(m, uvm_gpu_base, uvm_base,
-                                 cfg_uvm_mem_size,
-                                 MemoryImpl::MKIND_MANAGED,
-                                 Memory::Kind::GPU_MANAGED_MEM);
-	runtime->add_memory(uvmmem);
+        Memory m = runtime->next_local_memory_id();
+        uvmmem =
+            new GPUZCMemory(m, uvm_gpu_base, uvm_base, cfg_uvm_mem_size,
+                            MemoryImpl::MKIND_MANAGED, Memory::Kind::GPU_MANAGED_MEM);
+        runtime->add_memory(uvmmem);
 
         // add the managed memory to any GPU capable of coherent access
-	for(unsigned i = 0; i < gpus.size(); i++) {
+        for(unsigned i = 0; i < gpus.size(); i++) {
           int concurrent_access;
-	  {
-	    AutoGPUContext agc(gpus[i]);
-            CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
-                      (&concurrent_access,
-                       CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
-                       gpus[i]->info->device) );
+          {
+            AutoGPUContext agc(gpus[i]);
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &concurrent_access, CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+                gpus[i]->info->device));
           }
 
           if(concurrent_access) {
             gpus[i]->managed_mems.insert(uvmmem->me);
           } else {
-            log_gpu.warning() << "GPU #" << i << " is not capable of concurrent access to managed memory!";
-	  }
-	}
+            log_gpu.warning()
+                << "GPU #" << i
+                << " is not capable of concurrent access to managed memory!";
+          }
+        }
       }
     }
 
@@ -4981,6 +5075,5 @@ namespace Realm {
 
     ActiveMessageHandlerReg<CudaIpcRelease> cuda_ipc_release_handler;
 
-
-  }; // namespace Cuda
+    }; // namespace Cuda
 }; // namespace Realm

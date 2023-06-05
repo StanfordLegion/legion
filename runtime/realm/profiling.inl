@@ -34,7 +34,7 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::CachePerfCounters<_ID>);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::IPCPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::TLBPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::BranchPredictionPerfCounters);
-TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationCopyInfo::RequestType);
 
 #include "realm/timers.h"
 
@@ -207,9 +207,47 @@ namespace Realm {
     //
 
     template <typename S>
-    bool serdez(S& serdez, const OperationCopyInfo& c)
+    bool serialize(S& ser, const OperationCopyInfo& c)
     {
-      return (serdez & c.inst_info);
+      bool success = false;
+      success = (ser & c.inst_info.size());
+      if (!success) return false;
+      for (size_t i = 0; i < c.inst_info.size(); i++) {
+        success = (ser & c.inst_info[i].src_insts) &&
+                  (ser & c.inst_info[i].dst_insts) &&
+                  (ser & c.inst_info[i].src_indirection_inst) &&
+                  (ser & c.inst_info[i].dst_indirection_inst) &&
+                  (ser & c.inst_info[i].src_fields) &&
+                  (ser & c.inst_info[i].dst_fields) &&
+                  (ser & c.inst_info[i].src_indirection_field) &&
+                  (ser & c.inst_info[i].dst_indirection_field) &&
+                  (ser & c.inst_info[i].request_type) &&
+                  (ser & c.inst_info[i].num_hops);
+      }
+      return success;
+    }
+
+    template <typename S>
+    bool deserialize(S& dez, OperationCopyInfo& c)
+    {
+      bool success = false;
+      size_t len = 0;
+      success = (dez & len);
+      if (!success) return false;
+      c.inst_info.resize(len);
+      for (size_t i = 0; i < c.inst_info.size(); i++) {
+        success = (dez & c.inst_info[i].src_insts) &&
+                  (dez & c.inst_info[i].dst_insts) &&
+                  (dez & c.inst_info[i].src_indirection_inst) &&
+                  (dez & c.inst_info[i].dst_indirection_inst) &&
+                  (dez & c.inst_info[i].src_fields) &&
+                  (dez & c.inst_info[i].dst_fields) &&
+                  (dez & c.inst_info[i].src_indirection_field) &&
+                  (dez & c.inst_info[i].dst_indirection_field) &&
+                  (dez & c.inst_info[i].request_type) &&
+                  (dez & c.inst_info[i].num_hops);
+      }
+      return success;
     }
 
 

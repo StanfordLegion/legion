@@ -39,6 +39,8 @@ add_subdirectory(realm)
 add_subdirectory(gather_perf)
 add_subdirectory(performance/realm/event_latency)
 add_subdirectory(performance/realm/task_throughput)
+add_subdirectory(performance/realm/event_ubench)
+add_subdirectory(performance/realm/task_ubench)
 add_subdirectory(legion_redop_test)
 
 if(Legion_USE_HDF5)

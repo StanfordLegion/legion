@@ -180,11 +180,15 @@ void top_level_task(const void *args, size_t arglen,
   log_app.print() << "Realm multi-affine instance test";
 
   // decide which processor we'll do writes on - use a GPU if available
+#if defined(REALM_USE_CUDA) // || defined(REALM_USE_HIP)
   Processor proc_write = Machine::ProcessorQuery(Machine::get_machine())
     .only_kind(Processor::TOC_PROC)
     .first();
   if(!proc_write.exists())
     proc_write = p;
+#else
+  Processor proc_write = p;
+#endif
 
   int test_id = 0;
   int errors = 0;
@@ -212,9 +216,12 @@ void top_level_task(const void *args, size_t arglen,
 
   // HACK: there's a shutdown race condition related to instance destruction
   usleep(100000);
+
+  Runtime::get_runtime().shutdown(Event::NO_EVENT, errors == 0 ? 0 : 1);
 }
 
-#ifdef REALM_USE_CUDA
+// FIXME: https://github.com/StanfordLegion/legion/issues/1476
+#if defined(REALM_USE_CUDA) // || defined(REALM_USE_HIP)
 // defined in multiaffine_gpu.cu
 void register_multiaffine_gpu_tasks();
 #endif
@@ -245,7 +252,8 @@ int main(int argc, char **argv)
 				   ProfilingRequestSet(),
 				   0, 0).wait();
 
-#ifdef REALM_USE_CUDA
+// FIXME: https://github.com/StanfordLegion/legion/issues/1476
+#if defined(REALM_USE_CUDA) //|| defined(REALM_USE_HIP)
   register_multiaffine_gpu_tasks();
 #endif
 
@@ -256,13 +264,10 @@ int main(int argc, char **argv)
   assert(p.exists());
 
   // collective launch of a single task - everybody gets the same finish event
-  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
-
-  // request shutdown once that task is complete
-  rt.shutdown(e);
+  rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
 
   // now sleep this thread until that shutdown actually happens
-  rt.wait_for_shutdown();
+  int ret = rt.wait_for_shutdown();
   
-  return 0;
+  return ret;
 }
