@@ -7277,8 +7277,10 @@ namespace Legion {
       : CollectiveCopyFillAnalysis(rt, o, idx, rn, true/*on heap*/,
                                    t_info, IS_WRITE(req)),
         usage(req), precondition(pre), term_event(term),
-        check_initialized(check && !IS_WRITE_DISCARD(usage)),
-        record_valid(record), output_aggregator(NULL)
+        // Don't support checking initialized for simultaneous because of
+        // must epoch operations which need a total order on mapping points
+        check_initialized(check && !IS_WRITE_DISCARD(usage) &&
+            !IS_SIMULT(usage)), record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
