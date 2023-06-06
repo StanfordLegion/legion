@@ -332,7 +332,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     # we'll write the GASNet configuration to a file so that we can rebuild
     #  (only) if it changes
     set(GASNet_CONFIG_FILE ${PROJECT_BINARY_DIR}/embed-gasnet/config.txt)
-    set(GASNet_CONFIG_SETTINGS "CONDUIT=${GASNet_CONDUIT}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
+    set(GASNet_CONFIG_SETTINGS "LEGION_GASNET_CONDUIT=${GASNet_CONDUIT}" "LEGION_GASNET_SYSTEM=${GASNet_SYSTEM}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
     if(Legion_EMBED_GASNet_VERSION)
       # make the source directory version-specific
       set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
@@ -376,6 +376,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 	message(STATUS "Downloading StanfordLegion/gasnet repo from: ${Legion_EMBED_GASNet_GITREPO}")
 	FetchContent_Populate(embed-gasnet)
 	set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
+  message(STATUS "make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}")
       endif()
       execute_process(
 	COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
@@ -606,7 +607,7 @@ if(Legion_USE_Kokkos)
   endif()
 
   if(Legion_USE_OpenMP AND (Kokkos_VERSION_MAJOR GREATER_EQUAL 4))
-    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
+    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer
     #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
     if(Legion_USE_CUDA)
       list(APPEND kokkos_compile_options "-Xcompiler")
