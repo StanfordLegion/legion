@@ -851,7 +851,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append(root_dir)
 
     cmd(cmdline, env=env, cwd=build_dir)
-    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=env.update({'VERBOSE': 1}))
+    verbose_env=env.copy()
+    verbose_env['VERBOSE'] = '1'
+    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=verbose_env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
 
