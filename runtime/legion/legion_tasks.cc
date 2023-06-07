@@ -4941,7 +4941,9 @@ namespace Legion {
           if (execution_context->overhead_profiler)
           {
             rez.serialize<bool>(true);
-            rez.serialize(*execution_context->overhead_profiler);
+            // Only pack the bits that we need for the profiling response
+            rez.serialize((const void*)execution_context->overhead_profiler,
+                sizeof(Mapping::ProfilingMeasurements::RuntimeOverhead));
           }
           else
             rez.serialize<bool>(false);
