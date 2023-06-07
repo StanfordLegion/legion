@@ -97,8 +97,7 @@ foreach(test IN LISTS REALM_TESTS)
     endif()
   endif()
 
-  set_target_cuda_architectures(TARGET ${test} ARCHS ${Legion_CUDA_ARCH})
-
+  # starting with nvcc 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
     target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
   endif()

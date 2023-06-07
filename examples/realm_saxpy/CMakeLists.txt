@@ -27,6 +27,11 @@ if(Legion_USE_CUDA)
   set(GPU_SOURCES realm_saxpy_gpu.cu)
   add_executable(realm_saxpy ${CPU_SOURCES} ${GPU_SOURCES})
   set_target_cuda_architectures(TARGET realm_saxpy ARCHS ${Legion_CUDA_ARCH})
+  # starting with nvcc 10.2, we can error out on all warnings
+  if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+    target_compile_options(realm_saxpy PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+  endif()
+  target_compile_options(realm_saxpy PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 elseif(Legion_USE_HIP)
   set(GPU_SOURCES realm_saxpy_gpu.cu)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
@@ -43,11 +48,3 @@ target_link_libraries(realm_saxpy Legion::Legion)
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_saxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_saxpy> ${Legion_TEST_ARGS})
 endif()
-
-set_target_cuda_architectures(TARGET realm_saxpy ARCHS ${Legion_CUDA_ARCH})
-
-if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-  target_compile_options(realm_saxpy PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
-endif()
-
-target_compile_options(realm_saxpy PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

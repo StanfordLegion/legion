@@ -23,7 +23,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 set(CPU_SOURCES agency_interop.cc)
-#set(GPU_SOURCES thrust_shim.h thrust_shim.cu)
+set(GPU_SOURCES )
 add_executable(agency_interop ${CPU_SOURCES} ${GPU_SOURCES})
 target_link_libraries(agency_interop Legion::Legion)
 

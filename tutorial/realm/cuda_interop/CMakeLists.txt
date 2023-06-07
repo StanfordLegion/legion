@@ -28,6 +28,12 @@ endif()
 
 if (REALM_USE_CUDA)
   add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+  set_target_cuda_architectures(TARGET realm_cuda_interop ARCHS ${Legion_CUDA_ARCH})
+  # starting with nvcc 10.2, we can error out on all warnings
+  if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+    target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+  endif()
+  target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 elseif(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
@@ -43,11 +49,3 @@ target_link_libraries(realm_cuda_interop Legion::Realm)
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_cuda_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_cuda_interop> ${Legion_TEST_ARGS} -ll:gpu 1)
 endif()
-
-set_target_cuda_architectures(TARGET realm_cuda_interop ARCHS ${Legion_CUDA_ARCH})
-
-if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-  target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
-endif()
-
-target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

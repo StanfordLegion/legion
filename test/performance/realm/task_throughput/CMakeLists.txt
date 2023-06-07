@@ -27,6 +27,11 @@ if(Legion_USE_CUDA)
   set(GPU_SOURCES task_throughput_gpu.cu)
   add_executable(task_throughput ${CPU_SOURCES} ${GPU_SOURCES})
   set_target_cuda_architectures(TARGET task_throughput ARCHS ${Legion_CUDA_ARCH})
+  # starting with nvcc 10.2, we can error out on all warnings
+  if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+    target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+  endif()
+  target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 elseif(Legion_USE_HIP)
   set(GPU_SOURCES task_throughput_gpu.cu)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
@@ -44,11 +49,3 @@ target_link_libraries(task_throughput Legion::Realm)
 if(Legion_ENABLE_TESTING)
   add_test(NAME task_throughput COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:task_throughput> ${Legion_TEST_ARGS})
 endif()
-
-set_target_cuda_architectures(TARGET task_throughput ARCHS ${Legion_CUDA_ARCH})
-
-if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-  target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
-endif()
-
-target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

@@ -29,11 +29,11 @@ endif()
 set(CPU_SOURCES thrust_interop.cc)
 set(GPU_SOURCES thrust_shim.h thrust_shim.cu)
 add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
-target_link_libraries(thrust_interop Legion::Legion)
 set_target_cuda_architectures(TARGET thrust_interop ARCHS ${Legion_CUDA_ARCH})
-
+# starting with nvcc 10.2, we can error out on all warnings
 if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
   target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
 endif()
-
 target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
+
+target_link_libraries(thrust_interop Legion::Legion)
