@@ -1849,6 +1849,7 @@ namespace Legion {
         enqueue_ready_operation();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplMergeCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -1909,6 +1910,7 @@ namespace Legion {
       complete_mapping(mapped_barrier);
       complete_execution();
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Repl Virtual Close Op 
@@ -4051,7 +4053,7 @@ namespace Legion {
         {
           const RegionRequirement &req = deletion_requirements[idx];
           repl_ctx->invalidate_region_tree_context(req.region, 
-                                    preconditions, to_release);
+                                      find_parent_index(idx));
         }
         if (!preconditions.empty())
           complete_mapping(Runtime::merge_events(preconditions));
@@ -4198,14 +4200,6 @@ namespace Legion {
         for (std::vector<LogicalRegion>::const_iterator it =
              regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
           runtime->forest->destroy_logical_region(*it, applied, &mapping);
-      }
-      if (!to_release.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it =
-              to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete (*it);
-        to_release.clear();
       }
 #ifdef LEGION_SPY
       // Still have to do this for legion spy
@@ -9524,7 +9518,6 @@ namespace Legion {
                                                   context, first_shard);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
                                 RegionNode *region_node, size_t op_ctx_index,
@@ -9597,7 +9590,9 @@ namespace Legion {
         }
         // Now make the equivalence set locally and register it
         EquivalenceSet *result = new EquivalenceSet(runtime, eq_did,
-          owner_space, region_node, context, true/*register now*/, eq_mapping);
+            owner_space, region_node->row_source, 
+            region_node->handle.get_tree_id(), context, 
+            true/*register now*/, eq_mapping);
         result->initialize_collective_references(local_users);
         if (local_users > 1)
         {
@@ -9688,8 +9683,8 @@ namespace Legion {
             // count the number of expected arrivals here if necessary
             EquivalenceSet *result = new EquivalenceSet(runtime,
                finder->second.did, runtime->determine_owner(finder->second.did),
-               region_node, context, true/*register now*/,
-               finder->second.mapping);
+               region_node->row_source, region_node->handle.get_tree_id(),
+               context, true/*register now*/, finder->second.mapping);
 #ifdef DEBUG_LEGION
             assert(finder->second.remaining > 0);
 #endif
@@ -9724,8 +9719,8 @@ namespace Legion {
 #endif
         finder->second.new_set = new EquivalenceSet(runtime,
                finder->second.did, runtime->determine_owner(finder->second.did),
-               region_node, context, true/*register now*/,
-               finder->second.mapping);
+               region_node->row_source, region_node->handle.get_tree_id(),
+               context, true/*register now*/, finder->second.mapping);
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining > 0);
 #endif
@@ -9737,7 +9732,6 @@ namespace Legion {
         created_equivalence_sets.erase(finder);
       return result;
     }
-#endif
 
     //--------------------------------------------------------------------------
     FillView* ShardManager::deduplicate_fill_view_creation(

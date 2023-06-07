@@ -10049,7 +10049,6 @@ namespace Legion {
       deletion_requirements.clear();
       version_infos.clear();
       map_applied_conditions.clear();
-      to_release.clear();
       dependences.clear();
       // Return this to the available deletion ops on the queue
       if (freeop)
@@ -10228,7 +10227,7 @@ namespace Legion {
         {
           const RegionRequirement &req = deletion_requirements[idx];
           parent_ctx->invalidate_region_tree_context(req.region, 
-                             map_applied_conditions, to_release);
+                                        find_parent_index(idx));
         }
       }
       else if (kind == FIELD_DELETION)
@@ -10344,14 +10343,6 @@ namespace Legion {
         for (std::vector<LogicalRegion>::const_iterator it =
               regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
           runtime->forest->destroy_logical_region(*it, preconditions);
-      }
-      if (!to_release.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it =
-              to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete (*it);
-        to_release.clear();
       }
       if (!preconditions.empty())
         complete_operation(Runtime::merge_events(preconditions));
@@ -10788,7 +10779,6 @@ namespace Legion {
       CloseOp::deactivate(false/*free*/);
       close_mask.clear();
       version_info.clear();
-      to_release.clear();
       refinement_mask.clear();
       if (freeop)
         runtime->free_merge_close_op(this);
@@ -10865,6 +10855,7 @@ namespace Legion {
         enqueue_ready_operation();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MergeCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -10912,21 +10903,7 @@ namespace Legion {
         complete_mapping();
       complete_execution();
     }
-
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!to_release.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it =
-              to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete (*it);
-        to_release.clear();
-      }
-      complete_operation();
-    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Post Close Operation 
@@ -11799,6 +11776,7 @@ namespace Legion {
       complete_execution();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RefinementOp::update_refinement(
                                       std::set<RtEvent> &map_applied_conditions)
@@ -11819,7 +11797,6 @@ namespace Legion {
                                       map_applied_conditions, version_infos);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_mapping(void)
     //--------------------------------------------------------------------------

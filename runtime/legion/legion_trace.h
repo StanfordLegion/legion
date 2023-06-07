@@ -854,15 +854,15 @@ namespace Legion {
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
     public:
-      virtual void add_subscription_reference(void);
-      virtual bool remote_subscription_reference(void);
+      virtual void add_subscription_reference(void) 
+        { add_reference(); }
+      virtual bool remove_subscription_reference(void) 
+        { return remove_reference(); }
       virtual RegionTreeID get_region_tree_id(void) const
         { return tree_id; }
       virtual IndexSpaceExpression* get_tracker_expression(void) const
         { return condition_expr; }
       virtual size_t count_outstanding_requests(void) const { return 1; }
-      virtual bool finish_subscription(EqKDTree *owner,
-                                       AddressSpaceID space);
       virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void invalidate_equivalence_sets(void);

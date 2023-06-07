@@ -5194,6 +5194,7 @@ namespace Legion {
                                  FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::dump_physical_state(LogicalRegion region,
                                                ContextID ctx)
@@ -5204,6 +5205,7 @@ namespace Legion {
       region_nodes[region]->dump_physical_context(ctx, &dump_logger,
                                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     }
+#endif
 #endif
 
     //--------------------------------------------------------------------------
@@ -19599,7 +19601,6 @@ namespace Legion {
       state.sanity_check();
 #endif
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_logical_state(ContextID src, ContextID dst,
@@ -19624,7 +19625,6 @@ namespace Legion {
         (*it)->migrate_logical_state(src, dst, merge);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_version_state(ContextID src, ContextID dst,
                              std::set<RtEvent> &applied_events, bool merge,
@@ -19651,7 +19651,6 @@ namespace Legion {
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_version_state(src, dst, applied_events, merge);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_logical_state(ContextID ctx, Serializer &rez,
@@ -19687,7 +19686,6 @@ namespace Legion {
         it->second->unpack_logical_state(ctx, derez);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
                        const bool invalidate, std::set<RtEvent> &applied_events)
@@ -19708,7 +19706,6 @@ namespace Legion {
           delete it->second;
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::unpack_version_state(ContextID ctx, 
@@ -19722,6 +19719,7 @@ namespace Legion {
             to_traverse.begin(); it != to_traverse.end(); it++)
         it->second->unpack_version_state(ctx, derez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::initialize_current_state(ContextID ctx)
@@ -20260,6 +20258,7 @@ namespace Legion {
           delete (*it);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::initialize_disjoint_complete_tree(ContextID ctx,
                                                        const FieldMask &mask)
@@ -20271,6 +20270,7 @@ namespace Legion {
 #endif
       state.initialize_refined_fields(mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     ProjectionRegion* RegionNode::find_largest_disjoint_complete_subtree(
@@ -20797,7 +20797,6 @@ namespace Legion {
       }
       access_disjoint_complete_children.tighten_valid_mask(); 
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::initialize_versioning_analysis(ContextID ctx,
@@ -20818,6 +20817,7 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::perform_versioning_analysis(ContextID ctx,
@@ -20834,6 +20834,7 @@ namespace Legion {
         row_source, true/*expr covers*/, mask, opid, parent_req_index, applied);
     }
     
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::compute_equivalence_sets(ContextID ctx, 
                                               InnerContext *context,
@@ -20872,7 +20873,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
                                    bool self, InnerContext &source_context,
@@ -20900,7 +20900,6 @@ namespace Legion {
           delete it->first;
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,
@@ -20925,6 +20924,7 @@ namespace Legion {
       if (!!parent_mask && (parent != NULL))
         parent->propagate_refinement(ctx, this, parent_mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::find_open_complete_partitions(ContextID ctx,
@@ -21185,6 +21185,7 @@ namespace Legion {
       logger->up();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::print_physical_context(ContextID ctx, 
                                             TreeStateLogger *logger,
@@ -21213,6 +21214,7 @@ namespace Legion {
       }
       logger->up();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::print_context_header(TreeStateLogger *logger)
@@ -21472,6 +21474,7 @@ namespace Legion {
       logger->up();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::dump_physical_context(ContextID ctx,
                                            TreeStateLogger *logger,
@@ -21588,6 +21591,7 @@ namespace Legion {
       logger->log("");
       logger->up();
     }
+#endif
 #endif
 
     /////////////////////////////////////////////////////////////
@@ -22356,7 +22360,6 @@ namespace Legion {
       }
       state.disjoint_complete_accesses.filter_valid_mask(child_overlap);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void PartitionNode::compute_equivalence_sets(ContextID ctx,
@@ -22451,6 +22454,7 @@ namespace Legion {
       if (!!parent_mask)
         parent->propagate_refinement(ctx, this, parent_mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PartitionNode::print_logical_context(ContextID ctx,
@@ -22481,6 +22485,7 @@ namespace Legion {
       logger->up();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PartitionNode::print_physical_context(ContextID ctx,
                                                TreeStateLogger *logger,
@@ -22509,6 +22514,7 @@ namespace Legion {
       }
       logger->up();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PartitionNode::print_context_header(TreeStateLogger *logger)
@@ -22583,6 +22589,7 @@ namespace Legion {
       logger->up();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PartitionNode::dump_physical_context(ContextID ctx,
                                               TreeStateLogger *logger,
@@ -22603,6 +22610,7 @@ namespace Legion {
       logger->log("");
       logger->up();
     }
+#endif
 #endif 
 
   }; // namespace Internal 

@@ -3956,6 +3956,7 @@ namespace Legion {
                                           version_infos, op_id, ready_events);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PartitionRefinementNode::register_refinement(ContextID ctx, 
         const FieldMask &refinement_mask, InnerContext *context,
@@ -3972,6 +3973,7 @@ namespace Legion {
                     op_ctx_index, refinement_number, parent_req_index,
                     ready_events, version_infos);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionSummary
@@ -22992,6 +22994,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool EqSetTracker::finish_subscription(EqKDTree *owner,
+                                           AddressSpaceID space)
+    //--------------------------------------------------------------------------
+    {
+      bool remove_reference;
+      {
+        const std::pair<EqKDTree*,AddressSpaceID> key(owner, space);
+        AutoLock t_lock(tracker_lock);
+        std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::iterator
+          finder = subscription_owners.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != subscription_owners.end());
+        assert(finder->second > 0);
+#endif
+        if (--finder->second == 0)
+          subscription_owners.erase(finder);
+        remove_reference = subscription_owners.empty();
+      }
+      // Do this last in case we delete ourselves
+      if (remove_reference)
+        return remove_subscription_reference();
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void EqSetTracker::handle_equivalence_set_creation(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -23326,10 +23354,12 @@ namespace Legion {
       assert(waiting_infos.empty());
       assert(equivalence_sets.empty());
       assert(equivalence_sets_ready.empty());
+#if 0
       assert(!disjoint_complete);
       assert(disjoint_complete_children.empty());
       assert(disjoint_complete_children_shards.empty());
       assert(refinement_subscriptions.empty());
+#endif
       assert(subscription_owners.empty());
 #endif
     }
@@ -23454,7 +23484,6 @@ namespace Legion {
       }
     } 
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::record_equivalence_sets(VersionInfo *version_info,
                   const FieldMask &mask, IndexSpaceExpression *expr,
@@ -23479,6 +23508,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::record_subscription(VersionManager *owner,
                                              AddressSpaceID space)
@@ -23526,29 +23556,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool VersionManager::finish_subscription(EqKDTree *owner,
-                                             AddressSpaceID space)
+    void VersionManager::add_subscription_reference(void)
     //--------------------------------------------------------------------------
     {
-      bool remove_reference;
-      {
-        const std::pair<EqKDTree*,AddressSpaceID> key(owner, space);
-        AutoLock m_lock(manager_lock);
-        std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::iterator
-          finder = subscription_owners.find(key);
-#ifdef DEBUG_LEGION
-        assert(finder != subscription_owners.end());
-        assert(finder->second > 0);
-#endif
-        if (--finder->second == 0)
-          subscription_owners.erase(finder);
-        remove_reference = subscription_owners.empty();
-      }
-      // Do this last to avoid 
-      if (remove_reference &&
-          node->remove_base_resource_ref(VERSION_MANAGER_REF))
+      // This implicitly keeps us alive
+      node->add_base_resource_ref(VERSION_MANAGER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::remove_subscription_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(VERSION_MANAGER_REF))
         delete node;
-      // Never delete this directly
+      // Never directly delete ourselves
       return false;
     }
 
@@ -23717,9 +23738,11 @@ namespace Legion {
         assert(pending_equivalence_sets.empty());
         assert(waiting_infos.empty());
         assert(equivalence_sets_ready.empty());
+#if 0
         assert(!disjoint_complete);
         assert(disjoint_complete_children.empty());
         assert(disjoint_complete_children_shards.empty());
+#endif
 #endif
         if (!equivalence_sets.empty())
           to_remove.swap(equivalence_sets);
@@ -23750,6 +23773,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::add_node_disjoint_complete_ref(void) const
     //--------------------------------------------------------------------------
@@ -23819,7 +23843,6 @@ namespace Legion {
         }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(IndexSpaceExpression *expr,
                                           EqSetTracker *target,
@@ -24268,7 +24291,6 @@ namespace Legion {
       else
         Runtime::trigger_event(done_event);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::record_refinement(EquivalenceSet *set, 
@@ -24506,7 +24528,6 @@ namespace Legion {
       disjoint_complete |= mask;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_refinement(InnerContext &context,
                                       const FieldMask &mask, bool self,
@@ -24667,7 +24688,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::filter_refinement_subscriptions(const FieldMask &mask,
@@ -24748,7 +24768,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::merge(VersionManager &src, 
                              std::set<RegionTreeNode*> &to_traverse,
@@ -25223,7 +25242,6 @@ namespace Legion {
         it->first->unpack_global_ref();
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *node,
@@ -25237,6 +25255,7 @@ namespace Legion {
       assert(false);
       logger->up();
     } 
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::handle_finalize_eq_sets(const void *args)

@@ -4289,7 +4289,6 @@ namespace Legion {
       else
         finder->second++;
     }
-#endif
 
     //--------------------------------------------------------------------------
     bool TraceConditionSet::finish_subscription(EqKDTree *owner,
@@ -4311,7 +4310,6 @@ namespace Legion {
       return remove_reference();
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void TraceConditionSet::record_equivalence_set(EquivalenceSet *set,
                                                    const FieldMask &mask)
@@ -4358,13 +4356,12 @@ namespace Legion {
       equivalence_sets.tighten_valid_mask();
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void TraceConditionSet::invalidate_equivalence_sets(void)
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EquivalenceSet> to_remove;
-      std::map<AddressSpaceID,std::vector<VersionManager*> > to_cancel;
+      std::map<AddressSpaceID,std::vector<EqKDTree*> > to_cancel;
       {
         AutoLock s_lock(set_lock);
         if (subscription_owners.empty())
@@ -4376,7 +4373,7 @@ namespace Legion {
         }
         // Copy and not remove since we need to see the acknowledgement
         // before we know when it is safe to remove our references
-        for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
+        for (std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::
               const_iterator it = subscription_owners.begin(); 
               it != subscription_owners.end(); it++)
           to_cancel[it->first.second].push_back(it->first.first);
@@ -4388,7 +4385,6 @@ namespace Legion {
         if (it->first->remove_base_resource_ref(TRACE_REF))
           delete it->first;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::capture(EquivalenceSet *set, const FieldMask &mask,

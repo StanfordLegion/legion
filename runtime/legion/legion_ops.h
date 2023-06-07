@@ -1927,7 +1927,6 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo> version_infos;
       std::set<RtEvent> map_applied_conditions;
-      std::vector<EquivalenceSet*> to_release;
       std::map<Operation*,GenerationID> dependences;
       bool has_preconditions;
     }; 
@@ -2070,13 +2069,11 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
     protected:
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;
       VersionInfo version_info;
-      std::vector<EquivalenceSet*> to_release;
       FieldMask refinement_mask;
       bool refinement_overwrite;
     };

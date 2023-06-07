@@ -3461,9 +3461,7 @@ namespace Legion {
           std::vector<RtEvent> &ready_events);
     public:
       virtual void add_subscription_reference(void) = 0;
-      virtual bool remote_subscription_reference(void) = 0;
-      virtual bool finish_subscription(EqKDTree *owner,
-                                       AddressSpaceID space) = 0;
+      virtual bool remove_subscription_reference(void) = 0;
     public:
       virtual RegionTreeID get_region_tree_id(void) const = 0;
       virtual IndexSpaceExpression* get_tracker_expression(void) const = 0;
@@ -3473,6 +3471,7 @@ namespace Legion {
     public:
       void cancel_subscriptions(Runtime *runtime,
        const std::map<AddressSpaceID,std::vector<EqKDTree*> > &to_cancel);
+      bool finish_subscription(EqKDTree *owner, AddressSpaceID space);
       static void finish_subscriptions(Runtime *runtime, EqKDTree &source,
           LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
           std::set<RtEvent> &applied_events);
@@ -4164,8 +4163,10 @@ namespace Legion {
                                        UniqueID opid, unsigned parent_req_index,
                                        std::set<RtEvent> &ready);
     protected:
+#if 0
       void add_node_disjoint_complete_ref(void) const;
       void remove_node_disjoint_complete_ref(void) const;
+#endif
       void record_equivalence_sets(VersionInfo *version_info,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *expr,
@@ -4173,7 +4174,7 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events) const;
     public:
       virtual void add_subscription_reference(void);
-      virtual bool remote_subscription_reference(void);
+      virtual bool remove_subscription_reference(void);
       virtual RegionTreeID get_region_tree_id(void) const;
       virtual IndexSpaceExpression* get_tracker_expression(void) const;
       virtual size_t count_outstanding_requests(void) const;
@@ -4184,6 +4185,7 @@ namespace Legion {
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);
     public:
+#if 0
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
                                           const FieldMask &mask);
@@ -4202,10 +4204,8 @@ namespace Legion {
                                     const FieldMask &mask,
                                     const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events);
-#if 0
       static void handle_compute_equivalence_sets_response(
                   Deserializer &derez, Runtime *runtime, AddressSpaceID source);
-#endif
       // Call these from region nodes
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
                              FieldMask &parent_mask);
@@ -4250,6 +4250,7 @@ namespace Legion {
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                                 TreeStateLogger *logger);
+#endif
     public:
       static void handle_finalize_eq_sets(const void *args);
     public:
@@ -4261,6 +4262,7 @@ namespace Legion {
     protected: 
       LegionList<WaitingVersionInfo> waiting_infos;
       LegionMap<RtUserEvent,FieldMask> equivalence_sets_ready;
+#if 0
     protected:
       // The fields for which this node has disjoint complete information
       FieldMask disjoint_complete;
@@ -4282,6 +4284,7 @@ namespace Legion {
       // between fields and equivalence sets in a node represeting a refinement
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EqSetTracker> > refinement_subscriptions;
+#endif
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 

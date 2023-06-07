@@ -5014,6 +5014,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::initialize_equivalence_set_kd_tree(
+       EqKDTree *tree, EquivalenceSet *set, const FieldMask &mask, bool current)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+        typed_tree->initialize_set(set, itr.rect, mask, current);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -5026,14 +5040,28 @@ namespace Legion {
           ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       DomainT<DIM,T> realm_index_space;
       get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
         typed_tree->compute_equivalence_sets(itr.rect, mask, tracker,
             tracker_space, eq_sets, pending_sets, subscriptions,
             to_create, creation_rects, remote_shard_rects);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::invalidate_equivalence_set_kd_tree(
+                   EqKDTree *tree, const FieldMask &mask, bool move_to_previous)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+        typed_tree->invalidate_tree(itr.rect, mask, move_to_previous);
     }
     
     //--------------------------------------------------------------------------
@@ -6350,6 +6378,29 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void EqKDTreeT<DIM,T>::compute_shard_equivalence_sets(
+          const Domain &domain, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects, ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      const Rect<DIM,T> rect = domain;
+      std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
+      compute_equivalence_sets(rect, mask, tracker, tracker_space, eq_sets,
+          pending_sets, subscriptions, to_create, creation_rects,
+          remote_shard_rects, local_shard);
+#ifdef DEBUG_LEGION
+      // Should not have any of these at this point
+      assert(remote_shard_rects.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceExpression* EqKDTreeT<DIM,T>::create_from_rectangles(
                RegionTreeForest *forest, const std::vector<Domain> &rects) const
     //--------------------------------------------------------------------------
@@ -6363,6 +6414,10 @@ namespace Legion {
       return new InstanceExpression<DIM,T>(&rectangles.front(), 
                                            rectangles.size(), forest);
     }
+
+    /////////////////////////////////////////////////////////////
+    // Equivalence Set KD Node
+    /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

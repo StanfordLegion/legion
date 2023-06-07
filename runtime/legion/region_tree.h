@@ -817,7 +817,9 @@ namespace Legion {
       // These are debugging methods and are never called from
       // actual code, therefore they never take locks
       void dump_logical_state(LogicalRegion region, ContextID ctx);
+#if 0
       void dump_physical_state(LogicalRegion region, ContextID ctx);
+#endif
 #endif
     public:
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
@@ -2303,6 +2305,13 @@ namespace Legion {
     public:
       virtual EqKDTree* create_equivalence_set_kd_tree(
                                         size_t total_shards = 1) = 0;
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        bool current) = 0;
+      virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
+                                        const FieldMask &mask,
+                                        bool move_to_previous) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2604,6 +2613,10 @@ namespace Legion {
                                         std::set<ShardID> &range_shards);
     public:
       virtual EqKDTree* create_equivalence_set_kd_tree(size_t total_shards = 1);
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        bool current);
       virtual void compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -2614,6 +2627,9 @@ namespace Legion {
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
+      virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
+                                        const FieldMask &mask,
+                                        bool move_to_previous);
     public:
       bool contains_point(const Point<DIM,T> &point);
     protected:
@@ -2989,9 +3005,26 @@ namespace Legion {
     public:
       virtual ~EqKDTree(void) = 0;
     public:
+      virtual void compute_shard_equivalence_sets(
+          const Domain &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          ShardID local_shard) = 0;
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+      virtual void extract_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          ShardID local_shard, size_t total_shards) const = 0;
+      virtual void extract_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, size_t total_source_shards,
+          size_t total_target_shards, RegionNode *region) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space) = 0;
       // Just use this method of indirecting into template land
@@ -3012,6 +3045,19 @@ namespace Legion {
       EqKDTreeT(const Rect<DIM,T> &rect);
       virtual ~EqKDTreeT(void) = 0;
     public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  bool current) = 0;
+      virtual void compute_shard_equivalence_sets(
+          const Domain &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          ShardID local_shard);
       virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -3025,6 +3071,9 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask,
+                                   bool move_to_previous) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space) = 0;
       // Just use this method of indirecting into template land
@@ -3048,6 +3097,10 @@ namespace Legion {
     public:
       EqKDNode& operator=(const EqKDNode &rhs) = delete;
     public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  bool current);
       virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -3061,6 +3114,17 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space);
+      virtual void extract_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          ShardID local_shard, size_t total_shards) const;
+      virtual void extract_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, size_t total_source_shards,
+          size_t total_target_shards, RegionNode *region);
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask,
+                                   bool move_to_previous);
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space);
     protected:
@@ -4030,7 +4094,6 @@ namespace Legion {
                                    RegionTreeNode *next_child,
                                    FieldMask &open_below,
                                    bool force_close_next);
-#endif
     public:
       void migrate_logical_state(ContextID src, ContextID dst, bool merge,
                const std::vector<ShardID> *shard_to_shard_mapping = NULL);
@@ -4044,6 +4107,7 @@ namespace Legion {
                               const bool invalidate,
                               std::set<RtEvent> &applied_events); 
       void unpack_version_state(ContextID ctx, Deserializer &derez);
+#endif
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -4090,25 +4154,31 @@ namespace Legion {
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
+#if 0
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask,
                                   std::deque<RegionTreeNode*> &to_traverse) = 0;
+#endif
       virtual void print_context_header(TreeStateLogger *logger) = 0;
+#if 0
       virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  bool self, InnerContext &source_context,
                                  std::set<RtEvent> &applied_events,
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_root = false) = 0;
+#endif
 #ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask) = 0;
+#if 0
       virtual void dump_physical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
+#endif
 #endif
     public:
       // Logical helper operations
@@ -4182,7 +4252,9 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
+#if 0
       void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
+#endif
       ProjectionRegion* find_largest_disjoint_complete_subtree(
           InnerContext *context, const std::vector<ShardID> &participants,
           size_t *leaves = NULL);
@@ -4255,10 +4327,12 @@ namespace Legion {
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
+#if 0
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask,
                                       std::deque<RegionTreeNode*> &to_traverse);
+#endif
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
@@ -4270,9 +4344,11 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask);
+#if 0
       virtual void dump_physical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
+#endif
 #endif
     public:
       // Support for refinements and versioning
@@ -4281,18 +4357,19 @@ namespace Legion {
                                          const FieldMask &refinement_mask,
                                          FieldMask &refined_partition,
                                          std::set<RtEvent> &applied_events);
-#endif
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                                           const FieldMask &mask);
       void initialize_nonexclusive_virtual_analysis(ContextID ctx,
                                   const FieldMask &mask,
                                   const FieldMaskSet<EquivalenceSet> &eq_sets);
+#endif
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
                                        UniqueID opid, unsigned parent_req_index,
                                        std::set<RtEvent> &ready_events);
+#if 0
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,
                                     EqSetTracker *target,
@@ -4311,6 +4388,7 @@ namespace Legion {
                              const FieldMask &mask);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
                                 const FieldMask &mask);
+#endif
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -4417,7 +4495,6 @@ namespace Legion {
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
                                          std::set<RtEvent> &applied_events);
-#endif
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *context,
                                     EqSetTracker *target,
@@ -4436,15 +4513,18 @@ namespace Legion {
                              const FieldMask &mask);
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask);
+#endif
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
+#if 0
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask,
                                       std::deque<RegionTreeNode*> &to_traverse);
+#endif
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
@@ -4456,9 +4536,11 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask);
+#if 0
       virtual void dump_physical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
+#endif
 #endif
     public:
       const LogicalPartition handle;

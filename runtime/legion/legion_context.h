@@ -599,8 +599,8 @@ namespace Legion {
       const std::vector<OutputRegion> get_output_regions(void) const
         { return output_regions; }
     public:
-      void add_created_region(LogicalRegion handle, const bool task_local,
-                              const bool output_region = false);
+      unsigned add_created_region(LogicalRegion handle, const bool task_local,
+                                  const bool output_region = false);
       // for logging created region requirements
       void log_created_requirements(void);
     public:
@@ -1150,18 +1150,28 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
-      EqKDTree* find_equivalence_set_kd_tree(unsigned req_index);
+      EqKDTree* find_equivalence_set_kd_tree(unsigned req_index,
+                               bool return_null_if_doesnt_exist = false);
+      RtEvent report_equivalence_sets(EqSetTracker *target, 
+          AddressSpaceID target_space, const FieldMask &mask,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          size_t expected_responses, std::vector<RtEvent> &ready_events);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index, 
           std::set<RtEvent> &applied_events);
+#if 0
       virtual void compute_shard_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, IndexSpaceExpression *expr,
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
+#endif
       virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
                                               IndexSpaceNode *color_space);
       virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
@@ -1690,13 +1700,13 @@ namespace Legion {
       void invalidate_created_requirement_contexts(const bool is_top_level_task,
                             std::set<RtEvent> &applied,
                             const ShardMapping *mapping, ShardID source_shard);
-      virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                          const std::vector<RegionNode*> &created_state,
+      virtual void receive_created_region_contexts(
+                          const std::vector<RegionNode*> &created_regions,
+                          const std::vector<EqKDTree*> &created_trees,
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
-      void invalidate_region_tree_context(LogicalRegion handle,
-                                      std::set<RtEvent> &applied_events,
-                                      std::vector<EquivalenceSet*> &to_release);
+      void invalidate_region_tree_context(LogicalRegion handle, 
+                                          unsigned req_index);
       virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:
@@ -2032,10 +2042,6 @@ namespace Legion {
       std::list<std::pair<FillView*,DistributedID> > future_fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
     protected:
-      // Equivalence sets that were invalidated by 
-      // invalidate_region_tree_contexts and need to be released
-      std::vector<EquivalenceSet*> invalidated_refinements;
-    protected:
       // This data structure should only be accessed during the logical
       // analysis stage of the pipeline and therefore no lock is needed
       std::map<IndexTreeNode*,
@@ -2083,8 +2089,9 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
-      virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                          const std::vector<RegionNode*> &created_state,
+      virtual void receive_created_region_contexts(
+                          const std::vector<RegionNode*> &created_regions,
+                          const std::vector<EqKDTree*> &created_trees,
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
@@ -2497,14 +2504,17 @@ namespace Legion {
     public:
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
-      virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                          const std::vector<RegionNode*> &created_state,
+      virtual void receive_created_region_contexts(
+                          const std::vector<RegionNode*> &created_regions,
+                          const std::vector<EqKDTree*> &created_trees,
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
+#if 0
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
                           const std::multimap<ShardID,ShardID> &src_to_dst,
                           size_t num_srcs, std::set<RtEvent> &applied_events);
+#endif
       bool compute_shard_to_shard_mapping(const ShardMapping &src_mapping,
                 std::multimap<ShardID,ShardID> &src_to_dst_mapping) const;
       void handle_created_region_contexts(Deserializer &derez,
@@ -2987,11 +2997,13 @@ namespace Legion {
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index,
           std::set<RtEvent> &applied_events);
+#if 0
       virtual void compute_shard_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, IndexSpaceExpression *expr,
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
+#endif
       void handle_compute_equivalence_sets(Deserializer &derez);
       virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
                                               IndexSpaceNode *color_space);
@@ -3430,8 +3442,9 @@ namespace Legion {
                           std::set<RtEvent> &applied,
                           const ShardMapping *shard_mapping = NULL,
                           ShardID source_shard = 0);
-      virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                          const std::vector<RegionNode*> &created_state,
+      virtual void receive_created_region_contexts(
+                          const std::vector<RegionNode*> &created_regions,
+                          const std::vector<EqKDTree*> &created_trees,
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
       static void handle_created_region_contexts(Runtime *runtime, 
