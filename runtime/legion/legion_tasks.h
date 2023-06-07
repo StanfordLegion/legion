@@ -545,6 +545,7 @@ namespace Legion {
                                     std::vector<InstanceSet> &valid_instances);
       void replay_map_task_output(void);
       InnerContext* create_implicit_context(void);
+      void configure_execution_context(InnerContext *ctx);
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
     protected:
