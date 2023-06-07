@@ -97,7 +97,13 @@ foreach(test IN LISTS REALM_TESTS)
     endif()
   endif()
 
-  target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
+  set_target_cuda_architectures(TARGET ${test} ARCHS ${Legion_CUDA_ARCH})
+
+  if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+    target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+  endif()
+
+  target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 endforeach()
 
 # scatter uses C++11 lambdas

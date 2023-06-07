@@ -44,4 +44,10 @@ if(Legion_ENABLE_TESTING)
   add_test(NAME realm_cuda_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_cuda_interop> ${Legion_TEST_ARGS} -ll:gpu 1)
 endif()
 
-target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
+set_target_cuda_architectures(TARGET realm_cuda_interop ARCHS ${Legion_CUDA_ARCH})
+
+if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+  target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+endif()
+
+target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

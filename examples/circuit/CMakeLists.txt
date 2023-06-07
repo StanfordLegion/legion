@@ -50,4 +50,11 @@ if(Legion_ENABLE_TESTING)
   add_test(NAME circuit COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:circuit> ${Legion_TEST_ARGS})
 endif()
 
-target_compile_options(circuit PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
+set_target_cuda_architectures(TARGET circuit ARCHS ${Legion_CUDA_ARCH})
+
+# starting with nvcc 10.2, we can error out on all warnings
+if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+  target_compile_options(circuit PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+endif()
+
+target_compile_options(circuit PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

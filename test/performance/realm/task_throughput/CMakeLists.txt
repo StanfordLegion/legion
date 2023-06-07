@@ -45,4 +45,10 @@ if(Legion_ENABLE_TESTING)
   add_test(NAME task_throughput COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:task_throughput> ${Legion_TEST_ARGS})
 endif()
 
-target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
+set_target_cuda_architectures(TARGET task_throughput ARCHS ${Legion_CUDA_ARCH})
+
+if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+  target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+endif()
+
+target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

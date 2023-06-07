@@ -807,13 +807,15 @@ add_library(Legion::LegionRuntime ALIAS LegionRuntime)
 
 # Add CUDA-specific properties
 if(Legion_USE_CUDA)
-  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
                          -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
 
   # starting with nvcc 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-    target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Werror=all-warnings>)
+    target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
   endif()
+
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 
   # complex reduction ops bring in a public dependency on cuda headers
   if(Legion_REDOP_COMPLEX)
