@@ -973,7 +973,7 @@ namespace Realm {
   //
 
   EventImpl::EventImpl(void)
-    : me((ID::IDType)-1), owner(-1)
+    : me((ID::IDType)-1), owning_processor(nullptr), owner(-1)
   {}
 
   EventImpl::~EventImpl(void)
@@ -1245,8 +1245,20 @@ namespace Realm {
 
     /*static*/ GenEventImpl *GenEventImpl::create_genevent(void)
     {
-      GenEventImpl *impl = get_runtime()->local_event_free_list->alloc_entry();
-      assert(impl);
+      GenEventImpl *impl = nullptr;
+      RuntimeImpl *runtime_impl = get_runtime();
+
+      Processor current_proc = Processor::get_executing_processor();
+      if(current_proc != Processor::NO_PROC) {
+        ProcessorImpl *proc_impl = runtime_impl->get_processor_impl(current_proc);
+        assert(proc_impl != nullptr);
+        impl = proc_impl->create_genevent();
+      }
+      else {
+        impl = runtime_impl->local_event_free_list->alloc_entry();
+      }
+
+      assert(impl != nullptr);
       assert(ID(impl->me).is_event());
 
       log_event.spew() << "event created: event=" << impl->current_event();
@@ -1260,6 +1272,18 @@ namespace Realm {
       }
 #endif
       return impl;
+    }
+
+    /*static*/ void GenEventImpl::free_genevent(GenEventImpl *impl)
+    {
+      // Free this entry to the global list
+      if (impl->owning_processor != nullptr) {
+        // If this genevent belongs to a processor, return it
+        impl->owning_processor->free_genevent(impl);
+      }
+      else {
+        get_runtime()->local_event_free_list->free_entry(impl);
+      }
     }
 
     bool GenEventImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter)
@@ -1885,7 +1909,7 @@ namespace Realm {
 
 	// free event?
 	if(free_event)
-	  get_runtime()->local_event_free_list->free_entry(this);
+          GenEventImpl::free_genevent(this);
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
 	assert(trigger_node == (int)Network::my_node_id);
@@ -1998,7 +2022,7 @@ namespace Realm {
       }
 
       if(free_event)
-	get_runtime()->local_event_free_list->free_entry(this);
+        GenEventImpl::free_genevent(this);
     }
 
     /*static*/ BarrierImpl *BarrierImpl::create_barrier(unsigned expected_arrivals,
@@ -2320,7 +2344,7 @@ static void *bytedup(const void *data, size_t datalen)
       if(reduce_value_size) {
         char buffer[129];
 	for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
-	  sprintf(buffer+2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
+	  snprintf(buffer+2*i, sizeof buffer - 2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
 	log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s",
 	                 me.id(), barrier_gen, reduce_value_size, buffer);
       }

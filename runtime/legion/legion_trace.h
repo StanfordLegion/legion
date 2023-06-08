@@ -611,8 +611,7 @@ namespace Legion {
                        const FieldMaskSet<IndexSpaceExpression> &right_exprs,
                        FailedPrecondition *condition) const;
       void antialias_individual_view(IndividualView *view, FieldMask mask);
-      void antialias_collective_view(CollectiveView *view,
-                                     const FieldMask &mask,
+      void antialias_collective_view(CollectiveView *view, FieldMask mask,
                                      FieldMaskSet<InstanceView> &altviews);
     protected:
       typedef LegionMap<LogicalView*,
@@ -1031,7 +1030,7 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent pred_guard,
                              LgEvent src_unique, LgEvent dst_unique,
-                             int priority);
+                             int priority, CollectiveKind collective);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1068,7 +1067,8 @@ namespace Legion {
                              RegionTreeID tree_id,
 #endif
                              ApEvent precondition, PredEvent pred_guard,
-                             LgEvent unique_event, int priority);
+                             LgEvent unique_event, int priority,
+                             CollectiveKind collective);
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
                                   unsigned idx,
@@ -1373,7 +1373,7 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent guard_event,
                              LgEvent src_unique, LgEvent dst_unique,
-                             int priority);
+                             int priority, CollectiveKind collective);
       virtual void record_issue_fill(const TraceLocalID &tlid, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -1384,7 +1384,8 @@ namespace Legion {
                              RegionTreeID tree_id,
 #endif
                              ApEvent precondition, PredEvent guard_event,
-                             LgEvent unique_event, int priority);
+                             LgEvent unique_event, int priority, 
+                             CollectiveKind collective);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1729,7 +1730,7 @@ namespace Legion {
                 UniqueID fill_uid, FieldSpace handle, RegionTreeID tree_id,
 #endif
                 unsigned precondition_idx, LgEvent unique_event,
-                int priority);
+                int priority, CollectiveKind collective);
       virtual ~IssueFill(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1756,6 +1757,7 @@ namespace Legion {
       unsigned precondition_idx;
       LgEvent unique_event;
       int priority;
+      CollectiveKind collective;
     };
 
     /**
@@ -1778,7 +1780,8 @@ namespace Legion {
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                 unsigned precondition_idx,
-                LgEvent src_unique, LgEvent dst_unique, int priority);
+                LgEvent src_unique, LgEvent dst_unique,
+                int priority, CollectiveKind collective);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1804,6 +1807,7 @@ namespace Legion {
       unsigned precondition_idx;
       LgEvent src_unique, dst_unique;
       int priority;
+      CollectiveKind collective;
     };
 
     /**

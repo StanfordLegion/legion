@@ -720,7 +720,8 @@ namespace Legion {
                                              PredEvent pred_guard,
                                              LgEvent src_unique,
                                              LgEvent dst_unique,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -757,6 +758,7 @@ namespace Legion {
           rez.serialize(src_unique);
           rez.serialize(dst_unique);
           rez.serialize(priority);
+          rez.serialize(collective);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -769,7 +771,7 @@ namespace Legion {
                               src_tree_id, dst_tree_id,
 #endif
                               precondition, pred_guard,
-                              src_unique, dst_unique, priority);
+                              src_unique, dst_unique, priority, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -875,7 +877,8 @@ namespace Legion {
                                              ApEvent precondition,
                                              PredEvent pred_guard,
                                              LgEvent unique_event,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -905,6 +908,7 @@ namespace Legion {
           rez.serialize(pred_guard);  
           rez.serialize(unique_event);
           rez.serialize(priority);
+          rez.serialize(collective);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -917,7 +921,7 @@ namespace Legion {
                                       fill_uid, handle, tree_id,
 #endif
                                       precondition, pred_guard,
-                                      unique_event, priority);
+                                      unique_event, priority, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -1375,6 +1379,8 @@ namespace Legion {
             derez.deserialize(dst_unique);
             int priority;
             derez.deserialize(priority);
+            CollectiveKind collective;
+            derez.deserialize(collective);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
@@ -1384,7 +1390,8 @@ namespace Legion {
                                    src_tree_id, dst_tree_id,
 #endif
                                    precondition, pred_guard,
-                                   src_unique, dst_unique, priority);
+                                   src_unique, dst_unique,
+                                   priority, collective);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1475,6 +1482,8 @@ namespace Legion {
             derez.deserialize(unique_event);
             int priority;
             derez.deserialize(priority);
+            CollectiveKind collective;
+            derez.deserialize(collective);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs; 
             // Do the base call
@@ -1484,7 +1493,7 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard,
-                                   unique_event, priority);
+                                   unique_event, priority, collective);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -5152,8 +5161,12 @@ namespace Legion {
       {
         const RegionUsage write_usage((redop > 0) ? LEGION_REDUCE_PRIV : 
             LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, redop);
-        tracing_eq->update_tracing_valid_views(dst, expr, write_usage, mask, 
-                                    false/*do not invalidate copies here*/);
+        // If we're doing a reduction, that does need to invalidate 
+        // everything that is not being reduced to since it is a kind
+        // of a write and this instance has dirty state, otherwise normal
+        // copies are just making another copy of the same data
+        tracing_eq->update_tracing_valid_views(dst, expr, write_usage, mask,
+                                               (redop > 0)/*invalidates*/);
       }
     }
 
@@ -8639,7 +8652,7 @@ namespace Legion {
       std::vector<CopyAcrossHelper*> across_helpers;
       std::set<RtEvent> deferral_events, applied_events;
       RegionNode *dst_node = runtime->forest->get_node(dst_handle);
-      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
+      IndexSpaceExpression *dst_expr = dst_node->row_source;
       // Make sure that all our pointers are ready
       RtEvent ready_event;
       if (!ready_events.empty())
@@ -17438,12 +17451,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_equivalence_set_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);

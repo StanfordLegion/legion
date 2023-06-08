@@ -75,16 +75,17 @@ namespace Realm {
 
     public:
       struct ProcessorMemoryAffinity {
-	Processor p;
-	Memory m;
-	unsigned bandwidth; // TODO: consider splitting read vs. write?
-	unsigned latency;
+        Processor p;        // accessing processor
+        Memory m;           // target memory
+        unsigned bandwidth; // in MB/s
+        unsigned latency;   // in nanoseconds
       };
 
       struct MemoryMemoryAffinity {
-	Memory m1, m2;
-	unsigned bandwidth;
-	unsigned latency;
+        Memory m1;          // source memory
+        Memory m2;          // destination memory
+        unsigned bandwidth; // in MB/s
+        unsigned latency;   // in nanoseconds
       };
 
       int get_proc_mem_affinity(std::vector<ProcessorMemoryAffinity>& result,

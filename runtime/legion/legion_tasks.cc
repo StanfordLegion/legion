@@ -4556,31 +4556,31 @@ namespace Legion {
               is_output_global(idx), is_output_valid(idx));
 
         // Initialize any region tree contexts
-        std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
-                                version_infos, unmap_events, execution_events);
+                                                  version_infos, unmap_events);
         // Update the physical regions with any padding they might have
         if (variant->needs_padding)
           execution_context->record_padded_fields(variant);
-        // Execution events come from copying over virtual mapping state
-        // which needs to be done before the child task starts
-        if (!execution_events.empty())
-          for (std::set<RtEvent>::const_iterator it = 
-                execution_events.begin(); it != execution_events.end(); it++)
-            wait_on_events.insert(ApEvent(*it));
       }
       // If we have a predicate event then merge that in here as well
       if (true_guard.exists())
         wait_on_events.insert(ApEvent(true_guard));
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
-      // Take all the locks in order in the proper way
+      // Need a copy of any locks to release on the stack since the 
+      // atomic_locks cannot be touched after we launch the task
+      std::vector<Reservation> to_release;
       if (!atomic_locks.empty())
       {
+        // Take all the locks in order in the proper way
+        to_release.reserve(atomic_locks.size());
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
           start_condition = Runtime::acquire_ap_reservation(it->first, 
                                           it->second, start_condition);
+          to_release.push_back(it->first);
+        }
       }
       // STEP 3: Finally we get to launch the task
       // Mark that we have an outstanding task in this context 
@@ -4695,11 +4695,11 @@ namespace Legion {
         {
           variant->dispatch_inline(launch_processor, execution_context);
           // Release any reservations that we took on behalf of this task
-          if (!atomic_locks.empty())
+          if (!to_release.empty())
           {
-            for (std::map<Reservation,bool>::const_iterator it = 
-                  atomic_locks.begin(); it != atomic_locks.end(); it++)
-              Runtime::release_reservation(it->first);
+            for (std::vector<Reservation>::const_iterator it = 
+                  to_release.begin(); it != to_release.end(); it++)
+              Runtime::release_reservation(*it);
           }
         }
       }
@@ -4712,11 +4712,11 @@ namespace Legion {
         // Note this happens before protection of the event for predication
         // because the acquires were also subject to poisoning so we either
         // want all the releases to be done or poisoned the same as the acquires
-        if (!atomic_locks.empty())
+        if (!to_release.empty())
         {
-          for (std::map<Reservation,bool>::const_iterator it = 
-                atomic_locks.begin(); it != atomic_locks.end(); it++)
-            Runtime::release_reservation(it->first, task_launch_event);
+          for (std::vector<Reservation>::const_iterator it = 
+                to_release.begin(); it != to_release.end(); it++)
+            Runtime::release_reservation(*it, task_launch_event);
         }
         // If this task was predicated then we need to protect everything that
         // comes after this from the predication poison
@@ -5367,12 +5367,12 @@ namespace Legion {
       this->redop = rhs->redop;
       if (this->redop != 0)
       {
+        this->reduction_op = rhs->reduction_op;
         this->deterministic_redop = rhs->deterministic_redop;
         if (!this->deterministic_redop)
         {
           // Only need to initialize this if we're not doing a 
           // deterministic reduction operation
-          this->reduction_op = rhs->reduction_op;
           this->serdez_redop_fns = rhs->serdez_redop_fns;
         }
       }
@@ -5564,12 +5564,12 @@ namespace Legion {
       derez.deserialize(redop);
       if (redop > 0)
       {
+        reduction_op = Runtime::get_reduction_op(redop);
         derez.deserialize(deterministic_redop);
-        // Only need to fill these in if we're not doing a 
-        // deterministic reduction operation
         if (!deterministic_redop)
         {
-          reduction_op = Runtime::get_reduction_op(redop);
+          // Only need to fill this in if we're not doing a 
+          // deterministic reduction operation
           serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
         }
       }
@@ -6527,7 +6527,7 @@ namespace Legion {
         rez.serialize<bool>(valid_output_regions[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_task_context(rez);
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
@@ -6573,8 +6573,9 @@ namespace Legion {
       derez.deserialize(orig_task);
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
-      DistributedID context_did;
-      derez.deserialize(context_did);
+      // Figure out what our parent context is
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
       derez.deserialize(top_level_task);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -6597,10 +6598,6 @@ namespace Legion {
         deactivate();
         return false;
       }
-      // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = 
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
       if (!elide_future_return)
       {
         result = FutureImpl::unpack_future(runtime, derez);
@@ -7675,8 +7672,6 @@ namespace Legion {
       current_proc = proc;
       shard_manager = manager;
       shard_barrier = shard_manager->get_shard_task_barrier();
-      if (manager->original_task != NULL)
-        context_did = manager->original_task->get_context()->did;
       // Only make our termination event on the node where the shard will run
       if (runtime->find_address_space(proc) == runtime->address_space)
         single_task_termination = Runtime::create_ap_user_event(NULL);
@@ -7938,7 +7933,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       pack_single_task(rez, target);
-      rez.serialize(context_did);
+      parent_ctx->pack_task_context(rez);
       return false;
     }
 
@@ -7954,18 +7949,15 @@ namespace Legion {
       // Save this on the stack to prevent it being overwritten by unpack_single
       const ApUserEvent temp_single_task_termination = single_task_termination;
       unpack_single_task(derez, ready_events);
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Restore the single task termination event
 #ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
 #endif
       single_task_termination = temp_single_task_termination;
-      derez.deserialize(context_did);
-      // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = 
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
       return false;
     }
 
@@ -8587,8 +8579,7 @@ namespace Legion {
           lo[dim] = extents[c];
           hi[dim] = extents[c + 1] - 1;
         }
-        forest->set_pending_space_domain(
-          child->handle, Domain(lo, hi), runtime->address_space);
+        forest->set_pending_space_domain(child->handle, Domain(lo, hi));
       }
 
       // Finally, compute the extents of the root index space and return it
@@ -8632,14 +8623,13 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain, runtime->address_space))
+          if (parent->set_domain(root_domain))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(all_output_sizes[idx],
-                                          runtime->address_space))
+        else if (parent->set_output_union(all_output_sizes[idx]))
           delete parent;
       }
     }
@@ -11112,7 +11102,7 @@ namespace Legion {
       rez.serialize(index_owner);
       rez.serialize(remote_unique_id);
       rez.serialize(origin_mapped);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_task_context(rez);
       rez.serialize(internal_space);
       if (!elide_future_return)
       {
@@ -11185,8 +11175,8 @@ namespace Legion {
       derez.deserialize(index_owner);
       derez.deserialize(remote_unique_id); 
       derez.deserialize(origin_mapped);
-      DistributedID context_did;
-      derez.deserialize(context_did);
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
       derez.deserialize(internal_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
@@ -11198,18 +11188,9 @@ namespace Legion {
       num_uncommitted_points = num_points;
       // Remote slice tasks are always resolved
       resolved = true;
-      // Check to see if we ended up back on the original node
       // We have to do this before unpacking the points
-      if (is_remote())
-      {
-        RtEvent ctx_ready;
-        parent_ctx =
-          runtime->find_or_request_inner_context(context_did, ctx_ready);
-        if (ctx_ready.exists() && !ctx_ready.has_triggered())
-          ctx_ready.wait();
-      }
-      else
-        parent_ctx = index_owner->parent_ctx;
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       if (!elide_future_return)
       {
         if (redop == 0)

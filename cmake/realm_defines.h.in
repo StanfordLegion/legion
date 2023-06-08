@@ -72,4 +72,8 @@
 
 #cmakedefine REALM_USE_NVTX
 
+#cmakedefine REALM_USE_UNWIND
+
+#cmakedefine REALM_USE_LIBDW
+
 #cmakedefine REALM_RESPONSIVE_TIMELIMIT @REALM_RESPONSIVE_TIMELIMIT@

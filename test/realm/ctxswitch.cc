@@ -318,7 +318,12 @@ void top_level_task(const void *args, size_t arglen,
 	  printf("TOO FAST!\n");
 	  errors++;
 	}
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
+        // macOS ARM seems slower for some reason...
+	if(elapsed > (1.75 * exp_time)) {
+#else
 	if(elapsed > (1.25 * exp_time)) {
+#endif
 	  printf("TOO SLOW!\n");
 	  errors++;
 	}

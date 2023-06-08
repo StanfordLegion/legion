@@ -118,6 +118,10 @@ namespace Realm {
   // signal handlers
   //
 
+  namespace ThreadLocal {
+    static REALM_THREAD_LOCAL int error_signal_value = 0;
+  };
+
   static void register_error_signal_handler(void (*handler)(int))
   {
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
@@ -1637,7 +1641,7 @@ namespace Realm {
       DiskMemory *diskmem;
       if(disk_mem_size > 0) {
         char file_name[30];
-        sprintf(file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
                                  disk_mem_size,
@@ -2791,6 +2795,16 @@ namespace Realm {
     /*static*/
     void RuntimeImpl::realm_backtrace(int signal)
     {
+      // the signal handler has been called before, it is called again because
+      // an error is occured during printing the trace, to avoid handling signals 
+      // recursively, we just exit.
+      if (ThreadLocal::error_signal_value != 0) {
+        std::cerr << "Signal " << signal 
+                  << " raised inside realm signal handler, previous caught signal " << ThreadLocal::error_signal_value
+                  << std::endl;
+        unregister_error_signal_handler();
+        abort();
+      }
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       assert((signal == SIGILL) || (signal == SIGFPE) ||
              (signal == SIGABRT) || (signal == SIGSEGV) ||
@@ -2858,7 +2872,7 @@ namespace Realm {
       free(buffer);
       free(funcname);
 #endif
-      unregister_error_signal_handler();
+      ThreadLocal::error_signal_value = signal;
       std::cerr << "Signal " << signal << " received by node " << Network::my_node_id
 #ifdef REALM_ON_WINDOWS
                 << ", process " << GetCurrentProcessId()

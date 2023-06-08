@@ -248,22 +248,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_pending_partition(TaskContext *ctx,
+    RtEvent RegionTreeForest::create_pending_partition(InnerContext *ctx,
                                                        IndexPartition pid,
                                                        IndexSpace parent,
                                                        IndexSpace color_space,
-                                                    LegionColor partition_color,
+                                                   LegionColor &partition_color,
                                                        PartitionKind part_kind,
                                                        DistributedID did,
                                                        Provenance *provenance,
-                                                       ApEvent partition_ready,
-                                                     ApBarrier partial_pending)
+                                                     CollectiveMapping *mapping,
+                                                       RtEvent initialized)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (partial_pending.exists())
-        assert(partition_ready == partial_pending);
-#endif
       IndexSpaceNode *parent_node = get_node(parent);
       IndexSpaceNode *color_node = get_node(color_space);
       if (partition_color == INVALID_COLOR)
@@ -273,7 +269,10 @@ namespace Legion {
       // owner node about the existence of this partition
       RtEvent parent_notified;
       const AddressSpaceID parent_owner = parent_node->get_owner_space();
-      if (parent_owner != runtime->address_space)
+      if ((parent_owner != runtime->address_space) &&
+          ((mapping == NULL) || !mapping->contains(parent_owner)) &&
+          ((mapping == NULL) || 
+           (mapping->find_nearest(parent_owner) == runtime->address_space)))
       {
         RtUserEvent notified_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -291,21 +290,12 @@ namespace Legion {
           (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
           (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
-        RtUserEvent disjointness_event = Runtime::create_rt_user_event();
         // Use 1 if we know it's complete, 0 if it's not, 
         // otherwise -1 since we don't know
         const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
                          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
-        IndexPartNode *node = create_node(pid, parent_node, color_node, 
-            partition_color, disjointness_event, complete, did, provenance,
-            partition_ready, partial_pending, RtEvent::NO_RT_EVENT); 
-        // Get a reference for the node to hold until disjointness is computed
-        node->add_base_valid_ref(APPLICATION_REF);
-        IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
-        Runtime::trigger_event(disjointness_event,
-            runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(partition_ready)));
+        create_node(pid, parent_node, color_node, partition_color,
+            complete, did, provenance, initialized, mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
               complete, partition_color, runtime->address_space, 
@@ -322,33 +312,29 @@ namespace Legion {
                               (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
                              ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
-        create_node(pid, parent_node, color_node, partition_color, disjoint,
-                    complete, did, provenance, partition_ready, partial_pending,
-                    RtEvent::NO_RT_EVENT);
+        create_node(pid, parent_node, color_node, partition_color,
+            disjoint, complete, did, provenance, initialized, mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
               (provenance == NULL) ? NULL : provenance->human_str());
-	if (runtime->profiler != NULL)
-	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
-						    partition_color);
       }
       ctx->register_index_partition_creation(pid);
       return parent_notified;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_pending_cross_product(TaskContext *ctx,
+    void RegionTreeForest::create_pending_cross_product(InnerContext *ctx,
                                                  IndexPartition handle1,
                                                  IndexPartition handle2,
                              std::map<IndexSpace,IndexPartition> &user_handles,
                                                  PartitionKind kind,
                                                  Provenance *provenance,
                                                  LegionColor &part_color,
-                                                 ApEvent domain_ready,
                                                  std::set<RtEvent> &safe_events,
-                                                 ShardID shard,
-                                                 size_t total_shards)
+                                                 ShardID local_shard,
+                                              const ShardMapping *shard_mapping,
+                                   ValueBroadcast<LegionColor> *color_broadcast)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
@@ -371,7 +357,8 @@ namespace Legion {
       // If the source dominates the base then we know that all the
       // partitions that we are about to make will be complete
       if (((kind == LEGION_DISJOINT_KIND) || (kind == LEGION_ALIASED_KIND) || 
-            (kind == LEGION_COMPUTE_KIND)) && source->dominates(base)) 
+            (kind == LEGION_COMPUTE_KIND)) && 
+          source->is_complete() && source->parent->dominates(base->parent))
       {
         if (kind == LEGION_DISJOINT_KIND)
           kind = LEGION_DISJOINT_COMPLETE_KIND;
@@ -442,212 +429,127 @@ namespace Legion {
           break;
         }
       }
+      if (color_broadcast != NULL)
+        color_broadcast->broadcast(part_color);
       // Iterate over all our sub-regions and generate partitions
-      for (ColorSpaceIterator itr(base, shard, total_shards); itr; itr++)
+      if (shard_mapping == NULL)
       {
-        IndexSpaceNode *child_node = base->get_child(*itr);
-        IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           handle1.get_tree_id(), handle1.get_type_tag());
-        DistributedID did =
-          runtime->get_available_distributed_id();
-        const RtEvent safe =
-          create_pending_partition(ctx, pid, child_node->handle,
-                                   source->color_space->handle,
-                                   part_color, kind, did,
-                                   provenance, domain_ready);
-        // If the user requested the handle for this point return it
-        user_handles[child_node->handle] = pid;
-        if (safe.exists())
-          safe_events.insert(safe);
+        for (ColorSpaceIterator itr(base); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base->get_child(*itr);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag());
+          DistributedID did =
+            runtime->get_available_distributed_id();
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle,
+                                     source->color_space->handle,
+                                     part_color, kind, did, provenance);
+          // If the user requested the handle for this point return it
+          user_handles[child_node->handle] = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
+        }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_pending_partition_shard(
-                                              ShardID owner_shard,
-                                              ReplicateContext *ctx,
-                                              IndexPartition pid,
-                                              IndexSpace parent,
-                                              IndexSpace color_space,
-                                              LegionColor &partition_color,
-                                              PartitionKind part_kind,
-                                              DistributedID did,
-                                              Provenance *provenance,
-                                              ValueBroadcast<bool> *part_result,
-                                              ApEvent partition_ready,
-                                              CollectiveMapping *mapping,
-                                              ShardMapping *shard_mapping,
-                                              RtEvent creation_ready,
-                                              ApBarrier partial_pending)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      if (partial_pending.exists())
-        assert(partition_ready == partial_pending);
-#endif
-      if (owner_shard == ctx->owner_shard->shard_id)
+      else if (((LegionColor)shard_mapping->size()) <= base->total_children)
       {
-        // We're the owner so we do most of the work
-        IndexSpaceNode *parent_node = get_node(parent);
-        IndexSpaceNode *color_node = get_node(color_space);
-        if (partition_color == INVALID_COLOR)
-          partition_color = parent_node->generate_color();
-        // If we are making this partition on a different node than the
-        // owner node of the parent index space then we have to tell that
-        // owner node about the existence of this partition
-        RtEvent parent_notified;
-        const AddressSpaceID parent_owner = parent_node->get_owner_space();
-        if (parent_owner != runtime->address_space)
+        // There are more subregions than shards so we can shard the
+        // children over all the shards to make the partitions
+        for (ColorSpaceIterator itr(base, local_shard, 
+              shard_mapping->size()); itr; itr++)
         {
-          RtUserEvent notified_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(pid);
-            rez.serialize(parent);
-            rez.serialize(partition_color);
-            rez.serialize(notified_event);
-          }
-          runtime->send_index_partition_notification(parent_owner, rez);
-          parent_notified = notified_event;
+          IndexSpaceNode *child_node = base->get_child(*itr);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag());
+          DistributedID did =
+            runtime->get_available_distributed_id();
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle,
+                                     source->color_space->handle,
+                                     part_color, kind, did, provenance);
+          // If the user requested the handle for this point return it
+          user_handles[child_node->handle] = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
         }
-        RtUserEvent disjointness_event;
-        if ((part_kind == LEGION_COMPUTE_KIND) || 
-            (part_kind == LEGION_COMPUTE_COMPLETE_KIND) || 
-            (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        {
-#ifdef DEBUG_LEGION
-          assert(part_result != NULL);
-#endif
-          disjointness_event = Runtime::create_rt_user_event(); 
-        }
-#ifdef DEBUG_LEGION
-        else
-          assert(part_result == NULL);
-#endif
-        IndexPartNode *part_node;
-        if ((part_kind != LEGION_COMPUTE_KIND) && 
-            (part_kind != LEGION_COMPUTE_COMPLETE_KIND) && 
-            (part_kind != LEGION_COMPUTE_INCOMPLETE_KIND))
-        {
-          const bool disjoint = (part_kind == LEGION_DISJOINT_KIND) || 
-                                (part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == LEGION_DISJOINT_INCOMPLETE_KIND);
-          // Use 1 if we know it's complete, 0 if it's not, 
-          // otherwise -1 since we don't know
-          const int complete = ((part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
-                              (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
-                             ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
-                          (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
-          part_node = create_node(pid, parent_node, color_node, partition_color,
-            disjoint, complete, did, provenance, partition_ready,
-            partial_pending, creation_ready, mapping, shard_mapping);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
-                complete, partition_color, runtime->address_space,
-                (provenance == NULL) ? NULL : provenance->human_str());
-          if (runtime->profiler != NULL)
-	    runtime->profiler->record_index_partition(parent.id,pid.id,disjoint,
-                                                      partition_color);
-        }
-        else
-        {
-          // Use 1 if we know it's complete, 0 if it's not, 
-          // otherwise -1 since we don't know
-          const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
-                         (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
-          part_node = create_node(pid, parent_node, color_node, partition_color,
-                                  disjointness_event, complete, did, provenance,
-                                  partition_ready, partial_pending,
-                                  creation_ready, mapping, 
-                                  shard_mapping);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
-                complete, partition_color, runtime->address_space,
-                (provenance == NULL) ? NULL : provenance->human_str());
-        }
-        if (disjointness_event.exists())
-        {
-          // Hold a reference on the node until disjointness is performed
-          part_node->add_base_valid_ref(APPLICATION_REF);
-          IndexPartNode::DisjointnessArgs args(pid, part_result, true/*owner*/);
-          // Don't do the disjointness test until all the partition
-          // is ready and has been created on all the nodes
-          Runtime::trigger_event(disjointness_event,
-              runtime->issue_runtime_meta_task(args,
-                LG_THROUGHPUT_DEFERRED_PRIORITY,
-                Runtime::merge_events(creation_ready,
-                  Runtime::protect_event(partition_ready))));
-        }
-        ctx->register_index_partition_creation(pid);
-        return parent_notified;
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(partition_color != INVALID_COLOR);
-#endif
-        // We're not the owner so we just do basic setup work
-        IndexSpaceNode *parent_node = get_node(parent);
-        IndexSpaceNode *color_node = get_node(color_space);
-        RtUserEvent disjointness_event;
-        if ((part_kind == LEGION_COMPUTE_KIND) || 
-            (part_kind == LEGION_COMPUTE_COMPLETE_KIND) || 
-            (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
+        // There are fewer subregions than shards, so we can actually
+        // have multiple shards collaborating to create each partition 
+        // Round-robin the shards over the children partitions to compute
+        const unsigned color_index = local_shard % base->total_children; 
+        LegionColor child_color = color_index;
+        if (base->total_children < base->max_linearized_color)
         {
-#ifdef DEBUG_LEGION
-          assert(part_result != NULL);
-#endif
-          disjointness_event = Runtime::create_rt_user_event(); 
+          unsigned index = 0;
+          for (ColorSpaceIterator itr(base); itr; itr++, index++)
+          {
+            if (index != color_index)
+              continue;
+            child_color = *itr;
+            break;
+          }
+        }
+        IndexSpaceNode *child_node = base->get_child(child_color);
+        // Figure out how many shards are participating on this child 
+        // and what their address spaces are so we can make a collective
+        // mapping for the new partition. Also tracke if we're the first
+        // shard on this address space.
+        bool first_local_shard = true;
+        std::vector<AddressSpaceID> child_spaces;
+        for (ShardID shard = color_index; 
+              shard < shard_mapping->size(); shard += base->total_children)
+        {
+          const AddressSpaceID space = (*shard_mapping)[shard];
+          if (std::binary_search(child_spaces.begin(),child_spaces.end(),space))
+          {
+            if (shard == local_shard)
+              first_local_shard = false;
+            continue;
+          }
+          child_spaces.push_back(space);
+          std::sort(child_spaces.begin(), child_spaces.end());
         }
 #ifdef DEBUG_LEGION
+        assert(!child_spaces.empty());
+        ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+#endif
+        CrossProductExchange exchange(repl_ctx, COLLECTIVE_LOC_50);
+        if (first_local_shard)
+        {
+          // If we're the first space for this child then make the 
+          // distributed ID and index partition name for the new partition
+          // and then exchange in the collective
+          if (child_spaces.front() == runtime->address_space)
+          {
+            IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag());
+            exchange.exchange_ids(child_color,
+                runtime->get_available_distributed_id(), pid);
+            user_handles[child_node->handle] = pid;
+          }
+          else
+            exchange.perform_collective_async();
+          DistributedID child_did = 0;
+          IndexPartition child_pid = IndexPartition::NO_PART;
+          exchange.sync_child_ids(child_color, child_did, child_pid);
+          const RtEvent safe = create_pending_partition(ctx, child_pid, 
+              child_node->handle, source->color_space->handle,
+              part_color, kind, child_did, provenance,
+              new CollectiveMapping(child_spaces,
+                runtime->legion_collective_radix));
+          if (safe.exists())
+            safe_events.insert(safe);
+        }
         else
-          assert(part_result == NULL);
-#endif
-        IndexPartNode *part_node;
-        if ((part_kind != LEGION_COMPUTE_KIND) && 
-            (part_kind != LEGION_COMPUTE_COMPLETE_KIND) && 
-            (part_kind != LEGION_COMPUTE_INCOMPLETE_KIND))
         {
-          const bool disjoint = (part_kind == LEGION_DISJOINT_KIND) || 
-                                (part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == LEGION_DISJOINT_INCOMPLETE_KIND);
-          // Use 1 if we know it's complete, 0 if it's not, 
-          // otherwise -1 since we don't know
-          const int complete = ((part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
-                              (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
-                             ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
-                        (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
-          part_node = create_node(pid, parent_node, color_node, partition_color,
-            disjoint, complete, did, provenance, partition_ready,
-            partial_pending, creation_ready, mapping, shard_mapping);
+          // Still need to participate in the collective exchange
+          exchange.perform_collective_sync();
         }
-        else
-        {
-          // Use 1 if we know it's complete, 0 if it's not, 
-          // otherwise -1 since we don't know
-          const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
-                         (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
-          part_node = create_node(pid, parent_node, color_node, partition_color,
-                                  disjointness_event, complete, did, provenance,
-                                  partition_ready, partial_pending,
-                                  creation_ready, mapping, shard_mapping);
-        }
-        if (disjointness_event.exists())
-        {
-          // Hold a reference on the node until disjointness is performed
-          part_node->add_base_resource_ref(APPLICATION_REF);
-          IndexPartNode::DisjointnessArgs args(pid, part_result,false/*owner*/);
-          // We only need to wait for the creation to be ready 
-          // if we're not the owner
-          Runtime::trigger_event(disjointness_event,
-              runtime->issue_runtime_meta_task(args,
-                LG_THROUGHPUT_DEFERRED_PRIORITY, creation_ready));
-        }
-        ctx->register_index_partition_creation(pid);
-        // We know the parent is notified or we wouldn't even have
-        // been given our pid
-        return RtEvent::NO_RT_EVENT;
       }
     }
 
@@ -707,118 +609,96 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_equal_partition(Operation *op,
                                                      IndexPartition pid,
-                                                     size_t granularity,
-                                                     ShardID shard,
-                                                     size_t total_shards)
+                                                     size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_equal_children(op, granularity, 
-                                             shard, total_shards);
+      return new_part->create_equal_children(op, granularity); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_weights(Operation *op,
                                                        IndexPartition pid,
                                                        const FutureMap &weights,
-                                                       size_t granularity,
-                                                       ShardID shard,
-                                                       size_t total_shards)
+                                                       size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_by_weights(op, weights, granularity, 
-                                         shard, total_shards);
+      return new_part->create_by_weights(op, weights, granularity); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_union(Operation *op,
                                                         IndexPartition pid,
                                                         IndexPartition handle1,
-                                                        IndexPartition handle2,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                                        IndexPartition handle2)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_union(op, node1, node2, shard, total_shards);
+      return new_part->create_by_union(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                          IndexPartition pid,
                                                          IndexPartition handle1,
-                                                         IndexPartition handle2,
-                                                         ShardID shard,
-                                                         size_t total_shards)
+                                                         IndexPartition handle2)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_intersection(op, node1, node2, 
-                                              shard, total_shards);
+      return new_part->create_by_intersection(op, node1, node2); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                            IndexPartition pid,
                                                            IndexPartition part,
-                                                           const bool dominates,
-                                                           ShardID shard,
-                                                           size_t total_shards)
+                                                           const bool dominates)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node = get_node(part);
-      return new_part->create_by_intersection(op, node, dominates,
-                                              shard, total_shards); 
+      return new_part->create_by_intersection(op, node, dominates);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
-                                                       IndexPartition handle2,
-                                                       ShardID shard,
-                                                       size_t total_shards)
+                                                       IndexPartition handle2)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_difference(op, node1, node2, 
-                                            shard, total_shards);
+      return new_part->create_by_difference(op, node1, node2); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_restriction(
                                                         IndexPartition pid,
                                                         const void *transform,
-                                                        const void *extent,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                                        const void *extent)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_by_restriction(transform, extent, 
-                                             shard, total_shards); 
+      return new_part->create_by_restriction(transform, extent);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_domain(Operation *op,
                                                     IndexPartition pid,
                                                     const FutureMap &future_map,
-                                                    bool perform_intersections,
-                                                    ShardID shard,
-                                                    size_t total_shards) 
+                                                    bool perform_intersections)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       return new_part->parent->create_by_domain(op, new_part, future_map.impl, 
-                                  perform_intersections, shard, total_shards);
+                                                perform_intersections);
     }
 
     //--------------------------------------------------------------------------
@@ -826,98 +706,155 @@ namespace Legion {
                                                          IndexPartition base,
                                                          IndexPartition source,
                                                          LegionColor part_color,
-                                                         ShardID shard,
-                                                         size_t total_shards)
+                                                         ShardID local_shard,
+                                              const ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base_node = get_node(base);
       IndexPartNode *source_node = get_node(source);
       std::set<ApEvent> ready_events;
-      for (ColorSpaceIterator itr(base_node, shard, total_shards); itr; itr++)
+      if (shard_mapping == NULL)
       {
-        IndexSpaceNode *child_node = base_node->get_child(*itr);
-        IndexPartNode *part_node = child_node->get_child(part_color);
-        ApEvent ready = 
-          child_node->create_by_intersection(op, part_node, source_node);
-        ready_events.insert(ready);
+        for (ColorSpaceIterator itr(base_node); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base_node->get_child(*itr);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
+          ready_events.insert(ready);
+        }
+      }
+      else if (((LegionColor)shard_mapping->size()) <= 
+                  base_node->total_children)
+      {
+        for (ColorSpaceIterator itr(base_node, local_shard,
+              shard_mapping->size()); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base_node->get_child(*itr);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
+          ready_events.insert(ready);
+        }
+      }
+      else
+      {
+        const unsigned color_index = local_shard % base_node->total_children; 
+        // See if we're the first local shard on this address space
+        bool first_local_shard = true;
+        for (ShardID shard = color_index;
+              shard < shard_mapping->size(); shard += base_node->total_children)
+        {
+          const AddressSpaceID space = (*shard_mapping)[shard];
+          if (space != runtime->address_space)
+            continue;
+          first_local_shard = (shard == local_shard);
+          break;
+        }
+        if (first_local_shard)
+        {
+          LegionColor child_color = color_index;
+          if (base_node->total_children < base_node->max_linearized_color)
+          {
+            unsigned index = 0;
+            for (ColorSpaceIterator itr(base_node); itr; itr++, index++)
+            {
+              if (index != color_index)
+                continue;
+              child_color = *itr;
+              break;
+            }
+          }
+          IndexSpaceNode *child_node = base_node->get_child(child_color);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
+          ready_events.insert(ready);
+        }
       }
       return Runtime::merge_events(NULL, ready_events);
     } 
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_field(Operation *op,
+    ApEvent RegionTreeForest::create_partition_by_field(Operation *op, 
+                                                        FieldID fid,
                                                         IndexPartition pending,
                              const std::vector<FieldDataDescriptor> &instances,
+                                   std::vector<DeppartResult> *results,
                                                         ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
-      return partition->parent->create_by_field(op, partition, 
-                                                instances, instances_ready);
+      return partition->parent->create_by_field(op, fid, partition, instances,
+                                                results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_image(Operation *op,
+                                                        FieldID fid,
                                                         IndexPartition pending,
                                                         IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
-                                                      ApEvent instances_ready,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                    std::vector<FieldDataDescriptor> &instances,
+                                                        ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_image(op, partition, projection,
-                          instances, instances_ready, shard, total_shards);
+      return partition->parent->create_by_image(op, fid, partition, projection,
+                                                instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_image_range(Operation *op,
+                                                      FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
-                                                      ApEvent instances_ready,
-                                                      ShardID shard,
-                                                      size_t total_shards)
+                                  std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_image_range(op, partition, projection,
-                               instances, instances_ready, shard, total_shards);
+      return partition->parent->create_by_image_range(op, fid, partition,
+                                  projection, instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_preimage(Operation *op,
+                                                      FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
+                             const std::vector<FieldDataDescriptor> &instances,
+                             const std::map<DomainPoint,Domain> *remote_targets,
+                                    std::vector<DeppartResult> *results,
                                                       ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_preimage(op, partition, projection,
-                                           instances, instances_ready);
+      return partition->parent->create_by_preimage(op, fid, partition,
+          projection, instances, remote_targets, results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_preimage_range(Operation *op,
+                                                      FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
+                             const std::vector<FieldDataDescriptor> &instances,
+                             const std::map<DomainPoint,Domain> *remote_targets,
+                                    std::vector<DeppartResult> *results,
                                                       ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_preimage_range(op, partition, 
-                                projection, instances, instances_ready);
+      return partition->parent->create_by_preimage_range(op, fid, partition,
+          projection, instances, remote_targets, results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_association(Operation *op,
+    ApEvent RegionTreeForest::create_association(Operation *op, FieldID fid,
                                                  IndexSpace dom, IndexSpace ran,
                               const std::vector<FieldDataDescriptor> &instances,
                                                  ApEvent instances_ready)
@@ -925,7 +862,7 @@ namespace Legion {
     {
       IndexSpaceNode *domain = get_node(dom);
       IndexSpaceNode *range = get_node(ran);
-      return domain->create_association(op, range, instances, instances_ready);
+      return domain->create_association(op,fid,range,instances,instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -937,89 +874,52 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
-       IndexSpace target, const std::vector<IndexSpace> &handles, bool is_union,
-       ShardID shard, size_t total_shards)
+       IndexSpace target, const std::vector<IndexSpace> &handles, bool is_union)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      // Check to see if we own this child or not
-      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+      // See if we own this child or not
+      if (!child_node->is_owner() && ((child_node->collective_mapping == NULL)
+         || !child_node->collective_mapping->contains(child_node->local_space)))
         return ApEvent::NO_AP_EVENT;
-      // Convert the ap event for the space into an ap user event and 
-      // trigger it once the operation is complete
-      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
-                         const_cast<ApEvent*>(&child_node->index_space_ready)));
-      if (space_ready.has_triggered())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
-          "Invalid pending child!")
-      Runtime::trigger_event(NULL, space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handles, is_union);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
-                        IndexSpace target, IndexPartition handle, bool is_union,
-                        ShardID shard, size_t total_shards)
+                        IndexSpace target, IndexPartition handle, bool is_union)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      // Check to see if we own this child or not
-      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+      // See if we own this child or not
+      if (!child_node->is_owner() && ((child_node->collective_mapping == NULL)
+         || !child_node->collective_mapping->contains(child_node->local_space)))
         return ApEvent::NO_AP_EVENT;
-      // Convert the ap event for the space into an ap user event and 
-      // trigger it once the operation is complete
-      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
-                         const_cast<ApEvent*>(&child_node->index_space_ready)));
-      if (space_ready.has_triggered())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD, 
-                            "Invalid pending child!")
-      Runtime::trigger_event(NULL, space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handle, is_union);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::compute_pending_space(Operation *op,
                                          IndexSpace target, IndexSpace initial,
-                                         const std::vector<IndexSpace> &handles,
-                                         ShardID shard, size_t total_shards)
+                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      // Check to see if we own this child or not
-      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+      // See if we own this child or not
+      if (!child_node->is_owner() && ((child_node->collective_mapping == NULL)
+         || !child_node->collective_mapping->contains(child_node->local_space)))
         return ApEvent::NO_AP_EVENT;
-      // Convert the ap event for the space into an ap user event and 
-      // trigger it once the operation is complete
-      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
-                         const_cast<ApEvent*>(&child_node->index_space_ready)));
-      if (space_ready.has_triggered())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
-                            "Invalid pending child!\n")
-      Runtime::trigger_event(NULL, space_ready, op->get_completion_event());
       return child_node->compute_pending_difference(op, initial, handles);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::set_pending_space_domain(IndexSpace target,
-                                                    Domain domain,
-                                                    AddressSpaceID source,
-                                                    ShardID shard,
-                                                    size_t total_shards)
+                                                    Domain domain)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-
-      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
-        return;
-
-      if (child_node->set_domain(domain, source))
-        assert(false);
-      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
-                         const_cast<ApEvent*>(&child_node->index_space_ready)));
-      if (space_ready.has_triggered())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
-                            "Invalid pending child!\n")
-      Runtime::trigger_event(NULL, space_ready);
+      if (child_node->set_domain(domain, true/*broadcast*/))
+        delete child_node;
     }
 
     //--------------------------------------------------------------------------
@@ -1046,6 +946,19 @@ namespace Legion {
     IndexSpace RegionTreeForest::get_index_subspace(IndexPartition parent,
                                                     const void *realm_color,
                                                     TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *parent_node = get_node(parent);
+      LegionColor child_color = 
+        parent_node->color_space->linearize_color(realm_color, type_tag);
+      IndexSpaceNode *child_node = parent_node->get_child(child_color);
+      return child_node->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::instantiate_subspace(IndexPartition parent,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *parent_node = get_node(parent);
@@ -1225,12 +1138,10 @@ namespace Legion {
                                                     DistributedID did,
                                                     Provenance *provenance,
                                                     CollectiveMapping *mapping,
-                                                    ShardMapping *shard_mapping,
                                                     RtEvent initialized)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, did, initialized, provenance, 
-                         mapping, shard_mapping);
+      return create_node(handle, did, initialized, provenance, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -2496,8 +2407,6 @@ namespace Legion {
       const InstanceRef &idx_target = idx_targets[0];
       across->initialize_source_indirections(this, src_records, src_req,
           idx_req, idx_target, gather_is_range, possible_src_out_of_range);
-      across->src_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_unique_event();
       // Initialize the destination fields
       const bool exclusive_redop =
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
@@ -2645,8 +2554,6 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, idx_req, idx_target, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-      across->dst_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_unique_event();
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -2793,8 +2700,6 @@ namespace Legion {
       const InstanceRef &src_idx_target = src_idx_targets[0];
       across->initialize_source_indirections(this, src_records, src_req,
         src_idx_req, src_idx_target, both_are_range, possible_src_out_of_range);
-      across->src_indirect_instance_event = 
-       src_idx_target.get_physical_manager()->get_unique_event();
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -2804,8 +2709,6 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, dst_idx_req, dst_idx_target, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-      across->dst_indirect_instance_event = 
-        dst_idx_target.get_physical_manager()->get_unique_event();
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -3355,9 +3258,8 @@ namespace Legion {
                                                   const bool tree_valid)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
-                                did, is_ready, expr_id, initialized, depth,
-                                provenance, mapping, tree_valid);
+      IndexSpaceCreator creator(this, sp, parent, color, did, expr_id,
+                  initialized, depth, provenance, mapping, tree_valid);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3373,46 +3275,63 @@ namespace Legion {
         {
           // Need to remove resource reference if not owner
           delete result;
-          return it->second;
+          result = it->second;
+          // If the parent is NULL then we don't need to perform a duplicate set
+          if ((bounds == NULL) || (parent == NULL))
+            return result;
         }
-        index_nodes[sp] = result;
-        index_space_requests.erase(sp);
-        if (parent != NULL)
+        else
         {
+          index_nodes[sp] = result;
+          index_space_requests.erase(sp);
+          if (parent != NULL)
+          {
 #ifdef DEBUG_LEGION
-          assert(!add_root_reference);
+            assert(!add_root_reference);
 #endif
-          parent->add_child(result);
+            parent->add_child(result);
+          }
+          else if (add_root_reference)
+            result->add_base_valid_ref(APPLICATION_REF);
+          // If we didn't give it a value add a reference to be removed once
+          // the index space node has been set
+          if (bounds == NULL)
+          {
+            // Hold the reference on the parent partition to keep both it
+            // and the child index space alive if there is a a parent
+            if (result->parent != NULL)
+              result->parent->add_base_gc_ref(REGION_TREE_REF);
+            else
+              result->add_base_gc_ref(REGION_TREE_REF);
+          }
+          else
+            result->set_bounds(bounds, is_domain, true/*init*/, is_ready);
+          result->register_with_runtime();
+          return result;
         }
-        else if (add_root_reference)
-          result->add_base_valid_ref(APPLICATION_REF);
-        result->register_with_runtime();
       }
-      // If we had a realm index space issue the tighten now since
-      // we know that we'll probably need it later
-      // We have to do this after we've added our reference in case
-      // the tighten gets done and tries to delete the node
-      if (bounds != NULL)
-        result->tighten_index_space();
+#ifdef DEBUG_LEGION
+      assert(bounds != NULL);
+#endif
+      if (result->set_bounds(bounds, is_domain, false/*init*/, is_ready))
+        assert(false); // should never hit this
       return result;
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
-                                                  const void *realm_is,
                                                   IndexPartNode &parent,
                                                   LegionColor color,
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   Provenance *provenance,
-                                                  ApUserEvent is_ready,
                                                   CollectiveMapping *mapping,
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, &parent,
-                                color, did, is_ready, 0/*expr id*/, initialized,
-                                depth, provenance, mapping, true/*tree valid*/);
+      IndexSpaceCreator creator(this, sp, &parent, color, did, 0/*expr id*/, 
+                                initialized, depth, provenance, mapping, 
+                                true/*tree valid*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3427,22 +3346,18 @@ namespace Legion {
         if (it != index_nodes.end())
         {
           delete result;
-          // Free up the event since we didn't use it
-          Runtime::trigger_event(NULL, is_ready);
           return it->second;
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
         // Always add a valid reference from the parent
         parent.add_child(result);
+        // Add a reference for when we set this index space node
+        // Hold the reference on the parent partition to keep both it
+        // and the child index space alive 
+        parent.add_base_gc_ref(REGION_TREE_REF);
         result->register_with_runtime();
       } 
-      // If we had a realm index space issue the tighten now since
-      // we know that we'll probably need it later
-      // We have to do this after we've added our reference in case
-      // the tighten gets done and tries to delete the node
-      if (realm_is != NULL)
-        result->tighten_index_space();
       return result;
     }
 
@@ -3454,16 +3369,12 @@ namespace Legion {
                                                  bool disjoint, int complete,
                                                  DistributedID did,
                                                  Provenance *provenance,
-                                                 ApEvent part_ready,
-                                                 ApBarrier pending,
                                                  RtEvent initialized,
-                                                 CollectiveMapping *mapping,
-                                                 ShardMapping *shard_mapping)
+                                                 CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, color, disjoint,
-                               complete, did, part_ready, pending, initialized,
-                               mapping, shard_mapping, provenance);
+                             complete, did, initialized, mapping, provenance);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3498,6 +3409,13 @@ namespace Legion {
           color_space->parent->add_nested_valid_ref(did);
         else
           color_space->add_nested_valid_ref(did);
+        // We know if we're disjoint or not but if we're not complete we might 
+        // still be getting notifications to compute the complete
+        if (complete < 0)
+          result->initialize_disjoint_complete_notifications();
+        else if ((runtime->profiler != NULL) && result->is_owner())
+          runtime->profiler->record_index_partition(parent->handle.id,
+              p.id, disjoint, result->color);
         result->register_with_runtime();
       }
       return result;
@@ -3508,21 +3426,15 @@ namespace Legion {
                                                  IndexSpaceNode *parent,
                                                  IndexSpaceNode *color_space,
                                                  LegionColor color,
-                                                 RtEvent disjointness_ready,
                                                  int complete, 
                                                  DistributedID did,
                                                  Provenance *provenance,
-                                                 ApEvent part_ready,
-                                                 ApBarrier pending,
                                                  RtEvent initialized,
-                                                 CollectiveMapping *mapping,
-                                                 ShardMapping *shard_mapping)
+                                                 CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, color, 
-                               disjointness_ready, complete, did, part_ready, 
-                               pending, initialized, mapping, shard_mapping,
-                               provenance);
+                               complete, did, initialized, mapping, provenance);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3558,6 +3470,9 @@ namespace Legion {
           color_space->parent->add_nested_valid_ref(did);
         else
           color_space->add_nested_valid_ref(did);
+        // We don't know if we're disjonit or yet not so we need to do
+        // the disjoint and complete analysis
+        result->initialize_disjoint_complete_notifications();
         result->register_with_runtime();
       }
       return result;
@@ -3568,12 +3483,11 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   Provenance *provenance,
-                                                  CollectiveMapping *mapping,
-                                                  ShardMapping *shard_mapping)
+                                                  CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *result = new FieldSpaceNode(space, this, did,
-          initialized, mapping, shard_mapping, provenance);
+          initialized, mapping, provenance);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -3605,11 +3519,12 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   Provenance *provenance,
+                                                  CollectiveMapping *mapping,
                                                   Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *result = 
-        new FieldSpaceNode(space, this, did, initialized, provenance, derez);
+      FieldSpaceNode *result = new FieldSpaceNode(space, this, did,
+          initialized, mapping, provenance, derez);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -3874,6 +3789,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(space);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_index_space_request(owner, rez);     
           wait_on = done;
         }
@@ -4017,6 +3933,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(part);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_index_partition_request(owner, rez);    
           wait_on = done;
         }
@@ -4154,6 +4071,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(space);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_field_space_request(owner, rez);    
           wait_on = done;
         }
@@ -4286,6 +4204,7 @@ namespace Legion {
               Serializer rez;
               rez.serialize(handle.get_tree_id());
               rez.serialize(done);
+              rez.serialize(runtime->address_space);
               runtime->send_top_level_region_request(owner, rez);
               wait_on = done;
             }
@@ -4503,6 +4422,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(tid);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_top_level_region_request(owner, rez);
           wait_on = done;
         }
@@ -4524,7 +4444,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::request_node(IndexSpace space)
+    RtEvent RegionTreeForest::find_or_request_node(IndexSpace space,
+                                                   AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       {
@@ -4555,7 +4476,8 @@ namespace Legion {
         Serializer rez;
         rez.serialize(space);
         rez.serialize(done);
-        runtime->send_index_space_request(owner, rez);     
+        rez.serialize(runtime->address_space);
+        runtime->send_index_space_request(target, rez);
         return done;
       }
       else
@@ -4948,6 +4870,14 @@ namespace Legion {
         common_ancestor = one;
         return false;
       }
+      // Some older code still relies on us being able to prove that two index
+      // spaces are non-interfering with each other without using the tree so
+      // we still check that even if we can't prove it with just the tree
+      IndexSpaceNode *original_one = NULL, *original_two = NULL;
+      if (one->is_index_space_node())
+        original_one = one->as_index_space_node();
+      if (two->is_index_space_node())
+        original_two = two->as_index_space_node();
       // Bring them to the same depth
       while (one->depth < two->depth)
         two = two->get_parent();
@@ -4987,6 +4917,14 @@ namespace Legion {
       {
         if (parent_one->as_index_part_node()->are_disjoint(one->color, 
                                                            two->color))
+          return true;
+      }
+      // Test if two index spaces are interfering without using the tree
+      if ((original_one != NULL) && (original_two != NULL))
+      {
+        IndexSpaceExpression *intersection =
+          intersect_index_spaces(original_one, original_two);
+        if (intersection->is_empty())
           return true;
       }
       common_ancestor = parent_one;
@@ -6491,8 +6429,7 @@ namespace Legion {
           copy_mask.set_bit(*it);
           PhysicalManager *manager = ref.get_physical_manager();
           manager->compute_copy_offsets(copy_mask, src_fields);
-          src_unique_events.push_back(
-              ref.get_physical_manager()->get_unique_event());
+          src_unique_events.push_back(manager->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -6535,8 +6472,7 @@ namespace Legion {
           copy_mask.set_bit(*it);
           PhysicalManager *manager = ref.get_physical_manager();
           manager->compute_copy_offsets(copy_mask, dst_fields);
-          dst_unique_events.push_back(
-              ref.get_physical_manager()->get_unique_event());
+          dst_unique_events.push_back(manager->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -6567,8 +6503,9 @@ namespace Legion {
 #endif
       src_indirections.swap(records);
       src_indirect_field = *(idx_req.privilege_fields.begin());
-      src_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance();
+      PhysicalManager *manager = indirect_instance.get_physical_manager();
+      src_indirect_instance = manager->get_instance();
+      src_indirect_instance_event = manager->get_unique_event();
       src_indirect_type = src_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_src_out_of_range = possible_out_of_range;
@@ -6597,8 +6534,9 @@ namespace Legion {
 #endif
       dst_indirections.swap(records);
       dst_indirect_field = *(idx_req.privilege_fields.begin());
-      dst_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance();
+      PhysicalManager *manager = indirect_instance.get_physical_manager();
+      dst_indirect_instance = manager->get_instance();
+      dst_indirect_instance_event = manager->get_unique_event();
       dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_dst_out_of_range = possible_out_of_range;
@@ -6617,106 +6555,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyAcrossUnstructured::log_across_profiling(LgEvent copy_post,
-                                                      int preimage) const
+    LgEvent CopyAcrossUnstructured::find_instance_name(
+                                                PhysicalInstance instance) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime->profiler != NULL);
-      assert(src_fields.size() == dst_fields.size());
-#endif
-      if (0 <= preimage)
-      {
-#ifdef DEBUG_LEGION
-        assert(((unsigned)preimage) < nonempty_indexes.size());
-        assert(src_indirections.empty() != dst_indirections.empty());
-#endif
-        runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-        const unsigned index = nonempty_indexes[preimage];
-        if (src_indirections.empty())
-        {
-          // Scatter
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(src_fields[idx].field_id,
-                dst_fields[idx].field_id, src_fields[idx].inst,
-                dst_indirections[index].instances[idx], src_unique_events[idx],
-                dst_indirections[index].instance_events[idx], copy_post);
-        }
-        else
-        {
-          // Gather
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(
-                src_fields[idx].field_id, dst_fields[idx].field_id,
-                src_indirections[index].instances[idx], dst_fields[idx].inst,
-                src_indirections[index].instance_events[idx], 
-                dst_unique_events[idx], copy_post);
-        }
-      }
-      else if (src_indirections.empty())
-      {
-        if (dst_indirections.empty())
-        {
-          // Normal across
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(
-                src_fields[idx].field_id, dst_fields[idx].field_id,
-                src_fields[idx].inst, dst_fields[idx].inst,
-                src_unique_events[idx], dst_unique_events[idx], copy_post);
-        }
-        else
-        {
-          // Scatter
-          runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            for (std::vector<IndirectRecord>::const_iterator it =
-                  dst_indirections.begin(); it != dst_indirections.end(); it++)
-              runtime->profiler->record_copy_instances(
-                  src_fields[idx].field_id, dst_fields[idx].field_id,
-                  src_fields[idx].inst, it->instances[idx],
-                  src_unique_events[idx], it->instance_events[idx], copy_post);
-        }
-      }
-      else
-      {
-        if (dst_indirections.empty())
-        {
-          // Gather
-          runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            for (std::vector<IndirectRecord>::const_iterator it =
-                  src_indirections.begin(); it != src_indirections.end(); it++)
-              runtime->profiler->record_copy_instances(
-                  src_fields[idx].field_id, dst_fields[idx].field_id,
-                  it->instances[idx], dst_fields[idx].inst,
-                  it->instance_events[idx], dst_unique_events[idx], copy_post);
-        }
-        else
-        {
-          // Full indirection
-          runtime->profiler->record_indirect_instances(src_indirect_field,
-           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
-           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            for (std::vector<IndirectRecord>::const_iterator src_it =
-                  src_indirections.begin(); src_it !=
-                  src_indirections.end(); src_it++)
-              for (std::vector<IndirectRecord>::const_iterator dst_it =
-                    dst_indirections.begin(); dst_it !=
-                    dst_indirections.end(); dst_it++)
-                runtime->profiler->record_copy_instances(
-                    src_fields[idx].field_id, dst_fields[idx].field_id,
-                    src_it->instances[idx], dst_it->instances[idx],
-                    src_it->instance_events[idx], 
-                    dst_it->instance_events[idx], copy_post);
-        }
-      }
+      if (instance == src_indirect_instance)
+        return src_indirect_instance_event;
+      if (instance == dst_indirect_instance)
+        return dst_indirect_instance_event;
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        if (src_fields[idx].inst == instance)
+          return src_unique_events[idx];
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        if (dst_fields[idx].inst == instance)
+          return dst_unique_events[idx];
+      for (std::vector<IndirectRecord>::const_iterator it =
+            src_indirections.begin(); it != src_indirections.end(); it++)
+        for (unsigned idx = 0; idx < it->instances.size(); idx++)
+          if (it->instances[idx] == instance)
+            return it->instance_events[idx];
+      for (std::vector<IndirectRecord>::const_iterator it =
+            dst_indirections.begin(); it != dst_indirections.end(); it++)
+        for (unsigned idx = 0; idx < it->instances.size(); idx++)
+          if (it->instances[idx] == instance)
+            return it->instance_events[idx];
+      // Should always have found it before this
+      assert(false);
+      return src_indirect_instance_event;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7800,7 +7665,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(RegionTreeForest *ctx, IndexSpace h, 
                                    IndexPartNode *par, LegionColor c,
-                                   DistributedID did, ApEvent ready,
+                                   DistributedID did,
                                    IndexSpaceExprID exp_id, RtEvent init,
                                    unsigned dep, Provenance *prov,
                                    CollectiveMapping *map, bool tree_valid)
@@ -7810,11 +7675,8 @@ namespace Legion {
           init, map, prov, tree_valid),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
-        handle(h), parent(par), index_space_ready(ready),
-        next_uncollected_color(0),
-        realm_index_space_set(Runtime::create_rt_user_event()), 
-        tight_index_space_set(Runtime::create_rt_user_event()),
-        index_space_set(false), tight_index_space(false)
+        handle(h), parent(par), next_uncollected_color(0),
+        index_space_set(false), index_space_tight(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7840,11 +7702,6 @@ namespace Legion {
       // Remove ourselves from the context
       if (registered_with_runtime)
         context->remove_node(handle);
-      // Clean-up any untriggered events
-      if (!realm_index_space_set.has_triggered())
-        Runtime::trigger_event(realm_index_space_set);
-      if (!tight_index_space_set.has_triggered())
-        Runtime::trigger_event(tight_index_space_set);
     }
 
     //--------------------------------------------------------------------------
@@ -8276,6 +8133,20 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    RtEvent IndexSpaceNode::get_ready_event(void)
+    //--------------------------------------------------------------------------
+    {
+      if (index_space_set.load())
+        return RtEvent::NO_RT_EVENT;
+      AutoLock n_lock(node_lock);
+      if (index_space_set.load())
+        return RtEvent::NO_RT_EVENT;
+      if (!index_space_ready.exists())
+        index_space_ready = Runtime::create_rt_user_event();
+      return index_space_ready;
+    }
+
+    //--------------------------------------------------------------------------
     bool IndexSpaceNode::are_disjoint(LegionColor c1, LegionColor c2)
     //--------------------------------------------------------------------------
     {
@@ -8283,102 +8154,30 @@ namespace Legion {
       if (c1 == c2)
         return false;
       if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
-      // Do the test with read-only mode first
-      RtEvent ready;
-      bool issue_dynamic_test = false;
-      std::pair<LegionColor,LegionColor> key(c1,c2);
+        std::swap(c1, c2);
+      const std::pair<LegionColor,LegionColor> key(c1,c2);
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         if (disjoint_subsets.find(key) != disjoint_subsets.end())
           return true;
         else if (aliased_subsets.find(key) != aliased_subsets.end())
           return false;
-        else
-        {
-          std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-            finder = pending_tests.find(key);
-          if (finder != pending_tests.end())
-            ready = finder->second;
-          else
-          {
-            if (!implicit_runtime->disable_independence_tests)
-              issue_dynamic_test = true;
-            else
-            {
-              aliased_subsets.insert(key);
-              return false;
-            }
-          }
-        }
       }
-      if (issue_dynamic_test)
-      {
-        IndexPartNode *left = get_child(c1);
-        const bool left_complete = left->is_complete(false, true);
-        IndexPartNode *right = get_child(c2);
-        const bool right_complete = right->is_complete(false, true);
-        AutoLock n_lock(node_lock);
-        // If either one is known to be complete then we know that they
-        // must be aliased with each other
-        if (left_complete || right_complete)
-        {
-          aliased_subsets.insert(key);
-          return false;
-        }
-        // Test again to make sure we didn't lose the race
-        std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-          finder = pending_tests.find(key);
-        if (finder == pending_tests.end())
-        {
-          DynamicIndependenceArgs args(this, left, right);
-          // Get the preconditions for domains 
-          RtEvent pre = Runtime::protect_event(
-              Runtime::merge_events(NULL,
-                left->partition_ready, right->partition_ready));
-          ready = context->runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_WORK_PRIORITY, pre);
-          pending_tests[key] = ready;
-        }
-        else
-          ready = finder->second;
-      }
-      // Wait for the ready event and then get the result
-      ready.wait();
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      if (disjoint_subsets.find(key) != disjoint_subsets.end())
-        return true;
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::record_disjointness(bool disjoint, 
-                                             LegionColor c1, LegionColor c2)
-    //--------------------------------------------------------------------------
-    {
-      if (c1 == c2)
-        return;
-      if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
+      IndexPartNode *left = get_child(c1);
+      IndexPartNode *right = get_child(c2);
+      const bool intersects = left->intersects_with(right,
+            !context->runtime->disable_independence_tests);
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(color_map.find(c1) != color_map.end());
-      assert(color_map.find(c2) != color_map.end());
-#endif
-      if (disjoint)
-        disjoint_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+      if (intersects)
+      {
+        aliased_subsets.insert(key);
+        return false;
+      }
       else
-        aliased_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
-      pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
+      {
+        disjoint_subsets.insert(key);
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8389,7 +8188,8 @@ namespace Legion {
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(remote_colors.find(part_color) == remote_colors.end());
+      assert((remote_colors.find(part_color) == remote_colors.end()) ||
+              (remote_colors[part_color] == pid));
       // should only happen on the owner node
       assert(get_owner_space() == context->runtime->address_space);
 #endif
@@ -8441,40 +8241,11 @@ namespace Legion {
     void IndexSpaceNode::IndexSpaceSetFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (target == source)
-        return;
       if (target == runtime->address_space)
         return;
+      if (target == source)
+        return;
       runtime->send_index_space_set(target, rez);
-    } 
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
-                        IndexSpaceNode *par, IndexPartNode *l, IndexPartNode *r)
-      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
-        parent(par), left(l), right(r)
-    //--------------------------------------------------------------------------
-    {
-      left->add_base_resource_ref(META_TASK_REF);
-      right->add_base_resource_ref(META_TASK_REF);
-      parent->add_base_resource_ref(META_TASK_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_disjointness_test(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DynamicIndependenceArgs *dargs =
-        (const DynamicIndependenceArgs*)args;
-      const bool disjoint = !dargs->left->intersects_with(dargs->right);
-      dargs->parent->record_disjointness(disjoint, dargs->left->color,
-                                         dargs->right->color);
-      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->left;
-      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->right;
-      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->parent;
     } 
 
     //--------------------------------------------------------------------------
@@ -8488,7 +8259,14 @@ namespace Legion {
       // Send our parent first if necessary
       if (recurse && (parent != NULL))
         parent->send_node(target, true/*recurse*/);
-      if (is_owner())
+      // Only send it if we're the owner without a collective mapping
+      // or the target is not in the collective mapping and we're the
+      // closest node in the collective mapping to the target
+      if ((is_owner() && (collective_mapping == NULL)) ||
+          ((collective_mapping != NULL) && 
+           !collective_mapping->contains(target) && 
+           collective_mapping->contains(local_space) &&
+           (local_space == collective_mapping->find_nearest(target))))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -8526,7 +8304,8 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
-      if (index_space_set)
+      if (index_space_set && ((collective_mapping == NULL) ||
+            !collective_mapping->contains(target)))
         pack_index_space(rez, true/*include size*/);
       else
         rez.serialize<size_t>(0);
@@ -8676,17 +8455,51 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle;
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      AddressSpaceID source;
+      derez.deserialize(source);
       IndexSpaceNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       bool valid = false;
       if (target != NULL)
       {
+        // If there is a collective mapping, check to see if we're on the
+        // right node and if not forward it on to the right node
+        if (target->collective_mapping != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!target->collective_mapping->contains(source));
+          assert(target->collective_mapping->contains(target->local_space));
+#endif
+          if (target->is_owner())
+          {
+            const AddressSpaceID nearest = 
+              target->collective_mapping->find_nearest(source);
+            // If we're not the nearest then forward it on to the
+            // proper node to handle the request
+            if (nearest != target->local_space)
+            {
+              Serializer rez;
+              rez.serialize(handle);
+              rez.serialize(to_trigger);
+              rez.serialize(source);
+              forest->runtime->send_index_space_request(nearest, rez);
+              return;
+            }
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            assert(target->local_space == 
+                target->collective_mapping->find_nearest(source));
+          }
+#endif
+        }
         // See if we're going to be sending the whole tree or not
         bool recurse = true;
         if (target->parent == NULL)
@@ -8745,7 +8558,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_return(
-          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
+                                 RegionTreeForest *context, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -8920,11 +8733,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      IndexSpace handle;
-      derez.deserialize(handle);
-      IndexSpaceNode *node = forest->get_node(handle);
-      if (node->unpack_index_space(derez, source))
-        delete node;
+      IndexPartition parent_handle;
+      derez.deserialize(parent_handle);
+      if (parent_handle.exists())
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        IndexPartNode *parent = forest->get_node(parent_handle);
+        IndexSpaceNode *child = parent->get_child(color);
+        if (child->unpack_index_space(derez, source))
+          delete child;
+      }
+      else
+      {
+        IndexSpace handle;
+        derez.deserialize(handle);
+        IndexSpaceNode *node = forest->get_node(handle);
+        if (node->unpack_index_space(derez, source))
+          delete node;
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -9150,6 +8977,8 @@ namespace Legion {
           return false;
         // Otherwise fall through and do the expensive test
       }
+      if (!compute)
+        return true;
       IndexSpaceExpression *intersect = 
         context->intersect_index_spaces(this, rhs);
       return !intersect->is_empty();
@@ -9159,42 +8988,7 @@ namespace Legion {
     bool IndexSpaceNode::intersects_with(IndexPartNode *rhs, bool compute)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      // A very simple test but an obvious one
-      if ((rhs->parent == this) || (parent == rhs))
-          return true;
-      // We're about to do something expensive so if these are both
-      // in the same index space tree then walk up to a common partition
-      // if one exists and see if it is disjoint
-      if (handle.get_tree_id() == rhs->handle.get_tree_id())
-      {
-        IndexSpaceNode *one = this;
-        IndexSpaceNode *two = rhs->parent;
-        // Get them at the same depth
-        while (one->depth > two->depth)
-          one = one->parent->parent;
-        while (one->depth < two->depth)
-          two = two->parent->parent;
-        // Handle the case where one dominates the other
-        if (one == two)
-          return true;
-        // Now walk up until their parent is the same
-        while (one->parent != two->parent)
-        {
-          one = one->parent->parent;
-          two = two->parent->parent;
-        }
-        // If they have the same parent and it's not NULL and 
-        // it is disjoint then they don't intersect if they are different
-        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
-          return false;
-        // Otherwise fall through and do the expensive test
-      }
-      IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(this, rhs->get_union_expression());
-      return !intersect->is_empty();
+      return rhs->intersects_with(this, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -9231,41 +9025,6 @@ namespace Legion {
       return diff->is_empty();
     }
 
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::dominates(IndexPartNode *rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      // A simple but common case
-      if (rhs->parent == this)
-        return true;
-      // We're about to do something expensive so use the region tree
-      // as an acceleration data structure to try to make our tests
-      // more efficient. If these are in the same tree, see if we can
-      // walk up the tree from rhs and find ourself
-      if (handle.get_tree_id() == rhs->handle.get_tree_id())
-      {
-        // If we're the root of the tree we also trivially domainate
-        if (depth == 0)
-          return true;
-        if (rhs->depth > depth)
-        {
-          IndexSpaceNode *temp = rhs->parent;
-          while (depth < temp->depth)
-            temp = temp->parent->parent;
-          // If we find ourself at the same depth then we dominate
-          if (temp == this)
-            return true;
-        }
-        // Otherwise we fall through and do the expensive test
-      }
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(rhs->get_union_expression(), this);
-      return diff->is_empty();
-    }
-
     /////////////////////////////////////////////////////////////
     // Index Partition Node 
     /////////////////////////////////////////////////////////////
@@ -9274,35 +9033,22 @@ namespace Legion {
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, bool dis, int comp, 
-                                 DistributedID did, ApEvent part_ready, 
-                                 ApBarrier partial, RtEvent init,
-                                 CollectiveMapping *mapping, ShardMapping *map,
-                                 Provenance *prov)
+                                 DistributedID did, RtEvent init,
+                                 CollectiveMapping *mapping, Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
                       init, mapping, prov, true/*tree valid*/),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
-        partition_ready(part_ready), partial_pending(partial),
-        shard_mapping(map), disjoint(dis), has_complete(comp >= 0),
-        complete(comp != 0), first_entry(NULL)
+        total_children_volume(0), total_intersection_volume(0),
+        has_disjoint(true), disjoint(dis),
+        has_complete(comp >= 0), complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
-      if (has_complete && complete)
-      {
-        parent->add_nested_expression_reference(did);
-        union_expr.store(parent);
-      }
-      else
-        union_expr.store(NULL);
-      if (shard_mapping != NULL)
-        shard_mapping->add_reference();
 #ifdef DEBUG_LEGION
-      if (partial_pending.exists())
-        assert(partial_pending == partition_ready);
       assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif
 #ifdef LEGION_GC
@@ -9314,43 +9060,75 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
-                                 LegionColor c, RtEvent dis_ready,
-                                 int comp, DistributedID did,
-                                 ApEvent part_ready, ApBarrier part,
+                                 LegionColor c, int comp, DistributedID did,
                                  RtEvent init, CollectiveMapping *map,
-                                 ShardMapping *shard_map, Provenance *prov)
+                                 Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
                       init, map, prov, true/*tree valid*/),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
-        partition_ready(part_ready), partial_pending(part),
-        shard_mapping(shard_map), disjoint_ready(dis_ready), disjoint(false), 
-        has_complete(comp >= 0), complete(comp != 0),
-        first_entry(NULL)
+        total_children_volume(0), total_intersection_volume(0),
+        has_disjoint(false), disjoint(true),
+        has_complete(comp >= 0), complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
-      if (has_complete && complete)
-      {
-        parent->add_nested_expression_reference(did);
-        union_expr.store(parent);
-      }
-      else
-        union_expr.store(NULL);
-      if (shard_mapping != NULL)
-        shard_mapping->add_reference();
 #ifdef DEBUG_LEGION
-      if (partial_pending.exists())
-        assert(partial_pending == partition_ready);
       assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Index Partition %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::initialize_disjoint_complete_notifications(void)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out how many notifications we're waiting for
+      if (is_owner() || ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space)))
+      {
+        remaining_local_disjoint_complete_notifications = 0;
+        // Count how many locat notifications we're going to get
+        for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          remaining_local_disjoint_complete_notifications++;
+        // One for the disjointness task that will run
+        if (remaining_local_disjoint_complete_notifications > 0)
+          remaining_global_disjoint_complete_notifications = 1;
+        else
+          remaining_global_disjoint_complete_notifications = 0;
+        // More notifications from any remote nodes
+        if (collective_mapping != NULL)
+          remaining_global_disjoint_complete_notifications +=
+            collective_mapping->count_children(owner_space, local_space);
+        if (remaining_global_disjoint_complete_notifications == 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(!is_owner());
+#endif
+          const AddressSpaceID target =
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<int>(1); // up and compressed
+            rez.serialize(total_children_volume);
+            rez.serialize(total_intersection_volume);
+          }
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
+        }
+      }
+      else
+        remaining_global_disjoint_complete_notifications = 0;
+      // Add a reference to be removed only after both the disjointness 
+      // and the completeness is set
+      add_base_gc_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -9373,8 +9151,6 @@ namespace Legion {
         delete parent;
       if (color_space->remove_nested_resource_ref(did))
         delete color_space; 
-      if ((shard_mapping != NULL) && shard_mapping->remove_reference())
-        delete shard_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -9418,13 +9194,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent->remove_child(color);  
-      // Remove the reference on our union expression if we have one
-      IndexSpaceExpression *expr = union_expr.load();
-      if ((expr != NULL) && expr->remove_nested_expression_reference(did))
-        delete expr;
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
             color_map.begin(); it != color_map.end(); it++)
-        if (it->second->remove_nested_resource_ref(did))
+        if (it->second->remove_nested_gc_ref(did))
           delete it->second;
       color_map.clear();
     }
@@ -9616,6 +9388,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID IndexPartNode::find_color_creator_space(LegionColor color,
+                                        CollectiveMapping *&child_mapping) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(child_mapping == NULL);
+#endif
+      if (collective_mapping == NULL)
+      {
+        if (is_owner())
+          return local_space;
+        else
+          return owner_space;
+      }
+      else
+      {
+        // See whether the children are sharded or replicated
+        if (((LegionColor)collective_mapping->size()) <= total_children)
+        {
+          // Sharded, so figure out which space to send the request to
+          const size_t chunk = (max_linearized_color + 
+              collective_mapping->size() - 1) / collective_mapping->size();
+          const unsigned offset = color / chunk;
+#ifdef DEBUG_LEGION
+          assert(offset < collective_mapping->size());
+#endif
+          return (*collective_mapping)[offset];
+        }
+        else
+        {
+          // Replicated so find the child collective mapping
+          std::vector<AddressSpaceID> child_spaces;
+          const unsigned offset = color_space->compute_color_offset(color); 
+#ifdef DEBUG_LEGION
+          assert(offset < collective_mapping->size());
+#endif
+          for (unsigned idx = offset; 
+                idx < collective_mapping->size(); idx += total_children)
+            child_spaces.push_back((*collective_mapping)[idx]);
+#ifdef DEBUG_LEGION
+          assert(!child_spaces.empty());
+#endif
+          child_mapping = new CollectiveMapping(child_spaces, 
+              context->runtime->legion_collective_radix);
+          if (child_mapping->contains(local_space))
+            return local_space;
+          else
+            return child_mapping->find_nearest(local_space);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceNode* IndexPartNode::get_child(const LegionColor c,RtEvent *defer)
     //--------------------------------------------------------------------------
     {
@@ -9627,123 +9452,192 @@ namespace Legion {
         if (finder != color_map.end())
           return finder->second;
       }
-      // TODO: Remove this check here, it is not precise
       if (!color_space->contains_color(c, false/*report error*/))
         REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
                             "Invalid color space color for child %lld "
                             "of partition %d", c, handle.get_id())
-      // Check to see if we're the owner space this child, in the
-      // common case the owner space is whichever node made the 
-      // partition, but in the control replication case, we use the
-      // shard mapping to determine which node owns the given child
-      const AddressSpaceID owner_space = 
-        (shard_mapping == NULL) ? get_owner_space() :
-        (*shard_mapping)[c % shard_mapping->size()];
-      const AddressSpaceID local_space = context->runtime->address_space;
-      // If we own the index partition, create a new subspace here
-      if (owner_space == local_space)
+      // Retake the lock and see if we're going to be the one responsible
+      // for trying to make the child on this node
+      RtUserEvent ready_event;
       {
-        // First do a check to see someone else is already making
-        // the child in which case we should just wait for it to
-        // be ready
-        RtEvent wait_on;
+        AutoLock n_lock(node_lock);
+        // Make sure we didn't lose the race
+        std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+          color_map.find(c);
+        if (finder != color_map.end())
+          return finder->second;
+        // See if we're the first ones to make this child
+        std::map<LegionColor,RtUserEvent>::iterator pending_finder =
+          pending_child_map.find(c);
+        if (pending_finder != pending_child_map.end())
         {
-          AutoLock n_lock(node_lock);
-          // Check to make sure we didn't loose the race
-          std::map<LegionColor,IndexSpaceNode*>::const_iterator child_finder =
-            color_map.find(c);
-          if (child_finder != color_map.end())
-            return child_finder->second;
-          // Didn't loose the race so we can keep going
-          std::map<LegionColor,RtUserEvent>::const_iterator finder = 
-            pending_child_map.find(c);
-          if (finder == pending_child_map.end())
-            pending_child_map[c] = Runtime::create_rt_user_event();
-          else
-            wait_on = finder->second;
+          if (!pending_finder->second.exists())
+            pending_finder->second = Runtime::create_rt_user_event();
+          ready_event = pending_finder->second;
         }
-        if (wait_on.exists())
+        else
+          pending_child_map[c] = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      if (!ready_event.exists())
+      {
+        // See if we need to send a request to get the handle for this
+        CollectiveMapping *child_mapping = NULL;
+        AddressSpaceID creator_space = 
+          find_color_creator_space(c, child_mapping);
+        if (creator_space != local_space)
         {
-          // Someone else is already making it so just wait
-          if (defer == NULL)
-          {
-            wait_on.wait();
-            AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
-              color_map.find(c);
-#ifdef DEBUG_LEGION
-            // It better be here when we wake up
-            assert(finder != color_map.end());
-#endif
+          if (child_mapping != NULL)
+            delete child_mapping;
+          // Find or get the ready event to wait on
+          AutoLock n_lock(node_lock);
+          std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+            color_map.find(c);
+          if (finder != color_map.end())
             return finder->second;
-          }
-          else
+          // If we get here then we need to send the request
+          Serializer rez;
           {
-            *defer = wait_on;
-            return NULL;
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(c);
           }
+          context->runtime->send_index_partition_child_request(creator_space,
+                                                               rez);
+          // Make sure we have to event to wait on for when the child is ready
+          std::map<LegionColor,RtUserEvent>::iterator pending_finder =
+            pending_child_map.find(c);
+#ifdef DEBUG_LEGION
+          assert(pending_finder != pending_child_map.end());
+#endif
+          if (!pending_finder->second.exists())
+            pending_finder->second = Runtime::create_rt_user_event();
+          ready_event = pending_finder->second;
+        }
+        else if ((child_mapping != NULL) && 
+            (local_space != child_mapping->get_origin()))
+        {
+          // We're not the origin that will make IDs, so retake the lock
+          // and see if the child has appeared, if not record ourselves as
+          // a pending waiter for it
+          delete child_mapping;
+          AutoLock n_lock(node_lock);
+          std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+            color_map.find(c);
+          if (finder != color_map.end())
+            return finder->second;
+          std::map<LegionColor,RtUserEvent>::iterator pending_finder =
+            pending_child_map.find(c);
+#ifdef DEBUG_LEGION
+          assert(pending_finder != pending_child_map.end());
+#endif
+          if (!pending_finder->second.exists())
+            pending_finder->second = Runtime::create_rt_user_event();
+          ready_event = pending_finder->second;
         }
         else
         {
-          // We're making this so just do it
+          // If we get here then we're the ones to actually make the name 
+          // of the index subspace and instantiate the node
+#ifdef DEBUG_LEGION
+          assert(is_owner() || ((collective_mapping != NULL) &&
+                collective_mapping->contains(local_space)));
+          assert((child_mapping == NULL) || 
+              (local_space == child_mapping->get_origin()));
+#endif
           IndexSpace is(context->runtime->get_unique_index_space_id(),
                         handle.get_tree_id(), handle.get_type_tag());
-          DistributedID did = 
+          DistributedID child_did = 
             context->runtime->get_available_distributed_id();
-          IndexSpaceNode *result = NULL;
-          if (partial_pending.exists())
+          // Make a new index space node ready when the partition is ready
+          IndexSpaceNode *result = context->create_node(is, *this, c, child_did,
+                                        initialized, provenance, child_mapping);
+          if ((child_mapping != NULL) && (child_mapping->size() > 1))
           {
-            ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
-            result = context->create_node(is, NULL/*realm is*/, *this, c, did,
-                                          initialized,provenance,partial_event);
-            Runtime::phase_barrier_arrive(partial_pending, 
-                                          1/*count*/, partial_event);
+            // We know other participants are nodes are going to need
+            // these IDs so broadcast them up to the other nodes that
+            // are also going to consider child as a local child
+            std::vector<AddressSpaceID> children;
+            child_mapping->get_children(local_space, local_space, children);
+#ifdef DEBUG_LEGION
+            assert(!children.empty());
+#endif
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(c);
+              rez.serialize(is);
+              rez.serialize(child_did);
+              child_mapping->pack(rez);
+            }
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              context->runtime->send_index_partition_child_replication(*it,rez);
           }
-          else
-            // Make a new index space node ready when the partition is ready
-            result = context->create_node(is, NULL/*realm is*/, false, this, c,
-                                did, initialized, provenance, partition_ready);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                 runtime->address_space, result->get_domain_point_color());
           if (runtime->profiler != NULL)
-	    runtime->profiler->record_index_subspace(handle.id, is.id,
+            runtime->profiler->record_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
-          return result; 
+          return result;
         }
       }
-      // Otherwise, request a child node from the owner node
+#ifdef DEBUG_LEGION
+      assert(ready_event.exists());
+#endif
+      if (defer == NULL)
+      {
+        ready_event.wait();
+        return get_child(c);
+      }
       else
       {
-        std::atomic<IndexSpaceID> child_id(0);
-        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        *defer = ready_event;
+        return NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_child_replication(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition parent_handle;
+      derez.deserialize(parent_handle);
+      LegionColor child_color;
+      derez.deserialize(child_color);
+      IndexSpace child_handle;
+      derez.deserialize(child_handle);
+      DistributedID child_did;
+      derez.deserialize(child_did);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+#ifdef DEBUG_LEGION
+      assert(num_spaces > 0);
+#endif
+      CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+
+      IndexPartNode *parent = forest->get_node(parent_handle);
+      forest->create_node(child_handle, *parent, child_color, child_did,
+                      parent->initialized, parent->provenance, mapping);
+      std::vector<AddressSpaceID> children;
+      mapping->get_children(mapping->get_origin(),parent->local_space,children);
+      if (!children.empty())
+      {
         Serializer rez;
         {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(c);
-          if (defer == NULL)
-            rez.serialize(&child_id);
-          else
-            rez.serialize<std::atomic<IndexSpaceID>*>(NULL);
-          rez.serialize(ready_event);
+          RezCheck z2(rez);
+          rez.serialize(parent_handle);
+          rez.serialize(child_color);
+          rez.serialize(child_handle);
+          rez.serialize(child_did);
+          mapping->pack(rez);
         }
-        context->runtime->send_index_partition_child_request(owner_space, rez);
-        if (defer == NULL)
-        {
-          ready_event.wait();
-          IndexSpace child_handle(child_id.load(),
-              handle.get_tree_id(), handle.get_type_tag());
-#ifdef DEBUG_LEGION
-          assert(child_handle.exists());
-#endif
-          return context->get_node(child_handle);
-        }
-        else
-        {
-          *defer = ready_event;
-          return NULL;
-        }
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          forest->runtime->send_index_partition_child_replication(*it, rez);
       }
     }
 
@@ -9752,7 +9646,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This child should live as long as we are alive
-      child->add_nested_resource_ref(did);
+      child->add_nested_gc_ref(did);
       child->add_nested_valid_ref(did);
       RtUserEvent to_trigger;
       {
@@ -9762,14 +9656,39 @@ namespace Legion {
         assert(color_map.find(child->color) == color_map.end());
 #endif
         color_map[child->color] = child;
-        std::map<LegionColor,RtUserEvent>::iterator finder = 
+        std::map<LegionColor,RtUserEvent>::iterator finder =
           pending_child_map.find(child->color);
-        if (finder == pending_child_map.end())
-          return;
-        to_trigger = finder->second;
-        pending_child_map.erase(finder);
+        if (finder != pending_child_map.end())
+        {
+          if (finder->second.exists())
+            to_trigger = finder->second; 
+          pending_child_map.erase(finder);
+        }
       }
-      Runtime::trigger_event(to_trigger);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::set_child(IndexSpaceNode *child)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      if (!has_disjoint || !has_complete)
+      {
+#ifdef DEBUG_LEGION
+        assert(remaining_local_disjoint_complete_notifications > 0);
+        assert(remaining_global_disjoint_complete_notifications > 0);
+#endif
+        if (--remaining_local_disjoint_complete_notifications == 0)
+        {
+          // Launch the task to perform the local disjointness 
+          // and completeness tests
+          DisjointnessArgs args(this);
+          runtime->issue_runtime_meta_task(args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, initialized);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9809,148 +9728,520 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartNode::RemoteDisjointnessFunctor::RemoteDisjointnessFunctor(
-                        Serializer &r, Runtime *rt, ShardMapping *shard_mapping)
+                                              Serializer &r, Runtime *rt)
       : rez(r), runtime(rt)
     //--------------------------------------------------------------------------
     {
-      if (shard_mapping != NULL)
-      {
-        for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
-          skip_shard_spaces.insert((*shard_mapping)[idx]);
-      }
     }
 
     //--------------------------------------------------------------------------
     void IndexPartNode::RemoteDisjointnessFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if ((target != runtime->address_space) && 
-          (skip_shard_spaces.empty() ||
-           (skip_shard_spaces.find(target) == skip_shard_spaces.end())))
+      if (target != runtime->address_space)
         runtime->send_index_partition_disjoint_update(target, rez);
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::compute_disjointness(ValueBroadcast<bool> *collective,
-                                             bool owner)
+    bool IndexPartNode::compute_disjointness_and_completeness(void)
     //--------------------------------------------------------------------------
     {
-      if (owner)
+#ifdef DEBUG_LEGION
+      assert(is_owner() || ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space)));
+#endif
+      if (is_complete(false/*from app*/, true/*false if not ready*/) ||
+          is_disjoint(false/*from app*/, true/*false if not ready*/))
       {
-        // If we're the owner we do the disjointness test
-        disjoint = true;
-        if (is_complete(false/*from app*/, true/*false if not ready*/))
+        // If we know we're complete, then we can check disjointness
+        // simply by summing up the volume of all the children and 
+        // seeing if it equals the total volume of the parent. If it
+        // does then we must be disjoint since any aliasing would result
+        // in a volume that is larger than the volume of the parent.
+        //
+        // If we know we're disjoint, then we can check completeness
+        // simply by summing up the volume of all the children and seeing
+        // if it equals the the total volume of the parent. If it does then
+        // we must be complete because there is no aliasing of the subspaces.
+        //
+        // If we have no collective mapping or the number of children is
+        // larger than the collective mapping then we can eagerly sum
+        // the volumes together, otherwise we need to keep them separte
+        // so we can deduplicate the volumes across nodes
+        if ((collective_mapping == NULL) || 
+            (((LegionColor)collective_mapping->size()) <= total_children))
         {
-          // If we're complete we can check this using a linear algorithm
-          // by suming up the volumes of all the children
-          const size_t parent_volume = parent->get_volume();
-          size_t children_volume = 0;
-          for (ColorSpaceIterator itr(this); itr; itr++)
+          // Children are sharded so no need to worry about uniqueness
+          uint64_t children_volume = 0;
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
           {
             IndexSpaceNode *child = get_child(*itr);
             children_volume += child->get_volume();
-            if (children_volume > parent_volume)
-              break;
           }
-#ifdef DEBUG_LEGION
-          assert(parent_volume <= children_volume);
-#endif
-          if (parent_volume < children_volume)
-            disjoint = false;
-        }
-        else if (total_children == max_linearized_color)
-        {
-          for (LegionColor c1 = 0; disjoint && 
-                (c1 < max_linearized_color); c1++)
-          {
-            for (LegionColor c2 = c1 + 1; disjoint && 
-                  (c2 < max_linearized_color); c2++)
-            {
-              if (!are_disjoint(c1, c2, true/*force compute*/))
-              {
-                disjoint = false;
-                break;
-              }
-            }
-            if (!disjoint)
-              break;
-          }
+          return update_disjoint_complete_result(children_volume);
         }
         else
         {
-          for (LegionColor c1 = 0; disjoint && 
-                (c1 < max_linearized_color); c1++)
+          // Worry about uniqueness of children in this case
+          std::map<LegionColor,uint64_t> children_volumes;
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
           {
-            if (!color_space->contains_color(c1))
-              continue;
-            for (LegionColor c2 = c1 + 1; disjoint &&
-                  (c2 < max_linearized_color); c2++)
-            {
-              if (!color_space->contains_color(c2))
-                continue;
-              if (!are_disjoint(c1, c2, true/*force compute*/))
-              {
-                disjoint = false;
-                break;
-              }
-            }
-            if (!disjoint)
-              break;
+            IndexSpaceNode *child = get_child(*itr);
+            children_volumes[*itr] = child->get_volume();
           }
+          return update_disjoint_complete_result(children_volumes);
         }
-        // Make sure the write of disjoint propagates before 
-        // we do the trigger of the event
-        __sync_synchronize();
-        {
-          AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-          assert(disjoint_ready.exists());
-#endif
-          // We have to send notifications before any other remote
-          // requests can record themselves so we need to do it 
-          // while we are holding the lock
-          if (has_remote_instances() && 
-              ((shard_mapping == NULL) || 
-               (count_remote_instances() > shard_mapping->size())))
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize<bool>(disjoint);
-            }
-            RemoteDisjointnessFunctor functor(rez, 
-                  context->runtime, shard_mapping);
-            map_over_remote_instances(functor);
-          }
-        }
-        // If we have a disjointness barrier, then signal the result
-        if (collective != NULL)
-          collective->broadcast(disjoint);
-        if (implicit_runtime->profiler != NULL)
-          runtime->profiler->record_index_partition(parent->handle.id,handle.id,
-                                                    disjoint, color);
       }
       else
       {
-        // We're not the owner so we should have a barrier that tells
-        // us what the disjointness result is
+        // In this case we don't know anything so we're computing both
+        // disjointness and completeness at the same time. 
+        // To check for disjointness we look for any neighboring 
+        // children that alias. If we find any then we know that we
+        // are not disjoint. To check for completeness, we count the
+        // total volume of all the children and then subtract off the
+        // volumes of the intersections from any interfering children
+        // with a lower legion color to deduplicate counts. To compute
+        // this difference for a given color C we first compute the union
+        // of all the interfering children with colors <C and then subtract
+        // that off the C to create a differende D, then we sum the 
+        // intersection of all the remaining interfering children with D
+        // Try drawing yourself n-way venn diagrams to convince yourself 
+        // this is correct and will count all overlapping points exactly once.
+        if ((collective_mapping == NULL) ||
+            (((LegionColor)collective_mapping->size()) <= total_children))
+        {
+          // Children are sharded so no need to worry about uniqueness
+          uint64_t children_volume = 0;
+          uint64_t intersection_volume = 0;
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          {
+            IndexSpaceNode *child = get_child(*itr);
+            size_t child_volume = child->get_volume();
+            if (child_volume == 0)
+              continue;
+            children_volume += child_volume;
+            std::vector<LegionColor> interfering;
+            if (!find_interfering_children_kd(child, interfering))
+            {
+              // Not enough entries for a kd-tree so do it locally
+              IndexSpaceExpression *difference = NULL;
+              std::set<IndexSpaceExpression*> previous;
+              for (ColorSpaceIterator itr2(this); itr2; itr2++)
+              {
+                if ((*itr) == (*itr2))
+                {
+                  if (previous.empty())
+                    difference = child;
+                  else
+                    difference = 
+                      context->subtract_index_spaces(child,
+                          context->union_index_spaces(previous));
+                }
+                else
+                {
+                  IndexSpaceNode *other = get_child(*itr2);
+                  if ((*itr) < (*itr2))
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(difference, other);
+                    intersection_volume += intersection->get_volume();
+                  }
+                  else
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(child, other);
+                    if (!intersection->is_empty())
+                      previous.insert(intersection);
+                  }
+                }
+              }
+            }
+            else
+            {
 #ifdef DEBUG_LEGION
-        assert(collective != NULL);
+              assert(!interfering.empty());
+              std::sort(interfering.begin(), interfering.end());
+              assert(std::binary_search(interfering.begin(),
+                    interfering.end(), *itr));
 #endif
-        // No need to wait, we know this was a precondition for launching
-        // the task to compute the disjointness
-        disjoint = collective->get_value();
+              if (interfering.size() > 1)
+              {
+                IndexSpaceExpression *difference = NULL;
+                std::set<IndexSpaceExpression*> previous;
+                for (std::vector<LegionColor>::const_iterator it =
+                      interfering.begin(); it != interfering.end(); it++)
+                {
+                  if ((*itr) == (*it))
+                  {
+                    IndexSpaceNode *child = get_child(*it);
+                    if (previous.empty())
+                      difference = child;
+                    else
+                      difference =
+                        context->subtract_index_spaces(child,
+                            context->union_index_spaces(previous));
+                  }
+                  else
+                  {
+                    IndexSpaceNode *other = get_child(*it);
+                    if ((*itr) < (*it))
+                    {
+                      IndexSpaceExpression *intersection =
+                        context->intersect_index_spaces(difference, other);
+                      intersection_volume += intersection->get_volume();
+                    }
+                    else
+                      previous.insert(other);
+                  }
+                }
+              }
+            }
+          }
+          return update_disjoint_complete_result(children_volume,
+                                            intersection_volume);
+        }
+        else
+        {
+          std::map<LegionColor,uint64_t> children_volumes;
+          std::map<
+            std::pair<LegionColor,LegionColor>,uint64_t> intersection_volumes;
+          // Children are not sharded so we need to worry about aliasing
+          // across the nodes for the same children
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          {
+            IndexSpaceNode *child = get_child(*itr);
+            size_t child_volume = child->get_volume();
+            children_volumes[*itr] = child_volume;
+            if (child_volume == 0)
+              continue;
+            std::vector<LegionColor> interfering;
+            if (!find_interfering_children_kd(child, interfering))
+            {
+              // Not enough entries for a kd-tree so do it locally
+              IndexSpaceExpression *difference = NULL;
+              std::set<IndexSpaceExpression*> previous;
+              for (ColorSpaceIterator itr2(this); itr2; itr2++)
+              {
+                if ((*itr) == (*itr2))
+                {
+                  if (previous.empty())
+                    difference = child;
+                  else
+                    difference = 
+                      context->subtract_index_spaces(child,
+                          context->union_index_spaces(previous));
+                }
+                else
+                {
+                  IndexSpaceNode *other = get_child(*itr2);
+                  if ((*itr) < (*itr2))
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(difference, other);
+                    if (!intersection->is_empty())
+                      intersection_volumes[std::make_pair(*itr,*itr2)] =
+                        intersection->get_volume();
+                  }
+                  else
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(child, other);
+                    if (!intersection->is_empty())
+                      previous.insert(intersection);
+                  }
+                }
+              }
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(!interfering.empty());
+              std::sort(interfering.begin(), interfering.end());
+              assert(std::binary_search(interfering.begin(),
+                    interfering.end(), *itr));
+#endif
+              if (interfering.size() > 1)
+              {
+                IndexSpaceExpression *difference = NULL;
+                std::set<IndexSpaceExpression*> previous;
+                for (std::vector<LegionColor>::const_iterator it =
+                      interfering.begin(); it != interfering.end(); it++)
+                {
+                  if ((*itr) == (*it))
+                  {
+                    IndexSpaceNode *child = get_child(*it);
+                    if (previous.empty())
+                      difference = child;
+                    else
+                      difference =
+                        context->subtract_index_spaces(child,
+                            context->union_index_spaces(previous));
+                  }
+                  else
+                  {
+                    IndexSpaceNode *other = get_child(*it);
+                    if ((*itr) < (*it))
+                    {
+                      IndexSpaceExpression *intersection =
+                        context->intersect_index_spaces(difference, other);
+                      if (!intersection->is_empty())
+                        intersection_volumes[std::make_pair(*itr,*it)] =
+                          intersection->get_volume();
+                    }
+                    else
+                      previous.insert(other);
+                  }
+                }
+              }
+            }
+          }
+          return update_disjoint_complete_result(children_volumes,
+                                            &intersection_volumes);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::is_disjoint(bool app_query)
+    bool IndexPartNode::update_disjoint_complete_result(
+                         uint64_t children_volume, uint64_t intersection_volume)
     //--------------------------------------------------------------------------
     {
-      if (disjoint_ready.exists() && !disjoint_ready.has_triggered())
-        disjoint_ready.wait();
-      return disjoint;
+      AutoLock n_lock(node_lock);
+      total_children_volume += children_volume;
+      total_intersection_volume += intersection_volume;
+      // Check to see if we've seen all our arrivals
+#ifdef DEBUG_LEGION
+      assert(remaining_global_disjoint_complete_notifications > 0);
+#endif
+      if (--remaining_global_disjoint_complete_notifications == 0)
+      {
+        if (is_owner())
+          return finalize_disjoint_complete();
+        else
+        {
+          // Send the result up the tree
+          const AddressSpaceID target =
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<int>(1); // up and compressed
+            rez.serialize(total_children_volume);
+            rez.serialize(total_intersection_volume);
+          }
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::update_disjoint_complete_result(
+                              std::map<LegionColor,uint64_t> &children_volumes,
+                              std::map<std::pair<LegionColor,LegionColor>,
+                                       uint64_t> *intersection_volumes)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      if (!total_children_volumes.empty())
+      {
+        for (std::map<LegionColor,uint64_t>::const_iterator it =
+              children_volumes.begin(); it != children_volumes.end(); it++)
+          total_children_volumes.insert(*it);
+      }
+      else
+        total_children_volumes.swap(children_volumes);
+      if (intersection_volumes != NULL)
+      {
+        if (!total_intersection_volumes.empty())
+        {
+          for (std::map<std::pair<LegionColor,LegionColor>,
+                        uint64_t>::const_iterator it =
+                intersection_volumes->begin(); it != 
+                intersection_volumes->end(); it++)
+            total_intersection_volumes.insert(*it);
+        }
+        else
+          total_intersection_volumes.swap(*intersection_volumes);
+      }
+      // Check to see if we've seen all our arrivals
+#ifdef DEBUG_LEGION
+      assert(remaining_global_disjoint_complete_notifications > 0);
+#endif
+      if (--remaining_global_disjoint_complete_notifications == 0)
+      {
+        if (is_owner())
+        {
+          // We can now compute the final sums
+#ifdef DEBUG_LEGION
+          assert(total_children_volume == 0);
+          assert(total_intersection_volume == 0);
+#endif
+          for (std::map<LegionColor,uint64_t>::const_iterator it =
+                total_children_volumes.begin(); it !=
+                total_children_volumes.end(); it++)
+            total_children_volume += it->second;
+          total_children_volumes.clear();
+          for (std::map<std::pair<LegionColor,LegionColor>,
+                          uint64_t>::const_iterator it =
+                total_intersection_volumes.begin(); it !=
+                total_intersection_volumes.end(); it++)
+            total_intersection_volume += it->second;
+          total_intersection_volumes.clear();
+          return finalize_disjoint_complete();
+        }
+        else
+        {
+          // Send the result up the tree
+          const AddressSpaceID target =
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<int>(-1); // up and not compressed
+            rez.serialize<size_t>(total_children_volumes.size());
+            for (std::map<LegionColor,uint64_t>::const_iterator it =
+                  total_children_volumes.begin(); it !=
+                  total_children_volumes.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+            rez.serialize<size_t>(total_intersection_volumes.size());
+            for (std::map<std::pair<LegionColor,LegionColor>,uint64_t>::
+                  const_iterator it = total_intersection_volumes.begin();
+                  it != total_intersection_volumes.end(); it++)
+            {
+              rez.serialize(it->first.first);
+              rez.serialize(it->first.second);
+              rez.serialize(it->second);
+            }
+          }
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
+          total_children_volumes.clear();
+          total_intersection_volumes.clear();
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::finalize_disjoint_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        const size_t parent_volume = parent->get_volume();
+        // We can now tell what our status is
+        if (is_complete(false/*from app*/, true/*false if not ready*/))
+        {
+#ifdef DEBUG_LEGION
+          assert(parent_volume <= total_children_volume);
+#endif
+          disjoint.store((parent_volume == total_children_volume));
+        }
+        else if (is_disjoint(false/*from app*/, true/*false if not ready*/))
+        {
+#ifdef DEBUG_LEGION
+          assert(total_children_volume <= parent_volume);
+#endif
+          complete.store((parent_volume == total_children_volume));
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert((total_children_volume - total_intersection_volume) <=
+                  parent_volume);
+#endif
+          if (total_intersection_volume == 0)
+          {
+            disjoint.store(true);
+#ifdef DEBUG_LEGION
+            assert((total_children_volume <= parent_volume));
+#endif
+            complete.store((total_children_volume == parent_volume));
+          }
+          else
+          {
+            disjoint.store(false);
+#ifdef DEBUG_LEGION
+            assert(total_intersection_volume < total_children_volume);
+#endif
+            total_children_volume -= total_intersection_volume;
+#ifdef DEBUG_LEGION
+            assert(total_children_volume <= parent_volume);
+#endif
+            complete.store((parent_volume == total_children_volume));
+          }
+        }
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->record_index_partition(parent->handle.id,
+              handle.id, disjoint.load(), color);
+      }
+      has_disjoint.store(true);
+      has_complete.store(true);
+      if (disjoint_complete_ready.exists())
+        Runtime::trigger_event(disjoint_complete_ready);
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
+      {
+        // Broadcast the result out to the children
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, 
+                                local_space, children);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize<int>(0); // down
+          rez.serialize<bool>(disjoint.load());
+          rez.serialize<bool>(complete.load());
+        }
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          runtime->send_index_partition_disjoint_update(*it, rez);
+      }
+      if (has_remote_instances())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize<int>(0); // down
+          rez.serialize<bool>(disjoint.load());
+          rez.serialize<bool>(complete.load());
+        }
+        RemoteDisjointnessFunctor functor(rez, context->runtime);
+        map_over_remote_instances(functor);
+      }
+      return remove_base_gc_ref(REGION_TREE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::is_disjoint(bool app_query, bool false_if_not_ready)
+    //--------------------------------------------------------------------------
+    {
+      if (has_disjoint.load())
+        return disjoint.load();
+      if (false_if_not_ready)
+        return false;
+      RtEvent wait_on;
+      {
+        AutoLock n_lock(node_lock);
+        if (has_disjoint.load())
+          return disjoint.load();
+        if (!disjoint_complete_ready.exists())
+          disjoint_complete_ready = Runtime::create_rt_user_event();
+        wait_on = disjoint_complete_ready;
+      }
+      wait_on.wait();
+#ifdef DEBUG_LEGION
+      assert(has_disjoint.load());
+#endif
+      return disjoint.load();
     }
 
     //--------------------------------------------------------------------------
@@ -9963,90 +10254,31 @@ namespace Legion {
       if (!force_compute && is_disjoint(false/*appy query*/))
         return true;
       if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
-      bool issue_dynamic_test = false;
-      std::pair<LegionColor,LegionColor> key(c1,c2);
-      RtEvent ready_event;
+        std::swap(c1, c2);
+      const std::pair<LegionColor,LegionColor> key(c1,c2);
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
           return true;
         else if (aliased_subspaces.find(key) != aliased_subspaces.end())
           return false;
-        else
-        {
-          std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-            finder = pending_tests.find(key);
-          if (finder != pending_tests.end())
-            ready_event = finder->second;
-          else
-          {
-            if (!implicit_runtime->disable_independence_tests)
-              issue_dynamic_test = true;
-            else
-            {
-              aliased_subspaces.insert(key);
-              return false;
-            }
-          }
-        }
       }
-      if (issue_dynamic_test)
-      {
-        IndexSpaceNode *left = get_child(c1);
-        IndexSpaceNode *right = get_child(c2);
-        ApEvent left_pre = left->index_space_ready;
-        ApEvent right_pre = right->index_space_ready;
-        AutoLock n_lock(node_lock);
-        // Test again to see if we lost the race
-        std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-          finder = pending_tests.find(key);
-        if (finder == pending_tests.end())
-        {
-          DynamicIndependenceArgs args(this, left, right);
-          ApEvent pre = Runtime::merge_events(NULL, left_pre, right_pre);
-          ready_event = context->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(pre));
-          pending_tests[key] = ready_event;
-        }
-        else
-          ready_event = finder->second;
-      }
-      ready_event.wait();
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
-        return true;
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::record_disjointness(bool result,
-                                            LegionColor c1, LegionColor c2)
-    //--------------------------------------------------------------------------
-    {
-      if (c1 == c2)
-        return;
-      if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
+      // Perform the test
+      IndexSpaceNode *left = get_child(c1);
+      IndexSpaceNode *right = get_child(c2);
+      const bool intersects = left->intersects_with(right,   
+            !context->runtime->disable_independence_tests);
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(color_map.find(c1) != color_map.end());
-      assert(color_map.find(c2) != color_map.end());
-#endif
-      if (result)
-        disjoint_subspaces.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+      if (intersects)
+      {
+        aliased_subspaces.insert(key);
+        return false;
+      }
       else
-        aliased_subspaces.insert(std::pair<LegionColor,LegionColor>(c1,c2));
-      pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
+      {
+        disjoint_subspaces.insert(key);
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10054,126 +10286,81 @@ namespace Legion {
                                     bool false_if_not_ready/*=false*/)
     //--------------------------------------------------------------------------
     {
-      // If we've cached the value then we are good to go
+      if (has_complete.load())
+        return complete.load();
+      if (false_if_not_ready)
+        return false;
+      RtEvent wait_on;
       {
-        AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-        if (has_complete)
-          return complete;
-        if (false_if_not_ready)
-          return false;
+        AutoLock n_lock(node_lock);
+        if (has_complete.load())
+          return complete.load();
+        if (!disjoint_complete_ready.exists())
+          disjoint_complete_ready = Runtime::create_rt_user_event();
+        wait_on = disjoint_complete_ready;
       }
-      bool result = false;
-      // Otherwise compute it 
-      if (is_disjoint(from_app))
-      {
-	// if the partition is disjoint, we can determine completeness by
-	//  seeing if the total volume of the child domains matches the volume
-	//  of the parent domains
-	const size_t parent_volume = parent->get_volume();
-	size_t child_volume = 0;
-        if (total_children == max_linearized_color)
-        {
-          for (LegionColor c = 0; c < max_linearized_color; c++)
-          {
-            IndexSpaceNode *child = get_child(c);
-            child_volume += child->get_volume();
-          }
-        }
-        else
-        {
-          for (LegionColor c = 0; c < max_linearized_color; c++)
-          {
-            if (!color_space->contains_color(c))
-              continue;
-            IndexSpaceNode *child = get_child(c);
-            child_volume += child->get_volume();
-          }
-        }
-	result = (child_volume == parent_volume);
-      } 
-      else 
-      {
-	// if not disjoint, we have to do a considerably-more-expensive test
-	//  that handles overlap (i.e. double-counting) in the child domains
-	result = compute_complete();
-      }
-      // Save the result for the future
-      AutoLock n_lock(node_lock);
-      // See if we lost the race
-      complete = result;
-      has_complete = true;
-      return complete;
+      wait_on.wait();
+#ifdef DEBUG_LEGION
+      assert(has_complete.load());
+#endif
+      return complete.load();
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* IndexPartNode::get_union_expression(
-                                                            bool check_complete)
+    bool IndexPartNode::handle_disjointness_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceExpression *result = union_expr.load();
-      if (result != NULL)
-        return result;
-      // If we're complete then we can use the parent index space expresion
-      if (!check_complete || !is_complete())
+      int mode;
+      derez.deserialize(mode);
+      if (mode < 0)
       {
-        // We can always write the result immediately since we know
-        // that the common sub-expression code will give the same
-        // result if there is a race
-        IndexSpaceExpression *expr = compute_union_expression();
-        expr->add_nested_expression_reference(did);
-        union_expr.store(expr);
+        // up and not compressed
+        std::map<LegionColor,uint64_t> children_volumes;
+        size_t num_children;
+        derez.deserialize(num_children);
+        for (unsigned idx = 0; idx < num_children; idx++)
+        {
+          LegionColor color;
+          derez.deserialize(color);
+          derez.deserialize(children_volumes[color]);
+        }
+        size_t num_intersections;
+        derez.deserialize(num_intersections);
+        std::map<std::pair<LegionColor,LegionColor>,
+                  uint64_t> intersection_volumes;
+        for (unsigned idx = 0; idx < num_intersections; idx++)
+        {
+          std::pair<LegionColor,LegionColor> key;
+          derez.deserialize(key.first);
+          derez.deserialize(key.second);
+          derez.deserialize(intersection_volumes[key]);
+        }
+        return update_disjoint_complete_result(children_volumes,
+                                               &intersection_volumes);
       }
-      else // if we're complete the parent is our expression
+      else if (mode > 0)
       {
-        parent->add_nested_expression_reference(did);
-        union_expr.store(parent);
-      }
-      return union_expr.load();
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* IndexPartNode::compute_union_expression(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<IndexSpaceExpression*> child_spaces;
-      if (total_children == max_linearized_color)
-      {
-        for (LegionColor color = 0; color < total_children; color++)
-          child_spaces.insert(get_child(color));
+        // up and already compressed
+        uint64_t children_volume, intersection_volume;
+        derez.deserialize(children_volume);
+        derez.deserialize(intersection_volume);
+        return update_disjoint_complete_result(children_volume,
+                                               intersection_volume);
       }
       else
       {
-        for (LegionColor color = 0; color < max_linearized_color; color++)
-        {
-          if (!color_space->contains_color(color))
-            continue;
-          child_spaces.insert(get_child(color));
-        }
+        // sending back down to the children
+        bool is_disjoint, is_complete;
+        derez.deserialize(is_disjoint);
+        derez.deserialize(is_complete);
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(remaining_global_disjoint_complete_notifications == 0);
+#endif
+        disjoint.store(is_disjoint);
+        complete.store(is_complete);
+        return finalize_disjoint_complete();
       }
-      return context->union_index_spaces(child_spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::record_remote_disjoint_ready(RtUserEvent ready)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(ready.exists());
-      assert(!remote_disjoint_ready.exists());
-#endif
-      remote_disjoint_ready = ready;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::record_remote_disjoint_result(const bool result)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_disjoint_ready.exists());
-#endif
-      disjoint = result;
-      __sync_synchronize();
-      Runtime::trigger_event(remote_disjoint_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -10189,98 +10376,63 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_equal_children(Operation *op,
-                                                 size_t granularity, 
-                                                 ShardID shard, 
-                                                 size_t total_shards)
+                                                 size_t granularity) 
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_equal_children(op, this, granularity,
-                                             shard, total_shards); 
-      else
-        return parent->create_equal_children(op, this, granularity);
+      return parent->create_equal_children(op, this, granularity);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_weights(Operation *op, 
-                                   const FutureMap &weights, size_t granularity,
-                                   ShardID shard, size_t total_shards)
+                                   const FutureMap &weights, size_t granularity)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_weights(op, this, weights.impl, granularity,
-                                       shard, total_shards); 
+      return parent->create_by_weights(op, this, weights.impl, granularity);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_union(Operation *op, 
                                            IndexPartNode *left, 
-                                           IndexPartNode *right,
-                                           ShardID shard,
-                                           size_t total_shards)
+                                           IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_union(op, this, left, right, 
-                                       shard, total_shards); 
-      else
-        return parent->create_by_union(op, this, left, right);
+      return parent->create_by_union(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_intersection(Operation *op,
                                                   IndexPartNode *left,
-                                                  IndexPartNode *right,
-                                                  ShardID shard,
-                                                  size_t total_shards)
+                                                  IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_intersection(op, this, left, right,
-                                              shard, total_shards);
-      else
-        return parent->create_by_intersection(op, this, left, right);
+      return parent->create_by_intersection(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_intersection(Operation *op,
                                                   IndexPartNode *original,
-                                                  const bool dominates,
-                                                  ShardID shard,
-                                                  size_t total_shards)
+                                                  const bool dominates)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_intersection(op, this, original,
-                                              shard, total_shards, dominates);
-      else
-        return parent->create_by_intersection(op, this, original, dominates);
+      return parent->create_by_intersection(op, this, original, dominates);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_difference(Operation *op,
                                                 IndexPartNode *left,
-                                                IndexPartNode *right,
-                                                ShardID shard,
-                                                size_t total_shards)
+                                                IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_difference(op, this, left, right,
-                                            shard, total_shards);
-      else
-        return parent->create_by_difference(op, this, left, right);
+      return parent->create_by_difference(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_restriction(const void *transform,
-                                                 const void *extent,
-                                                 ShardID shard,
-                                                 size_t total_shards)
+                                                 const void *extent)
     //--------------------------------------------------------------------------
     {
       return color_space->create_by_restriction(this, transform, extent,
-                     NT_TemplateHelper::get_dim(handle.get_type_tag()),
-                     shard, total_shards);
+                     NT_TemplateHelper::get_dim(handle.get_type_tag()));
     }
 
     //--------------------------------------------------------------------------
@@ -10289,34 +10441,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DisjointnessArgs *dargs = (const DisjointnessArgs*)args;
-      IndexPartNode *node = forest->get_node(dargs->pid);
-      node->compute_disjointness(dargs->disjointness_collective, dargs->owner);
-      // We can now delete the collective
-      if (dargs->disjointness_collective != NULL)
-        delete dargs->disjointness_collective;
-      if (dargs->owner)
-      {
-        // Remove the reference on our node as well
-        if (node->remove_base_valid_ref(APPLICATION_REF))
-          delete node;
-      }
-      else
-      {
-        if (node->remove_base_resource_ref(APPLICATION_REF))
-          delete node;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::compute_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_disjoint());
-#endif
-      IndexSpaceExpression *diff = context->subtract_index_spaces(parent, 
-                            get_union_expression(false/*check complete*/));
-      return diff->is_empty();
+      if (dargs->proxy_this->compute_disjointness_and_completeness())
+        delete dargs->proxy_this;
     }
 
     //--------------------------------------------------------------------------
@@ -10356,9 +10482,20 @@ namespace Legion {
           return false;
         // Otherwise fall through and do the expensive test
       }
-      IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(get_union_expression(), rhs);
-      return !intersect->is_empty();
+      if (!compute)
+        return true;
+      std::vector<LegionColor> interfering;
+      if (find_interfering_children_kd(rhs, interfering))
+        return !interfering.empty();
+      for (ColorSpaceIterator itr(this); itr; itr++)
+      {
+        IndexSpaceNode *child = get_child(*itr);
+        IndexSpaceExpression *intersect = 
+          context->intersect_index_spaces(child, rhs);
+        if (!intersect->is_empty())
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10404,68 +10541,17 @@ namespace Legion {
           return false;
         // Otherwise we fall through and do the expensive test
       }
-      IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(get_union_expression(),
-                                        rhs->get_union_expression());
-      return !intersect->is_empty();
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::dominates(IndexSpaceNode *rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      // A simple but common case
-      if (rhs->parent == this)
+      if (!compute)
         return true;
-      // We're about to do something expensive, so use the region tree
-      // as an acceleration data structure to try to make our tests
-      // more efficient
-      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
-          (rhs->depth > depth))
+      if (parent != rhs->parent)
       {
-        IndexPartNode *temp = rhs->parent;
-        while (depth < temp->depth)
-          temp = temp->parent->parent;
-        // If we find ourselves at the same depth then we dominate
-        if (temp == this)
-          return true;
-        // Otherwise we fall through and do the expensive test
+        IndexSpaceExpression *intersect = 
+          context->intersect_index_spaces(parent, rhs->parent);
+        if (intersect->is_empty())
+          return false;
       }
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(rhs, get_union_expression());
-      return diff->is_empty();
-    }
-    
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::dominates(IndexPartNode *rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      if (rhs == this)
-        return true;
-      // We're about to do something expensive, so use the region tree
-      // as an acceleration data structure and try to make our tests
-      // more efficient
-      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) &&
-          (rhs->depth > depth))
-      {
-        IndexPartNode *temp = rhs;
-        while (depth < temp->depth)
-          temp = temp->parent->parent;
-        // If we find ourselves at the same depth then we dominate
-        if (temp == this)
-          return true;
-        // Otherwise we fall through and do the expensive test
-      }
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(rhs->get_union_expression(),
-                                       get_union_expression());
-      return diff->is_empty();
+      // TODO::intersect KD-trees?
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10553,35 +10639,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
-                       IndexPartNode *par, IndexSpaceNode *l, IndexSpaceNode *r)
-      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
-        parent(par), left(l), right(r)
-    //--------------------------------------------------------------------------
-    {
-      left->add_base_resource_ref(META_TASK_REF);
-      right->add_base_resource_ref(META_TASK_REF);
-      parent->add_base_resource_ref(META_TASK_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/void IndexPartNode::handle_disjointness_test(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DynamicIndependenceArgs *dargs =
-        (const DynamicIndependenceArgs*)args;
-      bool disjoint = !dargs->left->intersects_with(dargs->right);
-      dargs->parent->record_disjointness(disjoint, dargs->left->color,
-                                         dargs->right->color);
-      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->left;
-      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->right;
-      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->parent;
-    }
-
-    //--------------------------------------------------------------------------
     void IndexPartNode::send_node(AddressSpaceID target, bool recurse)
     //--------------------------------------------------------------------------
     {
@@ -10594,7 +10651,14 @@ namespace Legion {
         return;
       parent->send_node(target, true/*recurse*/);
       color_space->send_node(target, true/*recurse*/);
-      if (is_owner())
+      // Only send it if we're the owner without a collective mapping
+      // or the target is not in the collective mapping and we're the
+      // closest node in the collective mapping to the target
+      if ((is_owner() && (collective_mapping == NULL)) ||
+          ((collective_mapping != NULL) && 
+           !collective_mapping->contains(target) && 
+           collective_mapping->contains(local_space) &&
+           (local_space == collective_mapping->find_nearest(target))))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -10617,17 +10681,14 @@ namespace Legion {
       // Check to see if we have computed the disjointness result
       // If not we'll record that we need to do it and then when it 
       // is computed we'll send out the result to all the remote copies
-      const bool has_disjoint = 
-        (!disjoint_ready.exists() || disjoint_ready.has_triggered());
-      const bool disjoint_result = has_disjoint ? is_disjoint() : false;
       RezCheck z(rez);
       rez.serialize(handle);
       rez.serialize(did);
       rez.serialize(parent->handle); 
       rez.serialize(color_space->handle);
       rez.serialize(color);
-      rez.serialize<bool>(has_disjoint);
-      rez.serialize<bool>(disjoint_result);
+      rez.serialize<bool>(has_disjoint.load());
+      rez.serialize<bool>(disjoint.load());
       if (has_complete)
       {
         if (complete)
@@ -10637,21 +10698,11 @@ namespace Legion {
       }
       else
         rez.serialize<int>(-1); // we don't know yet
-      rez.serialize(partition_ready);
-      rez.serialize(partial_pending);
       rez.serialize(initialized);
       if (collective_mapping != NULL)
         collective_mapping->pack(rez);
       else
         rez.serialize<size_t>(0); // total spaces
-      if (shard_mapping != NULL)
-      {
-        rez.serialize(shard_mapping->size());
-        for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
-          rez.serialize((*shard_mapping)[idx]);
-      }
-      else
-        rez.serialize<size_t>(0);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
@@ -10688,10 +10739,6 @@ namespace Legion {
       derez.deserialize(disjoint);
       int complete;
       derez.deserialize(complete);
-      ApEvent ready_event;
-      derez.deserialize(ready_event);
-      ApBarrier partial_pending;
-      derez.deserialize(partial_pending);
       RtEvent initialized;
       derez.deserialize(initialized);
       size_t num_spaces;
@@ -10699,16 +10746,6 @@ namespace Legion {
       CollectiveMapping *mapping = NULL;
       if (num_spaces > 0)
         mapping = new CollectiveMapping(derez, num_spaces);
-      size_t num_shard_mapping;
-      derez.deserialize(num_shard_mapping);
-      ShardMapping *shard_mapping = NULL;
-      if (num_shard_mapping > 0)
-      {
-        shard_mapping = new ShardMapping();
-        shard_mapping->resize(num_shard_mapping);
-        for (unsigned idx = 0; idx < num_shard_mapping; idx++)
-          derez.deserialize((*shard_mapping)[idx]);
-      }
       AutoProvenance provenance(Provenance::deserialize(derez));
       IndexSpaceNode *parent_node = context->get_node(parent);
       IndexSpaceNode *color_space_node = context->get_node(color_space);
@@ -10716,18 +10753,11 @@ namespace Legion {
       assert(parent_node != NULL);
       assert(color_space_node != NULL);
 #endif
-      RtUserEvent dis_ready;
-      if (!has_disjoint)
-        dis_ready = Runtime::create_rt_user_event();
       IndexPartNode *node = has_disjoint ?
         context->create_node(handle, parent_node, color_space_node, color, 
-               disjoint, complete, did, provenance, ready_event, 
-               partial_pending, initialized, mapping, shard_mapping) :
+               disjoint, complete, did, provenance, initialized, mapping) :
         context->create_node(handle, parent_node, color_space_node, color,
-               dis_ready, complete, did, provenance, ready_event,
-               partial_pending, initialized, mapping, shard_mapping);
-      if (!has_disjoint)
-        node->record_remote_disjoint_ready(dis_ready);
+               complete, did, provenance, initialized, mapping);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -10750,16 +10780,50 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexPartition handle;
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      AddressSpaceID source;
+      derez.deserialize(source);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       if (target != NULL)
       {
+        // If there is a collective mapping, check to see if we're on the
+        // right node and if not forward it on to the right node
+        if (target->collective_mapping != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!target->collective_mapping->contains(source));
+          assert(target->collective_mapping->contains(target->local_space));
+#endif
+          if (target->is_owner())
+          {
+            const AddressSpaceID nearest = 
+              target->collective_mapping->find_nearest(source);
+            // If we're not the nearest then forward it on to the
+            // proper node to handle the request
+            if (nearest != target->local_space)
+            {
+              Serializer rez;
+              rez.serialize(handle);
+              rez.serialize(to_trigger);
+              rez.serialize(source);
+              forest->runtime->send_index_partition_request(nearest, rez);
+              return;
+            }
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            assert(target->local_space == 
+                target->collective_mapping->find_nearest(source));
+          }
+#endif
+        }
         target->pack_valid_ref();
         target->send_node(source, true/*recurse*/);
         // Now send back the results
@@ -10777,7 +10841,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_return(
-          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
+                                 RegionTreeForest *context, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -10800,10 +10864,6 @@ namespace Legion {
       derez.deserialize(handle);
       LegionColor child_color;
       derez.deserialize(child_color);
-      std::atomic<IndexSpaceID> *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
       IndexPartNode *parent = forest->get_node(handle);
       RtEvent defer;
       IndexSpaceNode *child = parent->get_child(child_color, &defer);
@@ -10811,7 +10871,7 @@ namespace Legion {
       // to avoid blocking the virtual channel for nested index tree requests
       if (defer.exists())
       {
-        DeferChildArgs args(parent, child_color, target, to_trigger, source);
+        DeferChildArgs args(parent, child_color, source);
         forest->runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_DEFERRED_PRIORITY, defer);
       }
@@ -10821,8 +10881,6 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(child->handle);
-          rez.serialize(target);
-          rez.serialize(to_trigger);
         }
         forest->runtime->send_index_partition_child_response(source, rez);
       }
@@ -10838,36 +10896,29 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(child->handle);
-        rez.serialize(dargs->target);
-        rez.serialize(dargs->to_trigger);
       }
       Runtime *runtime = dargs->proxy_this->context->runtime;
       runtime->send_index_partition_child_response(dargs->source, rez);
     }
 
     //--------------------------------------------------------------------------
+    /*static*/void IndexPartNode::defer_find_local_shard_rects(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferFindShardRects *dargs = (const DeferFindShardRects*)args;
+      if (dargs->proxy_this->find_local_shard_rects())
+        delete dargs->proxy_this;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_child_response(
-                                  RegionTreeForest *forest, Deserializer &derez)
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      std::atomic<IndexSpaceID> *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      if (target == NULL)
-      {
-        RtEvent defer;
-        forest->get_node(handle, &defer);
-        Runtime::trigger_event(to_trigger, defer);
-      }
-      else
-      {
-        target->store(handle.get_id());
-        Runtime::trigger_event(to_trigger);
-      }
+      forest->find_or_request_node(handle, source);
     }
 
     //--------------------------------------------------------------------------
@@ -10878,10 +10929,9 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      bool disjoint_result;
-      derez.deserialize(disjoint_result);
       IndexPartNode *node = forest->get_node(handle);
-      node->record_remote_disjoint_result(disjoint_result);
+      if (node->handle_disjointness_update(derez))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
@@ -10909,21 +10959,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_mapping != NULL);
-#endif
-      AutoLock n_lock(node_lock);
-      if (shard_rects_ready.exists())
-        return shard_rects_ready;
-      shard_rects_ready = Runtime::create_rt_user_event();
-      // Add a reference to keep this node alive until this all done
-      add_base_resource_ref(RUNTIME_REF);
-#ifdef DEBUG_LEGION
       assert(collective_mapping != NULL);
 #endif
-      // Figure out how many downstream requests we have
       std::vector<AddressSpaceID> children;
-      collective_mapping->get_children(owner_space, local_space, children);
-      remaining_rect_notifications = children.size();
+      {
+        AutoLock n_lock(node_lock);
+        if (shard_rects_ready.exists())
+          return shard_rects_ready;
+        shard_rects_ready = Runtime::create_rt_user_event();
+        // Add a reference to keep this node alive until this all done
+        add_base_gc_ref(RUNTIME_REF);
+        // Figure out how many downstream requests we have
+        collective_mapping->get_children(owner_space, local_space, children);
+        // Need to see all our children notifications plus our local rectangles 
+        remaining_rect_notifications = children.size() + 1;
+        initialize_shard_rects();
+      }
       if (!children.empty())
       {
         Serializer rez;
@@ -10935,30 +10986,9 @@ namespace Legion {
               children.begin(); it != children.end(); it++)
           context->runtime->send_index_partition_shard_rects_request(*it, rez);
       }
-      // Fill in all the local rectangle values
-      initialize_shard_rects();
-      if (children.empty())
-      {
-        if (!is_owner())
-        {
-          // Pack up the rectangles and send them upstream to the parent
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize<bool>(true); // up
-            pack_shard_rects(rez, true/*clear*/);
-          }
-          context->runtime->send_index_partition_shard_rects_response(
-              collective_mapping->get_parent(owner_space, local_space), rez);
-        }
-        else
-        {
-          Runtime::trigger_event(shard_rects_ready);
-          if (remove_base_resource_ref(RUNTIME_REF))
-            assert(false); // should never hit this
-        }
-      }
+      // Compute our local shard rectangles
+      if (find_local_shard_rects())
+        assert(false); // should never delete ourselves
       return shard_rects_ready;
     }
 
@@ -10968,23 +10998,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_mapping != NULL);
+      assert(collective_mapping != NULL);
 #endif
       bool up;
       derez.deserialize<bool>(up);
-      AutoLock n_lock(node_lock);
       if (up)
       {
+        bool need_local = false;
         std::vector<AddressSpaceID> children;
+        AutoLock n_lock(node_lock);
         if (!shard_rects_ready.exists())
         {
           // Not initialized, so do the initialization
           shard_rects_ready = Runtime::create_rt_user_event();
           // Add a reference to keep this node alive until this all done
-          add_base_resource_ref(RUNTIME_REF);
-#ifdef DEBUG_LEGION
-          assert(collective_mapping != NULL);
-#endif
+          add_base_gc_ref(RUNTIME_REF);
           // Figure out how many downstream requests we have
           collective_mapping->get_children(owner_space, local_space, children);
 #ifdef DEBUG_LEGION
@@ -11000,7 +11028,8 @@ namespace Legion {
           }
           assert(found);
 #endif
-          remaining_rect_notifications = children.size();
+          need_local = true;
+          remaining_rect_notifications = children.size() + 1;
           Serializer rez;
           {
             RezCheck z(rez);
@@ -11031,59 +11060,23 @@ namespace Legion {
         }
 #endif
         unpack_shard_rects(derez);
-#ifdef DEBUG_LEGION
-        assert(remaining_rect_notifications > 0);
-#endif
-        if (--remaining_rect_notifications == 0)
+        if (perform_shard_rects_notification())
         {
-          if (is_owner())
-          {
 #ifdef DEBUG_LEGION
-            assert(shard_rects_ready.exists());
+          assert(!need_local);
 #endif
-            if (children.empty())
-              collective_mapping->get_children(owner_space, 
-                                               local_space, children);
-            // We've got all the data now, so we can broadcast it back out
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize<bool>(false); // sending down the tree now
-              pack_shard_rects(rez, false/*clear*/);
-            }
-            // Only trigger this after we've packed the shard rects since the
-            // local node is going to mutate it with its own values after this
-            Runtime::trigger_event(shard_rects_ready);
-
-            for (std::vector<AddressSpaceID>::const_iterator it =
-                  children.begin(); it != children.end(); it++)
-              context->runtime->send_index_partition_shard_rects_response(*it,
-                                                                          rez);
-            return remove_base_resource_ref(RUNTIME_REF);
-          }
-          else
-          {
-            // Continue propagating it back up the tree
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize<bool>(true); // still going up
-              pack_shard_rects(rez, true/*clear*/);
-            }
-            context->runtime->send_index_partition_shard_rects_response(
-               collective_mapping->get_parent(owner_space, local_space), rez);
-          }
+          return true;
         }
+        else if (!need_local)
+          return false;
       }
       else
       {
         // Going down
+        AutoLock n_lock(node_lock);
         unpack_shard_rects(derez);
 #ifdef DEBUG_LEGION
         assert(shard_rects_ready.exists());
-        assert(collective_mapping != NULL);
 #endif
         std::vector<AddressSpaceID> children;
         collective_mapping->get_children(owner_space, local_space, children);
@@ -11104,22 +11097,72 @@ namespace Legion {
         // Only trigger this after we've packed the shard rects since the
         // local node is going to mutate it with its own values after this
         Runtime::trigger_event(shard_rects_ready);
-        return remove_base_resource_ref(RUNTIME_REF);
+        return remove_base_gc_ref(RUNTIME_REF);
+      }
+      // If we get here then we need to kick off the local analysis
+      return find_local_shard_rects();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::perform_shard_rects_notification(void)
+    //--------------------------------------------------------------------------
+    {
+      // Lock held from caller
+#ifdef DEBUG_LEGION
+      assert(remaining_rect_notifications > 0);
+#endif
+      if (--remaining_rect_notifications == 0)
+      {
+        if (is_owner())
+        {
+#ifdef DEBUG_LEGION
+          assert(shard_rects_ready.exists());
+#endif
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          // We've got all the data now, so we can broadcast it back out
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<bool>(false); // sending down the tree now
+            pack_shard_rects(rez, false/*clear*/);
+          }
+          // Only trigger this after we've packed the shard rects since the
+          // local node is going to mutate it with its own values after this
+          Runtime::trigger_event(shard_rects_ready);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            context->runtime->send_index_partition_shard_rects_response(*it,
+                                                                        rez);
+          return remove_base_gc_ref(RUNTIME_REF);
+        }
+        else
+        {
+          // Continue propagating it back up the tree
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<bool>(true); // still going up
+            pack_shard_rects(rez, true/*clear*/);
+          }
+          context->runtime->send_index_partition_shard_rects_response(
+             collective_mapping->get_parent(owner_space, local_space), rez);
+        }
       }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode::RemoteKDTracker::RemoteKDTracker(std::set<LegionColor> &c, 
-                                                    Runtime *rt)
-      : colors(c), runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT),
-        remaining(0)
+    IndexPartNode::RemoteKDTracker::RemoteKDTracker(Runtime *rt)
+      : runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT), remaining(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::RemoteKDTracker::find_remote_interfering(
+    RtEvent IndexPartNode::RemoteKDTracker::find_remote_interfering(
         const std::set<AddressSpaceID> &targets, IndexPartition handle,
         IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
@@ -11138,7 +11181,7 @@ namespace Legion {
           assert(remaining.load() > 0);
 #endif
           if (remaining.fetch_sub(1) == 1)
-            return;
+            return RtEvent::NO_RT_EVENT;
           continue;
         }
         Serializer rez;
@@ -11154,12 +11197,26 @@ namespace Legion {
       {
         AutoLock t_lock(tracker_lock);
         if (remaining.load() == 0)
-          return;
+          return RtEvent::NO_RT_EVENT;
         done_event = Runtime::create_rt_user_event();
         wait_on = done_event;
       }
-      if (!wait_on.has_triggered())
-        wait_on.wait();
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::RemoteKDTracker::get_remote_interfering(
+                                                  std::set<LegionColor> &colors)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock since we're done at this point
+      if (!remote_colors.empty())
+      {
+        if (colors.empty())
+          colors.swap(remote_colors);
+        else
+          colors.insert(remote_colors.begin(), remote_colors.end());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11175,7 +11232,7 @@ namespace Legion {
       {
         LegionColor color;
         derez.deserialize(color);
-        colors.insert(color);
+        remote_colors.insert(color);
       }
 #ifdef DEBUG_LEGION
       assert(remaining.load() > 0);
@@ -11207,8 +11264,7 @@ namespace Legion {
       IndexPartition handle;
       derez.deserialize(handle);
       IndexPartNode *node = forest->get_node(handle);
-      if (node->process_shard_rects_response(derez, source) &&
-          node->remove_base_resource_ref(RUNTIME_REF))
+      if (node->process_shard_rects_response(derez, source))
         delete node;
     }
 
@@ -11258,6 +11314,58 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // Color Space Iterator
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ColorSpaceIterator::ColorSpaceIterator(IndexPartNode *partition,
+                                           bool local_only)
+      : color_space(partition->color_space)
+    //--------------------------------------------------------------------------
+    {
+      simple_step = 
+            (partition->total_children == partition->max_linearized_color);
+      if (local_only && (partition->collective_mapping != NULL))
+      {
+#ifdef DEBUG_LEGION
+        assert(partition->collective_mapping->contains(
+              partition->local_space));
+#endif
+        const unsigned index = 
+          partition->collective_mapping->find_index(partition->local_space);
+        const LegionColor total_spaces = partition->collective_mapping->size();
+        if (partition->total_children < total_spaces)
+        {
+          // Just a single color to handle here
+          current = 0;
+          end = partition->max_linearized_color;
+          const unsigned offset = index % partition->total_children;
+          for (unsigned idx = 0; idx < offset; idx++)
+            step();
+#ifdef DEBUG_LEGION
+          assert(current < end);
+#endif
+          end = current+1;
+        }
+        else
+        {
+          const LegionColor chunk = 
+            compute_chunk(partition->max_linearized_color, total_spaces);
+          current = index * chunk;
+          end = ((current + chunk) < partition->max_linearized_color) ?
+            (current + chunk) : partition->max_linearized_color;
+          if (!simple_step && (current < end) &&
+              !color_space->contains_color(current))
+            step();       
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!local_only || partition->is_owner());
+#endif
+        current = 0;
+        end = partition->max_linearized_color;
+      }
+    }
 
     //--------------------------------------------------------------------------
     ColorSpaceIterator::ColorSpaceIterator(IndexPartNode *partition,
@@ -11329,12 +11437,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                    DistributedID did, RtEvent init, CollectiveMapping *map,
-                   ShardMapping *shard_mapping, Provenance *prov)
+                   Provenance *prov)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
-        allocation_state((shard_mapping != NULL) ? FIELD_ALLOC_COLLECTIVE :
+        allocation_state((map != NULL) ? FIELD_ALLOC_COLLECTIVE :
             is_owner() ? FIELD_ALLOC_READ_ONLY : FIELD_ALLOC_INVALID), 
         outstanding_allocators(0), outstanding_invalidations(0)
     //--------------------------------------------------------------------------
@@ -11344,9 +11452,9 @@ namespace Legion {
         unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         local_index_infos.resize(runtime->max_local_fields, 
             std::pair<size_t,CustomSerdezID>(0, 0));
-        if (shard_mapping != NULL)
+        if (collective_mapping != NULL)
         {
-          const ShardMapping &mapping = *shard_mapping;
+          const CollectiveMapping &mapping = *collective_mapping;
           for (unsigned idx = 0; idx < mapping.size(); idx++)
           {
             const AddressSpaceID space = mapping[idx];
@@ -11370,10 +11478,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
-         DistributedID did, RtEvent init, Provenance *prov, Deserializer &derez)
+         DistributedID did, RtEvent init, CollectiveMapping *map,
+         Provenance *prov, Deserializer &derez)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
-          false/*register with runtime*/),
+          false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state(FIELD_ALLOC_INVALID), outstanding_allocators(0),
         outstanding_invalidations(0)
@@ -14280,20 +14389,6 @@ namespace Legion {
           mask_index_map, unique_event, region_node, serdez,
           runtime->get_available_distributed_id(), collective_mapping);
       
-      if (collective_mapping != NULL)
-      {
-        // Since we're the owner address space, record that we have 
-        // instances on all other address spaces in the control
-        // replicated parent task's collective mapping
-        for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
-        {
-          const AddressSpaceID space = (*collective_mapping)[idx];
-          if (space == manager->owner_space)
-            continue;
-          manager->update_remote_instances(space);
-        }
-      }
-
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14493,7 +14588,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      // Only send it if we're the owner without a collective mapping
+      // or the target is not in the collective mapping and we're the
+      // closest node in the collective mapping to the target
+      assert((is_owner() && (collective_mapping == NULL)) ||
+            ((collective_mapping != NULL) && 
+             !collective_mapping->contains(target) &&
+             collective_mapping->contains(local_space) && 
+             (local_space == collective_mapping->find_nearest(target))));
 #endif
       // See if this is in our creation set, if not, send it and all the fields
       AutoLock n_lock(node_lock);
@@ -14510,6 +14612,10 @@ namespace Legion {
             provenance->serialize(rez);
           else
             Provenance::serialize_null(rez);
+          if (collective_mapping != NULL)
+            collective_mapping->pack(rez);
+          else
+            CollectiveMapping::pack_null(rez);
           // Pack the field infos
           if (allocation_state == FIELD_ALLOC_READ_ONLY)
           {
@@ -14566,8 +14672,13 @@ namespace Legion {
       RtEvent initialized;
       derez.deserialize(initialized);
       AutoProvenance provenance(Provenance::deserialize(derez));
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = NULL;
+      if (num_spaces > 0)
+        mapping = new CollectiveMapping(derez, num_spaces);
       FieldSpaceNode *node =
-        context->create_node(handle, did, initialized, provenance, derez);
+        context->create_node(handle,did,initialized,provenance,mapping,derez);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -14607,14 +14718,48 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void FieldSpaceNode::handle_node_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+           RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       FieldSpace handle;
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      AddressSpaceID source;
+      derez.deserialize(source);
       FieldSpaceNode *target = forest->get_node(handle);
+      // If there is a collective mapping, check to see if we're on the
+      // right node and if not forward it on to the right node
+      if (target->collective_mapping != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!target->collective_mapping->contains(source));
+        assert(target->collective_mapping->contains(target->local_space));
+#endif
+        if (target->is_owner())
+        {
+          const AddressSpaceID nearest = 
+            target->collective_mapping->find_nearest(source);
+          // If we're not the nearest then forward it on to the
+          // proper node to handle the request
+          if (nearest != target->local_space)
+          {
+            Serializer rez;
+            rez.serialize(handle);
+            rez.serialize(to_trigger);
+            rez.serialize(source);
+            forest->runtime->send_field_space_request(nearest, rez);
+            return;
+          }
+        }
+#ifdef DEBUG_LEGION
+        else
+        {
+          assert(target->local_space == 
+              target->collective_mapping->find_nearest(source));
+        }
+#endif
+      }
       target->send_node(source);
       Serializer rez;
       rez.serialize(to_trigger);
@@ -14950,33 +15095,30 @@ namespace Legion {
         invalidate_layouts(index, applied, source, false/*need lock*/);
         return;
       }
-      if (is_owner())
+      // Send messages to any remote nodes to perform the invalidation
+      // We're already holding the lock 
+      if (has_remote_instances())
       {
-        // Send messages to any remote nodes to perform the invalidation
-        // We're already holding the lock 
-        if (has_remote_instances())
+        std::deque<AddressSpaceID> targets;
+        FindTargetsFunctor functor(targets);
+        map_over_remote_instances(functor);
+        std::set<RtEvent> remote_ready;
+        for (std::deque<AddressSpaceID>::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
         {
-          std::deque<AddressSpaceID> targets;
-          FindTargetsFunctor functor(targets);
-          map_over_remote_instances(functor);
-          std::set<RtEvent> remote_ready;
-          for (std::deque<AddressSpaceID>::const_iterator it = 
-                targets.begin(); it != targets.end(); it++)
+          if ((*it) == source)
+            continue;
+          RtUserEvent remote_done = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            if ((*it) == source)
-              continue;
-            RtUserEvent remote_done = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize(index);
-              rez.serialize(remote_done);
-            }
-            pack_global_ref();
-            runtime->send_field_space_layout_invalidation(*it, rez);
-            applied.insert(remote_done);
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(index);
+            rez.serialize(remote_done);
           }
+          pack_global_ref();
+          runtime->send_field_space_layout_invalidation(*it, rez);
+          applied.insert(remote_done);
         }
       }
       std::vector<LEGION_FIELD_MASK_FIELD_TYPE> to_delete;
@@ -19564,13 +19706,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionNode::get_index_space_expression(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source;
-    }
-
-    //--------------------------------------------------------------------------
     RegionTreeID RegionNode::get_tree_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -19769,18 +19904,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::dominates(RegionTreeNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      if (other->is_region())
-        return row_source->dominates(other->as_region_node()->row_source);
-      else
-        return row_source->dominates(other->as_partition_node()->row_source);
-    }
-
-    //--------------------------------------------------------------------------
     size_t RegionNode::get_num_children(void) const
     //--------------------------------------------------------------------------
     {
@@ -19835,6 +19958,10 @@ namespace Legion {
             provenance->serialize(rez);
           else
             Provenance::serialize_null(rez);
+          if (collective_mapping != NULL)
+            collective_mapping->pack(rez);
+          else
+            CollectiveMapping::pack_null(rez);
           rez.serialize<size_t>(semantic_info.size());
           for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
@@ -19860,9 +19987,14 @@ namespace Legion {
       RtEvent initialized;
       derez.deserialize(initialized);
       AutoProvenance prov(Provenance::deserialize(derez));
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = NULL;
+      if (num_spaces > 0)
+        mapping = new CollectiveMapping(derez, num_spaces);
 
-      RegionNode *node = 
-        context->create_node(handle, NULL/*parent*/, initialized, did, prov);
+      RegionNode *node = context->create_node(handle, NULL/*parent*/,
+                                      initialized, did, prov, mapping);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -20316,7 +20448,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RegionNode::handle_top_level_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RegionTreeID tid;
@@ -20324,13 +20456,52 @@ namespace Legion {
       RegionNode *node = forest->get_tree(tid);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      Serializer rez;
+      AddressSpaceID source;
+      derez.deserialize(source);
+      if (node != NULL)
       {
-        RezCheck z(rez);
-        node->send_node(rez, source);
-        rez.serialize(done_event);
+        // If there is a collective mapping, check to see if we're on the
+        // right node and if not forward it on to the right node
+        if (node->collective_mapping != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!node->collective_mapping->contains(source));
+          assert(node->collective_mapping->contains(node->local_space));
+#endif
+          if (node->is_owner())
+          {
+            const AddressSpaceID nearest = 
+              node->collective_mapping->find_nearest(source);
+            // If we're not the nearest then forward it on to the
+            // proper node to handle the request
+            if (nearest != node->local_space)
+            {
+              Serializer rez;
+              rez.serialize(tid);
+              rez.serialize(done_event);
+              rez.serialize(source);
+              forest->runtime->send_top_level_region_request(nearest, rez);
+              return;
+            }
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            assert(node->local_space == 
+                node->collective_mapping->find_nearest(source));
+          }
+#endif
+        }
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          node->send_node(rez, source);
+          rez.serialize(done_event);
+        }
+        forest->runtime->send_top_level_region_return(source, rez);
       }
-      forest->runtime->send_top_level_region_return(source, rez);
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -20973,7 +21144,7 @@ namespace Legion {
       }
       // If we get here we didn't immediately have it so try
       // to make it through the proper channels
-      IndexSpaceNode *index_node = row_source->get_child(c);
+      IndexSpaceNode *index_node = row_source->get_child(c, NULL);
 #ifdef DEBUG_LEGION
       assert(index_node != NULL);
 #endif
@@ -21016,13 +21187,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return row_source;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* PartitionNode::get_index_space_expression(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_union_expression();
     }
 
     //--------------------------------------------------------------------------
@@ -21196,18 +21360,6 @@ namespace Legion {
       else
         return row_source->intersects_with(
                     other->as_partition_node()->row_source, compute);
-    }
-
-    //--------------------------------------------------------------------------
-    bool PartitionNode::dominates(RegionTreeNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      if (other->is_region())
-        return row_source->dominates(other->as_region_node()->row_source);
-      else
-        return row_source->dominates(other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------

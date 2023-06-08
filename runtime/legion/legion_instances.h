@@ -145,6 +145,7 @@ namespace Legion {
       bool contains(const CollectiveMapping &rhs) const;
       CollectiveMapping* clone_with(AddressSpace space) const;
       void pack(Serializer &rez) const;
+      static void pack_null(Serializer &rez);
     protected:
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
@@ -301,7 +302,6 @@ namespace Legion {
         DeferDeletePhysicalManager(PhysicalManager *manager_);
       public:
         PhysicalManager *manager;
-        const RtUserEvent done;
       };
       struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
       public:
@@ -393,11 +393,11 @@ namespace Legion {
       bool notify_invalid(void);
     public:
       virtual void send_manager(AddressSpaceID target);
-      static void handle_manager_request(Deserializer &derez, 
-                          Runtime *runtime, AddressSpaceID source);
+      static void handle_manager_request(Deserializer &derez, Runtime *runtime);
     public:
       virtual void notify_local(void);
     public:
+      bool is_collected(void) const;
       bool can_collect(bool &already_collected) const;
       bool acquire_collect(std::set<ApEvent> &gc_events, 
           uint64_t &sent_valid, uint64_t &received_valid);
@@ -405,12 +405,12 @@ namespace Legion {
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
                                   AddressSpaceID source, GCPriority priority);
-      RtEvent perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
-      void force_deletion(ApEvent precondition = ApEvent::NO_AP_EVENT);
+      void perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
+      void force_deletion(void);
       RtEvent update_garbage_collection_priority(AddressSpaceID source,
                                                  GCPriority priority);
       RtEvent attach_external_instance(void);
-      void detach_external_instance(ApEvent precondition);
+      void detach_external_instance(void);
       bool has_visible_from(const std::set<Memory> &memories) const;
       uintptr_t get_instance_pointer(void) const; 
       size_t get_instance_size(void) const;
@@ -545,7 +545,7 @@ namespace Legion {
       std::map<DistributedID,RtUserEvent> pending_views;
     protected:
       // Stuff for garbage collection
-      GarbageCollectionState gc_state; 
+      std::atomic<GarbageCollectionState> gc_state; 
       unsigned pending_changes;
       std::atomic<unsigned> failed_collection_count;
       RtEvent collection_ready;

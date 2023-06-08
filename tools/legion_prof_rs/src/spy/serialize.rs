@@ -210,7 +210,7 @@ pub enum Record {
     #[serde(rename = "Operation Events")]
     OperationEvents { uid: UniqueID, pre: EventID, post: EventID },
     #[serde(rename = "Copy Events")]
-    RealmCopy { uid: UniqueID, expr: ExprID, src_tid: TreeID, dst_tid: TreeID, pre: EventID, post: EventID },
+    RealmCopy { uid: UniqueID, expr: ExprID, src_tid: TreeID, dst_tid: TreeID, pre: EventID, post: EventID, collective: u64 },
     #[serde(rename = "Copy Field")]
     RealmCopyField { id: EventID, srcfid: FieldID, srcid: EventID, dstfid: FieldID, dstid: EventID, redop: u64 },
     #[serde(rename = "Indirect Events")]
@@ -222,7 +222,7 @@ pub enum Record {
     #[serde(rename = "Indirect Group")]
     IndirectGroup { indirect: IndirectID, index: u64, inst: InstID, ispace: IspaceID },
     #[serde(rename = "Fill Events")]
-    RealmFill { uid: UniqueID, ispace: IspaceID, fspace: FspaceID, tid: TreeID, pre: EventID, post: EventID, fill_uid: UniqueID },
+    RealmFill { uid: UniqueID, ispace: IspaceID, fspace: FspaceID, tid: TreeID, pre: EventID, post: EventID, fill_uid: UniqueID, collective: u64 },
     #[serde(rename = "Fill Field")]
     RealmFillField { id: EventID, fid: FieldID, dstid: EventID },
     #[serde(rename = "Deppart Events")]
@@ -350,9 +350,9 @@ pub enum Record {
     #[serde(rename = "All Reduce Operation")]
     AllReduceOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Predicate Operation")]
-    PredicateOperation { ctx: ContextID, uid: UniqueID },
+    PredicateOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Must Epoch Operation")]
-    MustEpochOperation { ctx: ContextID, uid: UniqueID },
+    MustEpochOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Summary Operation Creator")]
     SummaryCreator { uid: UniqueID, cuid: UniqueID },
     #[serde(rename = "Summary Operation")]

@@ -26,7 +26,7 @@
 #include "realm/profiling.h"
 
 #include "realm/dynamic_table.h"
-#include "realm/proc_impl.h"
+#include "realm/codedesc.h"
 #include "realm/deppart/partitions.h"
 
 // event and reservation impls are included directly in the node's dynamic tables,
@@ -79,39 +79,70 @@ namespace Realm {
       static ID make_id(const SparsityMapImplWrapper& dummy, int owner, IT index) { return ID::make_sparsity(owner, 0, index); }
       static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, IT index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
       static ID make_id(const SubgraphImpl& dummy, int owner, IT index) { return ID::make_subgraph(owner, 0, index); }
-      
-      static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
-				      int owner, FreeList *free_list)
-      {
-	LEAF_TYPE *leaf = new LEAF_TYPE(0, first_index, last_index);
-	IT last_ofs = (((IT)1) << LEAF_BITS) - 1;
-	for(IT i = 0; i <= last_ofs; i++)
-	  leaf->elems[i].init(make_id(leaf->elems[0], owner, first_index + i), owner);
-	  //leaf->elems[i].init(ID(ET::ID_TYPE, owner, first_index + i).convert<typeof(leaf->elems[0].me)>(), owner);
 
-	if(free_list) {
-	  // stitch all the new elements into the free list - we can do this
+      static std::vector<FreeList *> &get_registered_freelists(Mutex* &lock)
+      {
+        static std::vector<FreeList *> registered_freelists;
+        static Mutex registered_freelist_lock;
+        lock = &registered_freelist_lock;
+        return registered_freelists;
+      }
+      static void register_freelist(FreeList *free_list)
+      {
+        Mutex *lock = nullptr;
+        std::vector<FreeList *>& freelists = get_registered_freelists(lock);
+        AutoLock<> al(*lock);
+        freelists.push_back(free_list);
+      }
+      static ET *steal_freelist_element(FreeList *requestor = nullptr)
+      {
+        // TODO: improve this by adjusting the starting offset to reduce contention
+        Mutex *lock = nullptr;
+        std::vector<FreeList *>& freelists = get_registered_freelists(lock);
+        AutoLock<> al(*lock);
+        for(FreeList *free_list : freelists) {
+          if(free_list != requestor) {
+            ET *elem = free_list->pop_front();
+            if(elem != nullptr) {
+              return elem;
+            }
+          }
+        }
+        return nullptr;
+      }
+
+      static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, int owner,
+                                      ET **free_list_head, ET **free_list_tail)
+      {
+        LEAF_TYPE *leaf = new LEAF_TYPE(0, first_index, last_index);
+        const IT last_ofs = (((IT)1) << LEAF_BITS) - 1;
+        for(IT i = 0; i <= last_ofs; i++)
+          leaf->elems[i].init(make_id(leaf->elems[0], owner, first_index + i), owner);
+        // leaf->elems[i].init(ID(ET::ID_TYPE, owner, first_index +
+        // i).convert<typeof(leaf->elems[0].me)>(), owner);
+
+        if(free_list_head != nullptr && free_list_tail != nullptr) {
+          // stitch all the new elements into the free list - we can do this
           //  with a single cmpxchg if we link up all of our new entries
           //  first
 
           // special case - if the first_index == 0, don't actually enqueue
           //  our first element, which would be global index 0
-          IT first_ofs = ((first_index > 0) ? 0 : 1);
-          ET *new_head = &leaf->elems[first_ofs];
-          ET **tailp = &(leaf->elems[last_ofs].next_free);
+          const IT first_ofs = ((first_index > 0) ? 0 : 1);
 
-          for(IT i = first_ofs; i < last_ofs; i++)
-            leaf->elems[i].next_free = &leaf->elems[i+1];
+          for(IT i = first_ofs; i < last_ofs; i++) {
+            leaf->elems[i].next_free = &leaf->elems[i + 1];
+          }
 
-          ET *old_head = free_list->first_free.load_acquire();
-          while(true) {
-            *tailp = old_head;
-            if(free_list->first_free.compare_exchange(old_head, new_head))
-              break;
+          // Push these new elements on the front of the free list we have so far
+          leaf->elems[last_ofs].next_free = *free_list_head;
+          *free_list_head = &leaf->elems[first_ofs];
+          if (*free_list_tail == nullptr) {
+            *free_list_tail = &leaf->elems[last_ofs];
           }
         }
 
-	return leaf;
+        return leaf;
       }
     };
 

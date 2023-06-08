@@ -8,6 +8,7 @@
 #define cudaError_t hipError_t
 #define cudaEvent_t hipEvent_t
 #define cudaStream_t hipStream_t
+#define cudaSurfaceObject_t hipSurfaceObject_t
 
 // functions
 #define cudaDeviceReset hipDeviceReset
@@ -35,6 +36,9 @@
 #define cudaStreamDestroy hipStreamDestroy
 
 // enum values
+#define cudaBoundaryModeClamp hipBoundaryModeClamp
+#define cudaBoundaryModeTrap hipBoundaryModeTrap
+#define cudaBoundaryModeZero hipBoundaryModeZero
 #define cudaMemAdviseSetReadMostly hipMemAdviseSetReadMostly
 #define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
 #define cudaMemcpyHostToDevice hipMemcpyHostToDevice

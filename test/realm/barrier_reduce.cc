@@ -4,9 +4,9 @@
 #include <cstring>
 #include <time.h>
 
-#include "osdep.h"
-
 #include "realm.h"
+
+#include "osdep.h"
 
 using namespace Realm;
 

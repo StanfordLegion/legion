@@ -362,7 +362,7 @@ namespace Realm {
       } else {
         // replace % with node number
         char filename[256];
-        sprintf(filename, "%.*s%d%s",
+        snprintf(filename, sizeof filename, "%.*s%d%s",
                 (int)(pct - start), logname.c_str() + start, Network::my_node_id, logname.c_str() + pct + 1);
 
         f = fopen(filename, append ? "a" : "w");
@@ -636,7 +636,7 @@ namespace Realm {
       static const int MAXLEN = 4096;
        char msg[MAXLEN] = {0};
        if(messageID != RESERVED_LOGGER_MESSAGE_ID) {
-          sprintf(msg, "[%s %d] ", typeName, messageID);
+          snprintf(msg, MAXLEN, "[%s %d] ", typeName, messageID);
        }
        int prefixLength = strlen(msg);
       int full = prefixLength + vsnprintf(msg + prefixLength, MAXLEN - prefixLength, fmt, args);
@@ -650,8 +650,9 @@ namespace Realm {
             vsnprintf(full_msg, full+1, fmt, args);
          } else {
             const int MAX_LENGTH_MESSAGE_ID = 16;
-            full_msg = (char*)malloc(full+1+MAX_LENGTH_MESSAGE_ID+2);
-            sprintf(full_msg, "[%d] ", messageID);
+            int full_msg_size = full+1+MAX_LENGTH_MESSAGE_ID+2;
+            full_msg = (char*)malloc(full_msg_size);
+            snprintf(full_msg, full_msg_size, "[%d] ", messageID);
             vsnprintf(full_msg + strlen(full_msg), full+1, fmt, args);
          }
          get_stream() << full_msg;

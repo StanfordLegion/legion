@@ -15,6 +15,7 @@
 
 // test for Realm's IDs
 
+#include "realm.h"
 #include "realm/nodeset.h"
 
 #include <stdio.h>

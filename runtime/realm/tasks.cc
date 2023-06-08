@@ -18,6 +18,7 @@
 #include "realm/tasks.h"
 
 #include "realm/runtime_impl.h"
+#include "realm/proc_impl.h"
 
 namespace Realm {
 
@@ -246,7 +247,7 @@ namespace Realm {
     char argstr[100];
     argstr[0] = 0;
     for(size_t i = 0; (i < arglen) && (i < 40); i++)
-      sprintf(argstr+2*i, "%02x", ((unsigned char *)(args))[i]);
+      snprintf(argstr+2*i, sizeof argstr-2*i, "%02x", ((unsigned char *)(args))[i]);
     if(arglen > 40) strcpy(argstr+80, "...");
     log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
 	     "task start: %d (%p) (%s)", func_id, fptr, argstr);

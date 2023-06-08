@@ -1,6 +1,16 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 23.06.0 (June ??, 2023)
+  * Build
+    - Fixes for CMake build on macOS
+    - Fixes for HIP build when arch is specified
+  * Realm
+    - Support for better backtraces via libdw
+  * Tools
+    - Fix rendering of profiles over HTTP
+    - Fix profiling of copies with different numbers of hops between instances
+
 Version 23.03.0 (March 27, 2023)
   * Build
     - Minimum supported CMake version is now 3.16. (Some optional features may

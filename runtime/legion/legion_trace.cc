@@ -1758,10 +1758,10 @@ namespace Legion {
     {
       initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
       fence_kind = MAPPING_FENCE;
+      context_index = invalidator->get_ctx_index();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
             unique_op_id, context_index, false/*execution fence*/);
-      context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
@@ -3393,7 +3393,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); ++it)
         {
-          char *mask = it->second.to_string();
+          char *mask = region->column_source->to_string(it->second, context);
           const void *name = NULL; size_t name_size = 0;
           forest->runtime->retrieve_semantic_information(lr, 
               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
@@ -3403,7 +3403,7 @@ namespace Legion {
                       << "Fill view: " << view
                       << ", Index expr: " << it->first->expr_id
                       << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Field Mask: " << mask;
+                      << ", Fields: " << mask;
           }
           else if (view->is_collective_view())
           {
@@ -3412,7 +3412,7 @@ namespace Legion {
                       << "view: " << view
                       << ", Index expr: " << it->first->expr_id
                       << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Field Mask: " << mask;
+                      << ", Fields: " << mask;
           }
           else
           {
@@ -3425,7 +3425,7 @@ namespace Legion {
                       << std::hex << manager->get_instance().id << std::dec
                       << ", Index expr: " << it->first->expr_id
                       << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Field Mask: " << mask;
+                      << ", Fields: " << mask;
           }
           free(mask);
         }
@@ -3574,12 +3574,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::antialias_collective_view(CollectiveView *collective,
-           const FieldMask &mask, FieldMaskSet<InstanceView> &alternative_views)
+                  FieldMask mask, FieldMaskSet<InstanceView> &alternative_views)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(conditions.find(collective) == conditions.end());
-#endif
+      ViewExprs::const_iterator collective_finder = conditions.find(collective);
+      if (collective_finder != conditions.end())
+      {
+        // If we can already find it then it is already anti-aliased so
+        // there's no need to do the rest of this work for those fields
+        FieldMask overlap = mask & collective_finder->second.get_valid_mask();
+        if (!!overlap)
+        {
+          alternative_views.insert(collective, overlap);
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+      }
       ViewExprs to_add;
       CollectiveAntiAlias alias_analysis(collective);
       for (ViewExprs::iterator vit = conditions.begin(); 
@@ -7018,7 +7029,8 @@ namespace Legion {
                                              PredEvent pred_guard,
                                              LgEvent src_unique,
                                              LgEvent dst_unique,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -7041,7 +7053,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            rhs_, src_unique, dst_unique, priority)); 
+            rhs_, src_unique, dst_unique, priority, collective)); 
     }
 
     //--------------------------------------------------------------------------
@@ -7059,7 +7071,8 @@ namespace Legion {
                                              ApEvent precondition,
                                              PredEvent pred_guard,
                                              LgEvent unique_event,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -7081,7 +7094,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                        fill_uid, handle, tree_id,
 #endif
-                                       rhs_, unique_event, priority));
+                                       rhs_, unique_event,
+                                       priority, collective));
     }
 
     //--------------------------------------------------------------------------
@@ -8109,7 +8123,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent src_unique, LgEvent dst_unique, 
-                                 int priority)
+                                 int priority, CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -8130,7 +8144,8 @@ namespace Legion {
                                           src_tree_id, dst_tree_id,
 #endif
                                           precondition, pred_guard,
-                                          src_unique, dst_unique, priority); 
+                                          src_unique, dst_unique,
+                                          priority, collective); 
     } 
     
     //--------------------------------------------------------------------------
@@ -8143,7 +8158,8 @@ namespace Legion {
                                  RegionTreeID tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent unique_event, int priority)
+                                 LgEvent unique_event, int priority,
+                                 CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -8164,7 +8180,7 @@ namespace Legion {
                                           fill_uid, handle, tree_id,
 #endif
                                           precondition, pred_guard, 
-                                          unique_event, priority);
+                                          unique_event, priority, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -9847,14 +9863,14 @@ namespace Legion {
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
                          unsigned pi, LgEvent src_uni, LgEvent dst_uni,
-                         int pr)
+                         int pr, CollectiveKind collect)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
         reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
         precondition_idx(pi), src_unique(src_uni),
-        dst_unique(dst_uni), priority(pr)
+        dst_unique(dst_uni), priority(pr), collective(collect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9896,7 +9912,7 @@ namespace Legion {
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
                                      src_unique, dst_unique,
-                                     priority, true/*replay*/);
+                                     collective, priority, true/*replay*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10010,12 +10026,14 @@ namespace Legion {
 #ifdef LEGION_SPY
                          UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
-                         unsigned pi, LgEvent unique, int pr)
+                         unsigned pi, LgEvent unique, int pr,
+                         CollectiveKind collect)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
         fill_uid(uid), handle(h), tree_id(tid),
 #endif
-        precondition_idx(pi), unique_event(unique), priority(pr)
+        precondition_idx(pi), unique_event(unique), priority(pr),
+        collective(collect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10057,7 +10075,8 @@ namespace Legion {
                                      fill_uid, handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     unique_event, priority, true/*replay*/);
+                                     unique_event, collective, priority,
+                                     true/*replay*/);
     }
 
     //--------------------------------------------------------------------------

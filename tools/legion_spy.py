@@ -140,6 +140,15 @@ UNION_EXPR = 1
 INTERSECT_EXPR = 2
 DIFFERENCE_EXPR = 3,
 
+COLLECTIVE_FILL = 1,
+COLLECTIVE_BROADCAST = 2
+COLLECTIVE_REDUCTION = 3
+COLLECTIVE_BUTTERFLY_ALLREDUCE = 4
+COLLECTIVE_HOURGLASS_ALLREDUCE = 5
+COLLECTIVE_POINT_TO_POINT = 6
+COLLECTIVE_REDUCECAST = 7
+COLLECTIVE_HAMMER_REDUCTION = 8
+
 # Helper methods for python 2/3 foolishness
 def iteritems(obj):
     return obj.items() if sys.version_info > (3,) else obj.viewitems()
@@ -5915,21 +5924,26 @@ class CollectiveRendezvous(object):
                     break
             if diff_regions == total_points:
                 # Check to make sure the user didn't ask for any collective behavior
-                if requested:
+                # Skip this for index attach and detach points since we have to do
+                # this check and it might fail but that is just part of the semantics
+                # of those operations so it shouldn't be a warning
+                if requested and self.owner.kind != ATTACH_OP_KIND and \
+                        self.owner.kind != DETACH_OP_KIND:
+                    assert self.owner.kind == INDEX_TASK_KIND
                     if provenance is not None and len(provenance) > 0:
                         print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
                                 ' (from '+provenance+') but no point operations shared '+
                                 'the same logical region. This could lead to unnecessary '+
                                 'runtime overhead.')
-                        if self.op.state.assert_on_warning:
+                        if self.owner.state.assert_on_warning:
                             assert False
                     else:
                         print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
                                 ' but no point operations shared the same logical region.'+
                                 ' This could lead to unnecessary runtime overhead.')
-                        if self.op.state.assert_on_warning:
+                        if self.owner.state.assert_on_warning:
                             assert False
             elif requested:
                 matched_reqs.append(idx)
@@ -5963,6 +5977,9 @@ class CollectiveRendezvous(object):
                             pointstr += ', '
                         pointstr += str(op.index_point)
                     print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
+        # We skip index attach and detach operations here since they have to do
+        # collective rendezvous by default and might not end up matching and that
+        # is not a bug in the runtime
         if collective_reqs:
             for idx in collective_reqs:
                 # Count the number of points that matched with another
@@ -5972,20 +5989,32 @@ class CollectiveRendezvous(object):
                         total_matches += len(ops)
                 assert total_matches <= total_points
                 efficiency = "{:.2f}".format(100 * total_matches / total_points)
-                if provenance is not None and len(provenance) > 0:
-                    print('WARNING: Missed collective rendezvous optimization for region '+
-                            'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
-                            ') which had '+str(total_points)+' out of '+str(total_points)+
-                            ' ('+efficiency+'%) use the same logical region as another point.')
-                    if self.op.state.assert_on_warning:
-                        assert False
+                if self.owner.kind == SINGLE_TASK_KIND or self.owner.kind == INDEX_TASK_KIND:
+                    if provenance is not None and len(provenance) > 0:
+                        print('WARNING: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
+                                ') which had '+str(total_points)+' out of '+str(total_points)+
+                                ' ('+efficiency+'%) use the same logical region as another point.')
+                        if self.owner.state.assert_on_warning:
+                            assert False
+                    else:
+                        print('WARNING: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                                str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                                'use the same logical region as another point.')
+                        if self.owner.state.assert_on_warning:
+                            assert False
                 else:
-                    print('WARNING: Missed collective rendezvous optimization for region '+
-                            'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
-                            str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
-                            'use the same logical region as another point.')
-                    if self.op.state.assert_on_warning:
-                        assert False
+                    if provenance is not None and len(provenance) > 0:
+                        print('INFO: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
+                                ') which had '+str(total_points)+' out of '+str(total_points)+
+                                ' ('+efficiency+'%) use the same logical region as another point.')
+                    else:
+                        print('INFO: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                                str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                                'use the same logical region as another point.')
                 for region,ops in iteritems(self.matches[idx]):
                     pointstr = ''
                     first = True
@@ -5996,7 +6025,10 @@ class CollectiveRendezvous(object):
                             pointstr += ', '
                         pointstr += str(op.index_point)
                     print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
-
+                if self.owner.kind != SINGLE_TASK_KIND and self.owner.kind != INDEX_TASK_KIND:
+                    print("The runtime does not currently support parallel rendezvous for "+
+                            OpNames[self.owner.kind]+"s but you can request support for mapping "+
+                            "collective views for this kind of operation.")
 
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
@@ -6304,6 +6336,14 @@ class Operation(object):
     def get_context(self):
         assert self.context is not None
         return self.context
+
+    def get_context_index(self):
+        if self.context_index is not None:
+            return self.context_index
+        # This better be an internal oepration with a creator
+        # if it does not have a context index
+        assert self.creator is not None
+        return self.creator.get_context_index()
 
     def set_op_kind(self, kind):
         if self.kind == NO_OP_KIND:
@@ -7202,17 +7242,8 @@ class Operation(object):
                     other_req.logical_node.get_index_node())
                 if aliased:
                     assert ancestor
-                    dep_type = compute_dependence_type(req, other_req)
-                    if dep_type != NO_DEPENDENCE:
-                        # Only report this at least one is not a projection requirement
-                        if req.projection_function is None or \
-                            other_req.projection_function is None:
-                            print(("Region requirements %d and %d of operation %s "+
-                                   "are interfering in %s") % 
-                                   (index,idx,str(self),str(self.context)))
-                            if self.state.assert_on_error:
-                                assert False
-                            return False
+                    # We don't need this check for aliasing here anymore as we have
+                    # a more precise check in is_interfering_index_space_launch
                     aliased_children.add(ancestor.depth) 
             # Keep track of the previous dependences so we can 
             # use them for adding/checking dependences on close operations
@@ -7460,8 +7491,9 @@ class Operation(object):
         if prev_op in previous_deps:
             if need_fence:
                 # Check to see if the previous dependence had an intermediate close
-                if (field,tree_id) in previous_deps[prev_op]:
+                if previous_deps[prev_op] is not None and (field,tree_id) in previous_deps[prev_op]:
                     return True
+                # else we haven't computed it with a fence yet
             else:
                 # We already found this prev_op as a previous dependence
                 return True
@@ -7474,7 +7506,7 @@ class Operation(object):
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
                   str(self)+" (UID "+str(self.uid)+")")
             if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, self.field)
+                self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
                 assert False
         elif need_fence and (field,tree_id) not in previous_deps[prev_op]:
@@ -7484,7 +7516,7 @@ class Operation(object):
                     "requriement "+str(req.index)+" of "+str(self)+" (UID "+
                     str(self.uid)+")")
             if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, self.field)
+                self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
                 assert False
         else:
@@ -7493,19 +7525,55 @@ class Operation(object):
 
     def has_verification_transitive_mapping_dependence(self, prev_op, need_fence, 
                                                     field, tree_id, previous_deps):
-        # If we don't need a close then we can do BFS which is much more efficient
-        # at finding dependences of things nearby in the graph
+        # Equal is for stupid must epoch launches
+        assert prev_op.get_context_index() <= self.get_context_index()
         if not need_fence:
+            # If we don't need a close then we can do BFS which is much more efficient
+            # at finding dependences of things nearby in the graph
+            queue = collections.deque()
+            queue.append(self)
+            if len(previous_deps) > 0:
+                # We already started BFS-ing so we can restart from all
+                # the operations that we already visited
+                for op in iterkeys(previous_deps):
+                    if prev_op.get_context_index() <= op.get_context_index():
+                        queue.append(op)
+            while queue:
+                current = queue.popleft()
+                if not current.logical_incoming:
+                    continue
+                # If this operation comes earlier in the program than the
+                # previous operation that we're searching for then there
+                # is no need to search past it for now
+                if current.get_context_index() < prev_op.get_context_index():
+                    continue
+                for next_op in current.logical_incoming:
+                    if next_op in previous_deps:
+                        continue
+                    previous_deps[next_op] = None
+                    if next_op is prev_op:
+                        return True
+                    queue.append(next_op)
+        else:
+            # First BFS to find all the close fence operations that we can reach 
+            # from this operation but also come before the previous operation. 
+            # Then for each of close fence operations run a BFS to see if we can 
+            # find the prev_op from them. As soon as we find one then we are done, 
+            # otherwise we fail
             next_gen = self.state.get_next_traversal_generation()
             self.generation = next_gen
             queue = collections.deque()
             queue.append(self)
+            merge_close_ops = list()
             while queue:
                 current = queue.popleft()
-                if not current in previous_deps:
-                    previous_deps[current] = set()
-                if current is prev_op:
-                    return True
+                if current.get_context_index() < prev_op.get_context_index():
+                    continue
+                if current.kind == INTER_CLOSE_OP_KIND:
+                    assert current.reqs is not None and len(current.reqs) == 1
+                    if current.reqs[0].logical_node.tree_id == tree_id and \
+                            field in current.reqs[0].fields:
+                        merge_close_ops.append(current)
                 if not current.logical_incoming:
                     continue
                 for next_op in current.logical_incoming:
@@ -7513,75 +7581,27 @@ class Operation(object):
                         continue
                     next_op.generation = next_gen
                     queue.append(next_op)
-        else:
-            # Otherwise start the traversal and look for a path that contains the fence
-            # Since it's likely that the operation we're looking for is nearby in the
-            # graph we'll use a timeout to find it efficiently search ever increasing
-            # depths until we notice that we do not get a timeout
-            max_depth = 4 
-            close_map = dict()
-            timeout_counter = list()
-            timeout_counter.append(0)
-            while True:
-                timeout_counter[0] = 0    
-                assert len(close_map) == 0
-                if self.has_mapping_dependence_with_close(prev_op, field, tree_id, 
-                              previous_deps, close_map, max_depth, timeout_counter):
-                    return True
-                # If we didn't have any timeout it means we explore the whole graph
-                elif timeout_counter[0] == 0:
-                    break;
-                # Increase the depth for the next pass
-                max_depth *= 2
-        return False
-
-    def has_mapping_dependence_with_close(self, prev_op, field, tree_id, 
-                      previous_deps, close_map, timeout, timeout_counter):
-        # Record our dependence set in the previous deps
-        if not self.kind == INTER_CLOSE_OP_KIND:
-            if self not in previous_deps:
-                previous_deps[self] = set()
-            if close_map is not None and len(close_map) > 0:
-                for key in iterkeys(close_map):
-                    previous_deps[self].add(key)
-        # See if we arrived at the node we're looking for
-        if self is prev_op:
-            # Check to see if we have a close for our field and tree
-            if (field,tree_id) in close_map:
-                return True
-            else:
-                return False
-        # If there's no where to traverse we're done
-        if not self.logical_incoming:
-            return False
-        # If we timed out record it in the count
-        if timeout <= 0:
-            timeout_counter[0] += 1
-            return False
-        # Otherwise continue the traversal
-        if self.kind == INTER_CLOSE_OP_KIND:
-            # If we're a close op, add ourselves to the close map
-            assert self.reqs is not None and len(self.reqs) == 1
-            close_tid = self.reqs[0].logical_node.tree_id
-            for close_field in self.reqs[0].fields:
-                key = (close_field,close_tid)
-                if key in close_map:
-                    close_map[key] += 1
-                else:
-                    close_map[key] = 1
-        for next_op in self.logical_incoming:
-            if next_op.has_mapping_dependence_with_close(prev_op, field, tree_id, 
-                            previous_deps, close_map, timeout-1, timeout_counter):
-                # No need to prune close map entries, this is the fast path back
-                return True
-        if self.kind == INTER_CLOSE_OP_KIND:
-            # Remove our entries on the way back
-            for close_field in self.reqs[0].fields:
-                key = (close_field,close_tid)
-                close_map[key] -= 1
-                if close_map[key] == 0:
-                    del close_map[key]
-        return False
+            # Once we've got the merge close fences then iterate over them  
+            # and run BFS from them looking for the previous op, recording
+            # that there are fences on anything we find along the way
+            for close in merge_close_ops:
+                next_gen = self.state.get_next_traversal_generation()
+                close.generation = next_gen
+                queue.append(close)
+                while queue:
+                    current = queue.popleft()
+                    if current not in previous_deps or previous_deps[current] is None:
+                        previous_deps[current] = set()
+                    previous_deps[current].add((field,tree_id))
+                    if current.get_context_index() < prev_op.get_context_index():
+                        continue
+                    if not current.logical_incoming:
+                        continue
+                    for next_op in current.logical_incoming:
+                        if next_op.generation == next_gen:
+                            continue
+                        next_op.generation = next_gen
+                        queue.append(next_op)
 
     def analyze_previous_interference(self, next_op, next_req, reachable):
         if not self.reqs:
@@ -9072,7 +9092,7 @@ class Task(object):
                     else:
                         # Not a sharded operation so just run this like normal
                         if self.op.state.verbose:
-                            print('Verifying '+str(op))
+                            print('Verifying '+str(logical_op))
                         previous_deps = dict()
                         if not logical_op.perform_op_logical_verification(logical_op, previous_deps):
                             success = False
@@ -10468,7 +10488,7 @@ class RealmBase(object):
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
                  'event_context', 'version_numbers', 'across_version_numbers', 
-                 'indirections', 'cluster_name']
+                 'indirections', 'collective', 'cluster_name']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -10487,6 +10507,7 @@ class RealmBase(object):
         self.version_numbers = None
         self.across_version_numbers = None
         self.indirections = None
+        self.collective = None
         self.cluster_name = None # always none
 
     def is_realm_operation(self):
@@ -10494,6 +10515,10 @@ class RealmBase(object):
 
     def is_physical_operation(self):
         return True 
+
+    def set_collective(self, collective):
+        assert self.collective is None
+        self.collective = collective
 
     def add_equivalence_incoming(self, eq, src):
         assert eq in self.eq_privileges
@@ -10744,6 +10769,7 @@ class RealmCopy(RealmBase):
 
     def __str__(self):
         if self.indirections:
+            assert self.collective is None
             has_src = False
             for index in self.src_indirections:
                 if index is not None:
@@ -10762,6 +10788,16 @@ class RealmCopy(RealmBase):
                     return "Gather Copy ("+str(self.realm_num)+")"
             else:
                 return "Scatter Copy ("+str(self.realm_num)+")"
+        elif self.collective is not None:
+            return {
+                COLLECTIVE_BROADCAST : "Broadcast ",
+                COLLECTIVE_REDUCTION : "Reduction ",
+                COLLECTIVE_BUTTERFLY_ALLREDUCE : "Butterfly Allreduce ",
+                COLLECTIVE_HOURGLASS_ALLREDUCE : "Hourglass Allreduce ",
+                COLLECTIVE_POINT_TO_POINT : "Point-to-Point ",
+                COLLECTIVE_REDUCECAST : "Reducecast ",
+                COLLECTIVE_HAMMER_REDUCTION : "Hammer Reduction ",
+            }[self.collective] + "Realm Copy ("+str(self.realm_num)+")"
         else:
             return "Realm Copy ("+str(self.realm_num)+")"
 
@@ -11111,7 +11147,13 @@ class RealmFill(RealmBase):
         self.node_name = 'realm_fill_'+str(realm_num)
 
     def __str__(self):
-        return "Realm Fill ("+str(self.realm_num)+")"
+        if self.collective is not None:
+            return {
+                COLLECTIVE_FILL : "Collective ",
+                COLLECTIVE_BUTTERFLY_ALLREDUCE : "Butterfly Allreduce ",
+            }[self.collective] + "Realm Fill ("+str(self.realm_num)+")"
+        else:
+            return "Realm Fill ("+str(self.realm_num)+")"
 
     __repr__ = __str__
 
@@ -11783,9 +11825,9 @@ tunable_op_pat           = re.compile(
 all_reduce_op_pat        = re.compile(
     prefix+"All Reduce Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 predicate_op_pat         = re.compile(
-    prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 must_epoch_op_pat        = re.compile(
-    prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 summary_op_pat        = re.compile(
     prefix+"Summary Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 summary_op_creator_pat        = re.compile(
@@ -11925,7 +11967,7 @@ operation_event_pat     = re.compile(
 realm_copy_pat          = re.compile(
     prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
            "(?P<src_tid>[0-9]+) (?P<dst_tid>[0-9]+) "+
-           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<collective>[0-9]+)")
 realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
@@ -11944,7 +11986,8 @@ indirect_group_pat      = re.compile(
            "(?P<inst>[0-9a-f]+) (?P<ispace>[0-9]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<fill_uid>[0-9]+)")
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) "+
+           "(?P<fill_uid>[0-9]+) (?P<collective>[0-9]+)")
 realm_fill_field_pat    = re.compile(
     prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
@@ -12024,6 +12067,9 @@ def parse_legion_spy_line(line, state):
         src_tree_id = int(m.group('src_tid'))
         dst_tree_id = int(m.group('dst_tid'))
         copy.set_tree_properties(index_expr, src_tree_id, dst_tree_id)
+        collective = int(m.group('collective'))
+        if collective > 0:
+            copy.set_collective(collective)
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:
@@ -12086,6 +12132,9 @@ def parse_legion_spy_line(line, state):
         if fill_uid > 0:
             fill_op = state.get_operation(fill_uid)
             fill.set_fill_op(fill_op)
+        collective = int(m.group('collective'))
+        if collective > 0:
+            fill.set_collective(collective)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:
@@ -12566,14 +12615,15 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PREDICATE_OP_KIND)
         op.set_name("Predicate Op")
-        # Predicate ops are not recorded in the context for now
-        # because they have to outlive when they complete
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, int(m.group('index')))
         return True
     m = must_epoch_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(MUST_EPOCH_OP_KIND)
-        # Don't add it to the context for now
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, int(m.group('index')))
         return True
     m = summary_op_creator_pat.match(line)
     if m is not None:

@@ -503,38 +503,6 @@ namespace Legion {
       virtual Future get_predicate_future(const Predicate &p,
                                           Provenance *provenance) = 0;
     public:
-      // The following set of operations correspond directly
-      // to the complete_mapping, complete_operation, and
-      // commit_operations performed by an operation.  Every
-      // one of those calls invokes the corresponding one of
-      // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
-                                                  RtUserEvent &resolved, 
-                      const std::vector<StaticDependence> *dependences) = 0;
-      virtual void register_new_internal_operation(InternalOp *op) = 0;
-      virtual size_t register_new_close_operation(CloseOp *op) = 0;
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual bool add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false,
-                                           bool outermost = true) = 0;
-      virtual void register_executing_child(Operation *op) = 0;
-      virtual void register_child_executed(Operation *op) = 0;
-      virtual void register_child_complete(Operation *op) = 0;
-      virtual void register_child_commit(Operation *op) = 0; 
-      virtual ApEvent register_implicit_dependences(Operation *op) = 0;
-    public:
-      virtual RtEvent get_current_mapping_fence_event(void) = 0;
-      virtual ApEvent get_current_execution_fence_event(void) = 0;
-      // Break this into two pieces since we know that there are some
-      // kinds of operations (like deletions) that want to act like 
-      // one-sided fences (e.g. waiting on everything before) but not
-      // preventing re-ordering for things afterwards
-      virtual void perform_fence_analysis(Operation *op, 
-          std::set<ApEvent> &preconditions, bool mapping, bool execution) = 0;
-      virtual void update_current_fence(FenceOp *op, 
-                                        bool mapping, bool execution) = 0;
-      virtual void update_current_implicit(Operation *op) = 0;
-    public:
       virtual void begin_trace(TraceID tid, bool logical_only,
         bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
         Provenance *provenance) = 0;
@@ -558,24 +526,13 @@ namespace Legion {
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
-#ifdef DEBUG_LEGION_COLLECTIVES
-      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node) = 0;
-      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
-                                              RegionTreeNode *node) = 0;
-#else
-      virtual MergeCloseOp* get_merge_close_op(void) = 0;
-      virtual RefinementOp* get_refinement_op(void) = 0;
-#endif
-    public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &execution_events) = 0;
+          const std::vector<ApUserEvent> &unmap_events) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -807,14 +764,29 @@ namespace Legion {
     public:
       const bool inline_task;
       const bool implicit_task; 
-#ifdef LEGION_SPY
-    protected:
-      UniqueID current_fence_uid;
-#endif
     }; 
 
     class InnerContext : public TaskContext, public Murmur3Hasher::HashVerifier,
          public InstanceDeletionSubscriber, public LegionHeapify<InnerContext> {
+    public:
+      enum PipelineStage {
+        EXECUTING_STAGE,
+        EXECUTED_STAGE,
+        COMPLETED_STAGE,
+        COMMITTED_STAGE,
+      };
+      struct ReorderBufferEntry {
+      public:
+        inline ReorderBufferEntry(size_t index)
+          : operation(NULL), operation_index(index), stage(COMMITTED_STAGE) { }
+        inline ReorderBufferEntry(Operation *op)
+          : operation(op), operation_index(op->get_ctx_index()),
+            stage(EXECUTING_STAGE) { }
+      public:
+        Operation *operation;
+        size_t operation_index;
+        PipelineStage stage;
+      };
     public:
       // Prepipeline stages need to hold a reference since the
       // logical analysis could clean the context up before it runs
@@ -1543,15 +1515,15 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
+      size_t register_new_child_operation(Operation *op,
                                                   RtUserEvent &resolved,
                 const std::vector<StaticDependence> *dependences);
-      virtual void register_new_internal_operation(InternalOp *op);
+      void register_new_internal_operation(InternalOp *op);
       // Must be called while holding the dependence lock
       virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
-      virtual size_t register_new_close_operation(CloseOp *op);
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
+      size_t register_new_close_operation(CloseOp *op);
+      size_t register_new_summary_operation(TraceSummaryOp *op);
     public:
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
@@ -1612,19 +1584,25 @@ namespace Legion {
       bool process_deferred_commit_queue(void);
       bool process_post_end_tasks(void);
     public:
-      virtual void register_executing_child(Operation *op);
-      virtual void register_child_executed(Operation *op);
-      virtual void register_child_complete(Operation *op);
-      virtual void register_child_commit(Operation *op); 
-      virtual ApEvent register_implicit_dependences(Operation *op);
+      void register_executing_child(Operation *op);
+      void register_child_executed(Operation *op);
+      void register_child_complete(Operation *op);
+      void register_child_commit(Operation *op); 
+      ReorderBufferEntry& find_rob_entry(Operation *op);
+      ApEvent register_implicit_dependences(Operation *op, 
+                              RtEvent &mappin_fence_event);
     public:
-      virtual RtEvent get_current_mapping_fence_event(void);
-      virtual ApEvent get_current_execution_fence_event(void);
-      virtual void perform_fence_analysis(Operation *op, 
+      RtEvent get_current_mapping_fence_event(void);
+      ApEvent get_current_execution_fence_event(void);
+      // Break this into two pieces since we know that there are some
+      // kinds of operations (like deletions) that want to act like 
+      // one-sided fences (e.g. waiting on everything before) but not
+      // preventing re-ordering for things afterwards
+      void perform_fence_analysis(Operation *op, 
           std::set<ApEvent> &preconditions, bool mapping, bool execution);
-      virtual void update_current_fence(FenceOp *op,
+      void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      virtual void update_current_implicit(Operation *op);
+      void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
@@ -1658,6 +1636,11 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
       virtual RefinementOp* get_refinement_op(void);
 #endif
+      virtual VirtualCloseOp* get_virtual_close_op(void);
+    public:
+      virtual void pack_task_context(Serializer &rez) const;
+      static InnerContext* unpack_task_context(Deserializer &derez,
+          Runtime *runtime, RtEvent &ctx_ready);
     public:
       bool nonexclusive_virtual_mapping(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -1669,8 +1652,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &execution_events);
+          const std::vector<ApUserEvent> &unmap_events);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
@@ -1849,25 +1831,16 @@ namespace Legion {
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
       size_t total_children_count; // total number of sub-operations
+      size_t executing_children_count;
+      size_t executed_children_count;
       size_t total_close_count; 
       size_t total_summary_count;
-      std::atomic<size_t> outstanding_children_count;
-      LegionMap<Operation*,GenerationID,
-                EXECUTING_CHILD_ALLOC> executing_children;
-      LegionMap<Operation*,GenerationID,
-                EXECUTED_CHILD_ALLOC> executed_children;
-      LegionMap<Operation*,GenerationID,
-                COMPLETE_CHILD_ALLOC> complete_children; 
+      std::atomic<size_t> outstanding_children_count; 
+      std::deque<ReorderBufferEntry> reorder_buffer;
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted
       // into the stream of operations from the task
       std::list<Operation*> unordered_ops;
-#ifdef DEBUG_LEGION
-      // In debug mode also keep track of them in context order so
-      // we can see what the longest outstanding operation is which
-      // is often useful when things hang
-      std::map<unsigned,Operation*> outstanding_children;
-#endif
 #ifdef LEGION_SPY
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
@@ -1956,9 +1929,12 @@ namespace Legion {
       // indicating that it is no longer far enough ahead
       bool currently_active_context;
     protected:
-      FenceOp *current_mapping_fence;
-      GenerationID mapping_fence_gen;
+#ifdef LEGION_SPY
+      UniqueID current_fence_uid;
+      GenerationID current_mapping_fence_gen;
+#endif
       unsigned current_mapping_fence_index;
+      RtEvent current_mapping_fence_event;
       ApEvent current_execution_fence_event;
       unsigned current_execution_fence_index;
       // We currently do not track dependences for dependent partitioning
@@ -2878,6 +2854,9 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
       virtual RefinementOp* get_refinement_op(void);
 #endif
+      virtual VirtualCloseOp* get_virtual_close_op(void);
+    public:
+      virtual void pack_task_context(Serializer &rez) const;
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -2915,8 +2894,7 @@ namespace Legion {
       bool create_shard_partition(Operation *op, IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
           PartitionKind part_kind, LegionColor partition_color,
-          bool color_generated, ApBarrier partition_ready,
-          ValueBroadcast<bool> *disjoint_result = NULL);
+          bool color_generated);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
@@ -2957,8 +2935,10 @@ namespace Legion {
         { return detach_effects_barrier.next(this); }
       inline ApBarrier get_next_future_map_wait_barrier(void)
         { return future_map_wait_barrier.next(this); }
-      inline RtBarrier get_next_dependent_partition_barrier(void)
-        { return dependent_partition_barrier.next(this); }
+      inline RtBarrier get_next_dependent_partition_mapping_barrier(void)
+        { return dependent_partition_mapping_barrier.next(this); }
+      inline ApBarrier get_next_dependent_partition_execution_barrier(void)
+        { return dependent_partition_execution_barrier.next(this); }
       inline RtBarrier get_next_attach_resource_barrier(void)
         { return attach_resource_barrier.next(this); }
       inline RtBarrier get_next_concurrent_precondition_barrier(void)
@@ -3149,7 +3129,6 @@ namespace Legion {
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
     protected:
-      ApReplBar pending_partition_barrier;
       RtReplBar creation_barrier;
       RtLogicalBar deletion_ready_barrier;
       RtLogicalBar deletion_mapping_barrier;
@@ -3160,7 +3139,8 @@ namespace Legion {
       RtReplBar resource_return_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
-      RtReplBar dependent_partition_barrier;
+      RtReplBar dependent_partition_mapping_barrier;
+      ApLogicalBar dependent_partition_execution_barrier;
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;
@@ -3345,6 +3325,7 @@ namespace Legion {
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual void pack_task_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
@@ -3364,8 +3345,7 @@ namespace Legion {
       static void handle_local_field_update(Deserializer &derez, 
                                             Runtime *runtime);
     public:
-      static void handle_context_request(Deserializer &derez, Runtime *runtime,
-                                         AddressSpaceID source);
+      static void handle_context_request(Deserializer &derez, Runtime *runtime);
       static void handle_context_response(Deserializer &derez,Runtime *runtime);
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
@@ -3781,34 +3761,6 @@ namespace Legion {
       virtual Future get_predicate_future(const Predicate &p,
                                           Provenance *provenance);
     public:
-      // The following set of operations correspond directly
-      // to the complete_mapping, complete_operation, and
-      // commit_operations performed by an operation.  Every
-      // one of those calls invokes the corresponding one of
-      // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
-                                                  RtUserEvent &resolved,
-                const std::vector<StaticDependence> *dependences);
-      virtual void register_new_internal_operation(InternalOp *op);
-      virtual size_t register_new_close_operation(CloseOp *op);
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual bool add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false,
-                                           bool outermost = true);
-      virtual void register_executing_child(Operation *op);
-      virtual void register_child_executed(Operation *op);
-      virtual void register_child_complete(Operation *op);
-      virtual void register_child_commit(Operation *op); 
-      virtual ApEvent register_implicit_dependences(Operation *op);
-    public:
-      virtual RtEvent get_current_mapping_fence_event(void);
-      virtual ApEvent get_current_execution_fence_event(void);
-      virtual void perform_fence_analysis(Operation *op,
-          std::set<ApEvent> &preconditions, bool mapping, bool execution);
-      virtual void update_current_fence(FenceOp *op,
-                                        bool mapping, bool execution);
-      virtual void update_current_implicit(Operation *op);
-    public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
           Provenance *provenance);
@@ -3832,23 +3784,12 @@ namespace Legion {
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
-#ifdef DEBUG_LEGION_COLLECTIVES
-      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node);
-      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
-                                              RegionTreeNode *node);
-#else
-      virtual MergeCloseOp* get_merge_close_op(void);
-      virtual RefinementOp* get_refinement_op(void);
-#endif
-    public:
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &execution_events);
+          const std::vector<ApUserEvent> &unmap_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
