@@ -80,6 +80,11 @@ foreach(test IN LISTS REALM_TESTS)
   if(CUDASRC_${test})
     add_executable(${test} ${test}.cc ${CUDASRC_${test}})
     set_target_cuda_architectures(TARGET ${test} ARCHS ${Legion_CUDA_ARCH})
+    # starting with nvcc 10.2, we can error out on all warnings
+    if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+      target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+    endif()
+    target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
   elseif(HIPSRC_${test})
     hip_add_executable(${test} ${test}.cc ${HIPSRC_${test}})
   else()
@@ -96,13 +101,6 @@ foreach(test IN LISTS REALM_TESTS)
       target_compile_definitions(${test} PRIVATE __HIP_PLATFORM_AMD__)
     endif()
   endif()
-
-  # starting with nvcc 10.2, we can error out on all warnings
-  if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-    target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
-  endif()
-
-  target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 endforeach()
 
 # scatter uses C++11 lambdas
