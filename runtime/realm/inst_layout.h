@@ -47,8 +47,19 @@ enum { Kokkos_Unmanaged = 0x01 };
 #include <map>
 #include <iostream>
 
+/**
+ * \file int_layout.h
+ * This file contains definitions of various instance layouts and
+ * accessors to read/write the underlying data.
+ */
+
 namespace Realm {
 
+  /**
+   * \class InstanceLayoutConstraints
+   * This class is used to describe the layout constraints for a
+   * RegionInstance.
+   */
   class REALM_PUBLIC_API InstanceLayoutConstraints {
   public:
     InstanceLayoutConstraints(void) { }
@@ -135,8 +146,11 @@ namespace Realm {
 
   };
 
-  // instance layouts are templated on the type of the IndexSpace used to
-  //  index them, but they all inherit from a generic version
+  /**
+   * \class InstanceLayoutGeneric
+   * Instance layouts are templated on the type of the IndexSpace used to
+   * index them, but they all inherit from a generic version.
+   */
   class REALM_PUBLIC_API InstanceLayoutGeneric {
   protected:
     // cannot be created directly
@@ -150,22 +164,38 @@ namespace Realm {
     
     virtual InstanceLayoutGeneric *clone(void) const = 0;
 
-    // adjusts offsets of all pieces by 'adjust_amt'
+    /**
+     * Adjusts offsets of all pieces by 'adjust_amt'
+     * \param adjust_amt
+     */
     virtual void relocate(size_t adjust_amt) = 0;
 
     virtual void print(std::ostream& os) const = 0;
 
-    // creates an affine layout using the bounds of 'is' (i.e. one piece)
-    //  using the requested dimension ordering and respecting the field
-    //  size/alignment constraints provided
+    /**
+     * Create an affine layout using the bounds of 'is' (i.e. one piece)
+     * using the requested dimension ordering and respecting the field
+     * size/alignment constraints provided.
+     * \param is Index space to use for layout creation.
+     * \param ilc Layout constraints to use for layout creation.
+     * \param dim_order Dimension ordering to use for layout creation.
+     * \return InstanceLayoutGeneric* Pointer to the created layout.
+     */
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
 							 const InstanceLayoutConstraints& ilc,
                                                          const int dim_order[N]);
 
-    // creates a multi-affine layout using one piece for each rectangle in
-    //  'covering', using the requested dimension ordering and respecting
-    //  the field size/alignment constraints provided
+    /**
+     * Create a multi-affine layout using one piece for each rectangle in
+     * 'covering' using the requested dimension ordering and respecting the
+     * field size/alignment constraints provided.
+     * \param is Index space to use for layout creation.
+     * \param covering Rectangles to use for layout creation.
+     * \param ilc Layout constraints to use for layout creation.
+     * \param dim_order Dimension ordering to use for layout creation.
+     * \return InstanceLayoutGeneric* Pointer to the created layout.
+     */
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
 							 const std::vector<Rect<N,T> >& covering,
@@ -192,9 +222,12 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutGeneric& ilg);
 
-  // users that wish to handle instances as simple blocks of bits may use
-  //  an InstanceLayoutOpaque to just request a contiguous range of bytes with
-  //  a specified alignment
+  /**
+   * \class InstanceLayoutOpaque
+   * Users that wish to handle instances as simple blocks of bits may use
+   * an InstanceLayoutOpaque to just request a contiguous range of bytes with
+   * a specified alignment.
+   */
   class REALM_PUBLIC_API InstanceLayoutOpaque : public InstanceLayoutGeneric {
   public:
     InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
@@ -209,6 +242,10 @@ namespace Realm {
     static const LayoutType AffineLayoutType = 1;
   };
 
+  /**
+   * \class InstanceLayoutPieceBase
+   * Base class for all pieces of an instance layout.
+   */
   class REALM_PUBLIC_API InstanceLayoutPieceBase {
   public:
     InstanceLayoutPieceBase(PieceLayoutTypes::LayoutType _layout_type);
@@ -227,6 +264,10 @@ namespace Realm {
     PieceLayoutTypes::LayoutType layout_type;
   };
 
+  /**
+   * \class InstanceLayoutPiece
+   * A piece of an instance layout that is defined by a single rectangle.
+   */
   template <int N, typename T = int>
   class REALM_PUBLIC_API InstanceLayoutPiece : public InstanceLayoutPieceBase {
   public:
@@ -249,6 +290,11 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutPiece<N,T>& ilp);
 
+  /**
+   * \class AffineLayoutPiece
+   * An affine piece of an instance layout. Affine pieces are defined by a
+   * single rectangle and a set of strides.
+   */
   template <int N, typename T = int>
   class REALM_PUBLIC_API AffineLayoutPiece : public InstanceLayoutPiece<N,T> {
   public:
@@ -259,6 +305,12 @@ namespace Realm {
 
     virtual InstanceLayoutPiece<N,T> *clone(void) const;
 
+    /**
+     * Calculate the offset of a point within the affine piece.
+     * The offet is calculated as: offset + sum(strides[i] * p[i]).
+     * \param p Point to calculate offset for.
+     * \return size_t Offset of point.
+     */
     virtual size_t calculate_offset(const Point<N,T>& p) const;
 
     virtual void relocate(size_t base_offset);
@@ -279,6 +331,10 @@ namespace Realm {
     size_t offset;
   };
 
+  /**
+   * \class IntancePieceList
+   * A list of pieces that make up an instance layout.
+   */
   template <int N, typename T = int>
   class REALM_PUBLIC_API InstancePieceList {
   public:
@@ -302,6 +358,10 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstancePieceList<N,T>& ipl);
 
+  /**
+   * \class InstanceLayout
+   * A layout for an instance of a logical region.
+   */
   template <int N, typename T = int>
   class REALM_PUBLIC_API InstanceLayout : public InstanceLayoutGeneric {
   public:
@@ -314,7 +374,10 @@ namespace Realm {
 
     virtual InstanceLayoutGeneric *clone(void) const;
 
-    // adjusts offsets of pieces to start from 'base_offset'
+    /**
+     * Adjust offsets of pieces to start from 'base_offset'.
+     * \param base_offset Offset to start from.
+     */
     virtual void relocate(size_t base_offset);
 
     virtual void print(std::ostream& os) const;
@@ -322,8 +385,13 @@ namespace Realm {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const;
 
-    // computes the offset of the specified field for an element - this
-    //  is generally much less efficient than using a layout-specific accessor
+    /**
+     * Compute the offset of the specified field for an element - this
+     * is generally much less efficient than using a layout-specific accessor.
+     * \param p Point to calculate offset for.
+     * \param fid FieldID of field to calculate offset for.
+     * \return size_t Offset of field.
+     */
     size_t calculate_offset(Point<N,T> p, FieldID fid) const;
 
     IndexSpace<N,T> space;
@@ -408,20 +476,37 @@ namespace Realm {
     size_t offset;
   };
 
-  // a generic accessor that works (slowly) for any instance layout
+  /**
+   * \class GenericAccessor
+   * A generic accessor that works for any instance layout.
+   * GenericAccessors.  While useful, these accessors are generally more
+   * expensive and should be used with caution. A read/write operation via
+   * this accessor could potentially result in a network transaction,
+   * assuming the data is stored on a remote node
+   */
   template <typename FT, int N, typename T = int>
   class REALM_PUBLIC_API GenericAccessor {
   public:
     GenericAccessor(void);
 
-    // GenericAccessor constructors always work, but the is_compatible(...)
-    //  calls are still available for templated code
-
-    // implicitly tries to cover the entire instance's domain
+    /**
+     * Construct a GenericAccessor for the specified instance and field.
+     * Implicitly tries to cover the entire instance's domain.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subfield_offset Offset of subfield to construct accessor for.
+     */
     GenericAccessor(RegionInstance inst,
 		   FieldID field_id, size_t subfield_offset = 0);
 
-    // limits domain to a subrectangle
+    /**
+     * Construct a GenericAccessor for the specified instance and field.
+     * Limits the domain to the specified subrectangle.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subrect Subrectangle to limit domain to.
+     * \param subfield_offset Offset of subfield to construct accessor for.
+     */
     GenericAccessor(RegionInstance inst,
 		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
@@ -442,8 +527,12 @@ namespace Realm {
     FT read(const Point<N,T>& p);
     void write(const Point<N,T>& p, FT newval);
 
-    // this returns a "reference" that knows how to do a read via operator FT
-    //  or a write via operator=
+    /**
+     * Return a reference that can be used to read or write a single
+     * element.
+     * \param p Point to read/write.
+     * \return Reference to element at p.
+     */
     AccessorRefHelper<FT> operator[](const Point<N,T>& p);
 
     // instead of storing the top-level layout - we narrow down to just the
@@ -464,7 +553,14 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const GenericAccessor<FT,N,T>& a);
 
 
-  // an instance accessor based on an affine linearization of an index space
+  /**
+   * \class AffineAccessor
+   * An accessor that works for any instance layout that can be
+   * linearized using an affine transformation.  AffineAccessors are
+   * generally more efficient than GenericAccessors, but are only
+   * applicable to a subset of instance layouts.
+   * The random-access look-ups are O(1) in the size of the instance.
+   */
   template <typename FT, int N, typename T = int>
   class REALM_PUBLIC_API AffineAccessor {
   public:
@@ -475,20 +571,43 @@ namespace Realm {
     REALM_CUDA_HD
     AffineAccessor(void);
 
-    // NOTE: these constructors will die horribly if the conversion is not
-    //  allowed - call is_compatible(...) first if you're not sure
-
-    // implicitly tries to cover the entire instance's domain
+    /**
+     * Construct an AffineAccessor for the specified instance and field.
+     * Implicitly tries to cover the entire instance's domain.
+     * NOTE: this constructor will die if the instance is not compatible
+     * with AffineAccessor. Call is_compatible(...) first if you're not
+     * sure.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subfield_offset Offset of subfield to construct accessor for.
+     */
     AffineAccessor(RegionInstance inst,
 		   FieldID field_id, size_t subfield_offset = 0);
 
-    // limits domain to a subrectangle
+    /** Construct an AffineAccessor for the specified instance and field.
+     * Limits the domain to the specified subrectangle.
+     * NOTE: this constructor will die if the instance is not compatible
+     * with AffineAccessor. Call is_compatible(...) first if you're not
+     * sure.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subrect Subrectangle to limit domain to.
+     * \param subfield_offset Offset of subfield to construct accessor for.
+     */
     AffineAccessor(RegionInstance inst,
 		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
 
-    // these two constructors build accessors that incorporate an
-    //  affine coordinate transform before the lookup in the actual instance
+    ///@{
+    /**
+     * Construct an AffineAccessor for the specified instance, field, 
+     * and coordinate transform.
+     * \param inst RegionInstance to construct accessor for.
+     * \param transform Affine transform to apply to coordinates.
+     * \param offset Offset to apply to coordinates.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subfield_offset Offset of subfield to construct accessor for.
+     */
     template <int N2, typename T2>
     AffineAccessor(RegionInstance inst,
 		   const Matrix<N2, N, T2>& transform,
@@ -504,6 +623,7 @@ namespace Realm {
 		   const Point<N2, T2>& offset,
 		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
+    ///@}
 
     REALM_CUDA_HD
     ~AffineAccessor(void);
@@ -610,25 +730,42 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const MultiAffineAccessor<FT,N,T>& a);
 
+  /**
+   * \class MultiAffineAccessor
+   * A multi-affine accessor handles instances with multiple pieces, but only
+   * if all of them are affine. Multi-affine accessors may be accessed and
+   * copied in CUDA device code, but must be initially constructed on the host.
+   * The random-access look-ups are O(log(N)) in the number of pieces.
+   */
   template <typename FT, int N, typename T>
   class REALM_PUBLIC_API MultiAffineAccessor {
   public:
-    // multi-affine accessors may be accessed and copied in CUDA device code
-    //  but must be initially constructed on the host
 
     REALM_CUDA_HD
     MultiAffineAccessor(void);
 
-    // NOTE: these constructors will die horribly if the conversion is not
-    //  allowed - call is_compatible(...) first if you're not sure
-
-    // implicitly tries to cover the entire instance's domain
+    /**
+     * Construct a multi-affine accessor for the given instance and field.
+     * The accessor will implicitly try to cover the entire instance's domain.
+     * NOTE: This constructor will crash if the conversion is not
+     * allowed - call is_compatible(...) first if you're not sure.
+     * \param inst The instance to access.
+     * \param field_id The field to access.
+     * \param subfield_offset The offset of the subfield to access.
+     */
     MultiAffineAccessor(RegionInstance inst,
 			FieldID field_id, size_t subfield_offset = 0);
 
-    // limits domain to a subrectangle (NOTE: subrect need not be entirely
-    //  covered by the instance - a legal access must be both within the
-    //  subrect AND within the coverage of the instance)
+    /**
+     * Construct a multi-affine accessor for the given instance and field.
+     * Limits the domain to the given subrectangle. (NOTE: subrect need not be
+     * entirely covered by the instance - a legal access must be both within
+     * the subrect AND within the coverage of the instance.)
+     * \param inst The instance to access.
+     * \param field_id The field to access.
+     * \param subrect The subrectangle to limit the domain to.
+     * \param subfield_offset The offset of the subfield to access.
+     */
     MultiAffineAccessor(RegionInstance inst,
 			FieldID field_id, const Rect<N,T>& subrect,
 			size_t subfield_offset = 0);
@@ -649,8 +786,13 @@ namespace Realm {
 	       FieldID field_id, const Rect<N,T>& subrect,
 	       size_t subfield_offset = 0);
 
-    // ptr/read/write/operator[] come in const and nonconst versions -
-    //  nonconst ones are allowed to remember the most-recently-accessed piece
+    ///@{
+    /**
+     * Return a pointer to the given point in the instance. Nonconst version
+     * is allowed to remember the most-recently-accessed piece.
+     * \param p The point to access.
+     * \return A pointer to the given point.
+     */
     REALM_CUDA_HD
     FT *ptr(const Point<N,T>& p) const;
     REALM_CUDA_HD
@@ -659,6 +801,8 @@ namespace Realm {
     FT read(const Point<N,T>& p) const;
     REALM_CUDA_HD
     void write(const Point<N,T>& p, FT newval) const;
+    ///@}
+
 
     REALM_CUDA_HD
     FT& operator[](const Point<N,T>& p) const;
