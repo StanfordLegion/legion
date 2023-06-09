@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use legion_prof_viewer::{
     data::{
@@ -60,24 +61,301 @@ struct ItemInfo {
 
 pub struct StateDataSource {
     state: State,
-    info: Option<EntryInfo>,
+    info: EntryInfo,
     entry_map: BTreeMap<EntryID, EntryKind>,
     proc_groups: BTreeMap<ProcGroup, Vec<ProcID>>,
     mem_groups: BTreeMap<MemGroup, Vec<MemID>>,
     chan_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
-    step_utilization_cache: BTreeMap<EntryID, Vec<(Timestamp, f64)>>,
+    step_utilization_cache: Mutex<BTreeMap<EntryID, Arc<Vec<(Timestamp, f64)>>>>,
 }
 
 impl StateDataSource {
     pub fn new(state: State) -> Self {
+        let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
+
+        let mut proc_groups = state.group_procs();
+        let mem_groups = state.group_mems();
+        let chan_groups = state.group_chans();
+
+        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _)| *n).collect();
+        let proc_kinds: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(_, k)| *k).collect();
+        let mem_kinds: BTreeSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
+
+        if !state.has_multiple_nodes() {
+            nodes.remove(&None);
+        }
+
+        let mut node_slots = Vec::new();
+        let root_id = EntryID::root();
+        for (node_index, node) in nodes.iter().enumerate() {
+            let node_short_name;
+            let node_long_name;
+            match node {
+                Some(node_id) => {
+                    node_short_name = format!("n{}", node_id.0);
+                    node_long_name = format!("Node {}", node_id.0);
+                }
+                None => {
+                    node_short_name = "all".to_owned();
+                    node_long_name = "All Nodes".to_owned();
+                }
+            }
+            let node_id = root_id.child(node_index as u64);
+
+            let mut kind_slots = Vec::new();
+            let mut kind_index = 0;
+            let mut node_empty = node.is_some();
+            // Processors
+            for kind in &proc_kinds {
+                let group = ProcGroup(*node, *kind);
+
+                let procs = proc_groups.get(&group).unwrap();
+                if node.is_some() {
+                    // Don't render kind if all processors of the kind are empty
+                    let empty = procs.iter().all(|p| state.procs.get(p).unwrap().is_empty());
+                    node_empty = node_empty && empty;
+                    if empty {
+                        continue;
+                    }
+                }
+
+                let kind_name = format!("{:?}", kind);
+                let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
+
+                let kind_id = node_id.child(kind_index);
+                kind_index += 1;
+
+                let color = match kind {
+                    ProcKind::GPU => Color::OLIVEDRAB,
+                    ProcKind::CPU => Color::STEELBLUE,
+                    ProcKind::Utility => Color::CRIMSON,
+                    ProcKind::IO => Color::ORANGERED,
+                    ProcKind::ProcGroup => Color::ORANGERED,
+                    ProcKind::ProcSet => Color::ORANGERED,
+                    ProcKind::OpenMP => Color::ORANGERED,
+                    ProcKind::Python => Color::OLIVEDRAB,
+                };
+                let color: Color32 = color.into();
+
+                let mut proc_slots = Vec::new();
+                if node.is_some() {
+                    for (proc_index, proc) in procs.iter().enumerate() {
+                        let proc_id = kind_id.child(proc_index as u64);
+                        entry_map.insert(proc_id, EntryKind::Proc(*proc));
+
+                        let rows = state.procs.get(proc).unwrap().max_levels as u64 + 1;
+                        proc_slots.push(EntryInfo::Slot {
+                            short_name: format!("{}{}", kind_first_letter, proc.proc_in_node()),
+                            long_name: format!(
+                                "{} {} {}",
+                                node_long_name,
+                                kind_name,
+                                proc.proc_in_node()
+                            ),
+                            max_rows: rows,
+                        });
+                    }
+                }
+
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::ProcKind(group));
+
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: kind_name.to_lowercase(),
+                    long_name: format!("{} {}", node_long_name, kind_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: proc_slots,
+                });
+            }
+
+            // Don't render node if all processors of the node are empty
+            if node_empty {
+                // Remove this node's processors from the all nodes list to
+                // avoid influencing global utilization
+                for kind in &proc_kinds {
+                    let group = ProcGroup(None, *kind);
+                    proc_groups
+                        .get_mut(&group)
+                        .unwrap()
+                        .retain(|p| p.node_id() != node.unwrap());
+                }
+                continue;
+            }
+
+            // Memories
+            for kind in &mem_kinds {
+                let group = MemGroup(*node, *kind);
+
+                let kind_name = format!("{:?}", kind);
+                let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
+
+                let kind_id = node_id.child(kind_index);
+                kind_index += 1;
+
+                let color = match kind {
+                    MemKind::NoMemKind => unreachable!(),
+                    MemKind::Global => Color::CRIMSON,
+                    MemKind::System => Color::OLIVEDRAB,
+                    MemKind::Registered => Color::DARKMAGENTA,
+                    MemKind::Socket => Color::ORANGERED,
+                    MemKind::ZeroCopy => Color::CRIMSON,
+                    MemKind::Framebuffer => Color::BLUE,
+                    MemKind::Disk => Color::DARKGOLDENROD,
+                    MemKind::HDF5 => Color::OLIVEDRAB,
+                    MemKind::File => Color::ORANGERED,
+                    MemKind::L3Cache => Color::CRIMSON,
+                    MemKind::L2Cache => Color::DARKMAGENTA,
+                    MemKind::L1Cache => Color::OLIVEDRAB,
+                    MemKind::GPUManaged => Color::DARKMAGENTA,
+                    MemKind::GPUDynamic => Color::ORANGERED,
+                };
+                let color: Color32 = color.into();
+
+                let mut mem_slots = Vec::new();
+                if node.is_some() {
+                    let mems = mem_groups.get(&group).unwrap();
+                    for (mem_index, mem) in mems.iter().enumerate() {
+                        let mem_id = kind_id.child(mem_index as u64);
+                        entry_map.insert(mem_id, EntryKind::Mem(*mem));
+
+                        let rows = state.mems.get(mem).unwrap().max_live_insts as u64 + 1;
+                        mem_slots.push(EntryInfo::Slot {
+                            short_name: format!("{}{}", kind_first_letter, mem.mem_in_node()),
+                            long_name: format!(
+                                "{} {} {}",
+                                node_long_name,
+                                kind_name,
+                                mem.mem_in_node()
+                            ),
+                            max_rows: rows,
+                        });
+                    }
+                }
+
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::MemKind(group));
+
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: kind_name.to_lowercase(),
+                    long_name: format!("{} {}", node_long_name, kind_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: mem_slots,
+                });
+            }
+
+            // Channels
+            {
+                let kind_id = node_id.child(kind_index);
+
+                let color: Color32 = Color::ORANGERED.into();
+
+                let mut chan_slots = Vec::new();
+                if node.is_some() {
+                    let chans = chan_groups.get(node).unwrap();
+                    for (chan_index, chan) in chans.iter().enumerate() {
+                        let chan_id = kind_id.child(chan_index as u64);
+                        entry_map.insert(chan_id, EntryKind::Chan(*chan));
+
+                        let (src_name, src_short) = if let Some(mem) = chan.src {
+                            let kind = state.mems.get(&mem).unwrap().kind;
+                            let kind_first_letter =
+                                format!("{:?}", kind).chars().next().unwrap().to_lowercase();
+                            let src_node = mem.node_id().0;
+                            (
+                                Some(format!(
+                                    "Node {} {:?} {}",
+                                    src_node,
+                                    kind,
+                                    mem.mem_in_node()
+                                )),
+                                Some(format!("n{}{}", src_node, kind_first_letter)),
+                            )
+                        } else {
+                            (None, None)
+                        };
+
+                        let (dst_name, dst_short) = if let Some(mem) = chan.dst {
+                            let kind = state.mems.get(&mem).unwrap().kind;
+                            let kind_first_letter =
+                                format!("{:?}", kind).chars().next().unwrap().to_lowercase();
+                            let dst_node = mem.node_id().0;
+                            (
+                                Some(format!(
+                                    "Node {} {:?} {}",
+                                    dst_node,
+                                    kind,
+                                    mem.mem_in_node()
+                                )),
+                                Some(format!("n{}{}", dst_node, kind_first_letter)),
+                            )
+                        } else {
+                            (None, None)
+                        };
+
+                        let short_name = match chan.channel_kind {
+                            ChanKind::Copy => {
+                                format!("{}-{}", src_short.unwrap(), dst_short.unwrap())
+                            }
+                            ChanKind::Fill => format!("f {}", dst_short.unwrap()),
+                            ChanKind::Gather => format!("g {}", dst_short.unwrap()),
+                            ChanKind::Scatter => format!("s {}", src_short.unwrap()),
+                            ChanKind::DepPart => "dp".to_owned(),
+                        };
+
+                        let long_name = match chan.channel_kind {
+                            ChanKind::Copy => {
+                                format!("{} to {}", src_name.unwrap(), dst_name.unwrap())
+                            }
+                            ChanKind::Fill => format!("Fill {}", dst_name.unwrap()),
+                            ChanKind::Gather => format!("Gather to {}", dst_name.unwrap()),
+                            ChanKind::Scatter => {
+                                format!("Scatter from {}", src_name.unwrap())
+                            }
+                            ChanKind::DepPart => "Dependent Partitioning".to_owned(),
+                        };
+
+                        let rows = state.chans.get(chan).unwrap().max_levels as u64 + 1;
+                        chan_slots.push(EntryInfo::Slot {
+                            short_name,
+                            long_name,
+                            max_rows: rows,
+                        });
+                    }
+                }
+
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::ChanKind(*node));
+
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: "chan".to_owned(),
+                    long_name: format!("{} Channel", node_long_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: chan_slots,
+                });
+            }
+            node_slots.push(EntryInfo::Panel {
+                short_name: node_short_name,
+                long_name: node_long_name,
+                summary: None,
+                slots: kind_slots,
+            });
+        }
+
+        let info = EntryInfo::Panel {
+            short_name: "root".to_owned(),
+            long_name: "root".to_owned(),
+            summary: None,
+            slots: node_slots,
+        };
+
         Self {
             state,
-            info: None,
-            entry_map: BTreeMap::new(),
-            proc_groups: BTreeMap::new(),
-            mem_groups: BTreeMap::new(),
-            chan_groups: BTreeMap::new(),
-            step_utilization_cache: BTreeMap::new(),
+            info,
+            entry_map,
+            proc_groups,
+            mem_groups,
+            chan_groups,
+            step_utilization_cache: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -90,8 +368,9 @@ impl StateDataSource {
     /// interpolation and level of detail. We compute this first because it's
     /// how the profiler internally represents utilization, but we convert it
     /// to a more useful format below.
-    fn generate_step_utilization(&mut self, entry_id: &EntryID) -> &Vec<(Timestamp, f64)> {
-        if !self.step_utilization_cache.contains_key(entry_id) {
+    fn generate_step_utilization(&self, entry_id: &EntryID) -> Arc<Vec<(Timestamp, f64)>> {
+        let mut cache = self.step_utilization_cache.lock().unwrap();
+        if !cache.contains_key(entry_id) {
             let step_utilization = match self.entry_map.get(entry_id).unwrap() {
                 EntryKind::ProcKind(group) => {
                     let procs = self.proc_groups.get(group).unwrap();
@@ -169,10 +448,9 @@ impl StateDataSource {
                 }
                 _ => unreachable!(),
             };
-            self.step_utilization_cache
-                .insert(entry_id.clone(), step_utilization);
+            cache.insert(entry_id.clone(), Arc::new(step_utilization));
         }
-        self.step_utilization_cache.get(entry_id).unwrap()
+        cache.get(entry_id).unwrap().clone()
     }
 
     /// Converts the step utilization into a sample utilization, where each
@@ -610,317 +888,27 @@ impl StateDataSource {
         }
     }
 
-    fn interval(&mut self) -> ts::Interval {
+    fn interval(&self) -> ts::Interval {
         let last_time = self.state.last_time;
         // Add a bit to the end of the timeline to make it more visible
         let last_time = last_time + Timestamp(last_time.0 / 200);
         ts::Interval::new(ts::Timestamp(0), last_time.into())
     }
-
-    fn entry_info(&mut self) -> &EntryInfo {
-        if let Some(ref info) = self.info {
-            return info;
-        }
-
-        let mut proc_groups = self.state.group_procs();
-        let mem_groups = self.state.group_mems();
-        let chan_groups = self.state.group_chans();
-
-        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _)| *n).collect();
-        let proc_kinds: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(_, k)| *k).collect();
-        let mem_kinds: BTreeSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
-
-        if !self.state.has_multiple_nodes() {
-            nodes.remove(&None);
-        }
-
-        let mut node_slots = Vec::new();
-        let root_id = EntryID::root();
-        for (node_index, node) in nodes.iter().enumerate() {
-            let node_short_name;
-            let node_long_name;
-            match node {
-                Some(node_id) => {
-                    node_short_name = format!("n{}", node_id.0);
-                    node_long_name = format!("Node {}", node_id.0);
-                }
-                None => {
-                    node_short_name = "all".to_owned();
-                    node_long_name = "All Nodes".to_owned();
-                }
-            }
-            let node_id = root_id.child(node_index as u64);
-
-            let mut kind_slots = Vec::new();
-            let mut kind_index = 0;
-            let mut node_empty = node.is_some();
-            // Processors
-            for kind in &proc_kinds {
-                let group = ProcGroup(*node, *kind);
-
-                let procs = proc_groups.get(&group).unwrap();
-                if node.is_some() {
-                    // Don't render kind if all processors of the kind are empty
-                    let empty = procs
-                        .iter()
-                        .all(|p| self.state.procs.get(p).unwrap().is_empty());
-                    node_empty = node_empty && empty;
-                    if empty {
-                        continue;
-                    }
-                }
-
-                let kind_name = format!("{:?}", kind);
-                let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
-
-                let kind_id = node_id.child(kind_index);
-                kind_index += 1;
-
-                let color = match kind {
-                    ProcKind::GPU => Color::OLIVEDRAB,
-                    ProcKind::CPU => Color::STEELBLUE,
-                    ProcKind::Utility => Color::CRIMSON,
-                    ProcKind::IO => Color::ORANGERED,
-                    ProcKind::ProcGroup => Color::ORANGERED,
-                    ProcKind::ProcSet => Color::ORANGERED,
-                    ProcKind::OpenMP => Color::ORANGERED,
-                    ProcKind::Python => Color::OLIVEDRAB,
-                };
-                let color: Color32 = color.into();
-
-                let mut proc_slots = Vec::new();
-                if node.is_some() {
-                    for (proc_index, proc) in procs.iter().enumerate() {
-                        let proc_id = kind_id.child(proc_index as u64);
-                        self.entry_map.insert(proc_id, EntryKind::Proc(*proc));
-
-                        let rows = self.state.procs.get(proc).unwrap().max_levels as u64 + 1;
-                        proc_slots.push(EntryInfo::Slot {
-                            short_name: format!("{}{}", kind_first_letter, proc.proc_in_node()),
-                            long_name: format!(
-                                "{} {} {}",
-                                node_long_name,
-                                kind_name,
-                                proc.proc_in_node()
-                            ),
-                            max_rows: rows,
-                        });
-                    }
-                }
-
-                let summary_id = kind_id.summary();
-                self.entry_map
-                    .insert(summary_id, EntryKind::ProcKind(group));
-
-                kind_slots.push(EntryInfo::Panel {
-                    short_name: kind_name.to_lowercase(),
-                    long_name: format!("{} {}", node_long_name, kind_name),
-                    summary: Some(Box::new(EntryInfo::Summary { color })),
-                    slots: proc_slots,
-                });
-            }
-
-            // Don't render node if all processors of the node are empty
-            if node_empty {
-                // Remove this node's processors from the all nodes list to
-                // avoid influencing global utilization
-                for kind in &proc_kinds {
-                    let group = ProcGroup(None, *kind);
-                    proc_groups
-                        .get_mut(&group)
-                        .unwrap()
-                        .retain(|p| p.node_id() != node.unwrap());
-                }
-                continue;
-            }
-
-            // Memories
-            for kind in &mem_kinds {
-                let group = MemGroup(*node, *kind);
-
-                let kind_name = format!("{:?}", kind);
-                let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
-
-                let kind_id = node_id.child(kind_index);
-                kind_index += 1;
-
-                let color = match kind {
-                    MemKind::NoMemKind => unreachable!(),
-                    MemKind::Global => Color::CRIMSON,
-                    MemKind::System => Color::OLIVEDRAB,
-                    MemKind::Registered => Color::DARKMAGENTA,
-                    MemKind::Socket => Color::ORANGERED,
-                    MemKind::ZeroCopy => Color::CRIMSON,
-                    MemKind::Framebuffer => Color::BLUE,
-                    MemKind::Disk => Color::DARKGOLDENROD,
-                    MemKind::HDF5 => Color::OLIVEDRAB,
-                    MemKind::File => Color::ORANGERED,
-                    MemKind::L3Cache => Color::CRIMSON,
-                    MemKind::L2Cache => Color::DARKMAGENTA,
-                    MemKind::L1Cache => Color::OLIVEDRAB,
-                    MemKind::GPUManaged => Color::DARKMAGENTA,
-                    MemKind::GPUDynamic => Color::ORANGERED,
-                };
-                let color: Color32 = color.into();
-
-                let mut mem_slots = Vec::new();
-                if node.is_some() {
-                    let mems = mem_groups.get(&group).unwrap();
-                    for (mem_index, mem) in mems.iter().enumerate() {
-                        let mem_id = kind_id.child(mem_index as u64);
-                        self.entry_map.insert(mem_id, EntryKind::Mem(*mem));
-
-                        let rows = self.state.mems.get(mem).unwrap().max_live_insts as u64 + 1;
-                        mem_slots.push(EntryInfo::Slot {
-                            short_name: format!("{}{}", kind_first_letter, mem.mem_in_node()),
-                            long_name: format!(
-                                "{} {} {}",
-                                node_long_name,
-                                kind_name,
-                                mem.mem_in_node()
-                            ),
-                            max_rows: rows,
-                        });
-                    }
-                }
-
-                let summary_id = kind_id.summary();
-                self.entry_map.insert(summary_id, EntryKind::MemKind(group));
-
-                kind_slots.push(EntryInfo::Panel {
-                    short_name: kind_name.to_lowercase(),
-                    long_name: format!("{} {}", node_long_name, kind_name),
-                    summary: Some(Box::new(EntryInfo::Summary { color })),
-                    slots: mem_slots,
-                });
-            }
-
-            // Channels
-            {
-                let kind_id = node_id.child(kind_index);
-
-                let color: Color32 = Color::ORANGERED.into();
-
-                let mut chan_slots = Vec::new();
-                if node.is_some() {
-                    let chans = chan_groups.get(node).unwrap();
-                    for (chan_index, chan) in chans.iter().enumerate() {
-                        let chan_id = kind_id.child(chan_index as u64);
-                        self.entry_map.insert(chan_id, EntryKind::Chan(*chan));
-
-                        let (src_name, src_short) = if let Some(mem) = chan.src {
-                            let kind = self.state.mems.get(&mem).unwrap().kind;
-                            let kind_first_letter =
-                                format!("{:?}", kind).chars().next().unwrap().to_lowercase();
-                            let src_node = mem.node_id().0;
-                            (
-                                Some(format!(
-                                    "Node {} {:?} {}",
-                                    src_node,
-                                    kind,
-                                    mem.mem_in_node()
-                                )),
-                                Some(format!("n{}{}", src_node, kind_first_letter)),
-                            )
-                        } else {
-                            (None, None)
-                        };
-
-                        let (dst_name, dst_short) = if let Some(mem) = chan.dst {
-                            let kind = self.state.mems.get(&mem).unwrap().kind;
-                            let kind_first_letter =
-                                format!("{:?}", kind).chars().next().unwrap().to_lowercase();
-                            let dst_node = mem.node_id().0;
-                            (
-                                Some(format!(
-                                    "Node {} {:?} {}",
-                                    dst_node,
-                                    kind,
-                                    mem.mem_in_node()
-                                )),
-                                Some(format!("n{}{}", dst_node, kind_first_letter)),
-                            )
-                        } else {
-                            (None, None)
-                        };
-
-                        let short_name = match chan.channel_kind {
-                            ChanKind::Copy => {
-                                format!("{}-{}", src_short.unwrap(), dst_short.unwrap())
-                            }
-                            ChanKind::Fill => format!("f {}", dst_short.unwrap()),
-                            ChanKind::Gather => format!("g {}", dst_short.unwrap()),
-                            ChanKind::Scatter => format!("s {}", src_short.unwrap()),
-                            ChanKind::DepPart => "dp".to_owned(),
-                        };
-
-                        let long_name = match chan.channel_kind {
-                            ChanKind::Copy => {
-                                format!("{} to {}", src_name.unwrap(), dst_name.unwrap())
-                            }
-                            ChanKind::Fill => format!("Fill {}", dst_name.unwrap()),
-                            ChanKind::Gather => format!("Gather to {}", dst_name.unwrap()),
-                            ChanKind::Scatter => {
-                                format!("Scatter from {}", src_name.unwrap())
-                            }
-                            ChanKind::DepPart => "Dependent Partitioning".to_owned(),
-                        };
-
-                        let rows = self.state.chans.get(chan).unwrap().max_levels as u64 + 1;
-                        chan_slots.push(EntryInfo::Slot {
-                            short_name,
-                            long_name,
-                            max_rows: rows,
-                        });
-                    }
-                }
-
-                let summary_id = kind_id.summary();
-                self.entry_map
-                    .insert(summary_id, EntryKind::ChanKind(*node));
-
-                kind_slots.push(EntryInfo::Panel {
-                    short_name: "chan".to_owned(),
-                    long_name: format!("{} Channel", node_long_name),
-                    summary: Some(Box::new(EntryInfo::Summary { color })),
-                    slots: chan_slots,
-                });
-            }
-            node_slots.push(EntryInfo::Panel {
-                short_name: node_short_name,
-                long_name: node_long_name,
-                summary: None,
-                slots: kind_slots,
-            });
-        }
-
-        self.proc_groups = proc_groups;
-        self.mem_groups = mem_groups;
-        self.chan_groups = chan_groups;
-
-        self.info = Some(EntryInfo::Panel {
-            short_name: "root".to_owned(),
-            long_name: "root".to_owned(),
-            summary: None,
-            slots: node_slots,
-        });
-        self.info.as_ref().unwrap()
-    }
 }
 
 impl DataSource for StateDataSource {
-    fn fetch_info(&mut self) -> DataSourceInfo {
+    fn fetch_info(&self) -> DataSourceInfo {
         DataSourceInfo {
-            entry_info: self.entry_info().clone(),
+            entry_info: self.info.clone(),
             interval: self.interval(),
         }
     }
 
-    fn fetch_tile_set(&mut self) -> TileSet {
+    fn fetch_tile_set(&self) -> TileSet {
         TileSet::default()
     }
 
-    fn fetch_summary_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SummaryTile {
+    fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SummaryTile {
         // Pick this number to be approximately the number of pixels we expect
         // the user to have on their screen
         const SAMPLES: u64 = 1000;
@@ -936,7 +924,7 @@ impl DataSource for StateDataSource {
         }
     }
 
-    fn fetch_slot_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SlotTile {
+    fn fetch_slot_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SlotTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
             EntryKind::Proc(proc_id) => self.generate_proc_slot_tile(entry_id, *proc_id, tile_id),
@@ -946,7 +934,7 @@ impl DataSource for StateDataSource {
         }
     }
 
-    fn fetch_slot_meta_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SlotMetaTile {
+    fn fetch_slot_meta_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SlotMetaTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
             EntryKind::Proc(proc_id) => {
