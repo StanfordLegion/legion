@@ -2,9 +2,13 @@
 name = "legion_prof"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.67"
 
 [features]
+default = []
 viewer = ["dep:legion_prof_viewer"]
+client = ["dep:legion_prof_viewer", "legion_prof_viewer?/client"]
+server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
 
 [dependencies]
 clap = "2.33"

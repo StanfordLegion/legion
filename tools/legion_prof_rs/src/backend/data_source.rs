@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use legion_prof_viewer::{
     data::{
-        Color32, DataSource, EntryID, EntryInfo, Field, Item, ItemMeta, ItemUID, Rgba,
-        SlotMetaTile, SlotTile, SummaryTile, TileID, UtilPoint,
+        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, Item, ItemMeta, ItemUID,
+        Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData, SummaryTile, SummaryTileData,
+        TileID, TileSet, UtilPoint,
     },
     timestamp as ts,
 };
@@ -417,13 +418,27 @@ impl StateDataSource {
         items
     }
 
-    fn generate_proc_slot_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotTile {
+    fn generate_proc_slot_tile(
+        &self,
+        entry_id: &EntryID,
+        proc_id: ProcID,
+        tile_id: TileID,
+    ) -> SlotTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
         let items = self.build_items(proc, tile_id, None, |_, _| unreachable!());
-        SlotTile { tile_id, items }
+        SlotTile {
+            entry_id: entry_id.clone(),
+            tile_id,
+            data: SlotTileData { items },
+        }
     }
 
-    fn generate_proc_slot_meta_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotMetaTile {
+    fn generate_proc_slot_meta_tile(
+        &self,
+        entry_id: &EntryID,
+        proc_id: ProcID,
+        tile_id: TileID,
+    ) -> SlotMetaTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
         let items = self.build_items(proc, tile_id, Some(&mut item_metas), |entry, info| {
@@ -463,18 +478,33 @@ impl StateDataSource {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
+            entry_id: entry_id.clone(),
             tile_id,
-            items: item_metas,
+            data: SlotMetaTileData { items: item_metas },
         }
     }
 
-    fn generate_mem_slot_tile(&self, mem_id: MemID, tile_id: TileID) -> SlotTile {
+    fn generate_mem_slot_tile(
+        &self,
+        entry_id: &EntryID,
+        mem_id: MemID,
+        tile_id: TileID,
+    ) -> SlotTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
         let items = self.build_items(mem, tile_id, None, |_, _| unreachable!());
-        SlotTile { tile_id, items }
+        SlotTile {
+            entry_id: entry_id.clone(),
+            tile_id,
+            data: SlotTileData { items },
+        }
     }
 
-    fn generate_mem_slot_meta_tile(&self, mem_id: MemID, tile_id: TileID) -> SlotMetaTile {
+    fn generate_mem_slot_meta_tile(
+        &self,
+        entry_id: &EntryID,
+        mem_id: MemID,
+        tile_id: TileID,
+    ) -> SlotMetaTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
         let items = self.build_items(mem, tile_id, Some(&mut item_metas), |entry, info| {
@@ -511,18 +541,33 @@ impl StateDataSource {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
+            entry_id: entry_id.clone(),
             tile_id,
-            items: item_metas,
+            data: SlotMetaTileData { items: item_metas },
         }
     }
 
-    fn generate_chan_slot_tile(&self, chan_id: ChanID, tile_id: TileID) -> SlotTile {
+    fn generate_chan_slot_tile(
+        &self,
+        entry_id: &EntryID,
+        chan_id: ChanID,
+        tile_id: TileID,
+    ) -> SlotTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
         let items = self.build_items(chan, tile_id, None, |_, _| unreachable!());
-        SlotTile { tile_id, items }
+        SlotTile {
+            entry_id: entry_id.clone(),
+            tile_id,
+            data: SlotTileData { items },
+        }
     }
 
-    fn generate_chan_slot_meta_tile(&self, chan_id: ChanID, tile_id: TileID) -> SlotMetaTile {
+    fn generate_chan_slot_meta_tile(
+        &self,
+        entry_id: &EntryID,
+        chan_id: ChanID,
+        tile_id: TileID,
+    ) -> SlotMetaTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
         let items = self.build_items(chan, tile_id, Some(&mut item_metas), |entry, info| {
@@ -559,13 +604,12 @@ impl StateDataSource {
             assert_eq!(item_row.len(), item_meta_row.len());
         }
         SlotMetaTile {
+            entry_id: entry_id.clone(),
             tile_id,
-            items: item_metas,
+            data: SlotMetaTileData { items: item_metas },
         }
     }
-}
 
-impl DataSource for StateDataSource {
     fn interval(&mut self) -> ts::Interval {
         let last_time = self.state.last_time;
         // Add a bit to the end of the timeline to make it more visible
@@ -573,7 +617,7 @@ impl DataSource for StateDataSource {
         ts::Interval::new(ts::Timestamp(0), last_time.into())
     }
 
-    fn fetch_info(&mut self) -> &EntryInfo {
+    fn entry_info(&mut self) -> &EntryInfo {
         if let Some(ref info) = self.info {
             return info;
         }
@@ -862,14 +906,18 @@ impl DataSource for StateDataSource {
         });
         self.info.as_ref().unwrap()
     }
+}
 
-    fn request_tiles(
-        &mut self,
-        _entry_id: &EntryID,
-        request_interval: ts::Interval,
-    ) -> Vec<TileID> {
-        // For now, always return one tile
-        vec![TileID(request_interval)]
+impl DataSource for StateDataSource {
+    fn fetch_info(&mut self) -> DataSourceInfo {
+        DataSourceInfo {
+            entry_info: self.entry_info().clone(),
+            interval: self.interval(),
+        }
+    }
+
+    fn fetch_tile_set(&mut self) -> TileSet {
+        TileSet::default()
     }
 
     fn fetch_summary_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SummaryTile {
@@ -882,17 +930,18 @@ impl DataSource for StateDataSource {
         let utilization = Self::compute_sample_utilization(&step_utilization, tile_id.0, SAMPLES);
 
         SummaryTile {
+            entry_id: entry_id.clone(),
             tile_id,
-            utilization,
+            data: SummaryTileData { utilization },
         }
     }
 
     fn fetch_slot_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SlotTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => self.generate_proc_slot_tile(*proc_id, tile_id),
-            EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(*mem_id, tile_id),
-            EntryKind::Chan(chan_id) => self.generate_chan_slot_tile(*chan_id, tile_id),
+            EntryKind::Proc(proc_id) => self.generate_proc_slot_tile(entry_id, *proc_id, tile_id),
+            EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(entry_id, *mem_id, tile_id),
+            EntryKind::Chan(chan_id) => self.generate_chan_slot_tile(entry_id, *chan_id, tile_id),
             _ => unreachable!(),
         }
     }
@@ -900,9 +949,13 @@ impl DataSource for StateDataSource {
     fn fetch_slot_meta_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SlotMetaTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => self.generate_proc_slot_meta_tile(*proc_id, tile_id),
-            EntryKind::Mem(mem_id) => self.generate_mem_slot_meta_tile(*mem_id, tile_id),
-            EntryKind::Chan(chan_id) => self.generate_chan_slot_meta_tile(*chan_id, tile_id),
+            EntryKind::Proc(proc_id) => {
+                self.generate_proc_slot_meta_tile(entry_id, *proc_id, tile_id)
+            }
+            EntryKind::Mem(mem_id) => self.generate_mem_slot_meta_tile(entry_id, *mem_id, tile_id),
+            EntryKind::Chan(chan_id) => {
+                self.generate_chan_slot_meta_tile(entry_id, *chan_id, tile_id)
+            }
             _ => unreachable!(),
         }
     }
