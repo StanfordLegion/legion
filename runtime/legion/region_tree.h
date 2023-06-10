@@ -705,6 +705,7 @@ namespace Legion {
                                   IndexPartNode &par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   Provenance *provenance,
+                                  IndexSpaceExprID expr_id = 0,
                                   CollectiveMapping *mapping = NULL,
                                   unsigned depth = UINT_MAX);
       // We know the disjointness of the index partition

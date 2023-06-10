@@ -3325,12 +3325,13 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   Provenance *provenance,
+                                                  IndexSpaceExprID expr_id,
                                                   CollectiveMapping *mapping,
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, &parent, color, did, 0/*expr id*/, 
-                                initialized, depth, provenance, mapping, 
+      IndexSpaceCreator creator(this, sp, &parent, color, did, expr_id,
+                                initialized, depth, provenance, mapping,
                                 true/*tree valid*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
@@ -9546,11 +9547,13 @@ namespace Legion {
 #endif
           IndexSpace is(context->runtime->get_unique_index_space_id(),
                         handle.get_tree_id(), handle.get_type_tag());
+          const IndexSpaceExprID expr_id =
+            context->runtime->get_unique_index_space_expr_id();
           DistributedID child_did = 
             context->runtime->get_available_distributed_id();
           // Make a new index space node ready when the partition is ready
           IndexSpaceNode *result = context->create_node(is, *this, c, child_did,
-                                        initialized, provenance, child_mapping);
+                               initialized, provenance, expr_id, child_mapping);
           if ((child_mapping != NULL) && (child_mapping->size() > 1))
           {
             // We know other participants are nodes are going to need
@@ -9568,6 +9571,7 @@ namespace Legion {
               rez.serialize(c);
               rez.serialize(is);
               rez.serialize(child_did);
+              rez.serialize(expr_id);
               child_mapping->pack(rez);
             }
             for (std::vector<AddressSpaceID>::const_iterator it =
@@ -9612,6 +9616,8 @@ namespace Legion {
       derez.deserialize(child_handle);
       DistributedID child_did;
       derez.deserialize(child_did);
+      IndexSpaceExprID expr_id;
+      derez.deserialize(expr_id);
       size_t num_spaces;
       derez.deserialize(num_spaces);
 #ifdef DEBUG_LEGION
@@ -9621,7 +9627,7 @@ namespace Legion {
 
       IndexPartNode *parent = forest->get_node(parent_handle);
       forest->create_node(child_handle, *parent, child_color, child_did,
-                      parent->initialized, parent->provenance, mapping);
+              parent->initialized, parent->provenance, expr_id, mapping);
       std::vector<AddressSpaceID> children;
       mapping->get_children(mapping->get_origin(),parent->local_space,children);
       if (!children.empty())
@@ -9633,6 +9639,7 @@ namespace Legion {
           rez.serialize(child_color);
           rez.serialize(child_handle);
           rez.serialize(child_did);
+          rez.serialize(expr_id);
           mapping->pack(rez);
         }
         for (std::vector<AddressSpaceID>::const_iterator it =
