@@ -2,6 +2,11 @@ use std::io;
 
 use rayon::prelude::*;
 
+#[cfg(feature = "client")]
+use legion_prof_viewer::{app, http::client::HTTPClientDataSource};
+#[cfg(feature = "client")]
+use url::Url;
+
 #[cfg(feature = "server")]
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
@@ -71,6 +76,12 @@ fn main() -> io::Result<()> {
                 .help("overwrite output directory if it exists"),
         )
         .arg(
+            clap::Arg::with_name("attach")
+                .long("attach")
+                .takes_value(true)
+                .help("connect viewer to the specified HTTP profile server"),
+        )
+        .arg(
             clap::Arg::with_name("serve")
                 .long("serve")
                 .help("start profile HTTP server"),
@@ -117,6 +128,7 @@ fn main() -> io::Result<()> {
     let filenames = matches.values_of_os("filenames").unwrap();
     let output = matches.value_of_os("output").unwrap();
     let force = matches.is_present("force");
+    let attach = matches.value_of("attach");
     let serve = matches.is_present("serve");
     let statistics = matches.is_present("stats");
     let trace = matches.is_present("trace");
@@ -150,6 +162,14 @@ fn main() -> io::Result<()> {
         .map(|x| x.parse::<u16>().unwrap())
         .unwrap();
 
+    #[cfg(not(feature = "client"))]
+    if attach {
+        panic!(
+            "Legion Prof was not build with the \"client\" feature. \
+                Rebuild with --features=client to enable."
+        );
+    }
+
     #[cfg(not(feature = "server"))]
     if serve {
         panic!(
@@ -164,6 +184,15 @@ fn main() -> io::Result<()> {
             "Legion Prof was not build with the \"viewer\" feature. \
                 Rebuild with --features=viewer to enable."
         );
+    }
+
+    if let Some(url) = attach {
+        #[cfg(feature = "client")]
+        {
+            let url: Url = Url::parse(url).expect("invalid profile URL");
+            app::start(Box::new(HTTPClientDataSource::new(url)), None);
+        }
+        return Ok(());
     }
 
     let filenames: Vec<_> = filenames.collect();

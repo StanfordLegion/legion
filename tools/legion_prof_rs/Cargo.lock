@@ -1790,6 +1790,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]
