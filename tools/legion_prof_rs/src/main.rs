@@ -3,7 +3,9 @@ use std::io;
 use rayon::prelude::*;
 
 #[cfg(feature = "client")]
-use legion_prof_viewer::{app, http::client::HTTPClientDataSource};
+use legion_prof_viewer::{
+    app, deferred_data::DeferredDataSource, http::client::HTTPClientDataSource,
+};
 #[cfg(feature = "client")]
 use url::Url;
 
@@ -78,7 +80,6 @@ fn main() -> io::Result<()> {
         .arg(
             clap::Arg::with_name("attach")
                 .long("attach")
-                .takes_value(true)
                 .help("connect viewer to the specified HTTP profile server"),
         )
         .arg(
@@ -128,7 +129,7 @@ fn main() -> io::Result<()> {
     let filenames = matches.values_of_os("filenames").unwrap();
     let output = matches.value_of_os("output").unwrap();
     let force = matches.is_present("force");
-    let attach = matches.value_of("attach");
+    let attach = matches.is_present("attach");
     let serve = matches.is_present("serve");
     let statistics = matches.is_present("stats");
     let trace = matches.is_present("trace");
@@ -186,11 +187,29 @@ fn main() -> io::Result<()> {
         );
     }
 
-    if let Some(url) = attach {
+    if [attach, serve, view].iter().filter(|x| **x).count() > 1 {
+        panic!("Legion Prof takes at most one of --attach, --serve or --view");
+    }
+
+    if attach {
         #[cfg(feature = "client")]
         {
-            let url: Url = Url::parse(url).expect("invalid profile URL");
-            app::start(Box::new(HTTPClientDataSource::new(url)), None);
+            let urls: Vec<_> = filenames
+                .map(|x| {
+                    Url::parse(x.to_str().expect("URL contains invalid UTF-8"))
+                        .expect("invalid profile URL")
+                })
+                .collect();
+            if urls.len() > 2 {
+                println!("Legion Prof is currently only able to attach two profiles. Ignoring the others.");
+            }
+            let ds0 = Box::new(HTTPClientDataSource::new(urls[0].clone()));
+            let ds1: Option<Box<dyn DeferredDataSource>> = if let Some(url) = urls.get(1) {
+                Some(Box::new(HTTPClientDataSource::new(url.clone())))
+            } else {
+                None
+            };
+            app::start(ds0, ds1);
         }
         return Ok(());
     }
