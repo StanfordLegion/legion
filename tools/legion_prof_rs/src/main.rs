@@ -2,6 +2,13 @@ use std::io;
 
 use rayon::prelude::*;
 
+#[cfg(feature = "client")]
+use legion_prof_viewer::{app, http::client::HTTPClientDataSource};
+#[cfg(feature = "client")]
+use url::Url;
+
+#[cfg(feature = "server")]
+use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
 use legion_prof::backend::viewer;
 use legion_prof::backend::{analyze, trace_viewer, visualize};
@@ -69,6 +76,31 @@ fn main() -> io::Result<()> {
                 .help("overwrite output directory if it exists"),
         )
         .arg(
+            clap::Arg::with_name("attach")
+                .long("attach")
+                .takes_value(true)
+                .help("connect viewer to the specified HTTP profile server"),
+        )
+        .arg(
+            clap::Arg::with_name("serve")
+                .long("serve")
+                .help("start profile HTTP server"),
+        )
+        .arg(
+            clap::Arg::with_name("host")
+                .long("host")
+                .takes_value(true)
+                .default_value("127.0.0.1")
+                .help("host to bind for HTTP server"),
+        )
+        .arg(
+            clap::Arg::with_name("port")
+                .long("port")
+                .takes_value(true)
+                .default_value("8080")
+                .help("port to bind for HTTP server"),
+        )
+        .arg(
             clap::Arg::with_name("statistics")
                 .short("s")
                 .long("statistics")
@@ -96,6 +128,8 @@ fn main() -> io::Result<()> {
     let filenames = matches.values_of_os("filenames").unwrap();
     let output = matches.value_of_os("output").unwrap();
     let force = matches.is_present("force");
+    let attach = matches.value_of("attach");
+    let serve = matches.is_present("serve");
     let statistics = matches.is_present("stats");
     let trace = matches.is_present("trace");
     let view = matches.is_present("view");
@@ -122,12 +156,43 @@ fn main() -> io::Result<()> {
         filter_input = !matches.is_present("no-filter-input");
     }
 
+    let host = matches.value_of("host").unwrap();
+    let port = matches
+        .value_of("port")
+        .map(|x| x.parse::<u16>().unwrap())
+        .unwrap();
+
+    #[cfg(not(feature = "client"))]
+    if attach {
+        panic!(
+            "Legion Prof was not build with the \"client\" feature. \
+                Rebuild with --features=client to enable."
+        );
+    }
+
+    #[cfg(not(feature = "server"))]
+    if serve {
+        panic!(
+            "Legion Prof was not build with the \"server\" feature. \
+                Rebuild with --features=server to enable."
+        );
+    }
+
     #[cfg(not(feature = "viewer"))]
     if view {
         panic!(
             "Legion Prof was not build with the \"viewer\" feature. \
                 Rebuild with --features=viewer to enable."
         );
+    }
+
+    if let Some(url) = attach {
+        #[cfg(feature = "client")]
+        {
+            let url: Url = Url::parse(url).expect("invalid profile URL");
+            app::start(Box::new(HTTPClientDataSource::new(url)), None);
+        }
+        return Ok(());
     }
 
     let filenames: Vec<_> = filenames.collect();
@@ -191,6 +256,12 @@ fn main() -> io::Result<()> {
         analyze::print_statistics(&state);
     } else if trace {
         trace_viewer::emit_trace(&state, output, force)?;
+    } else if serve {
+        #[cfg(feature = "server")]
+        {
+            state.assign_colors();
+            server::start(state, host, port);
+        }
     } else if view {
         #[cfg(feature = "viewer")]
         {
