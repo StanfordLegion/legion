@@ -200,16 +200,15 @@ fn main() -> io::Result<()> {
                         .expect("invalid profile URL")
                 })
                 .collect();
-            if urls.len() > 2 {
-                println!("Legion Prof is currently only able to attach two profiles. Ignoring the others.");
-            }
-            let ds0 = Box::new(HTTPClientDataSource::new(urls[0].clone()));
-            let ds1: Option<Box<dyn DeferredDataSource>> = if let Some(url) = urls.get(1) {
-                Some(Box::new(HTTPClientDataSource::new(url.clone())))
-            } else {
-                None
-            };
-            app::start(ds0, ds1);
+            let data_sources: Vec<_> = urls
+                .into_iter()
+                .map(|url| {
+                    let data_source: Box<dyn DeferredDataSource> =
+                        Box::new(HTTPClientDataSource::new(url));
+                    data_source
+                })
+                .collect();
+            app::start(data_sources);
         }
         return Ok(());
     }
