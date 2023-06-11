@@ -2951,6 +2951,9 @@ namespace Legion {
       void handle_compute_equivalence_sets(Deserializer &derez);
       void handle_equivalence_set_notification(Deserializer &derez);
     public:
+      void send_refine_equivalence_sets(ShardID target, Serializer &rez);
+      void handle_refine_equivalence_sets(Deserializer &derez);
+    public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
@@ -3004,6 +3007,8 @@ namespace Legion {
       static void handle_rendezvous_message(Deserializer &derez, Runtime *rt);
       static void handle_compute_equivalence_sets(Deserializer &derez,
                                                   Runtime *runtime);
+      static void handle_refine_equivalence_sets(Deserializer &derez,
+                                                 Runtime *runtime);
       static void handle_equivalence_set_notification(Deserializer &derez, 
                                                       Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 

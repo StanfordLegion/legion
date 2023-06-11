@@ -1030,6 +1030,7 @@ namespace Legion {
       void handle_collective_message(Deserializer &derez);
       void handle_rendezvous_message(Deserializer &derez);
       void handle_compute_equivalence_sets(Deserializer &derez);
+      void handle_refine_equivalence_sets(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);

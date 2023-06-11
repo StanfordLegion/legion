@@ -5063,6 +5063,23 @@ namespace Legion {
             itr.valid; itr.step())
         typed_tree->invalidate_tree(itr.rect, mask, move_to_previous);
     }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::invalidate_shard_equivalence_set_kd_tree(
+        EqKDTree *tree, const FieldMask &mask,
+        std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+        ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+        typed_tree->invalidate_shard_tree(itr.rect, mask, 
+                        remote_shard_rects, local_shard);
+    }
     
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -6413,6 +6430,16 @@ namespace Legion {
         rectangles[idx] = rects[idx];
       return new InstanceExpression<DIM,T>(&rectangles.front(), 
                                            rectangles.size(), forest);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDTreeT<DIM,T>::invalidate_shard_tree(const Domain &domain,
+                                                 const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      const Rect<DIM,T> rect = domain;
+      invalidate_tree(rect, mask, true/*move to previous*/);
     }
 
     /////////////////////////////////////////////////////////////

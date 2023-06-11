@@ -1697,7 +1697,7 @@ namespace Legion {
                                            IndexSpaceNode *node,
                                            const FieldMask &refinement_mask,
                                            std::vector<RtEvent> &applied_events,
-                                           ShardID shard_id = 0);
+                                           bool sharded = false);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                             std::set<RtEvent> &applied,
                             const ShardMapping *mapping = NULL,
@@ -2509,6 +2509,11 @@ namespace Legion {
     public:
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
+      virtual void refine_equivalence_sets(unsigned req_index,
+                                           IndexSpaceNode *node,
+                                           const FieldMask &refinement_mask,
+                                           std::vector<RtEvent> &applied_events,
+                                           bool sharded = false);
       virtual void receive_created_region_contexts(
                           const std::vector<RegionNode*> &created_regions,
                           const std::vector<EqKDTree*> &created_trees,
@@ -3003,6 +3008,7 @@ namespace Legion {
           unsigned refinement_number, unsigned index,
           std::set<RtEvent> &applied_events);
       void handle_compute_equivalence_sets(Deserializer &derez);
+      void handle_refine_equivalence_sets(Deserializer &derez);
 #if 0
       virtual void compute_shard_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, IndexSpaceExpression *expr,

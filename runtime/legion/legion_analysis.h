@@ -3517,7 +3517,6 @@ namespace Legion {
       virtual RegionTreeID get_region_tree_id(void) const = 0;
       virtual IndexSpaceExpression* get_tracker_expression(void) const = 0;
       virtual size_t count_outstanding_requests(void) const = 0;
-    public:
       virtual void invalidate_equivalence_sets(const FieldMask &mask) = 0;
     public:
       void cancel_subscriptions(Runtime *runtime,
@@ -4229,8 +4228,6 @@ namespace Legion {
       virtual RegionTreeID get_region_tree_id(void) const;
       virtual IndexSpaceExpression* get_tracker_expression(void) const;
       virtual size_t count_outstanding_requests(void) const;
-      virtual bool finish_subscription(EqKDTree *owner,
-                                       AddressSpaceID space);
       virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void finalize_equivalence_sets(RtUserEvent done_event);                           

@@ -4082,6 +4082,20 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    void InnerContext::refine_equivalence_sets(unsigned req_index,
+                        IndexSpaceNode *node, const FieldMask &refinement_mask,
+                        std::vector<RtEvent> &applied_events, bool sharded)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!sharded);
+#endif
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+      node->invalidate_equivalence_set_kd_tree(tree, refinement_mask,
+                                               true/*move to previous*/);
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     void InnerContext::compute_shard_equivalence_sets(EqSetTracker *target,
@@ -22098,6 +22112,67 @@ namespace Legion {
         return InnerContext::create_equivalence_set(node, op_ctx_index,
                             creating_shards, mask, old_sets, 
                             refinement_number, index, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::refine_equivalence_sets(unsigned req_index,
+                        IndexSpaceNode *node, const FieldMask &refinement_mask,
+                        std::vector<RtEvent> &applied_events, bool sharded)
+    //--------------------------------------------------------------------------
+    {
+      if (sharded)
+      {
+        EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+        std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
+        node->invalidate_shard_equivalence_set_kd_tree(tree, refinement_mask,
+                                   remote_shard_rects, owner_shard->shard_id);
+        // If there are any remote then send them to the target shard
+        for (std::map<ShardID,LegionMap<Domain,FieldMask> >::const_iterator 
+              sit = remote_shard_rects.begin();
+              sit != remote_shard_rects.end(); sit++)
+        {
+          const RtUserEvent refined_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          rez.serialize(shard_manager->did);
+          rez.serialize(sit->first);
+          rez.serialize(req_index);
+          rez.serialize<size_t>(sit->second.size());
+          for (LegionMap<Domain,FieldMask>::const_iterator it =
+                sit->second.begin(); it != sit->second.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          rez.serialize(refined_event);
+          shard_manager->send_refine_equivalence_sets(sit->first, rez);
+          applied_events.push_back(refined_event);
+        }
+      }
+      else
+        InnerContext::refine_equivalence_sets(req_index, node, refinement_mask,
+                                              applied_events, sharded);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_refine_equivalence_sets(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_index;
+      derez.deserialize(req_index);
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+      size_t num_rects;
+      derez.deserialize(num_rects);
+      for (unsigned idx = 0; idx < num_rects; idx++)
+      {
+        Domain domain;
+        derez.deserialize(domain);
+        FieldMask mask;
+        derez.deserialize(mask);
+        tree->invalidate_shard_tree(domain, mask);
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
     }
 
 #if 0

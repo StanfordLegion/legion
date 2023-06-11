@@ -2312,6 +2312,10 @@ namespace Legion {
       virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
                                         bool move_to_previous) = 0;
+      virtual void invalidate_shard_equivalence_set_kd_tree(EqKDTree *tree,
+                                        const FieldMask &mask,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+                                        ShardID local_shard) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2630,6 +2634,10 @@ namespace Legion {
       virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
                                         bool move_to_previous);
+      virtual void invalidate_shard_equivalence_set_kd_tree(EqKDTree *tree,
+                                        const FieldMask &mask,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+                                        ShardID local_shard);
     public:
       bool contains_point(const Point<DIM,T> &point);
     protected:
@@ -3025,6 +3033,8 @@ namespace Legion {
                    FieldMaskSet<EquivalenceSet> > > &eq_sets,
           ShardID source_shard, size_t total_source_shards,
           size_t total_target_shards, RegionNode *region) = 0;
+      virtual void invalidate_shard_tree(const Domain &domain,
+                                         const FieldMask &mask) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space) = 0;
       // Just use this method of indirecting into template land
@@ -3074,6 +3084,12 @@ namespace Legion {
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask,
                                    bool move_to_previous) = 0;
+      virtual void invalidate_shard_tree(const Domain &domain,
+                                         const FieldMask &mask);
+      virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space) = 0;
       // Just use this method of indirecting into template land
@@ -3125,6 +3141,10 @@ namespace Legion {
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask,
                                    bool move_to_previous);
+      virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                        AddressSpaceID space);
     protected:

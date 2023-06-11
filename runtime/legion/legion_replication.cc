@@ -2396,8 +2396,7 @@ namespace Legion {
         RegionNode *region = refinement_node->as_region_node();
         // Replicated so no need to do sharding
         parent_ctx->refine_equivalence_sets(parent_req_index,
-            region->row_source, refinement_mask, map_applied_conditions,
-            repl_ctx->total_shards);
+            region->row_source, refinement_mask, map_applied_conditions);
       }
       else
       {
@@ -2405,16 +2404,30 @@ namespace Legion {
           refinement_node->as_partition_node()->row_source;
         if (partition->is_disjoint() && !partition->is_complete())
         {
-          // Check to see if there are at least as many children
-          // as there are shards, in which case we can shard this
-          for (ColorSpaceIterator itr(partition,
-                repl_ctx->owner_shard->shard_id, repl_ctx->total_shards);
-                itr; itr++)
+          // We have a small heuristic here, if the partition has at least
+          // half as many children as there are shards then we will shard
+          // the traversal, otherwise we can replicate the refinements and
+          // do them without any communication
+          if (repl_ctx->total_shards <= (2*partition->total_children))
           {
-            IndexSpaceNode *child = partition->get_child(*itr);
-            parent_ctx->refine_equivalence_sets(parent_req_index,
-                child, refinement_mask, map_applied_conditions,
-                repl_ctx->owner_shard->shard_id);
+            for (ColorSpaceIterator itr(partition,
+                  repl_ctx->owner_shard->shard_id, repl_ctx->total_shards);
+                  itr; itr++)
+            {
+              IndexSpaceNode *child = partition->get_child(*itr);
+              parent_ctx->refine_equivalence_sets(parent_req_index,
+                child, refinement_mask, map_applied_conditions,true/*sharded*/);
+            }
+          }
+          else
+          {
+            // Not sharded path
+            for (ColorSpaceIterator itr(partition); itr; itr++)
+            {
+              IndexSpaceNode *child = partition->get_child(*itr);
+              parent_ctx->refine_equivalence_sets(parent_req_index,
+                  child, refinement_mask, map_applied_conditions);
+            }
           }
         }
         else
@@ -2425,8 +2438,7 @@ namespace Legion {
           // root as well since we can't compute the overlapping parts
           // This is replicated so no need to do sharding
           parent_ctx->refine_equivalence_sets(parent_req_index,
-              partition->parent, refinement_mask, map_applied_conditions,
-              repl_ctx->total_shards);
+              partition->parent, refinement_mask, map_applied_conditions);
         }
       }
       if (!map_applied_conditions.empty())
@@ -10694,6 +10706,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_refine_equivalence_sets(ShardID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        DistributedID local_repl;
+        derez.deserialize(local_repl);
+        handle_refine_equivalence_sets(derez);
+      }
+      else
+        runtime->send_control_replicate_refine_equivalence_sets(target_space,
+                                                                rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_refine_equivalence_sets(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_refine_equivalence_sets(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::send_intra_space_dependence(ShardID target, 
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11569,6 +11624,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_compute_equivalence_sets(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_refine_equivalence_sets(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_refine_equivalence_sets(derez);
     }
 
     //--------------------------------------------------------------------------
