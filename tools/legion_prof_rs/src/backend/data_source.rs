@@ -369,88 +369,99 @@ impl StateDataSource {
     /// how the profiler internally represents utilization, but we convert it
     /// to a more useful format below.
     fn generate_step_utilization(&self, entry_id: &EntryID) -> Arc<Vec<(Timestamp, f64)>> {
-        let mut cache = self.step_utilization_cache.lock().unwrap();
-        if !cache.contains_key(entry_id) {
-            let step_utilization = match self.entry_map.get(entry_id).unwrap() {
-                EntryKind::ProcKind(group) => {
-                    let procs = self.proc_groups.get(group).unwrap();
-                    let points = self.state.proc_group_timepoints(procs);
-                    let count = procs.len() as u64;
-                    let owners: BTreeSet<_> = procs
-                        .iter()
-                        .zip(points.iter())
-                        .filter(|(_, tp)| !tp.is_empty())
-                        .map(|(proc_id, _)| *proc_id)
-                        .collect();
+        // This is an INTENTIONAL race; if two requests for the same entry
+        // arrive simultaneously, we'll miss in the cache on both and compute
+        // the utilization twice. The result should be the same, so this is
+        // mostly wasted computation (in exchange for enabling parallelism).
 
-                    if owners.is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut utilizations = Vec::new();
-                        for tp in points {
-                            if !tp.is_empty() {
-                                self.state
-                                    .convert_points_to_utilization(tp, &mut utilizations);
-                            }
-                        }
-                        utilizations.sort_by_key(|point| point.time_key());
-                        self.state
-                            .calculate_proc_utilization_data(utilizations, owners, count)
-                    }
-                }
-                EntryKind::MemKind(group) => {
-                    let mems = self.mem_groups.get(group).unwrap();
-                    let points = self.state.mem_group_timepoints(mems);
-                    let owners: BTreeSet<_> = mems
-                        .iter()
-                        .zip(points.iter())
-                        .filter(|(_, tp)| !tp.is_empty())
-                        .map(|(mem_id, _)| *mem_id)
-                        .collect();
-
-                    if owners.is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut utilizations: Vec<_> = points
-                            .iter()
-                            .filter(|tp| !tp.is_empty())
-                            .flat_map(|tp| *tp)
-                            .collect();
-                        utilizations.sort_by_key(|point| point.time_key());
-                        self.state
-                            .calculate_mem_utilization_data(utilizations, owners)
-                    }
-                }
-                EntryKind::ChanKind(node) => {
-                    let chans = self.chan_groups.get(node).unwrap();
-                    let points = self.state.chan_group_timepoints(chans);
-                    let owners: BTreeSet<_> = chans
-                        .iter()
-                        .zip(points.iter())
-                        .filter(|(_, tp)| !tp.is_empty())
-                        .map(|(chan_id, _)| *chan_id)
-                        .collect();
-
-                    if owners.is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut utilizations = Vec::new();
-                        for tp in points {
-                            if !tp.is_empty() {
-                                self.state
-                                    .convert_points_to_utilization(tp, &mut utilizations);
-                            }
-                        }
-                        utilizations.sort_by_key(|point| point.time_key());
-                        self.state
-                            .calculate_chan_utilization_data(utilizations, owners)
-                    }
-                }
-                _ => unreachable!(),
-            };
-            cache.insert(entry_id.clone(), Arc::new(step_utilization));
+        let cache = &self.step_utilization_cache;
+        if let Some(util) = cache.lock().unwrap().get(entry_id) {
+            return util.clone();
         }
-        cache.get(entry_id).unwrap().clone()
+
+        let step_utilization = match self.entry_map.get(entry_id).unwrap() {
+            EntryKind::ProcKind(group) => {
+                let procs = self.proc_groups.get(group).unwrap();
+                let points = self.state.proc_group_timepoints(procs);
+                let count = procs.len() as u64;
+                let owners: BTreeSet<_> = procs
+                    .iter()
+                    .zip(points.iter())
+                    .filter(|(_, tp)| !tp.is_empty())
+                    .map(|(proc_id, _)| *proc_id)
+                    .collect();
+
+                if owners.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut utilizations = Vec::new();
+                    for tp in points {
+                        if !tp.is_empty() {
+                            self.state
+                                .convert_points_to_utilization(tp, &mut utilizations);
+                        }
+                    }
+                    utilizations.sort_by_key(|point| point.time_key());
+                    self.state
+                        .calculate_proc_utilization_data(utilizations, owners, count)
+                }
+            }
+            EntryKind::MemKind(group) => {
+                let mems = self.mem_groups.get(group).unwrap();
+                let points = self.state.mem_group_timepoints(mems);
+                let owners: BTreeSet<_> = mems
+                    .iter()
+                    .zip(points.iter())
+                    .filter(|(_, tp)| !tp.is_empty())
+                    .map(|(mem_id, _)| *mem_id)
+                    .collect();
+
+                if owners.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut utilizations: Vec<_> = points
+                        .iter()
+                        .filter(|tp| !tp.is_empty())
+                        .flat_map(|tp| *tp)
+                        .collect();
+                    utilizations.sort_by_key(|point| point.time_key());
+                    self.state
+                        .calculate_mem_utilization_data(utilizations, owners)
+                }
+            }
+            EntryKind::ChanKind(node) => {
+                let chans = self.chan_groups.get(node).unwrap();
+                let points = self.state.chan_group_timepoints(chans);
+                let owners: BTreeSet<_> = chans
+                    .iter()
+                    .zip(points.iter())
+                    .filter(|(_, tp)| !tp.is_empty())
+                    .map(|(chan_id, _)| *chan_id)
+                    .collect();
+
+                if owners.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut utilizations = Vec::new();
+                    for tp in points {
+                        if !tp.is_empty() {
+                            self.state
+                                .convert_points_to_utilization(tp, &mut utilizations);
+                        }
+                    }
+                    utilizations.sort_by_key(|point| point.time_key());
+                    self.state
+                        .calculate_chan_utilization_data(utilizations, owners)
+                }
+            }
+            _ => unreachable!(),
+        };
+        let result = Arc::new(step_utilization);
+        cache
+            .lock()
+            .unwrap()
+            .insert(entry_id.clone(), result.clone());
+        result
     }
 
     /// Converts the step utilization into a sample utilization, where each
