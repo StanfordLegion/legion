@@ -532,7 +532,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events) = 0;
+          const std::vector<ApUserEvent> &unmap_events) = 0; 
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied,
                                       const ShardMapping *mapping = NULL,
@@ -1171,7 +1171,6 @@ namespace Legion {
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
-#endif
       virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
                                               IndexSpaceNode *color_space);
       virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
@@ -1183,7 +1182,6 @@ namespace Legion {
                                        std::vector<IndexSpaceNode*> &children);
       virtual size_t count_total_leaves(size_t leaves,
                                       const std::vector<ShardID> &participants);
-#if 0
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
                                                 const FieldMask &mask);
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
@@ -1680,7 +1678,9 @@ namespace Legion {
       static InnerContext* unpack_task_context(Deserializer &derez,
           Runtime *runtime, RtEvent &ctx_ready);
     public:
+#if 0
       bool nonexclusive_virtual_mapping(unsigned index);
+#endif
       virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       // Override by RemoteTask and TopLevelTask
@@ -1693,6 +1693,11 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
+      virtual void refine_equivalence_sets(unsigned req_index,
+                                           IndexSpaceNode *node,
+                                           const FieldMask &refinement_mask,
+                                           std::vector<RtEvent> &applied_events,
+                                           ShardID shard_id = 0);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                             std::set<RtEvent> &applied,
                             const ShardMapping *mapping = NULL,
@@ -2997,14 +3002,13 @@ namespace Legion {
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index,
           std::set<RtEvent> &applied_events);
+      void handle_compute_equivalence_sets(Deserializer &derez);
 #if 0
       virtual void compute_shard_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, IndexSpaceExpression *expr,
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
-#endif
-      void handle_compute_equivalence_sets(Deserializer &derez);
       virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
                                               IndexSpaceNode *color_space);
       virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
@@ -3016,7 +3020,6 @@ namespace Legion {
                                        std::vector<IndexSpaceNode*> &children);
       virtual size_t count_total_leaves(size_t leaves,
                                       const std::vector<ShardID> &participants);
-#if 0
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
           const AddressSpaceID source, RtUserEvent ready_event);

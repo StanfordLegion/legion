@@ -659,8 +659,10 @@ namespace Legion {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
+#if 0
       // Help for seeing if the parent region is non-exclusively virtual mapped
       bool is_parent_nonexclusive_virtual_mapping(unsigned index);
+#endif
       // Help for finding the contexts for an operation
       InnerContext* find_physical_context(unsigned index);
     public:
@@ -2055,9 +2057,11 @@ namespace Legion {
         { close_mask |= mask; }
       inline const FieldMask& get_close_mask(void) const
         { return close_mask; }
+#if 0
       // Make this virtual so we can override for ReplMergeCloseOp
       virtual void record_refinements(const FieldMask &refinement_mask, 
                                       const bool overwrite);
+#endif
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2067,15 +2071,19 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_dependence_analysis(void);
+#if 0
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+#endif
     protected:
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;
       VersionInfo version_info;
+#if 0
       FieldMask refinement_mask;
       bool refinement_overwrite;
+#endif
     };
 
     /**
@@ -2199,13 +2207,15 @@ namespace Legion {
       inline bool deterministic_pointer_less(const RefinementOp *rhs) const
         { return (unique_op_id < rhs->get_unique_op_id()); }
     public:
-      void initialize(Operation *creator, unsigned idx,
-                      LogicalRegion parent, RefinementNode *refinement);
+      void initialize(Operation *creator, unsigned idx, LogicalRegion parent, 
+          RegionTreeNode *refinement_node, unsigned parent_req_index);
       void record_refinement_mask(unsigned refinement_number,
                                   const FieldMask &refinement_mask);
+#if 0
       RefinementNode* clone_refinement(void) const;
       bool interferes(RefinementNode *refinement, bool &dominates) const;
       void incorporate_refinement(RefinementNode *refinement);
+#endif
       RegionTreeNode* get_refinement_node(void) const;
 #if 0
       void record_refinement(RegionTreeNode *node, const FieldMask &mask,
@@ -2215,10 +2225,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       void verify_refinement_mask(const FieldMask &refinement_mask);
 #endif
-#endif
     protected:
       void update_refinement(std::set<RtEvent> &map_applied_conditions);
-#if 0
       void initialize_region(RegionNode *node, const FieldMask &mask,
                              InnerContext *context,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
@@ -2240,20 +2248,23 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
     protected:
+#if 0
       RefinementNode *refinement;
+#endif
       FieldMask refinement_mask;
+      RegionTreeNode *refinement_node;
+      // The parent region requirement for the refinement to update
+      unsigned parent_req_index;
       // For uniquely identify this refinement in the context of
       // its creator operation
       unsigned refinement_number;
+#if 0
       // The current equivalence sets for the node to be refined
       LegionMap<RegionNode*,VersionInfo> version_infos;
       // Equivalence sets that need to be released at completion
       std::vector<EquivalenceSet*> to_release;
-#if 0
       // Upper bound node where this refinement is occuring
       RegionNode *to_refine;
       // Region tree nodes from which to make refinements

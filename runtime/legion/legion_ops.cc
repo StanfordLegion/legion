@@ -2573,12 +2573,14 @@ namespace Legion {
         trigger_commit();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool Operation::is_parent_nonexclusive_virtual_mapping(unsigned index)
     //--------------------------------------------------------------------------
     {
       return parent_ctx->nonexclusive_virtual_mapping(find_parent_index(index));
     }
+#endif
 
     //--------------------------------------------------------------------------
     InnerContext* Operation::find_physical_context(unsigned index)
@@ -10746,6 +10748,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MergeCloseOp::record_refinements(const FieldMask &refinements, 
                                           const bool overwrite)
@@ -10763,13 +10766,16 @@ namespace Legion {
       refinement_mask = refinements;
       refinement_overwrite = overwrite;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
       CloseOp::activate();
+#if 0
       refinement_overwrite = false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10779,7 +10785,9 @@ namespace Legion {
       CloseOp::deactivate(false/*free*/);
       close_mask.clear();
       version_info.clear();
+#if 0
       refinement_mask.clear();
+#endif
       if (freeop)
         runtime->free_merge_close_op(this);
     }
@@ -10831,6 +10839,7 @@ namespace Legion {
         perform_logging(create_op, creator_req_idx, true/*merge close*/);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MergeCloseOp::trigger_ready(void)
     //--------------------------------------------------------------------------
@@ -10855,7 +10864,6 @@ namespace Legion {
         enqueue_ready_operation();
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void MergeCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -11456,7 +11464,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InternalOp::activate();
-      refinement = NULL;
+      refinement_node = NULL;
+      parent_req_index = 0;
+      refinement_number = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -11464,12 +11474,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InternalOp::deactivate(false/*free*/);
-      if (refinement != NULL)
-        delete refinement;
       refinement_mask.clear();
+#if 0
       version_infos.clear();
       to_release.clear();
-#if 0
       make_from.clear();
       if (!projections.empty())
       {
@@ -11513,14 +11521,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize(Operation *creator, unsigned index,
-                                  LogicalRegion parent, RefinementNode *refine)
+                                  LogicalRegion parent, RegionTreeNode *refine,
+                                  unsigned parent_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(refinement == NULL);
+      assert(refinement_node == NULL);
 #endif
       initialize_internal(creator, index);
-      refinement = refine;
+      refinement_node = refine;
+      parent_req_index = parent_index;
       MustEpochOp *must = creator->get_must_epoch_op();
       if (must != NULL)
         set_must_epoch(must, false/*do registration*/);
@@ -11528,10 +11538,9 @@ namespace Legion {
       {
         LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 
                                             unique_op_id);
-        RegionTreeNode *node = refinement->get_region_tree_node();
-        if (node->is_region())
+        if (refinement_node->is_region())
         {
-          RegionNode *root = node->as_region_node();
+          RegionNode *root = refinement_node->as_region_node();
           LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
                                         true/*region*/,
                                         root->handle.index_space.id,
@@ -11542,7 +11551,7 @@ namespace Legion {
         }
         else
         {
-          PartitionNode *root = node->as_partition_node();
+          PartitionNode *root = refinement_node->as_partition_node();
           LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
                                         false/*region*/,
                                         root->handle.index_partition.id,
@@ -11563,19 +11572,19 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!refinement_mask);
-      assert(refinement != NULL);
+      assert(refinement_node != NULL);
 #endif
       refinement_mask = mask;
       refinement_number = number;
       if (runtime->legion_spy_enabled && !!mask)
       {
         std::set<FieldID> fields;
-        RegionTreeNode *node = refinement->get_region_tree_node();
-        node->column_source->get_field_set(mask, parent_ctx, fields);
+        refinement_node->column_source->get_field_set(mask, parent_ctx, fields);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RefinementNode* RefinementOp::clone_refinement(void) const
     //--------------------------------------------------------------------------
@@ -11632,15 +11641,16 @@ namespace Legion {
       assert(incorporated);
 #endif
     }
+#endif
 
     //--------------------------------------------------------------------------
     RegionTreeNode* RefinementOp::get_refinement_node(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(refinement != NULL);
+      assert(refinement_node != NULL);
 #endif
-      return refinement->get_region_tree_node();
+      return refinement_node;
     }
 
 #if 0
@@ -11743,6 +11753,7 @@ namespace Legion {
       must_epoch = NULL;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_ready(void)
     //--------------------------------------------------------------------------
@@ -11759,16 +11770,49 @@ namespace Legion {
       else
         enqueue_ready_operation();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> map_applied_conditions;
-      // Check to make sure we have refinement fields
-      // We might not if we were completely filtered out of them
-      if (!!refinement_mask)
-        update_refinement(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      assert(!!refinement_mask);
+      assert(refinement_node != NULL);
+#endif
+      std::vector<RtEvent> map_applied_conditions;
+      // Check to see if this is a region or a parttiion
+      if (refinement_node->is_region())
+      {
+        RegionNode *region = refinement_node->as_region_node();
+        parent_ctx->refine_equivalence_sets(parent_req_index,
+            region->row_source, refinement_mask, map_applied_conditions);
+      }
+      else
+      {
+        IndexPartNode *partition = 
+          refinement_node->as_partition_node()->row_source;
+        if (partition->is_disjoint() && !partition->is_complete())
+        {
+          // For disjoint and incomplete partitions we can traverse
+          // each of their children individually and refine them
+          for (ColorSpaceIterator itr(partition); itr; itr++)
+          {
+            IndexSpaceNode *child = partition->get_child(*itr);
+            parent_ctx->refine_equivalence_sets(parent_req_index,
+                child, refinement_mask, map_applied_conditions);
+          }
+        }
+        else
+        {
+          // For complete partitions we refine from the root since it will
+          // have the same impact as if we did it by individual subregions 
+          // For aliased but incomplete partitions we just do it from the
+          // root as well since we can't compute the overlapping parts
+          parent_ctx->refine_equivalence_sets(parent_req_index,
+              partition->parent, refinement_mask, map_applied_conditions);
+        }
+      }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -11988,7 +12032,6 @@ namespace Legion {
       else
         pending->record_all(info);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_complete(void)
@@ -12004,6 +12047,7 @@ namespace Legion {
       }
       complete_operation();
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Advisement Operation 

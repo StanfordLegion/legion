@@ -4094,7 +4094,6 @@ namespace Legion {
       // We should never get this call for a non-control replicated context
       assert(false);
     }
-#endif
 
     //--------------------------------------------------------------------------
     ProjectionNode* InnerContext::compute_fallback_refinement(RegionNode *root,
@@ -4179,7 +4178,6 @@ namespace Legion {
       return leaves;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
                               PendingEquivalenceSet *set, const FieldMask &mask)
@@ -4326,6 +4324,7 @@ namespace Legion {
     }
 #endif
 
+#if 0
     //--------------------------------------------------------------------------
     bool InnerContext::nonexclusive_virtual_mapping(unsigned index)
     //--------------------------------------------------------------------------
@@ -4345,6 +4344,7 @@ namespace Legion {
       return ((index < virtual_mapped.size()) && virtual_mapped[index] && 
               !IS_WRITE(regions[index]));
     }
+#endif
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_physical_context(unsigned index)
@@ -10614,6 +10614,7 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
+      const ContextID ctx = tree_context.get_id();
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
       equivalence_set_trees.resize(regions.size(), NULL);
@@ -10638,6 +10639,8 @@ namespace Legion {
                                                 get_total_shards());
         tree->add_reference();
         equivalence_set_trees[idx1] = tree;
+        const FieldMask user_mask = 
+          region_node->column_source->get_field_mask(req.privilege_fields);
         // For virtual mappings, there are two approaches here
         // 1. For read-write privileges we can do copy-in/copy-out
         // on the equivalence sets since we know that we're the 
@@ -10658,15 +10661,20 @@ namespace Legion {
 #endif
           const FieldMaskSet<EquivalenceSet> &eq_sets =
             version_infos[idx1].get_equivalence_sets();
+#ifdef DEBUG_LEGION
+          assert(user_mask == eq_sets.get_valid_mask());
+#endif
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             region_node->row_source->initialize_equivalence_set_kd_tree(
                             tree, it->first, it->second, true/*current*/);
+          // In this case we also tell the region tree that this is
+          // already refined so that no read or reduce refinements can
+          // be performed in this context
+          region_node->initialize_refined_fields(ctx, user_mask); 
           continue;
         }
-        EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req);
-        const FieldMask user_mask = 
-          region_node->column_source->get_field_mask(req.privilege_fields);
+        EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req); 
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
         if (!virtual_mapped[idx1])
@@ -22178,6 +22186,7 @@ namespace Legion {
       Runtime::trigger_event(ready_event, ready);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::find_all_disjoint_complete_children(
                                        IndexSpaceNode *node,
@@ -22494,7 +22503,6 @@ namespace Legion {
         return InnerContext::count_total_leaves(leaves, participants);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,

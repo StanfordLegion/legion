@@ -1772,7 +1772,9 @@ namespace Legion {
     {
       MergeCloseOp::activate();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
+#if 0
       refinement_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1794,6 +1796,7 @@ namespace Legion {
       mapped_barrier = mapped;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplMergeCloseOp::record_refinements(const FieldMask &refinement_mask,
                                               const bool overwrite)
@@ -1848,8 +1851,8 @@ namespace Legion {
       else
         enqueue_ready_operation();
     }
+#endif
 
-#if 0
     //--------------------------------------------------------------------------
     void ReplMergeCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -1857,6 +1860,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
 #endif
+#if 0
       if (!!refinement_mask)
       {
 #ifdef DEBUG_LEGION
@@ -1905,12 +1909,12 @@ namespace Legion {
           Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       }
       else // Arrive on our barrier
-        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+#endif
+      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       // Then complete the mapping once the barrier has triggered
       complete_mapping(mapped_barrier);
       complete_execution();
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Repl Virtual Close Op 
@@ -2078,6 +2082,7 @@ namespace Legion {
     void ReplRefinementOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       std::set<RtEvent> ready_events;
       if (!!refinement_mask)
       {
@@ -2085,16 +2090,18 @@ namespace Legion {
         refinement->perform_versioning_analysis(ctx, parent_ctx,
             refinement_mask, version_infos, unique_op_id, ready_events);
       }
-#ifdef DEBUG_LEGION
-      assert(refinement_barrier.exists());
-#endif
+
       // Make sure that everyone is done computing their equivalence sets
       // from the previous set before we allow anyone to do any invalidations
       if (!ready_events.empty())
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
             Runtime::merge_events(ready_events));
       else
-        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+#endif
+#ifdef DEBUG_LEGION
+      assert(refinement_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
       enqueue_ready_operation(refinement_barrier);
     }
 
@@ -2375,14 +2382,53 @@ namespace Legion {
     void ReplRefinementOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> map_applied_conditions;
-      // Check to make sure we have refinement fields
-      // We might not if we were completely filtered out of them
-      if (!!refinement_mask)
-        update_refinement(map_applied_conditions);
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      std::vector<RtEvent> map_applied_conditions;
+      // Check to see if this is a region or a parttiion
+      if (refinement_node->is_region())
+      {
+        RegionNode *region = refinement_node->as_region_node();
+        // Replicated so no need to do sharding
+        parent_ctx->refine_equivalence_sets(parent_req_index,
+            region->row_source, refinement_mask, map_applied_conditions,
+            repl_ctx->total_shards);
+      }
+      else
+      {
+        IndexPartNode *partition = 
+          refinement_node->as_partition_node()->row_source;
+        if (partition->is_disjoint() && !partition->is_complete())
+        {
+          // Check to see if there are at least as many children
+          // as there are shards, in which case we can shard this
+          for (ColorSpaceIterator itr(partition,
+                repl_ctx->owner_shard->shard_id, repl_ctx->total_shards);
+                itr; itr++)
+          {
+            IndexSpaceNode *child = partition->get_child(*itr);
+            parent_ctx->refine_equivalence_sets(parent_req_index,
+                child, refinement_mask, map_applied_conditions,
+                repl_ctx->owner_shard->shard_id);
+          }
+        }
+        else
+        {
+          // For complete partitions we refine from the root since it will
+          // have the same impact as if we did it by individual subregions 
+          // For aliased but incomplete partitions we just do it from the
+          // root as well since we can't compute the overlapping parts
+          // This is replicated so no need to do sharding
+          parent_ctx->refine_equivalence_sets(parent_req_index,
+              partition->parent, refinement_mask, map_applied_conditions,
+              repl_ctx->total_shards);
+        }
+      }
       if (!map_applied_conditions.empty())
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
             Runtime::merge_events(map_applied_conditions));

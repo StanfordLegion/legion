@@ -1628,21 +1628,26 @@ namespace Legion {
       // analysis for a single context are performed in order
       {
         FieldMask unopened_mask = user_mask;
-        FieldMask disjoint_complete_mask;;
+        FieldMask refinement_mask = user_mask;
+#if 0
         FieldMask first_touch_refinement = user_mask;
+#endif
         FieldMaskSet<RefinementOp> refinements;
+#if 0
         const bool check_for_unversioned = 
           !op->is_parent_nonexclusive_virtual_mapping(idx);
+#endif
         parent_node->register_logical_user(req.parent, *user, path,
                      trace_info, proj_info, user_mask, unopened_mask,
-                     disjoint_complete_mask, logical_analysis, refinements,
-                     true/*disjoint complete path*/, check_for_unversioned);
+                     refinement_mask, logical_analysis, refinements);
+#if 0
 #ifdef DEBUG_LEGION
         // should never flow out here unless we're not checking for versioning
         // we aren't checking when we've got an non-read-write virtual mapping
         // because in that case we are sharing equivalence sets with the
         // parent context and therefore are never permitted to do refinements
         assert(!disjoint_complete_mask || !check_for_unversioned);
+#endif
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -15974,11 +15979,9 @@ namespace Legion {
                                        const ProjectionInfo &proj_info,
                                        const FieldMask &user_mask,
                                        FieldMask &unopened_field_mask,
-                                       FieldMask &disjoint_complete_mask,
+                                       FieldMask &refinement_mask,
                                        LogicalAnalysis &logical_analysis,
-                                       FieldMaskSet<RefinementOp> &refinements,
-                                       const bool disjoint_complete_path,
-                                       const bool check_unversioned)
+                                       FieldMaskSet<RefinementOp> &refinements)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -15991,8 +15994,10 @@ namespace Legion {
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       FieldMask open_below;
+#if 0
       if (check_unversioned)
         state.initialize_unrefined_fields(user_mask,user.idx,logical_analysis);
+#endif
       RegionTreeNode *next_child = NULL;
       if (!arrived)
         next_child = get_tree_child(path.get_child(depth));
@@ -16036,6 +16041,13 @@ namespace Legion {
         }
         // If we've arrived add ourselves as a user
         register_local_user(state, user, user_mask);
+        // If we still have a refinement mask then we record that we should
+        // do a refinement operation from this node before the operation
+        if (!!refinement_mask)
+          logical_analysis.record_pending_refinement(privilege_root,
+              user.idx, user.op->find_parent_index(user.idx),
+              this, refinement_mask, refinements);
+#if 0
         if (disjoint_complete_path)
         {
           if (proj_info.is_projecting())
@@ -16063,6 +16075,7 @@ namespace Legion {
             disjoint_complete_mask = user_mask;
           }
         }
+#endif
       }
       else
       {
@@ -16085,6 +16098,7 @@ namespace Legion {
           assert(!open_below);
 #endif
 #endif
+#if 0
         // There are four modes in which we might want to traverse the
         // next child depending on whether we are considering changing
         // the refinement or not
@@ -16122,16 +16136,20 @@ namespace Legion {
             next_child->as_partition_node()->row_source->is_complete(false)));
         // First figure out which fields want the child to track refinement
         FieldMask child_disjoint_complete_mask;
+#endif
+        if (!!refinement_mask)
+          state.update_refinement_child(ctx, next_child, 
+                                        user.usage, refinement_mask);
         next_child->register_logical_user(privilege_root, user, path,
             trace_info, proj_info, user_mask, unopened_field_mask,
-            child_disjoint_complete_mask, logical_analysis, refinements,
+            refinement_mask, logical_analysis, refinements);
+#if 0
             child_disjoint_complete, false/*check unversioned*/);
         if (disjoint_complete_path)
           state.update_refinement_child(disjoint_complete_mask, user_mask,
                                  next_child, child_disjoint_complete_mask,
                                  proj_info, logical_analysis, ctx, 
                                  privilege_root, user.idx, refinements);
-#if 0
 
         if (!!deviating_mask)
         {
@@ -16512,6 +16530,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::update_logical_refinement(ContextID ctx, 
                                       size_t total_shards,
@@ -16532,7 +16551,6 @@ namespace Legion {
       state.invalidate_refinements(ctx, invalidation_mask);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::record_refinement_tree(ContextID ctx,
             const FieldMask &mask, const std::vector<RegionTreeNode*> &children)
@@ -20258,10 +20276,9 @@ namespace Legion {
           delete (*it);
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void RegionNode::initialize_disjoint_complete_tree(ContextID ctx,
-                                                       const FieldMask &mask)
+    void RegionNode::initialize_refined_fields(ContextID ctx,
+                                               const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
@@ -20270,8 +20287,8 @@ namespace Legion {
 #endif
       state.initialize_refined_fields(mask);
     }
-#endif
 
+#if 0
     //--------------------------------------------------------------------------
     ProjectionRegion* RegionNode::find_largest_disjoint_complete_subtree(
                                       InnerContext *context,
@@ -20326,7 +20343,6 @@ namespace Legion {
       return result;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionNode::refine_disjoint_complete_tree(ContextID ctx,
             PartitionNode *child, RefinementOp *refinement_op,
@@ -22167,6 +22183,7 @@ namespace Legion {
         Runtime::trigger_event(ready);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ProjectionPartition* PartitionNode::find_largest_disjoint_complete_subtree(
                                       InnerContext *context,
@@ -22211,7 +22228,6 @@ namespace Legion {
       return result;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void PartitionNode::update_disjoint_complete_tree(ContextID ctx,
                                               RefinementOp *refinement_op,

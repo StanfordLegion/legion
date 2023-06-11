@@ -2822,6 +2822,7 @@ namespace Legion {
       child->add_reference();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RefinementNode* ProjectionRegion::create_refinement(void) const
     //--------------------------------------------------------------------------
@@ -2923,6 +2924,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_users; idx++)
         derez.deserialize(shard_users[idx]);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionPartition
@@ -3197,6 +3199,7 @@ namespace Legion {
       child->add_reference();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RefinementNode* ProjectionPartition::create_refinement(void) const
     //--------------------------------------------------------------------------
@@ -3343,6 +3346,7 @@ namespace Legion {
       if (disjoint_complete_children_shards != NULL)
         disjoint_complete_children_shards->add_reference();
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ShardedColorMap
@@ -3723,7 +3727,6 @@ namespace Legion {
       copy->touches = touches;
       return copy;
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // RegionRefinementNode
@@ -3793,7 +3796,6 @@ namespace Legion {
         return child->incorporate(refinement);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionRefinementNode::perform_versioning_analysis(ContextID ctx,
         InnerContext *context, const FieldMask &refinement_mask,
@@ -3866,7 +3868,6 @@ namespace Legion {
         child->register_refinement(ctx, refinement_mask, context, op_ctx_index,
             refinement_number, parent_req_index, applied_events, version_infos);
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // PartitionRefinementNode
@@ -3956,7 +3957,6 @@ namespace Legion {
                                           version_infos, op_id, ready_events);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void PartitionRefinementNode::register_refinement(ContextID ctx, 
         const FieldMask &refinement_mask, InnerContext *context,
@@ -4047,6 +4047,7 @@ namespace Legion {
     // RegionRefinementTracker
     /////////////////////////////////////////////////////////////
 
+#if 0
     //--------------------------------------------------------------------------
     RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
                                                      bool current)
@@ -5051,6 +5052,7 @@ namespace Legion {
         return new PartitionRefinementTracker(partition, projection);
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // LogicalState 
@@ -5058,7 +5060,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalState::LogicalState(RegionTreeNode *node, ContextID c)
-      : owner(node), fallback_refinement(NULL)
+      : owner(node)
     //--------------------------------------------------------------------------
     {
     }
@@ -5080,7 +5082,6 @@ namespace Legion {
       assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
       assert(interfering_shards.empty());
-      assert(fallback_refinement == NULL);
 #endif
     }
 
@@ -5209,12 +5210,6 @@ namespace Legion {
             summary->remove_reference())
           delete summary;
       }
-      if (fallback_refinement != NULL)
-      {
-        if (fallback_refinement->remove_reference())
-          delete fallback_refinement;
-        fallback_refinement = NULL;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5231,6 +5226,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void LogicalState::pack_refinements(Serializer &rez, 
                        std::map<LegionColor,RegionTreeNode*> &to_traverse) const
@@ -5325,6 +5321,7 @@ namespace Legion {
       }
       src.reset();
     }
+#endif
 
     //--------------------------------------------------------------------------
     ProjectionSummary* LogicalState::find_or_create_projection_summary(
@@ -5475,6 +5472,7 @@ namespace Legion {
       return result;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ProjectionNode* LogicalState::find_or_create_fallback_refinement(
                              InnerContext *context, IndexSpaceNode *color_space)
@@ -5491,6 +5489,7 @@ namespace Legion {
       }
       return fallback_refinement;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void LogicalState::initialize_refined_fields(const FieldMask &mask)
@@ -5500,11 +5499,81 @@ namespace Legion {
       assert(owner->is_region());
       assert(mask * refinement_trackers.get_valid_mask());
 #endif
-      RefinementTracker *new_tracker = 
-        owner->create_refinement_tracker(true/*current refinement*/); 
+      RefinementTracker *new_tracker = owner->create_refinement_tracker();
+      new_tracker->initialize_already_refined();
       refinement_trackers.insert(new_tracker, mask);
     }
 
+    //--------------------------------------------------------------------------
+    void LogicalState::update_refinement_child(ContextID ctx,
+                                               RegionTreeNode *child,
+                                               const RegionUsage &usage,
+                                               FieldMask &refinement_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!refinement_mask);
+#endif
+      // This function filters through the refinement trackers and updates
+      // them as necessary. Since the refinement trackers are not field aware,
+      // this function will clone them and delete them as necessary to make
+      // sure that each field is accurately represented
+      if (!(refinement_mask * refinement_trackers.get_valid_mask()))
+      {
+        FieldMaskSet<RefinementTracker> to_add;
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+             refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = refinement_mask & it->second;
+          if (!overlap)
+            continue;
+          if (overlap != it->second)
+          {
+            RefinementTracker *diff = it->first->clone();
+            FieldMask diff_mask = it->second - overlap;
+            to_add.insert(diff, diff_mask);
+            it.filter(diff_mask);
+          }
+          bool allow_refinement = false;
+          if (it->first->update_child(child, usage, allow_refinement))
+          {
+            it->first->invalidate_refinement(ctx, overlap);
+            to_delete.push_back(it->first);
+          }
+          else if (!allow_refinement)
+          {
+            refinement_mask -= overlap;
+            if (!refinement_mask)
+              break;
+          }
+        }
+        // Remove old entries
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+        // Add new entries
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          refinement_trackers.insert(it->first, it->second);
+      }
+      if (!!refinement_mask)
+      {
+        RefinementTracker *new_tracker = owner->create_refinement_tracker();
+        bool allow_refinement = false;
+        if (new_tracker->update_child(child, usage, allow_refinement))
+          assert(false); // should never get here
+#ifdef DEBUG_LEGION
+        assert(allow_refinement);
+#endif
+        refinement_trackers.insert(new_tracker, refinement_mask);
+      }
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     void LogicalState::initialize_unrefined_fields(const FieldMask &mask,
                                 const unsigned index, LogicalAnalysis &analysis)
@@ -5970,7 +6039,6 @@ namespace Legion {
       refinement_trackers.tighten_valid_mask();
     }
 
-#if 0
     //--------------------------------------------------------------------------
     bool LogicalState::find_symbolic_elide_close_result(
                                                   const ProjectionSummary &prev,
@@ -6955,6 +7023,7 @@ namespace Legion {
           issue_internal_operation(it->second, close, close->get_close_mask());
         }
       }
+#if 0
       // If we have any unrefined nodes we can issue close operations
       // to create a refinement for them at the root now
       if (!unrefined_nodes.empty())
@@ -6988,7 +7057,6 @@ namespace Legion {
           issue_internal_operation(it->second, initializer, refinement_mask);
         }
       }
-#if 0
       if (!pending_closes.empty())
       {
         // Need to issue these close operations in order in case we are
@@ -7134,7 +7202,6 @@ namespace Legion {
       }
       return true;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void LogicalAnalysis::record_unrefined_fields(RegionNode *node, 
@@ -7147,23 +7214,25 @@ namespace Legion {
       if (unrefined_nodes.insert(node, unrefined))
         unrefined_indexes[node] = index;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void LogicalAnalysis::record_pending_refinement(LogicalRegion privilege,
                                             unsigned req_index,
-                                            RefinementNode *refinement,
+                                            unsigned parent_req_index,
+                                            RegionTreeNode *refinement_node,
                                             FieldMask refinement_mask,
                                             FieldMaskSet<RefinementOp> &pending)
     //--------------------------------------------------------------------------
     {
+#if 0
       // If we overlap with any unrefined nodes then we can remove them
       if (!unrefined_nodes.empty())
       {
-        RegionTreeNode *node = refinement->get_region_tree_node();
-        if (node->is_region())
+        if (refinement_node->is_region())
         {
           FieldMaskSet<RegionNode>::iterator finder = 
-            unrefined_nodes.find(node->as_region_node());
+            unrefined_nodes.find(refinement_node->as_region_node());
           if (finder != unrefined_nodes.end())
           {
             finder.filter(refinement_mask);
@@ -7175,101 +7244,33 @@ namespace Legion {
           }
         }
       }
-      // Search through all the existing refinements and see if we have any
-      // that interfere and whether they are dominating or conflicting
+#endif
+      // See if we already have a refinement for handling this node
       for (OrderedRefinements::iterator it =
             pending_refinements.begin(); it != pending_refinements.end(); it++)
       {
-        // Note this mask comparison is pretty strange in that we might
-        // accidentally be comparing fields from different regions/field spaces
-        // but we'll detect those cases later when we ask the refinements
-        // to check for domination
-        const FieldMask overlap = refinement_mask & it->second;
-        if (!overlap)
+        if (it->first->get_refinement_node() != refinement_node)
           continue;
-        bool dominates = false;
-        if (it->first->interferes(refinement, dominates))
-        {
-          if (dominates)
-          {
-            // It dominates need to handle all the partial overlapping cases
-            if (it->second != overlap)
-            {
-              RefinementNode *dominator = it->first->clone_refinement();
-              if (overlap != refinement_mask)
-              {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-                bool incorporated = 
-#endif
-#endif
-                dominator->incorporate(refinement->clone());
-#ifdef DEBUG_LEGION
-                assert(incorporated);
-#endif
-                RefinementOp *op =
-                  create_refinement(privilege, req_index, dominator); 
-                pending_refinements.insert(op, overlap);
-                pending.insert(op, overlap);
-                refinement_mask -= overlap;
-                if (!refinement_mask)
-                  break;
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-                bool incorporated = 
-#endif
-#endif
-                dominator->incorporate(refinement);
-#ifdef DEBUG_LEGION
-                assert(incorporated);
-#endif
-                refinement = dominator;
-              }
-            } 
-            else // they're equal so we can just subsume it
-            {
-              it->first->incorporate_refinement(refinement);
-              pending.insert(it->first, overlap);
-              refinement_mask -= overlap;
-              if (!refinement_mask)
-                break;
-            }
-          }
-          else 
-            // The only way they interefere without dominating is by
-            // the new refinement conflicting with the earlier one as a
-            // change higher up in the tree, so we can just remove these
-            // fields and not issue the refinement for them
-            it.filter(overlap);
-        }
+        it.merge(refinement_mask);
+        refinement_mask.clear();
+        break;
       }
       if (!!refinement_mask)
       {
-        RefinementOp *op = create_refinement(privilege, req_index, refinement);
-        pending_refinements.insert(op, refinement_mask);
-        pending.insert(op, refinement_mask);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RefinementOp* LogicalAnalysis::create_refinement(LogicalRegion privilege,
-                                 unsigned req_index, RefinementNode *refinement)
-    //--------------------------------------------------------------------------
-    {
 #ifdef DEBUG_LEGION_COLLECTIVES
-      RefinementOp *refinement_op = context->get_refinement_op(op, 
-                                                refinement->node);
+        RefinementOp *refinement_op = context->get_refinement_op(op, 
+                                                    refinement_node); 
 #else
-      RefinementOp *refinement_op = context->get_refinement_op();
+        RefinementOp *refinement_op = context->get_refinement_op();
 #endif
-      refinement_op->initialize(op, req_index, privilege, refinement);
-      // Start the dependence analysis for this refinement now
-      // We'll finish the dependence analysis in the destructor
-      refinement_op->begin_dependence_analysis();
-      return refinement_op;
+        refinement_op->initialize(op, req_index, privilege, 
+                                  refinement_node, parent_req_index);
+        // Start the dependence analysis for this refinement now
+        // We'll finish the dependence analysis in the destructor
+        refinement_op->begin_dependence_analysis();
+        pending_refinements.insert(refinement_op, refinement_mask);
+        pending.insert(refinement_op, refinement_mask);
+      }
     }
 
     //--------------------------------------------------------------------------

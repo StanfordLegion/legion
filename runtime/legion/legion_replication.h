@@ -1758,13 +1758,17 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
+#if 0
       virtual void record_refinements(const FieldMask &refinement_mask,
                                       const bool overwrite);
       virtual void trigger_ready(void);
+#endif
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
+#if 0
       RtBarrier refinement_barrier;
+#endif
     };
 
     /**
