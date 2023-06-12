@@ -10255,6 +10255,7 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
+      std::set<RtEvent> context_ready_events;
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
       const ContextID ctx = tree_context.get_id();
@@ -10371,18 +10372,11 @@ namespace Legion {
           const FieldMaskSet<EquivalenceSet> &eq_sets = 
             version_infos[idx1].get_equivalence_sets();
           const AddressSpaceID space = runtime->address_space;
-          std::set<RtEvent> context_ready_events;
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             eq_set->clone_from(space, it->first, it->second, 
                          false/*fowrard to owner*/, context_ready_events,
                          IS_WRITE(regions[idx1])/*invalidate source overlap*/);
-          // If there are any events for making these equivalence sets ready
-          // then we make them look like a mapping fence to ensure that the
-          // equivalence sets are all ready before anyone tries to map
-          if (!context_ready_events.empty())
-            current_mapping_fence_event = 
-              Runtime::merge_events(context_ready_events);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
@@ -10392,6 +10386,12 @@ namespace Legion {
         if (eq_set->remove_base_gc_ref(CONTEXT_REF))
           assert(false); // should never hit this
       }
+      // If there are any events for making these equivalence sets ready
+      // then we make them look like a mapping fence to ensure that the
+      // equivalence sets are all ready before anyone tries to map
+      if (!context_ready_events.empty())
+        current_mapping_fence_event = 
+          Runtime::merge_events(context_ready_events);
     }
 
     //--------------------------------------------------------------------------
