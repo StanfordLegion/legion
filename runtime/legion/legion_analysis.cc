@@ -21400,8 +21400,7 @@ namespace Legion {
         if (ready_event.exists() && !ready_event.has_triggered())
         {
           // Defer this until it is ready to be performed
-          const RtUserEvent applied_event = Runtime::create_rt_user_event();
-          DeferApplyStateArgs args(this, applied_event, forward_to_owner,
+          DeferApplyStateArgs args(this, forward_to_owner,
               applied_events, valid_updates, initialized_updates, 
               reduction_updates, restricted_updates, released_updates,
               read_only_updates, reduction_fill_updates, precondition_updates,
@@ -21422,7 +21421,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
-                                       RtUserEvent done, bool forward,
+                                       bool forward,
                                        std::set<RtEvent> &applied_events,
                                        ExprLogicalViews &valid,
                                        FieldMaskSet<IndexSpaceExpression> &init,
@@ -21449,7 +21448,7 @@ namespace Legion {
         precondition_updates(preconditions),
         anticondition_updates(anticonditions),
         postcondition_updates(postconditions),
-        done_event(done), forward_to_owner(forward)
+        done_event(Runtime::create_rt_user_event()), forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
       for (ExprLogicalViews::const_iterator it =

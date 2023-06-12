@@ -145,6 +145,8 @@ namespace Legion {
       virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
       virtual RtEvent post_broadcast(void) { return RtEvent::NO_RT_EVENT; }
+      // Use this method in case we don't actually end up using the collective
+      virtual void elide_collective(void);
     public:
       RtEvent get_done_event(void) const;
       inline bool is_origin(void) const
@@ -265,10 +267,9 @@ namespace Legion {
     public:
       FutureAllReduceCollective(Operation *op, CollectiveIndexLocation loc, 
           ReplicateContext *ctx, ReductionOpID redop_id,
-          const ReductionOp *redop, bool deterministic);
+          const ReductionOp *redop);
       FutureAllReduceCollective(Operation *op, ReplicateContext *ctx, 
-          CollectiveID id, ReductionOpID redop_id, 
-          const ReductionOp *redop, bool deterministic);
+          CollectiveID id, ReductionOpID redop_id, const ReductionOp *redop);
       virtual ~FutureAllReduceCollective(void);
     public:
       virtual void pack_collective_stage(ShardID target,
@@ -286,7 +287,6 @@ namespace Legion {
       Operation *const op;
       const ReductionOp *const redop;
       const ReductionOpID redop_id;
-      const bool deterministic;
     protected:
       const ApUserEvent finished;
       std::map<int,std::map<ShardID,FutureInstance*> > pending_reductions;
@@ -297,6 +297,68 @@ namespace Legion {
       int last_stage_sends;
       int current_stage;
       bool pack_shadow;
+    };
+
+    /**
+     * \class FutureBroadcast
+     * This class will broadast a future result out to all all shards
+     */
+    class FutureBroadcastCollective : public BroadcastCollective {
+    public:
+      FutureBroadcastCollective(ReplicateContext *ctx, 
+          CollectiveIndexLocation loc, ShardID origin, Operation *op);
+      FutureBroadcastCollective(const FutureBroadcastCollective &rhs) = delete;
+      virtual ~FutureBroadcastCollective(void);
+    public:
+      FutureBroadcastCollective& operator=(
+                                const FutureBroadcastCollective &rhs) = delete;
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+      virtual void elide_collective(void);
+    public:
+      RtEvent async_broadcast(FutureInstance *instance, 
+          ApEvent precondition = ApEvent::NO_AP_EVENT);
+    public:
+      Operation *const op;
+      const ApUserEvent finished;
+    protected:
+      FutureInstance *instance;
+    };
+
+    /**
+     * \class FutureReduction
+     * This class builds a reduction tree of futures down to a single
+     * future value.
+     */
+    class FutureReductionCollective : public GatherCollective {
+    public:
+      FutureReductionCollective(ReplicateContext *ctx,
+          CollectiveIndexLocation loc, ShardID origin,
+          Operation *op, FutureBroadcastCollective *broadcast,
+          const ReductionOp *redop, ReductionOpID redop_id);
+      FutureReductionCollective(const FutureReductionCollective &rhs) = delete;
+      virtual ~FutureReductionCollective(void);
+    public:
+      FutureReductionCollective& operator=(
+                                const FutureReductionCollective &rhs) = delete;
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_gather(void);
+    public:
+      void async_reduce(FutureInstance *instance, ApEvent precondition);
+    protected:
+      void perform_reductions(void) const;
+    public:
+      Operation *const op;
+      FutureBroadcastCollective *const broadcast;
+      const ReductionOp *const redop;
+      const ReductionOpID redop_id;
+    protected:
+      FutureInstance *instance;
+      mutable ApEvent ready;
+      std::map<ShardID,FutureInstance*> pending_reductions;
     };
 
     /**
@@ -1719,6 +1781,8 @@ namespace Legion {
       ShardingFunction *sharding_function;
       BufferExchange *serdez_redop_collective;
       FutureAllReduceCollective *all_reduce_collective;
+      FutureReductionCollective *reduction_collective;
+      FutureBroadcastCollective *broadcast_collective;
       OutputSizeExchange *output_size_collective;
       CollectiveID collective_check_id;
     protected:
@@ -2296,6 +2360,8 @@ namespace Legion {
     protected:
       BufferExchange *serdez_redop_collective;
       FutureAllReduceCollective *all_reduce_collective;
+      FutureReductionCollective *reduction_collective;
+      FutureBroadcastCollective *broadcast_collective;
     };
 
     /**
