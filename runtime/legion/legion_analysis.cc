@@ -18027,6 +18027,7 @@ namespace Legion {
               anticondition_updates, postcondition_updates);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, ready_event);
+          applied_events.insert(applied_event);
           return;
         }
       }
