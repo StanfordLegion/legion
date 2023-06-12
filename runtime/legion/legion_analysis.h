@@ -2921,7 +2921,7 @@ namespace Legion {
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
       public:
-        DeferApplyStateArgs(EquivalenceSet *set, RtUserEvent done_event, 
+        DeferApplyStateArgs(EquivalenceSet *set,
                             const bool foward_to_owner,
                             std::set<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
