@@ -1,4 +1,8 @@
+use std::ffi::OsString;
 use std::io;
+
+#[macro_use]
+extern crate clap;
 
 use rayon::prelude::*;
 
@@ -23,15 +27,17 @@ fn main() -> io::Result<()> {
         .about("Legion Prof: application profiler")
         .arg(
             clap::Arg::with_name("filenames")
-                .help("input Legion Prof log filenames")
                 .required(true)
-                .multiple(true),
+                .multiple(true)
+                .value_parser(value_parser!(OsString))
+                .help("input Legion Prof log filenames"),
         )
         .arg(
             clap::Arg::with_name("output")
-                .short("o")
+                .short('o')
                 .long("output")
                 .takes_value(true)
+                .value_parser(value_parser!(OsString))
                 .default_value("legion_prof")
                 .help("output directory pathname"),
         )
@@ -39,24 +45,28 @@ fn main() -> io::Result<()> {
             clap::Arg::with_name("start-trim")
                 .long("start-trim")
                 .takes_value(true)
+                .value_parser(value_parser!(u64))
                 .help("start time in microseconds to trim the profile"),
         )
         .arg(
             clap::Arg::with_name("stop-trim")
                 .long("stop-trim")
                 .takes_value(true)
+                .value_parser(value_parser!(u64))
                 .help("stop time in microseconds to trim the profile"),
         )
         .arg(
             clap::Arg::with_name("message-threshold")
                 .long("message-threshold")
                 .takes_value(true)
+                .value_parser(value_parser!(f64))
                 .help("threshold for warning about message latencies in microseconds"),
         )
         .arg(
             clap::Arg::with_name("message-percentage")
                 .long("message-percentage")
                 .takes_value(true)
+                .value_parser(value_parser!(f64))
                 .help("perentage of messages that must be over the threshold to trigger a warning"),
         )
         .arg(
@@ -73,7 +83,7 @@ fn main() -> io::Result<()> {
         )
         .arg(
             clap::Arg::with_name("force")
-                .short("f")
+                .short('f')
                 .long("force")
                 .help("overwrite output directory if it exists"),
         )
@@ -98,18 +108,19 @@ fn main() -> io::Result<()> {
             clap::Arg::with_name("port")
                 .long("port")
                 .takes_value(true)
+                .value_parser(value_parser!(u16))
                 .default_value("8080")
                 .help("port to bind for HTTP server"),
         )
         .arg(
             clap::Arg::with_name("statistics")
-                .short("s")
+                .short('s')
                 .long("statistics")
                 .help("print statistics"),
         )
         .arg(
             clap::Arg::with_name("trace")
-                .short("t")
+                .short('t')
                 .long("trace-viewer")
                 .help("emit JSON for Google Trace Viewer"),
         )
@@ -120,14 +131,14 @@ fn main() -> io::Result<()> {
         )
         .arg(
             clap::Arg::with_name("verbose")
-                .short("v")
+                .short('v')
                 .long("verbose")
                 .help("print verbose profiling information"),
         )
         .get_matches();
 
-    let filenames = matches.values_of_os("filenames").unwrap();
-    let output = matches.value_of_os("output").unwrap();
+    let filenames = matches.get_many::<OsString>("filenames").unwrap();
+    let output = matches.get_one::<OsString>("output").unwrap();
     let force = matches.is_present("force");
     let attach = matches.is_present("attach");
     let serve = matches.is_present("serve");
@@ -136,20 +147,24 @@ fn main() -> io::Result<()> {
     let view = matches.is_present("view");
     let verbose = matches.is_present("verbose");
     let start_trim = matches
-        .value_of("start-trim")
-        .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
+        .get_one::<u64>("start-trim")
+        .copied()
+        .map(Timestamp::from_us);
     let stop_trim = matches
-        .value_of("stop-trim")
-        .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
+        .get_one::<u64>("stop-trim")
+        .copied()
+        .map(Timestamp::from_us);
     let message_threshold = matches
-        .value_of("message-threshold")
-        .map_or(1000.0, |x| x.parse::<f64>().unwrap());
+        .get_one::<f64>("message-threshold")
+        .copied()
+        .unwrap_or(1000.0);
     let message_percentage = matches
-        .value_of("message-percentage")
-        .map_or(5.0, |x| x.parse::<f64>().unwrap());
+        .get_one::<f64>("message-percentage")
+        .copied()
+        .unwrap_or(5.0);
     let mut node_list: Vec<NodeID> = Vec::new();
     let mut filter_input = false;
-    if let Some(nodes_str) = matches.value_of("nodes") {
+    if let Some(nodes_str) = matches.get_one::<String>("nodes") {
         node_list = nodes_str
             .split(",")
             .map(|x| NodeID(x.parse::<u64>().unwrap()))
@@ -157,10 +172,9 @@ fn main() -> io::Result<()> {
         filter_input = !matches.is_present("no-filter-input");
     }
 
-    let host = matches.value_of("host").unwrap();
-    let port = matches
-        .value_of("port")
-        .map(|x| x.parse::<u16>().unwrap())
+    let host = matches.get_one::<String>("host").unwrap();
+    let port = *matches
+        .get_one::<u16>("port")
         .unwrap();
 
     #[cfg(not(feature = "client"))]

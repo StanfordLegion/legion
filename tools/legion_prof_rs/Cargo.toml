@@ -11,7 +11,7 @@ client = ["dep:legion_prof_viewer", "dep:url", "legion_prof_viewer?/client"]
 server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
 
 [dependencies]
-clap = "2.33"
+clap = "3"
 csv = "1.1"
 derive_more = { version = "0.99", default_features = false, features = ["add", "display", "from"] }
 flate2 = "1"
