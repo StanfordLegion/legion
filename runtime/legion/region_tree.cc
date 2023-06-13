@@ -16051,9 +16051,28 @@ namespace Legion {
         // If we still have a refinement mask then we record that we should
         // do a refinement operation from this node before the operation
         if (!!refinement_mask)
-          logical_analysis.record_pending_refinement(privilege_root,
-              user.idx, user.op->find_parent_index(user.idx),
-              this, refinement_mask, refinements);
+        {
+          if (proj_info.is_projecting())
+          {
+            if (user.shard_proj == NULL)
+            {
+              ProjectionSummary *summary = 
+                state.find_or_create_projection_summary(user.op, user.idx,
+                              trace_info.req, logical_analysis, proj_info);
+              state.update_refinement_projection(ctx, summary,
+                                                 user.usage, refinement_mask);
+            }
+            else
+              state.update_refinement_projection(ctx, user.shard_proj,
+                                          user.usage, refinement_mask);
+          }
+          else
+            state.update_refinement_arrival(ctx, user.usage, refinement_mask);
+          if (!!refinement_mask)
+            logical_analysis.record_pending_refinement(privilege_root,
+                user.idx, user.op->find_parent_index(user.idx),
+                this, refinement_mask, refinements);
+        }
 #if 0
         if (disjoint_complete_path)
         {
@@ -16548,6 +16567,7 @@ namespace Legion {
       LogicalState &state = get_logical_state(ctx);
       state.change_refinements(ctx, total_shards, refinement_mask, refinements);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::invalidate_logical_refinement(ContextID ctx,
@@ -16558,6 +16578,7 @@ namespace Legion {
       state.invalidate_refinements(ctx, invalidation_mask);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::record_refinement_tree(ContextID ctx,
             const FieldMask &mask, const std::vector<RegionTreeNode*> &children)

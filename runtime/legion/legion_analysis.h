@@ -1155,14 +1155,16 @@ namespace Legion {
       virtual ProjectionPartition *as_partition_projection(void) 
         { return NULL; }
       virtual bool is_disjoint(void) const = 0;
+#if 0
       virtual bool is_complete(void) const = 0;
+#endif
       virtual bool is_leaves_only(void) const = 0;
       virtual bool is_unique_shards(void) const = 0;
       virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
-      virtual void extract_shard_summaries(bool disjoint_complete,
+      virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const = 0;
-      virtual void update_shard_summaries(bool disjoint_complete,
+      virtual void update_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) = 0;
@@ -1183,14 +1185,16 @@ namespace Legion {
     public:
       virtual ProjectionRegion* as_region_projection(void) { return this; }
       virtual bool is_disjoint(void) const;
+#if 0
       virtual bool is_complete(void) const;
+#endif
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
-      virtual void extract_shard_summaries(bool disjoint_complete,
+      virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const;
-      virtual void update_shard_summaries(bool disjoint_complete,
+      virtual void update_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
@@ -1224,14 +1228,16 @@ namespace Legion {
       virtual ProjectionPartition* as_partition_projection(void)
         { return this; }
       virtual bool is_disjoint(void) const;
+#if 0
       virtual bool is_complete(void) const;
+#endif
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
-      virtual void extract_shard_summaries(bool disjoint_complete,
+      virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const;
-      virtual void update_shard_summaries(bool disjoint_complete,
+      virtual void update_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
@@ -1250,7 +1256,9 @@ namespace Legion {
     public:
       PartitionNode *const partition;
       std::unordered_map<LegionColor,ProjectionRegion*> local_children;
-      ShardedColorMap *disjoint_complete_children_shards;
+      // This is only filled in if we support name-based dependence
+      // analysis (disjoint and all users at the leaves)
+      ShardedColorMap *name_based_children_shards;
     };
 
 #if 0
@@ -1282,7 +1290,7 @@ namespace Legion {
     public:
       ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
           const RegionRequirement &req, LogicalState *owner, bool dis,
-          bool dis_comp, bool permit_self, bool unique_shards);
+          bool comp, bool permit_self, bool unique_shards);
       ProjectionSummary(const ProjectionSummary &rhs) = delete;
       ~ProjectionSummary(void);
     public:
@@ -1305,9 +1313,9 @@ namespace Legion {
       // Whether we know all the points are disjoint from each other
       // based privileges of the projection and the projection function 
       const bool disjoint;
-      // Whether this projection represents a disjoint and complete
-      // sub-tree and can therefore be used for a refinement
-      const bool disjoint_complete; 
+      // Whether this projection tree is complete or not according to
+      // the projection functor
+      const bool complete; 
       // Whether this projection summary can be analyzed against itself
       // using name-based dependence analysis which is that same as
       // having sub-regions described using a disjoint-only subtree
@@ -1336,6 +1344,11 @@ namespace Legion {
       virtual bool update_child(RegionTreeNode *child, 
                                 const RegionUsage &usage,
                                 bool &allow_refinement) = 0;
+      virtual bool update_projection(ProjectionSummary *summary,
+                                     const RegionUsage &usage,
+                                     bool &allow_refinement) = 0;
+      virtual bool update_arrival(const RegionUsage &usage,
+                                  bool &allow_refinement) = 0;
       virtual void invalidate_refinement(ContextID ctx, 
                                 const FieldMask &invalidation_mask) = 0;
 #if 0
@@ -1372,6 +1385,15 @@ namespace Legion {
       // This is the timeout for refinements where we will clear out all
       // candidate refinements and reset the state to look again
       static constexpr uint64_t CHANGE_REFINEMENT_TIMEOUT = 4096;
+    protected:
+      enum RefinementState {
+        UNREFINED_STATE,
+        COMPLETE_NONWRITE_REFINED_STATE,
+        INCOMPLETE_NONWRITE_REFINED_STATE,
+        COMPLETE_WRITE_REFINED_STATE,
+        INCOMPLETE_WRITE_REFINED_STATE,
+        NO_REFINEMENT_STATE,
+      };
     };
 
     /**
@@ -1400,6 +1422,11 @@ namespace Legion {
       virtual bool update_child(RegionTreeNode *child, 
                                 const RegionUsage &usage,
                                 bool &allow_refinement);
+      virtual bool update_projection(ProjectionSummary *summary,
+                                     const RegionUsage &usage,
+                                     bool &allow_refinement);
+      virtual bool update_arrival(const RegionUsage &usage,
+                                  bool &allow_refinement);
       virtual void invalidate_refinement(ContextID ctx, 
                                          const FieldMask &invalidation_mask);
 #if 0
@@ -1423,10 +1450,10 @@ namespace Legion {
           std::map<LegionColor,RegionTreeNode*> &to_traverse);
       static RegionRefinementTracker* unpack(RegionNode *region,
           Deserializer &derez, std::map<LegionColor,RegionTreeNode*> &traverse);
+#endif
     protected:
       bool is_dominant_candidate(double score, bool is_current);
       void invalidate_unused_candidates(void);
-#endif
     public:
       RegionNode *const region;
 #if 0
@@ -1436,6 +1463,12 @@ namespace Legion {
       // This region can be part of the refinement tree even if it
       // doesn't have a refined child or projection
       const bool current_refinement;
+    
+#endif
+    protected: 
+      RefinementState refinement_state;
+      PartitionNode *refined_child;
+      ProjectionRegion *refined_projection;
     protected:  
       // Track the candidate children and projections and how often
       // we have observed a return back to them
@@ -1449,8 +1482,7 @@ namespace Legion {
       // The timeout tracks how long we've gone without seeing a return
       // If we go for too long without seeing a return, we timeout and
       // clear out all the candidates so we can try again
-      uint64_t return_timeout;
-#endif
+      uint64_t return_timeout;  
     };
 
     /**
@@ -1480,6 +1512,11 @@ namespace Legion {
       virtual bool update_child(RegionTreeNode *child, 
                                 const RegionUsage &usage,
                                 bool &allow_refinement);
+      virtual bool update_projection(ProjectionSummary *summary,
+                                     const RegionUsage &usage,
+                                     bool &allow_refinement);
+      virtual bool update_arrival(const RegionUsage &usage,
+                                  bool &allow_refinement);
       virtual void invalidate_refinement(ContextID ctx, 
                                          const FieldMask &invalidation_mask);
 #if 0
@@ -1503,10 +1540,10 @@ namespace Legion {
           std::map<LegionColor,RegionTreeNode*> &to_traverse);
       static PartitionRefinementTracker* unpack(PartitionNode *partition,
           Deserializer &derez, std::map<LegionColor,RegionTreeNode*> &traverse);
+#endif
     protected:
       bool is_dominant_candidate(double score, bool is_current);
       void invalidate_unused_candidates(void);
-#endif
     public:
       PartitionNode *const partition;
 #if 0
@@ -1514,11 +1551,14 @@ namespace Legion {
       // A partition is only a current refinement if it has a
       // refined_projection or all its children are part of the refinement
       const bool current_refinement;
+#endif
     protected:
+      ProjectionPartition *refined_projection;
+      RefinementState refinement_state;
       // These are children which are disjoint and complete
       // Note we don't need to hold references on them as they are kept alive
       // by the reference we are holding on their partition
-      std::unordered_set<RegionNode*> candidate_children;
+      std::vector<RegionNode*> children;
       std::unordered_map<ProjectionPartition*,
         std::pair<double,uint64_t> > candidate_projections;
       // The individual score and last traversals of all the children
@@ -1536,8 +1576,7 @@ namespace Legion {
       // that half the children need to be observed before being complete,
       // 3 means a third need to be observed before being complete, etc
       static constexpr uint64_t CHANGE_REFINEMENT_PARTITION_FRACTION = 2;
-#endif
-    }; 
+    };
 
     /**
      * \class LogicalState
@@ -1592,6 +1631,13 @@ namespace Legion {
       void update_refinement_child(ContextID ctx, RegionTreeNode *child,
                                    const RegionUsage &usage,
                                    FieldMask &refinement_mask);
+      void update_refinement_projection(ContextID ctx,
+                                        ProjectionSummary *summary,
+                                        const RegionUsage &usage,
+                                        FieldMask &refinement_mask);
+      void update_refinement_arrival(ContextID ctx, const RegionUsage &usage,
+                                     FieldMask &refinement_mask);
+      void invalidate_refinements(ContextID ctx, FieldMask invalidation_mask);
 #if 0
       void initialize_unrefined_fields(const FieldMask &mask, 
           const unsigned index, LogicalAnalysis &analysis);

@@ -1718,8 +1718,7 @@ namespace Legion {
       virtual ProjectionNode* construct_projection_tree(
           Operation *op, unsigned index, const RegionRequirement &req,
           RegionTreeNode *root, const ProjectionInfo &proj_info,
-          bool &disjoint, bool &disjoint_complete, bool &permits_name_based,
-          bool &unique_shards);
+          bool &disjoint, bool &permits_name_based, bool &unique_shards);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
       virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
@@ -2893,8 +2892,7 @@ namespace Legion {
       virtual ProjectionNode* construct_projection_tree(
           Operation *op, unsigned index, const RegionRequirement &req,
           RegionTreeNode *root, const ProjectionInfo &proj_info,
-          bool &disjoint, bool &disjoint_complete, bool &permits_name_based,
-          bool &unique_shards);
+          bool &disjoint, bool &permits_name_based, bool &unique_shards);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
       virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,

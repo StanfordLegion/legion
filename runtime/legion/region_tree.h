@@ -4092,8 +4092,10 @@ namespace Legion {
       void update_logical_refinement(ContextID ctx, size_t total_shards, 
                                      const FieldMask &refinement_mask,
                                      FieldMaskSet<RefinementNode> &refinements);
+#endif
       void invalidate_logical_refinement(ContextID ctx, 
                               const FieldMask &invalidate_mask);
+#if 0
       void record_refinement_tree(ContextID ctx, const FieldMask &mask,
                                   const std::vector<RegionTreeNode*> &children);
       void invalidate_refinement_tree(ContextID ctx, 

@@ -1398,8 +1398,7 @@ namespace Legion {
     class ProjectionTreeExchange : public AllGatherCollective<false> {
     public:
       ProjectionTreeExchange(ProjectionNode *n, bool &disjoint,
-          bool &disjoint_complete, bool &leaves_only,
-          bool &unique_shards, ReplicateContext *ctx,
+          bool &leaves_only, bool &unique_shards, ReplicateContext *ctx,
           CollectiveIndexLocation loc);
       ProjectionTreeExchange(const ProjectionTreeExchange &rhs) = delete;
       ~ProjectionTreeExchange(void);
@@ -1412,7 +1411,6 @@ namespace Legion {
     public:
       ProjectionNode *const node;
       bool &disjoint;
-      bool &disjoint_complete;
       bool &leaves_only;
       bool &unique_shards;
     protected:

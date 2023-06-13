@@ -16691,16 +16691,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionTreeExchange::ProjectionTreeExchange(ProjectionNode *n,
-        bool &dis, bool &dis_comp, bool &leaves, bool &unique,
-        ReplicateContext *ctx, CollectiveIndexLocation loc)
+        bool &dis, bool &leaves, bool &unique, ReplicateContext *ctx, 
+        CollectiveIndexLocation loc)
       : AllGatherCollective<false>(ctx,
           ctx->get_next_collective_index(loc, true/*logical*/)),
-        node(n), disjoint(dis), disjoint_complete(dis_comp),
-        leaves_only(leaves), unique_shards(unique)
+        node(n), disjoint(dis), leaves_only(leaves), unique_shards(unique)
     //--------------------------------------------------------------------------
     {
       // Extract our local summaries
-      node->extract_shard_summaries(disjoint_complete, local_shard,
+      node->extract_shard_summaries(disjoint && leaves_only, local_shard,
                               region_summaries, partition_summaries);
     }
 
@@ -16709,7 +16708,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Update our local summaries
-      node->update_shard_summaries(disjoint_complete, local_shard,
+      node->update_shard_summaries(disjoint && leaves_only, local_shard,
           context->total_shards, region_summaries, partition_summaries);
     }
 
@@ -16719,7 +16718,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<bool>(disjoint);
-      rez.serialize<bool>(disjoint_complete);
       rez.serialize<bool>(leaves_only);
       rez.serialize<bool>(unique_shards);
       rez.serialize<size_t>(region_summaries.size());
@@ -16738,7 +16736,7 @@ namespace Legion {
       {
         rez.serialize(it->first);
         it->second.children.serialize(rez);
-        if (disjoint_complete)
+        if (disjoint && leaves_only)
         {
           rez.serialize<size_t>(
               it->second.disjoint_complete_child_shards.size());
@@ -16762,10 +16760,6 @@ namespace Legion {
       derez.deserialize<bool>(dis);
       if (!dis)
         disjoint = false;
-      bool dis_comp;
-      derez.deserialize<bool>(dis_comp);
-      if (!dis_comp)
-        disjoint_complete = false;
       bool leaves;
       derez.deserialize<bool>(leaves);
       if (!leaves)
@@ -16819,7 +16813,7 @@ namespace Legion {
         derez.deserialize(partition);
         PartitionSummary &summary = partition_summaries[partition];
         summary.children.deserialize(derez);
-        if (dis_comp)
+        if (dis && leaves)
         {
           size_t num_child_shards;
           derez.deserialize(num_child_shards);
@@ -16828,7 +16822,7 @@ namespace Legion {
             std::pair<LegionColor,ShardID> color_shard;
             derez.deserialize(color_shard.first);
             derez.deserialize(color_shard.second);
-            if (disjoint_complete)
+            if (disjoint && leaves_only)
               summary.disjoint_complete_child_shards.insert(color_shard);
           }
         }
