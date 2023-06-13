@@ -1,8 +1,7 @@
 use std::ffi::OsString;
 use std::io;
 
-#[macro_use]
-extern crate clap;
+use clap::Parser;
 
 use rayon::prelude::*;
 
@@ -22,163 +21,108 @@ use legion_prof::serialize::deserialize;
 use legion_prof::spy;
 use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
 
-fn main() -> io::Result<()> {
-    let matches = clap::App::new("Legion Prof")
-        .about("Legion Prof: application profiler")
-        .arg(
-            clap::Arg::with_name("filenames")
-                .required(true)
-                .multiple(true)
-                .value_parser(value_parser!(OsString))
-                .help("input Legion Prof log filenames"),
-        )
-        .arg(
-            clap::Arg::with_name("output")
-                .short('o')
-                .long("output")
-                .takes_value(true)
-                .value_parser(value_parser!(OsString))
-                .default_value("legion_prof")
-                .help("output directory pathname"),
-        )
-        .arg(
-            clap::Arg::with_name("start-trim")
-                .long("start-trim")
-                .takes_value(true)
-                .value_parser(value_parser!(u64))
-                .help("start time in microseconds to trim the profile"),
-        )
-        .arg(
-            clap::Arg::with_name("stop-trim")
-                .long("stop-trim")
-                .takes_value(true)
-                .value_parser(value_parser!(u64))
-                .help("stop time in microseconds to trim the profile"),
-        )
-        .arg(
-            clap::Arg::with_name("message-threshold")
-                .long("message-threshold")
-                .takes_value(true)
-                .value_parser(value_parser!(f64))
-                .help("threshold for warning about message latencies in microseconds"),
-        )
-        .arg(
-            clap::Arg::with_name("message-percentage")
-                .long("message-percentage")
-                .takes_value(true)
-                .value_parser(value_parser!(f64))
-                .help("perentage of messages that must be over the threshold to trigger a warning"),
-        )
-        .arg(
-            clap::Arg::with_name("nodes")
-                .long("nodes")
-                .takes_value(true)
-                .help("a list of nodes that will be visualized"),
-        )
-        .arg(
-            clap::Arg::with_name("no-filter-input")
-                .long("no-filter-input")
-                .hidden(true)
-                .help("parse all log files, even when a subset of nodes are being shown (uses more memory)"),
-        )
-        .arg(
-            clap::Arg::with_name("force")
-                .short('f')
-                .long("force")
-                .help("overwrite output directory if it exists"),
-        )
-        .arg(
-            clap::Arg::with_name("attach")
-                .long("attach")
-                .help("connect viewer to the specified HTTP profile server"),
-        )
-        .arg(
-            clap::Arg::with_name("serve")
-                .long("serve")
-                .help("start profile HTTP server"),
-        )
-        .arg(
-            clap::Arg::with_name("host")
-                .long("host")
-                .takes_value(true)
-                .default_value("127.0.0.1")
-                .help("host to bind for HTTP server"),
-        )
-        .arg(
-            clap::Arg::with_name("port")
-                .long("port")
-                .takes_value(true)
-                .value_parser(value_parser!(u16))
-                .default_value("8080")
-                .help("port to bind for HTTP server"),
-        )
-        .arg(
-            clap::Arg::with_name("statistics")
-                .short('s')
-                .long("statistics")
-                .help("print statistics"),
-        )
-        .arg(
-            clap::Arg::with_name("trace")
-                .short('t')
-                .long("trace-viewer")
-                .help("emit JSON for Google Trace Viewer"),
-        )
-        .arg(
-            clap::Arg::with_name("view")
-                .long("view")
-                .help("start interactive profile viewer"),
-        )
-        .arg(
-            clap::Arg::with_name("verbose")
-                .short('v')
-                .long("verbose")
-                .help("print verbose profiling information"),
-        )
-        .get_matches();
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[arg(required = true, help = "input Legion Prof log filenames")]
+    filenames: Vec<OsString>,
 
-    let filenames = matches.get_many::<OsString>("filenames").unwrap();
-    let output = matches.get_one::<OsString>("output").unwrap();
-    let force = matches.is_present("force");
-    let attach = matches.is_present("attach");
-    let serve = matches.is_present("serve");
-    let statistics = matches.is_present("stats");
-    let trace = matches.is_present("trace");
-    let view = matches.is_present("view");
-    let verbose = matches.is_present("verbose");
-    let start_trim = matches
-        .get_one::<u64>("start-trim")
-        .copied()
-        .map(Timestamp::from_us);
-    let stop_trim = matches
-        .get_one::<u64>("stop-trim")
-        .copied()
-        .map(Timestamp::from_us);
-    let message_threshold = matches
-        .get_one::<f64>("message-threshold")
-        .copied()
-        .unwrap_or(1000.0);
-    let message_percentage = matches
-        .get_one::<f64>("message-percentage")
-        .copied()
-        .unwrap_or(5.0);
+    #[arg(
+        short,
+        long,
+        default_value = "legion_prof",
+        help = "output directory pathname"
+    )]
+    output: OsString,
+
+    #[arg(
+        long = "start-trim",
+        help = "start time in microseconds to trim the profile"
+    )]
+    start_trim: Option<u64>,
+
+    #[arg(
+        long = "stop-trim",
+        help = "stop time in microseconds to trim the profile"
+    )]
+    stop_trim: Option<u64>,
+
+    #[arg(
+        long = "message-threshold",
+        default_value_t = 1000.0,
+        help = "threshold for warning about message latencies in microseconds"
+    )]
+    message_threshold: f64,
+
+    #[arg(
+        long = "message-percentage",
+        default_value_t = 5.0,
+        help = "perentage of messages that must be over the threshold to trigger a warning"
+    )]
+    message_percentage: f64,
+
+    #[arg(long, help = "a list of nodes that will be visualized")]
+    nodes: Option<String>,
+
+    #[arg(
+        long = "no-filter-input",
+        hide = true,
+        help = "parse all log files, even when a subset of nodes are being shown (uses more memory)"
+    )]
+    no_filter_input: bool,
+
+    #[arg(short, long, help = "overwrite output directory if it exists")]
+    force: bool,
+
+    #[arg(long, help = "connect viewer to the specified HTTP profile server")]
+    attach: bool,
+
+    #[arg(long, help = "start profile HTTP server")]
+    serve: bool,
+
+    #[arg(long, help = "start interactive profile viewer")]
+    view: bool,
+
+    #[arg(short, long, help = "print statistics")]
+    statistics: bool,
+
+    #[arg(short, long, help = "emit JSON for Google Trace Viewer")]
+    trace: bool,
+
+    #[arg(short, long, help = "print verbose profiling information")]
+    verbose: bool,
+
+    #[arg(
+        long,
+        default_value = "127.0.0.1",
+        help = "host to bind for HTTP server"
+    )]
+    host: String,
+
+    #[arg(long, default_value_t = 8080, help = "port to bind for HTTP server")]
+    port: u16,
+}
+
+fn main() -> io::Result<()> {
+    let cli = Cli::parse();
+
+    let start_trim = cli.start_trim.map(Timestamp::from_us);
+    let stop_trim = cli.stop_trim.map(Timestamp::from_us);
+    let message_threshold = cli.message_threshold;
+    let message_percentage = cli.message_percentage;
+
     let mut node_list: Vec<NodeID> = Vec::new();
     let mut filter_input = false;
-    if let Some(nodes_str) = matches.get_one::<String>("nodes") {
+    if let Some(nodes_str) = cli.nodes {
         node_list = nodes_str
             .split(",")
             .map(|x| NodeID(x.parse::<u64>().unwrap()))
             .collect();
-        filter_input = !matches.is_present("no-filter-input");
+        filter_input = !cli.no_filter_input;
     }
 
-    let host = matches.get_one::<String>("host").unwrap();
-    let port = *matches
-        .get_one::<u16>("port")
-        .unwrap();
-
     #[cfg(not(feature = "client"))]
-    if attach {
+    if cli.attach {
         panic!(
             "Legion Prof was not build with the \"client\" feature. \
                 Rebuild with --features=client to enable."
@@ -186,7 +130,7 @@ fn main() -> io::Result<()> {
     }
 
     #[cfg(not(feature = "server"))]
-    if serve {
+    if cli.serve {
         panic!(
             "Legion Prof was not build with the \"server\" feature. \
                 Rebuild with --features=server to enable."
@@ -194,21 +138,30 @@ fn main() -> io::Result<()> {
     }
 
     #[cfg(not(feature = "viewer"))]
-    if view {
+    if cli.view {
         panic!(
             "Legion Prof was not build with the \"viewer\" feature. \
                 Rebuild with --features=viewer to enable."
         );
     }
 
-    if [attach, serve, view].iter().filter(|x| **x).count() > 1 {
-        panic!("Legion Prof takes at most one of --attach, --serve or --view");
+    if [cli.attach, cli.serve, cli.view, cli.statistics, cli.trace]
+        .iter()
+        .filter(|x| **x)
+        .count()
+        > 1
+    {
+        panic!(
+            "Legion Prof takes at most one of --attach, --serve, --view, --statistics, or --trace"
+        );
     }
 
-    if attach {
+    if cli.attach {
         #[cfg(feature = "client")]
         {
-            let urls: Vec<_> = filenames
+            let urls: Vec<_> = cli
+                .filenames
+                .into_iter()
                 .map(|x| {
                     Url::parse(x.to_str().expect("URL contains invalid UTF-8"))
                         .expect("invalid profile URL")
@@ -227,8 +180,8 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    let filenames: Vec<_> = filenames.collect();
-    let records: Result<Vec<Records>, _> = filenames
+    let records: Result<Vec<Records>, _> = cli
+        .filenames
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
@@ -264,8 +217,8 @@ fn main() -> io::Result<()> {
 
     let mut have_alllogs = true;
     // if number of files
-    if state.num_nodes > filenames.len().try_into().unwrap() {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", state.num_nodes, filenames.len());
+    if state.num_nodes > cli.filenames.len().try_into().unwrap() {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", state.num_nodes, cli.filenames.len());
         have_alllogs = false;
     }
 
@@ -275,7 +228,7 @@ fn main() -> io::Result<()> {
         have_alllogs = false;
     }
 
-    Config::set_config(filter_input, verbose, have_alllogs);
+    Config::set_config(filter_input, cli.verbose, have_alllogs);
 
     spy_state.postprocess_spy_records(&state);
 
@@ -284,17 +237,17 @@ fn main() -> io::Result<()> {
     state.sort_time_range();
     state.check_message_latencies(message_threshold, message_percentage);
     state.filter_output();
-    if statistics {
+    if cli.statistics {
         analyze::print_statistics(&state);
-    } else if trace {
-        trace_viewer::emit_trace(&state, output, force)?;
-    } else if serve {
+    } else if cli.trace {
+        trace_viewer::emit_trace(&state, cli.output, cli.force)?;
+    } else if cli.serve {
         #[cfg(feature = "server")]
         {
             state.assign_colors();
-            server::start(state, host, port);
+            server::start(state, &cli.host, cli.port);
         }
-    } else if view {
+    } else if cli.view {
         #[cfg(feature = "viewer")]
         {
             state.assign_colors();
@@ -302,7 +255,7 @@ fn main() -> io::Result<()> {
         }
     } else {
         state.assign_colors();
-        visualize::emit_interactive_visualization(&state, &spy_state, output, force)?;
+        visualize::emit_interactive_visualization(&state, &spy_state, cli.output, cli.force)?;
     }
 
     Ok(())
