@@ -763,7 +763,7 @@ namespace Legion {
           return this;
         else
           // Make a new expression for the bounding box
-          return new InstanceExpression<DIM,T>(&space.bounds,1/*size*/,context);
+          return new InternalExpression<DIM,T>(&space.bounds,1/*size*/,context);
       }
       else
       {
@@ -771,7 +771,7 @@ namespace Legion {
         assert(num_rects > 0);
 #endif
         // Make a realm expression from the rectangles
-        return new InstanceExpression<DIM,T>(rects, num_rects, context);
+        return new InternalExpression<DIM,T>(rects, num_rects, context);
       }
     }
 
@@ -883,7 +883,7 @@ namespace Legion {
       // expressions match and we can reuse this as the expression
       if (total_volume == get_volume())
         return this;
-      return new InstanceExpression<DIM,T>(&rectangles.front(), 
+      return new InternalExpression<DIM,T>(&rectangles.front(), 
                                            rectangles.size(), forest);
     }
 
@@ -1959,7 +1959,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    InstanceExpression<DIM,T>::InstanceExpression(
+    InternalExpression<DIM,T>::InternalExpression(
            const Rect<DIM,T> *rects, size_t num_rects, RegionTreeForest *forest)
       : IndexSpaceOperationT<DIM,T>(
           IndexSpaceOperation::INSTANCE_EXPRESSION_KIND, forest)
@@ -2024,8 +2024,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    InstanceExpression<DIM,T>::InstanceExpression(
-                                           const InstanceExpression<DIM,T> &rhs)
+    InternalExpression<DIM,T>::InternalExpression(
+                                           const InternalExpression<DIM,T> &rhs)
       : IndexSpaceOperationT<DIM,T>(
           IndexSpaceOperation::INSTANCE_EXPRESSION_KIND, NULL)
     //--------------------------------------------------------------------------
@@ -2036,15 +2036,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    InstanceExpression<DIM,T>::~InstanceExpression(void)
+    InternalExpression<DIM,T>::~InternalExpression(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    InstanceExpression<DIM,T>& InstanceExpression<DIM,T>::operator=(
-                                           const InstanceExpression<DIM,T> &rhs)
+    InternalExpression<DIM,T>& InternalExpression<DIM,T>::operator=(
+                                           const InternalExpression<DIM,T> &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2054,7 +2054,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void InstanceExpression<DIM,T>::pack_expression_value(Serializer &rez,
+    void InternalExpression<DIM,T>::pack_expression_value(Serializer &rez,
                                                           AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -2076,7 +2076,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool InstanceExpression<DIM,T>::invalidate_operation(void)
+    bool InternalExpression<DIM,T>::invalidate_operation(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2086,7 +2086,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void InstanceExpression<DIM,T>::remove_operation(void)
+    void InternalExpression<DIM,T>::remove_operation(void)
     //--------------------------------------------------------------------------
     {
       // Nothing to do here since we're not in the region tree
@@ -6428,7 +6428,7 @@ namespace Legion {
       std::vector<Rect<DIM,T> > rectangles(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         rectangles[idx] = rects[idx];
-      return new InstanceExpression<DIM,T>(&rectangles.front(), 
+      return new InternalExpression<DIM,T>(&rectangles.front(), 
                                            rectangles.size(), forest);
     }
 

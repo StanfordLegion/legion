@@ -1837,22 +1837,25 @@ namespace Legion {
     };
 
     /**
-     * \class InstanceExpression 
-     * This class stores an expression corresponding to the
-     * rectangles that represent a physical instance
+     * \class InternalExpression 
+     * This class stores an internal expression corresponding to a
+     * group of rectangles that the runtime had to compute and not
+     * derived from any other expressions. This can occur when creating
+     * a custom sparse physical instance, but can also come from a
+     * computing equivalence sets.
      */
     template<int DIM, typename T>
-    class InstanceExpression : public IndexSpaceOperationT<DIM,T>,
-        public LegionHeapify<InstanceExpression<DIM,T> > {
+    class InternalExpression : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<InternalExpression<DIM,T> > {
     public:
       static const AllocationType alloc_type = INSTANCE_EXPR_ALLOC;
     public:
-      InstanceExpression(const Rect<DIM,T> *rects, size_t num_rects,
+      InternalExpression(const Rect<DIM,T> *rects, size_t num_rects,
                          RegionTreeForest *context);
-      InstanceExpression(const InstanceExpression<DIM,T> &rhs);
-      virtual ~InstanceExpression(void);
+      InternalExpression(const InternalExpression<DIM,T> &rhs);
+      virtual ~InternalExpression(void);
     public:
-      InstanceExpression& operator=(const InstanceExpression &rhs);
+      InternalExpression& operator=(const InternalExpression &rhs);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
