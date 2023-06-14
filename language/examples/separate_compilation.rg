@@ -67,7 +67,7 @@ terra main(argc : int, argv : &rawstring)
   end
 end
 
-local executable = root_dir .. "separate_compilation.exe"
+local executable = tmp_dir .. "separate_compilation.exe"
 terralib.saveobj(executable, {main=main}, link_libraries)
 
 local args = rawget(_G, "arg")
