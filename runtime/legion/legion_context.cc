@@ -47,7 +47,8 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
-        total_tunable_count(0), overhead_profiler(NULL), task_executed(false),
+        total_tunable_count(0), overhead_profiler(NULL), 
+        implicit_profiler(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
         inline_task(inline_t), implicit_task(implicit_t)
