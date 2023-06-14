@@ -79,10 +79,10 @@ end
 local ffi = require("ffi")
 local cmd
 if ffi.os == "OSX" then
-  let lib_path = (os.getenv("DYLD_LIBRARY_PATH") or "") .. ":"
+  local lib_path = (os.getenv("DYLD_LIBRARY_PATH") or "") .. ":"
   cmd = "DYLD_LIBRARY_PATH=" .. lib_path .. ":" .. lib_dir .. ":" .. tmp_dir .. " " .. executable .. " " .. executable_args:concat(" ")
 else
-  let lib_path = (os.getenv("LD_LIBRARY_PATH") or "") .. ":"
+  local lib_path = (os.getenv("LD_LIBRARY_PATH") or "") .. ":"
   cmd = "LD_LIBRARY_PATH=" .. lib_path .. ":" .. lib_dir .. ":" .. tmp_dir .. " " .. executable .. " " .. executable_args:concat(" ")
 end
 print(cmd)
