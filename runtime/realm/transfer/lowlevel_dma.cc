@@ -202,11 +202,50 @@ namespace Realm {
     void PosixAIOWrite::launch(void)
     {
       log_aio.debug("write issued: op=%p cb=%p", this, &cb);
-#ifndef NDEBUG
-      int ret =
+#ifdef REALM_ON_MACOS
+      constexpr unsigned MAX_ATTEMPTS = 8;
+#else
+      constexpr unsigned MAX_ATTEMPTS = 1;
 #endif
-	aio_write(&cb);
-      assert(ret == 0);
+      for (unsigned idx = 0; idx < MAX_ATTEMPTS; idx++)
+      {
+        int ret = aio_write(&cb);
+        if (ret == 0)
+          return;
+        switch (errno)
+        {
+          case EAGAIN:
+            continue;
+          case EBADF:
+            {
+              log_aio.fatal("bad aio file descriptor");
+              break;
+            }
+          case EFBIG:
+            {
+              log_aio.fatal("aio starting position beyond the end of file");
+              break;
+            }
+          case EINVAL:
+            {
+              log_aio.fatal("aio invalid parameter");
+              break;
+            }
+          case ENOSYS:
+            {
+              log_aio.fatal("aio writes are not supported on this OS");
+              break;
+            }
+          default:
+            {
+              log_aio.fatal("unknown aio error %d", errno);
+              break;
+            }
+        }
+        abort();
+      }
+      log_aio.fatal("exceeeded max aio write attempts %d", MAX_ATTEMPTS);
+      abort();
     }
 
     bool PosixAIOWrite::check_completion(void)
@@ -244,11 +283,50 @@ namespace Realm {
     void PosixAIORead::launch(void)
     {
       log_aio.debug("read issued: op=%p cb=%p", this, &cb);
-#ifndef NDEBUG
-      int ret =
+#ifdef REALM_ON_MACOS
+      constexpr unsigned MAX_ATTEMPTS = 8;
+#else
+      constexpr unsigned MAX_ATTEMPTS = 1;
 #endif
-	aio_read(&cb);
-      assert(ret == 0);
+      for (unsigned idx = 0; idx < MAX_ATTEMPTS; idx++)
+      {
+        int ret = aio_read(&cb);
+        if (ret == 0)
+          return;
+        switch (errno)
+        {
+          case EAGAIN:
+            continue;
+          case EBADF:
+            {
+              log_aio.fatal("bad aio file descriptor");
+              break;
+            }
+          case EFBIG:
+            {
+              log_aio.fatal("aio starting position beyond the end of file");
+              break;
+            }
+          case EINVAL:
+            {
+              log_aio.fatal("aio invalid parameter");
+              break;
+            }
+          case ENOSYS:
+            {
+              log_aio.fatal("aio reads are not supported on this OS");
+              break;
+            }
+          default:
+            {
+              log_aio.fatal("unknown aio error %d", errno);
+              break;
+            }
+        }
+        abort();
+      }
+      log_aio.fatal("exceeeded max aio read attempts %d", MAX_ATTEMPTS);
+      abort();
     }
 
     bool PosixAIORead::check_completion(void)
