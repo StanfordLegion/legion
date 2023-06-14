@@ -45,6 +45,7 @@ impl Into<Color32> for Color {
     }
 }
 
+#[derive(Debug, Clone)]
 enum EntryKind {
     ProcKind(ProcGroup),
     Proc(ProcID),
@@ -54,11 +55,13 @@ enum EntryKind {
     Chan(ChanID),
 }
 
+#[derive(Debug, Clone)]
 struct ItemInfo {
     point_interval: ts::Interval,
     expand: bool,
 }
 
+#[derive(Debug)]
 pub struct StateDataSource {
     state: State,
     info: EntryInfo,
