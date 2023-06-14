@@ -69,11 +69,21 @@ end
 
 local executable = root_dir .. "separate_compilation.exe"
 terralib.saveobj(executable, {main=main}, link_libraries)
-local ffi = require("ffi")
-if ffi.os == "OSX" then
-  assert(os.execute("DYLD_LIBRARY_PATH=" .. lib_dir .. " " .. executable) == 0)
-else
-  assert(os.execute("LD_LIBRARY_PATH=" .. lib_dir .. " " .. executable) == 0)
+
+local args = rawget(_G, "arg")
+local executable_args = terralib.newlist()
+for _, arg in ipairs(args) do
+  executable_args:insert(arg)
 end
+
+local ffi = require("ffi")
+local cmd
+if ffi.os == "OSX" then
+  cmd = "DYLD_LIBRARY_PATH=" .. lib_dir .. " " .. executable .. " " .. executable_args:concat(" ")
+else
+  cmd = "LD_LIBRARY_PATH=" .. lib_dir .. " " .. executable .. " " .. executable_args:concat(" ")
+end
+print(cmd)
+assert(os.execute(cmd) == 0)
 
 -- os.execute("rm -r " .. tmp_dir)
