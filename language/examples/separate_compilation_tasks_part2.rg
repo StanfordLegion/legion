@@ -34,4 +34,4 @@ end
 local root_dir = arg[0]:match(".*/") or "./"
 local separate_compilation_tasks_part2_h = root_dir .. "separate_compilation_tasks_part2.h"
 local separate_compilation_tasks_part2_so = root_dir .. "libseparate_compilation_tasks_part2.so"
-regentlib.save_tasks(separate_compilation_tasks_part2_h, separate_compilation_tasks_part2_so)
+regentlib.save_tasks(separate_compilation_tasks_part2_h, separate_compilation_tasks_part2_so, nil, nil, nil, nil, false)
