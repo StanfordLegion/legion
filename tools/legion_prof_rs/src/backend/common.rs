@@ -551,7 +551,7 @@ impl fmt::Display for FSpacePretty<'_> {
             while let Some((i, field)) = fields.next() {
                 let align = &align_desc[i];
                 if let Some(fld) = fspace.fields.get(field) {
-                    write!(f, "{}", fld.name)?;
+                    write!(f, "fid:{}:{}", field.0, fld.name)?;
                 } else {
                     write!(f, "fid:{}", field.0)?;
                 }

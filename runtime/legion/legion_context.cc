@@ -47,12 +47,14 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
-        total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
+        total_tunable_count(0), overhead_profiler(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
         inline_task(inline_t), implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
+      if (implicit_task && (runtime->profiler != NULL))
+        implicit_profiler = new ImplicitProfiler();
     }
 
     //--------------------------------------------------------------------------
@@ -74,8 +76,10 @@ namespace Legion {
             (*it->second.second)(it->second.first);
         }
       }
-      if (overhead_tracker != NULL)
-        delete overhead_tracker;
+      if (overhead_profiler != NULL)
+        delete overhead_profiler;
+      if (implicit_profiler != NULL)
+        delete implicit_profiler;
     }
 
     //--------------------------------------------------------------------------
@@ -2068,19 +2072,22 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& TaskContext::begin_task(
-                                                           Legion::Runtime *&rt)
+    const std::vector<PhysicalRegion>& TaskContext::begin_task(Processor proc)
     //--------------------------------------------------------------------------
     {
+      if (implicit_runtime == NULL)
+        implicit_runtime = this->runtime;
       implicit_context = this;
-      implicit_runtime = this->runtime;
-      rt = this->runtime->external;
       implicit_provenance = owner_task->get_unique_op_id();
-      if (overhead_tracker != NULL)
-        previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
+      if (overhead_profiler != NULL)
+        overhead_profiler->previous_profiling_time = 
+          Realm::Clock::current_time_in_nanoseconds();
+      if (implicit_profiler != NULL)
+        implicit_profiler->start_time = 
+          Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
-      executing_processor = Processor::get_executing_processor();
+      executing_processor = proc; 
       owner_task->current_proc = executing_processor;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_task_processor(get_unique_id(), executing_processor.id);
@@ -2467,15 +2474,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::initialize_overhead_tracker(void)
+    void TaskContext::initialize_overhead_profiler(void)
     //--------------------------------------------------------------------------
     {
       // Make an overhead tracker
 #ifdef DEBUG_LEGION
-      assert(overhead_tracker == NULL);
+      assert(overhead_profiler == NULL);
 #endif
-      overhead_tracker = new 
-        Mapping::ProfilingMeasurements::RuntimeOverhead();
+      overhead_profiler = new OverheadProfiler();
     } 
 
     //--------------------------------------------------------------------------
@@ -2518,11 +2524,9 @@ namespace Legion {
           raise_poison_exception();
         return;
       }
-      begin_task_wait(true/*from runtime*/);
       mapped_event.wait_faultaware(poisoned);
       if (poisoned)
         raise_poison_exception();
-      end_task_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -2567,9 +2571,7 @@ namespace Legion {
       // Run this task with minimum priority to allow other things to run
       const RtEvent wait_for = 
         runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
-      begin_task_wait(false/*from runtime*/);
       wait_for.wait();
-      end_task_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -7740,9 +7742,7 @@ namespace Legion {
           wait_event = window_wait;
         }
       }
-      begin_task_wait(false/*from runtime*/);
       wait_event.wait();
-      end_task_wait();
       // Re-increment the count once we are awake again
       outstanding_children_count.fetch_add(1);
     }
@@ -7898,12 +7898,10 @@ namespace Legion {
       }
       if (term_event.exists() && outermost) 
       {
-        begin_task_wait(true/*from runtime*/);
         bool poisoned = false;
         term_event.wait_faultaware(poisoned);
         if (poisoned)
           raise_poison_exception();
-        end_task_wait();
       }
       return true;
     }
@@ -11349,15 +11347,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& InnerContext::begin_task(
-                                                           Legion::Runtime *&rt)
+    const std::vector<PhysicalRegion>& InnerContext::begin_task(Processor proc)
     //--------------------------------------------------------------------------
     {
       // If we have mutable priority we need to save our realm done event
       if (mutable_priority)
         realm_done_event = ApEvent(Processor::get_current_finish_event());
       // Now do the base begin task routine
-      return TaskContext::begin_task(rt);
+      return TaskContext::begin_task(proc);
     }
 
     //--------------------------------------------------------------------------
@@ -11416,12 +11413,21 @@ namespace Legion {
           InnerContext::destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       }
-      if (overhead_tracker != NULL)
+      if (overhead_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        const long long diff = current - previous_profiling_time;
-        overhead_tracker->application_time += diff;
-      } 
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->application_time += diff;
+      }
+      if (implicit_profiler != NULL)
+      {
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        // log this with the profiler 
+        runtime->profiler->record_implicit(get_unique_id(), owner_task->task_id,
+            executing_processor, implicit_profiler->start_time, stop,
+            implicit_profiler->waits);
+      }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
       {
@@ -19472,11 +19478,7 @@ namespace Legion {
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
         term_event = inorder_bar;
         if (outermost)
-        {
-          begin_task_wait(true/*from runtime*/);
           term_event.wait();
-          end_task_wait();
-        }
         // Not unordered so it must have succeeded
         return true;
       }
@@ -23974,11 +23976,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
-      if (overhead_tracker != NULL)
+      if (overhead_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        const long long diff = current - previous_profiling_time;
-        overhead_tracker->application_time += diff;
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->application_time += diff;
       }
       if (!index_launch_spaces.empty())
       {

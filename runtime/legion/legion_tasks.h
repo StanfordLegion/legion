@@ -416,6 +416,7 @@ namespace Legion {
       void finalize_output_regions(void);
     public:
       virtual InnerContext* create_implicit_context(void);
+      void configure_execution_context(InnerContext *ctx);
       void set_shard_manager(ShardManager *manager);
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;

@@ -920,6 +920,38 @@ namespace Legion {
 #endif
       owner->update_footprint(sizeof(PartitionInfo), this);
     }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_implicit(UniqueID op_id, TaskID tid,
+        Processor proc, long long start_time, long long stop_time,
+        const std::vector<std::pair<long long,long long> > &waits)
+    //--------------------------------------------------------------------------
+    {
+      task_infos.emplace_back(TaskInfo()); 
+      TaskInfo &info = task_infos.back();
+      info.op_id = op_id;
+      info.task_id = tid;
+      info.variant_id = 0; // no variants for implicit tasks
+      info.proc_id = proc.id;
+      // We make create, ready, and start all the same for implicit tasks
+      info.create = start_time;
+      info.ready = start_time;
+      info.start = start_time;
+      info.stop = stop_time;
+      if (!waits.empty())
+      {
+        info.wait_intervals.resize(waits.size());
+        for (unsigned idx = 0; idx < waits.size(); idx++)
+        {
+          info.wait_intervals[idx].wait_start = waits[idx].first;
+          // For implicit tasks, these are external waits so we just
+          // assume that they resume right away
+          info.wait_intervals[idx].wait_ready = waits[idx].second;
+          info.wait_intervals[idx].wait_end = waits[idx].second;
+        }
+      }
+    }
+
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_mem_desc(const Memory &m)
     //--------------------------------------------------------------------------
@@ -953,8 +985,7 @@ namespace Legion {
       proc_desc_infos.emplace_back(ProcDesc());
       ProcDesc &info = proc_desc_infos.back();
       info.proc_id = p.id;
-      // Implicit top-level tasks aren't associated with any processor
-      info.kind = p.exists() ? p.kind() : Processor::LOC_PROC;
+      info.kind = p.kind();
       const size_t diff = sizeof(ProcDesc);
       owner->update_footprint(diff, this);
       process_proc_mem_aff_desc(p);
@@ -2542,6 +2573,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Processor current = Processor::get_executing_processor();
+      if (!current.exists())
+      {
+        // Implicit top-level task case where we're not actually running
+        // on a Realm processor so we need to get the proxy processor
+        // for the context instead
+#ifdef DEBUG_LEGION
+        assert(implicit_context != NULL);
+#endif
+        current = implicit_context->get_executing_processor();
+      }
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(current);
@@ -2569,11 +2610,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Processor current = Processor::get_executing_processor();
+      if (!current.exists())
+      {
+        // Implicit top-level task case where we're not actually running
+        // on a Realm processor so we need to get the proxy processor
+        // for the context instead
+#ifdef DEBUG_LEGION
+        assert(implicit_context != NULL);
+#endif
+        current = implicit_context->get_executing_processor();
+      }
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(current);
       thread_local_profiling_instance->record_runtime_call(current, kind, 
                                                            start, stop);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_implicit(UniqueID op_id, TaskID tid, 
+        Processor proc, long long start, long long stop,
+        const std::vector<std::pair<long long,long long> > &waits)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->process_proc_desc(proc);
+      thread_local_profiling_instance->process_implicit(op_id, tid, proc,
+                                                        start, stop, waits);
     }
 
 #ifdef DEBUG_LEGION

@@ -3491,12 +3491,18 @@ namespace Legion {
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
           0/*did*/, false/*inline*/, true/*implicit*/);
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id);
-      inner_ctx->configure_context(mapper, task_priority);
       execution_context = inner_ctx;
       execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::configure_execution_context(InnerContext *inner_ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      inner_ctx->configure_context(mapper, task_priority);
     }
 
     //--------------------------------------------------------------------------
@@ -4614,7 +4620,7 @@ namespace Legion {
           if ((*it) < Mapping::PMID_LEGION_FIRST)
             realm_measurements.insert((Realm::ProfilingMeasurementID)(*it));
           else if ((*it) == Mapping::PMID_RUNTIME_OVERHEAD)
-            execution_context->initialize_overhead_tracker();
+            execution_context->initialize_overhead_profiler();
           else
             assert(false); // should never get here
         }
@@ -4835,14 +4841,15 @@ namespace Legion {
           rez.serialize(orig_task);
           rez.serialize(orig_length);
           rez.serialize(orig, orig_length);
-          if (execution_context->overhead_tracker)
+          if (execution_context->overhead_profiler)
           {
             rez.serialize<bool>(true);
-            rez.serialize(*execution_context->overhead_tracker);
+            // Only pack the bits that we need for the profiling response
+            rez.serialize((const void*)execution_context->overhead_profiler,
+                sizeof(Mapping::ProfilingMeasurements::RuntimeOverhead));
           }
           else
             rez.serialize<bool>(false);
-          
         }
         runtime->send_remote_task_profiling_response(orig_proc, rez);
       }
@@ -4868,12 +4875,12 @@ namespace Legion {
             memcpy(info.buffer, orig, orig_length);
             if (info.task_response)
             {
-              // If we had an overhead tracker 
+              // If we had an overhead profiler
               // see if this is the callback for the task
-              if (execution_context->overhead_tracker != NULL)
+              if (execution_context->overhead_profiler != NULL)
                 // This is the callback for the task itself
                 info.profiling_responses.attach_overhead(
-                    execution_context->overhead_tracker);
+                    execution_context->overhead_profiler);
             }
             return;
           }
@@ -4887,12 +4894,12 @@ namespace Legion {
         info.fill_response = task_prof->fill;
         if (info.task_response)
         {
-          // If we had an overhead tracker 
+          // If we had an overhead profiler
           // see if this is the callback for the task
-          if (execution_context->overhead_tracker != NULL)
+          if (execution_context->overhead_profiler!= NULL)
             // This is the callback for the task itself
             info.profiling_responses.attach_overhead(
-                execution_context->overhead_tracker);
+                execution_context->overhead_profiler);
         }
         mapper->invoke_task_report_profiling(this, &info);
       }
@@ -5025,9 +5032,7 @@ namespace Legion {
           get_depth(), v->is_inner(), regions, output_regions,
           parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
           inline_task, concurrent_task || parent_ctx->is_concurrent_context());
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id);
-      inner_ctx->configure_context(mapper, task_priority);
+      configure_execution_context(inner_ctx);
       inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;
     }
@@ -5208,7 +5213,6 @@ namespace Legion {
                       "call on mapper %s. Mapper failed to specify an slices "
                       "for task %s (ID %lld).", mapper->get_mapper_name(),
                       get_task_name(), get_unique_id())
-
 #ifdef DEBUG_LEGION
       size_t total_points = 0;
 #endif
@@ -8037,9 +8041,6 @@ namespace Legion {
           parent_req_indexes, virtual_mapped, execution_fence_event,
           shard_manager, false/*inline task*/, true/*implicit*/);
       repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id);
-      repl_ctx->configure_context(mapper, task_priority);
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too

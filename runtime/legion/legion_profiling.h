@@ -483,11 +483,13 @@ namespace Legion {
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
+      void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
+          long long start, long long stop, 
+          const std::vector<std::pair<long long,long long> > &waits);
       void process_mem_desc(const Memory &m);
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
-
     public:
       void record_mapper_call(Processor proc, MappingCallKind kind, 
                               UniqueID uid, timestamp_t start,
@@ -682,6 +684,10 @@ namespace Legion {
                                      unsigned int num_runtime_call_kinds);
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
+    public:
+      void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
+                           long long start, long long stop,
+           const std::vector<std::pair<long long,long long> > &waits);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
