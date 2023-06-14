@@ -21,17 +21,25 @@ import "regent"
 
 require("separate_compilation_common")
 require("separate_compilation_tasks_part1_header")
+require("separate_compilation_tasks_part2_header")
 
-local format = require("std/format")
-
-task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
-where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
-  format.println("Task with two region requirements")
-  my_regent_task(r, 3, 4, false)
+task main()
+  var r = region(ispace(int1d, 5), fs)
+  var s = region(ispace(int1d, 10), fs)
+  var pr = partition(equal, r, ispace(int1d, 4))
+  var ps = partition(equal, s, ispace(int1d, 4))
+  fill(r.{x, y, z}, 0)
+  fill(s.{x, y, z}, 0)
+  for i = 0, 4 do
+    my_regent_task(pr[i], 1, 2, true)
+  end
+  for i = 0, 4 do
+    other_regent_task(pr[i], ps[i])
+  end
 end
 
--- Save tasks to libseparate_compilation_tasks_part2.so
+-- Save tasks to libseparate_compilation_main.so
 local root_dir = arg[0]:match(".*/") or "./"
-local separate_compilation_tasks_part2_h = root_dir .. "separate_compilation_tasks_part2.h"
-local separate_compilation_tasks_part2_so = root_dir .. "libseparate_compilation_tasks_part2.so"
-regentlib.save_tasks(separate_compilation_tasks_part2_h, separate_compilation_tasks_part2_so)
+local separate_compilation_main_h = root_dir .. "separate_compilation_main.h"
+local separate_compilation_main_so = root_dir .. "libseparate_compilation_main.so"
+regentlib.save_tasks(separate_compilation_main_h, separate_compilation_main_so, nil, nil, nil, nil, false, main)

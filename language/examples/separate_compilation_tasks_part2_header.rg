@@ -20,18 +20,6 @@
 import "regent"
 
 require("separate_compilation_common")
-require("separate_compilation_tasks_part1_header")
 
-local format = require("std/format")
-
-task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
-where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
-  format.println("Task with two region requirements")
-  my_regent_task(r, 3, 4, false)
-end
-
--- Save tasks to libseparate_compilation_tasks_part2.so
-local root_dir = arg[0]:match(".*/") or "./"
-local separate_compilation_tasks_part2_h = root_dir .. "separate_compilation_tasks_part2.h"
-local separate_compilation_tasks_part2_so = root_dir .. "libseparate_compilation_tasks_part2.so"
-regentlib.save_tasks(separate_compilation_tasks_part2_h, separate_compilation_tasks_part2_so)
+extern task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
+where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) end

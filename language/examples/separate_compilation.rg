@@ -12,16 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fseparate", "1", "-fjobs", "2", "-fincr-comp", "1"]]
-
--- FIXME: Separate compilation in JIT mode requires either incremental
--- or parallel compilation, due to a bad interaction when using the
--- LLVM JIT linker mode.
-
 import "regent"
-
-assert(regentlib.config["separate"], "test requires separate compilation")
 
 -- Make sure this all happens in a temporary directory in case we're
 -- running concurrently.
@@ -37,50 +28,52 @@ end
 -- Compile separate tasks.
 local root_dir = arg[0]:match(".*/") or "./"
 local loaders = terralib.newlist()
-for part = 1, 2 do
+local link_libraries = terralib.newlist({"-L" .. tmp_dir})
+for _, part in ipairs({"tasks_part1", "tasks_part2", "main"}) do
   local regent_exe = os.getenv('REGENT') or 'regent'
-  local tasks_rg = "separate_compilation_tasks_part" .. part .. ".rg"
+  local tasks_rg = "separate_compilation_" .. part .. ".rg"
   assert(os.execute("cp " .. root_dir .. tasks_rg .. " " .. tmp_dir .. tasks_rg) == 0)
-  local tasks_h = "separate_compilation_tasks_part" .. part .. ".h"
-  local tasks_so = tmp_dir .. "libseparate_compilation_tasks_part" .. part .. ".so"
+  local tasks_h = "separate_compilation_" .. part .. ".h"
+  local tasks_lib = "-lseparate_compilation_" .. part
   if os.execute(regent_exe .. " " .. tmp_dir .. tasks_rg .. " -fseparate 1") ~= 0 then
     print("Error: failed to compile " .. tmp_dir .. tasks_rg)
     assert(false)
   end
   local tasks_c = terralib.includec(tasks_h, {"-I", tmp_dir})
-  loaders:insert(tasks_c["separate_compilation_tasks_part" .. part .. "_h_register"])
-  terralib.linklibrary(tasks_so)
-end
-terra loader()
-  [loaders:map(function(thunk) return `thunk() end)]
+  loaders:insert(tasks_c["separate_compilation_" .. part .. "_h_register"])
+  link_libraries:insert(tasks_lib)
 end
 
-struct fs {
-  x : int
-  y : int
-  z : int
-}
+-- Link code copied from regentlib.save_tasks.
+local use_cmake = os.getenv("USE_CMAKE") == "1"
+local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
+if use_cmake then
+  lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
+end
+link_libraries:insertall({"-L" .. lib_dir, "-lregent"})
+if use_cmake then
+  link_libraries:insertall({"-llegion", "-lrealm"})
+end
 
-extern task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
-where reads writes(r.{x, y}), reads(r.z) end
-
-extern task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
-where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) end
-
-task main()
-  var r = region(ispace(int1d, 5), fs)
-  var s = region(ispace(int1d, 10), fs)
-  var pr = partition(equal, r, ispace(int1d, 4))
-  var ps = partition(equal, s, ispace(int1d, 4))
-  fill(r.{x, y, z}, 0)
-  fill(s.{x, y, z}, 0)
-  for i = 0, 4 do
-    my_regent_task(pr[i], 1, 2, true)
-  end
-  for i = 0, 4 do
-    other_regent_task(pr[i], ps[i])
+terra main(argc : int, argv : &rawstring)
+  escape
+    for i, thunk in ipairs(loaders) do
+      if i ~= #loaders then
+        emit quote thunk() end
+      else
+        emit quote thunk(argc, argv) end
+      end
+    end
   end
 end
-regentlib.start(main, loader)
+
+local executable = root_dir .. "separate_compilation.exe"
+terralib.saveobj(executable, {main=main}, link_libraries)
+local ffi = require("ffi")
+if ffi.os == "OSX" then
+  assert(os.execute("DYLD_LIBRARY_PATH=" .. lib_dir .. " " .. executable) == 0)
+else
+  assert(os.execute("LD_LIBRARY_PATH=" .. lib_dir .. " " .. executable) == 0)
+end
 
 -- os.execute("rm -r " .. tmp_dir)
