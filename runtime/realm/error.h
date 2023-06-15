@@ -41,7 +41,7 @@ namespace Realm {
     }
   };
 
-  const char* realm_strerror(int err, char *buffer, size_t size)
+  static inline const char* realm_strerror(int err, char *buffer, size_t size)
   {
     // Deal with the fact that strerror_r has two different possible
     // return types on different systems, call the right one based
