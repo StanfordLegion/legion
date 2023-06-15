@@ -46,13 +46,12 @@ namespace Realm {
     // Deal with the fact that strerror_r has two different possible
     // return types on different systems, call the right one based
     // on the return type and get the result
+    auto result = strerror_r(err, buffer, size);
     // Return types should either be int or char*
     static_assert(
-      std::is_same<decltype(strerror_r(err,buffer,size)),int>::value ||
-      std::is_same<decltype(strerror_r(err,buffer,size)),char*>::value,
+      std::is_same<decltype(result),int>::value ||
+      std::is_same<decltype(result),char*>::value,
       "Unknown strerror_r return type");
-    auto result = strerror_r(err, buffer, size);
-
     return ErrorHelper<decltype(result)>::process_error_message(result, buffer);
   }
 
