@@ -37,7 +37,7 @@ namespace Realm {
     {
       // this is the version of strerror_r that returns a string so use
       // that if it is not null
-      return (result == NULL) ? buffer : result;
+      return (result == nullptr) ? buffer : result;
     }
   };
 
@@ -51,7 +51,7 @@ namespace Realm {
       std::is_same<decltype(strerror_r(err,buffer,size)),int>::value ||
       std::is_same<decltype(strerror_r(err,buffer,size)),char*>::value,
       "Unknown strerror_r return type");
-    decltype(strerror_r(err,buffer,size)) result = strerror_r(err, buffer, size);
+    auto result = strerror_r(err, buffer, size);
 
     return ErrorHelper<decltype(result)>::process_error_message(result, buffer);
   }
