@@ -99,7 +99,8 @@ function base.load_all_libraries()
   end)
 end
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   base.binding_library = "libregent.dylib"
 else
   base.binding_library = "libregent.so"

@@ -19,17 +19,11 @@
 
 import "regent"
 
-assert(regentlib.config["separate"], "test requires separate compilation")
+require("separate_compilation_common")
 
 local format = require("std/format")
 
 local SAME_ADDRESS_SPACE = 4 -- (1 << 2)
-
-struct fs {
-  x : int
-  y : int
-  z : int
-}
 
 task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
 where reads writes(r.{x, y}), reads(r.z) do
