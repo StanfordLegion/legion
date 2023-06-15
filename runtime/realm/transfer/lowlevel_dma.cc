@@ -18,6 +18,7 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
 #include "realm/threads.h"
+#include "realm/error.h"
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/ib_memory.h"
@@ -216,33 +217,16 @@ namespace Realm {
         {
           case EAGAIN:
             continue;
-          case EBADF:
-            {
-              log_aio.fatal("bad aio file descriptor");
-              break;
-            }
-          case EFBIG:
-            {
-              log_aio.fatal("aio starting position beyond the end of file");
-              break;
-            }
-          case EINVAL:
-            {
-              log_aio.fatal("aio invalid parameter");
-              break;
-            }
-          case ENOSYS:
-            {
-              log_aio.fatal("aio writes are not supported on this OS");
-              break;
-            }
           default:
             {
-              log_aio.fatal("unknown aio error %d", errno);
-              break;
+              // Should be big enough for most error messages
+              constexpr size_t BUFFER_SIZE = 1024;
+              char buffer[BUFFER_SIZE];
+              const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+              log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+              abort();
             }
         }
-        abort();
       }
       log_aio.fatal("exceeeded max aio write attempts %d", MAX_ATTEMPTS);
       abort();
@@ -297,33 +281,16 @@ namespace Realm {
         {
           case EAGAIN:
             continue;
-          case EBADF:
-            {
-              log_aio.fatal("bad aio file descriptor");
-              break;
-            }
-          case EFBIG:
-            {
-              log_aio.fatal("aio starting position beyond the end of file");
-              break;
-            }
-          case EINVAL:
-            {
-              log_aio.fatal("aio invalid parameter");
-              break;
-            }
-          case ENOSYS:
-            {
-              log_aio.fatal("aio reads are not supported on this OS");
-              break;
-            }
           default:
             {
-              log_aio.fatal("unknown aio error %d", errno);
-              break;
+              // Should be big enough for most error messages
+              constexpr size_t BUFFER_SIZE = 1024;
+              char buffer[BUFFER_SIZE];
+              const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+              log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+              abort();
             }
         }
-        abort();
       }
       log_aio.fatal("exceeeded max aio read attempts %d", MAX_ATTEMPTS);
       abort();
