@@ -116,7 +116,17 @@ fn main() -> io::Result<()> {
     if let Some(nodes_str) = cli.nodes {
         node_list = nodes_str
             .split(",")
-            .map(|x| NodeID(x.parse::<u64>().unwrap()))
+            .flat_map(|x| {
+                let splits: Vec<_> = x
+                    .splitn(2, "-")
+                    .map(|x| x.parse::<u64>().unwrap())
+                    .collect();
+                if splits.len() == 2 {
+                    (splits[0]..=splits[1]).into_iter().map(NodeID)
+                } else {
+                    (splits[0]..=splits[0]).into_iter().map(NodeID)
+                }
+            })
             .collect();
         filter_input = !cli.no_filter_input;
     }
