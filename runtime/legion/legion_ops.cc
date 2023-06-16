@@ -14024,7 +14024,7 @@ namespace Legion {
                                           unique_op_id, context_index);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, 
-                                 future.impl->get_ready_event(), empty_point);
+                                       future.impl->did, empty_point);
       }
       return future;
     }
@@ -14205,8 +14205,7 @@ namespace Legion {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(),
                                            unique_op_id, context_index);
         if ((future.impl != NULL) && future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, future.impl->did); 
       }
       return predicate;
     }
@@ -18590,8 +18589,7 @@ namespace Legion {
                                       unique_op_id, context_index);
         if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, future.impl->did); 
       }
     }
 
@@ -19298,8 +19296,7 @@ namespace Legion {
                                       unique_op_id, context_index);
         if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, future.impl->did); 
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
@@ -22801,13 +22798,13 @@ namespace Legion {
         LegionSpy::log_timing_operation(ctx->get_unique_id(),
                                         unique_op_id, context_index);
         DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id, 
-            result.impl->get_ready_event(), empty_point);
+        LegionSpy::log_future_creation(unique_op_id, result.impl->did,
+                                       empty_point);
         for (std::set<Future>::const_iterator it = preconditions.begin();
               it != preconditions.end(); it++)
         {
           if ((it->impl != NULL) && it->impl->get_ready_event().exists())
-            LegionSpy::log_future_use(unique_op_id,it->impl->get_ready_event());
+            LegionSpy::log_future_use(unique_op_id, it->impl->did);
         }
       }
       return result;
@@ -22970,8 +22967,8 @@ namespace Legion {
         LegionSpy::log_tunable_operation(ctx->get_unique_id(),
                                          unique_op_id, context_index);
         const DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id,
-            result.impl->get_ready_event(), empty_point);
+        LegionSpy::log_future_creation(unique_op_id, result.impl->did,
+                                       empty_point);
         tunable_index = parent_ctx->get_tunable_index();
       }
       return result;
@@ -23171,8 +23168,8 @@ namespace Legion {
         LegionSpy::log_all_reduce_operation(ctx->get_unique_id(),
                                             unique_op_id, context_index);
         const DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id,
-            result.impl->get_ready_event(), empty_point);
+        LegionSpy::log_future_creation(unique_op_id, result.impl->did,
+                                       empty_point);
       }
       return result;
     }
@@ -23270,11 +23267,7 @@ namespace Legion {
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
                                        future_result_size, source);
         if (runtime->legion_spy_enabled)
-        {
-          const ApEvent ready_event = impl->get_ready_event();
-          if (ready_event.exists())
-            LegionSpy::log_future_use(unique_op_id, ready_event);
-        }
+          LegionSpy::log_future_use(unique_op_id, impl->did);
       }
     }
 
@@ -23503,11 +23496,7 @@ namespace Legion {
             preconditions[idx] = it->second->reduce_from_canonical(targets[idx],
                 this, redop_id, redop, true/*exclusive*/, preconditions[idx]);
           if (runtime->legion_spy_enabled)
-          {
-            const ApEvent ready_event = it->second->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
+            LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
         for (std::vector<ApEvent>::const_iterator it =
               preconditions.begin(); it != preconditions.end(); it++)
@@ -23527,11 +23516,7 @@ namespace Legion {
               postconditions.insert(done);
           }
           if (runtime->legion_spy_enabled)
-          {
-            const ApEvent ready_event = it->second->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
+            LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
       }
       RtEvent completion_precondition;

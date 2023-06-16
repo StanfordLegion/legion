@@ -4658,10 +4658,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl;
-          if (impl == NULL)
-            continue;
-          if (impl->get_ready_event().exists())
-            LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, impl->did);
         }
       }
       // If this is a leaf task variant, then we can immediately trigger
@@ -5910,7 +5907,7 @@ namespace Legion {
               parent_ctx->get_depth(), get_provenance());
       if (runtime->legion_spy_enabled)
         LegionSpy::log_future_creation(unique_op_id, 
-                impl->get_ready_event(), index_point);
+                                       impl->did, index_point);
       return Future(impl);
     }
 
@@ -8897,7 +8894,7 @@ namespace Legion {
           LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
         LegionSpy::log_future_creation(unique_op_id, 
-              reduction_future.impl->get_ready_event(), index_point);
+              reduction_future.impl->did, index_point);
       }
       return reduction_future;
     }

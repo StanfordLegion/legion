@@ -3801,7 +3801,7 @@ namespace Legion {
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                   ApEvent::NO_AP_EVENT, point);
+                                         result->did, point);
         return Future(result);
       }
     }
@@ -4523,7 +4523,7 @@ namespace Legion {
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                   ApEvent::NO_AP_EVENT, point);
+                                         result->did, point);
         return Future(result);
       }
     }
