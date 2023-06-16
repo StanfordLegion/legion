@@ -3406,6 +3406,8 @@ namespace Legion {
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
                                                   Serializer &rez);
+      void send_compute_equivalence_sets_pending(AddressSpaceID target,
+                                                 Serializer &rez);
       void send_cancel_equivalence_sets_subscription(AddressSpaceID target,
                                                      Serializer &rez);
       void send_finish_equivalence_sets_subscription(AddressSpaceID target,
@@ -3756,6 +3758,7 @@ namespace Legion {
                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_response(Deserializer &derez,
                                                     AddressSpaceID source);
+      void handle_compute_equivalence_sets_pending(Deserializer &derez);
       void handle_cancel_equivalence_sets_subscription(Deserializer &derez,
                                                        AddressSpaceID source);
       void handle_finish_equivalence_sets_subscription(Deserializer &derez,
@@ -6123,6 +6126,8 @@ namespace Legion {
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
+          break;
+        case SEND_COMPUTE_EQUIVALENCE_SETS_PENDING:
           break;
         case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
           break;

@@ -1158,6 +1158,7 @@ namespace Legion {
           std::vector<EqKDTree*> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           size_t expected_responses, std::vector<RtEvent> &ready_events);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,

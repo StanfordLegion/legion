@@ -3810,16 +3810,17 @@ namespace Legion {
       std::vector<RtEvent> pending_sets;
       std::vector<EqKDTree*> subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       expr->compute_equivalence_sets(tree, mask, target, target_space,
           eq_sets, pending_sets, subscriptions, to_create, 
-          creation_rects, remote_shard_rects);
+          creation_rects, creation_srcs, remote_shard_rects);
 #ifdef DEBUG_LEGION
       assert(remote_shard_rects.empty());
 #endif
       return report_equivalence_sets(target, target_space, mask,
           eq_sets, subscriptions, to_create, creation_rects,
-          1/*expected responses*/, pending_sets);
+          creation_srcs, 1/*expected responses*/, pending_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -3829,6 +3830,7 @@ namespace Legion {
           std::vector<EqKDTree*> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           size_t expected_responses, std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
@@ -3866,6 +3868,23 @@ namespace Legion {
             rez.serialize(it->second);
             rez.serialize(creation_rects[it->first]);
           }
+          rez.serialize<size_t>(creation_srcs.size());
+          for (std::map<EquivalenceSet*,
+                        LegionMap<Domain,FieldMask> >::const_iterator sit =
+                creation_srcs.begin(); sit != creation_srcs.end(); sit++)
+          {
+            // No need to pack a reference since we know that that 
+            // EqKDTree is still holding references to the creation_srcs
+            // until we're done making the new equivalence sets
+            rez.serialize(sit->first->did);
+            rez.serialize<size_t>(sit->second.size());
+            for (LegionMap<Domain,FieldMask>::const_iterator it =
+                  sit->second.begin(); it != sit->second.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+          }
           rez.serialize(expected_responses);
           rez.serialize(ready_event);
         }
@@ -3877,7 +3896,7 @@ namespace Legion {
         // We can report the results back immediately
         // Do the creation ones first if there are any to get them in flight
         target->record_equivalence_sets(this, mask, eq_sets, to_create, 
-            creation_rects, subscriptions, local_space, 
+            creation_rects, creation_srcs, subscriptions, local_space, 
             expected_responses, ready_events);
       }
       if (!ready_events.empty())
@@ -3892,11 +3911,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
+      DistributedID ctx_did;
+      derez.deserialize(ctx_did);
       RtEvent ctx_ready;
       InnerContext *context = 
-        runtime->find_or_request_inner_context(did, ctx_ready);
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
       EqSetTracker *target;
       derez.deserialize(target);
       FieldMask mask;
@@ -3904,7 +3923,7 @@ namespace Legion {
       size_t num_sets;
       derez.deserialize(num_sets);
       FieldMaskSet<EquivalenceSet> eq_sets;
-      std::vector<RtEvent> ready_events;
+      std::vector<RtEvent> done_events;
       for (unsigned idx = 0; idx < num_sets; idx++)
       {
         DistributedID did;
@@ -3913,7 +3932,7 @@ namespace Legion {
         EquivalenceSet *set = 
           runtime->find_or_request_equivalence_set(did, ready);
         if (ready.exists())
-          ready_events.push_back(ready);
+          done_events.push_back(ready);
         FieldMask set_mask;
         derez.deserialize(set_mask);
         eq_sets.insert(set, set_mask);
@@ -3936,19 +3955,50 @@ namespace Legion {
         to_create.insert(tree, tree_mask);
         derez.deserialize(creation_rects[tree]);
       }
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
+      size_t num_sources;
+      derez.deserialize(num_sources);
+      std::vector<RtEvent> ready_events;
+      for (unsigned idx1 = 0; idx1 < num_sources; idx1++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready);
+        if (ready.exists())
+          ready_events.push_back(ready);
+        LegionMap<Domain,FieldMask> &rects = creation_srcs[set];
+        size_t num_rects;
+        derez.deserialize(num_rects);
+        for (unsigned idx2 = 0; idx2 < num_rects; idx2++)
+        {
+          Domain rect;
+          derez.deserialize(rect);
+          derez.deserialize(rects[rect]);
+        }
+      }
       size_t expected_responses;
       derez.deserialize(expected_responses);
-      RtUserEvent ready_event;
-      derez.deserialize(ready_event);
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!ready_events.empty())
+      {
+        if (ctx_ready.exists())
+          ready_events.push_back(ctx_ready);
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      else if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
       target->record_equivalence_sets(context, mask, eq_sets, to_create,
-                                  creation_rects, subscriptions, source,
-                                  expected_responses, ready_events);
-      if (!ready_events.empty())
-        Runtime::trigger_event(ready_event,Runtime::merge_events(ready_events));
+                                  creation_rects, creation_srcs, subscriptions,
+                                  source, expected_responses, done_events);
+      if (!done_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else
-        Runtime::trigger_event(ready_event);
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -22008,10 +22058,11 @@ namespace Legion {
       std::vector<RtEvent> pending_sets;
       std::vector<EqKDTree*> subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       expr->compute_equivalence_sets(tree, mask, target, target_space,
-          eq_sets, pending_sets, subscriptions, to_create, 
-          creation_rects, remote_shard_rects, owner_shard->shard_id);
+          eq_sets, pending_sets, subscriptions, to_create, creation_rects,
+          creation_srcs, remote_shard_rects, owner_shard->shard_id);
 #ifdef DEBUG_LEGION
       assert(to_create.size() == creation_rects.size());
 #endif
@@ -22039,9 +22090,9 @@ namespace Legion {
         shard_manager->send_compute_equivalence_sets(sit->first, rez);
         pending_sets.push_back(ready);
       }
-      return report_equivalence_sets(target, target_space, mask, eq_sets, 
-                                subscriptions, to_create, creation_rects, 
-                                remote_shard_rects.size() + 1, pending_sets);
+      return report_equivalence_sets(target, target_space, mask, eq_sets,
+          subscriptions, to_create, creation_rects, creation_srcs,
+          remote_shard_rects.size() + 1, pending_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -22229,16 +22280,17 @@ namespace Legion {
       std::vector<RtEvent> pending_sets;
       std::vector<EqKDTree*> subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
       for (LegionMap<Domain,FieldMask>::const_iterator it =
             shard_rects.begin(); it != shard_rects.end(); it++)
         tree->compute_shard_equivalence_sets(it->first, it->second, target,
             target_space, eq_sets, pending_sets, subscriptions, to_create,
-            creation_rects, owner_shard->shard_id);
+            creation_rects, creation_srcs, owner_shard->shard_id);
       // Now we can send the responses
       RtEvent ready = report_equivalence_sets(target, target_space, mask, 
-                            eq_sets, subscriptions, to_create,
-                            creation_rects,expected_responses, pending_sets);
+                            eq_sets, subscriptions, to_create, creation_rects,
+                            creation_srcs, expected_responses, pending_sets);
       Runtime::trigger_event(ready_event, ready);
     }
 

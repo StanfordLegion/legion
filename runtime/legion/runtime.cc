@@ -12995,6 +12995,11 @@ namespace Legion {
                                                  remote_address_space);
               break;
             }
+          case SEND_COMPUTE_EQUIVALENCE_SETS_PENDING:
+            {
+              runtime->handle_compute_equivalence_sets_pending(derez);
+              break;
+            }
           case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
             {
               runtime->handle_cancel_equivalence_sets_subscription(derez,
@@ -23066,6 +23071,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_compute_equivalence_sets_pending(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COMPUTE_EQUIVALENCE_SETS_PENDING>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_cancel_equivalence_sets_subscription(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25382,6 +25397,13 @@ namespace Legion {
     {
       InnerContext::handle_compute_equivalence_sets_response(derez, this, 
                                                              source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_compute_equivalence_sets_pending(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker::handle_pending_equivalence_set(derez, this);
     }
 
     //--------------------------------------------------------------------------

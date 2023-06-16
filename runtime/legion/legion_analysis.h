@@ -3553,6 +3553,7 @@ namespace Legion {
           FieldMaskSet<EquivalenceSet> &eq_sets,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           std::vector<EqKDTree*> &subscriptions,
           AddressSpaceID source, unsigned expected_responses,
           std::vector<RtEvent> &ready_events);
@@ -3577,6 +3578,41 @@ namespace Legion {
           Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_creation(Deserializer &derez,
                                                   Runtime *runtime);
+      void record_pending_equivalence_set(EquivalenceSet *set, 
+                                          const FieldMask &mask);
+      static void handle_pending_equivalence_set(Deserializer &derez,
+                                                 Runtime *runtime);
+    protected:
+      void record_creation_sets(FieldMaskSet<EqKDTree> &to_create,
+         std::map<EqKDTree*,Domain> &creation_rects, AddressSpaceID source,
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
+      void extract_creation_sets(const FieldMask &mask,
+         LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+         LegionMap<Domain,FieldMask> &create_now_rectangles,
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
+      void create_new_equivalence_sets(InnerContext *context,
+         const FieldMask &mask, std::vector<RtEvent> &ready_events,
+         LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+         LegionMap<Domain,FieldMask> &create_now_rectangles,
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
+      struct SourceState : public FieldSet<Domain> {
+      public:
+        SourceState(void) : source_expr(NULL), source_volume(0) { }
+        SourceState(const FieldMask &m) : 
+          FieldSet(m), source_expr(NULL), source_volume(0) { }
+        ~SourceState(void);
+      public:
+        IndexSpaceExpression *source_expr;
+        size_t source_volume;
+      };
+      bool check_for_congruent_source_equivalence_sets(FieldSet<Domain> &dest,
+          FieldMaskSet<EquivalenceSet> &pending_sets,
+          FieldMaskSet<EquivalenceSet> &unique_sources,
+          std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
+      void extract_remote_notifications(const FieldMask &mask,
+          AddressSpaceID local_space,
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_notify);
     protected:
       LocalLock &tracker_lock;
       FieldMaskSet<EquivalenceSet> equivalence_sets;
@@ -3588,12 +3624,13 @@ namespace Legion {
       // keep a count of how many outstanding references there are for
       // each owner so we know when it is done
       std::map<
-        std::pair<EqKDTree*,AddressSpaceID>,unsigned> subscription_owners;
+        std::pair<EqKDTree*,AddressSpaceID>,unsigned>     subscription_owners;
       // These all help with the creation of equivalence sets for which we
       // are the first request to access them 
-      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > creation_requests;
-      LegionMap<Domain,FieldMask>                     creation_rectangles;
-      LegionMap<unsigned,FieldMask>                   remaining_responses;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >     creation_requests;
+      LegionMap<Domain,FieldMask>                         creation_rectangles;
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_sources;
+      LegionMap<unsigned,FieldMask>                       remaining_responses;
     };
 
     /**

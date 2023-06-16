@@ -916,6 +916,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
+      SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
       SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_EQUIVALENCE_SET_CREATION,
@@ -1184,6 +1185,7 @@ namespace Legion {
         "Send Remote Context Find Collective View Response",          \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
+        "Send Compute Equivalence Sets Pending",                      \
         "Send Cancel Equivalence Sets Subscription",                  \
         "Send Finish Equivalence Sets Subscription",                  \
         "Send Equivalence Set Creation",                              \

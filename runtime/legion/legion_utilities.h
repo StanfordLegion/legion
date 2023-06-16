@@ -2830,6 +2830,111 @@ namespace Legion {
         output_sets.push_front(FieldSet<T>(universe_mask));
     }
 
+    // This is a generalization of the above method but takes a list of 
+    // anything that has the same members as a FieldSet
+    //--------------------------------------------------------------------------
+    template<typename T, typename CT>
+    inline void compute_field_sets(FieldMask universe_mask,
+                                   const LegionMap<T,FieldMask> &inputs,
+                                   LegionList<CT> &output_sets)
+    //--------------------------------------------------------------------------
+    {
+      // Special cases for empty and size 1 sets
+      if (inputs.empty())
+      {
+        if (!!universe_mask)
+          output_sets.push_back(CT(universe_mask));
+        return;
+      }
+      else if (inputs.size() == 1)
+      {
+        typename LegionMap<T,FieldMask>::const_iterator first = 
+          inputs.begin();
+        output_sets.push_back(CT(first->second));
+        CT &last = output_sets.back();
+        last.elements.insert(first->first);
+        if (!!universe_mask)
+        {
+          universe_mask -= first->second;
+          if (!!universe_mask)
+            output_sets.push_back(CT(universe_mask));
+        }
+        return;
+      }
+      for (typename LegionMap<T,FieldMask>::const_iterator pit = 
+            inputs.begin(); pit != inputs.end(); pit++)
+      {
+        bool inserted = false;
+        // Also keep track of which fields have updates
+        // but don't have any members 
+        if (!!universe_mask)
+          universe_mask -= pit->second;
+        FieldMask remaining = pit->second;
+        // Insert this event into the precondition sets 
+        for (typename LegionList<CT>::iterator it = 
+              output_sets.begin(); it != output_sets.end(); it++)
+        {
+          // Easy case, check for equality
+          if (remaining == it->set_mask)
+          {
+            it->elements.insert(pit->first);
+            inserted = true;
+            break;
+          }
+          FieldMask overlap = remaining & it->set_mask;
+          // Easy case, they are disjoint so keep going
+          if (!overlap)
+            continue;
+          // Moderate case, we are dominated, split into two sets
+          // reusing existing set and making a new set
+          if (overlap == remaining)
+          {
+            // Leave the existing set and make it the difference 
+            it->set_mask -= overlap;
+            output_sets.push_back(CT(overlap));
+            CT &last = output_sets.back();
+            last.elements = it->elements;
+            last.elements.insert(pit->first);
+            inserted = true;
+            break;
+          }
+          // Moderate case, we dominate the existing set
+          if (overlap == it->set_mask)
+          {
+            // Add ourselves to the existing set and then
+            // keep going for the remaining fields
+            it->elements.insert(pit->first);
+            remaining -= overlap;
+            // Can't consider ourselves added yet
+            continue;
+          }
+          // Hard case, neither dominates, compute three
+          // distinct sets of fields, keep left one in
+          // place and reduce scope, add new one at the
+          // end for overlap, continue iterating for right one
+          it->set_mask -= overlap;
+          const std::set<T> &temp_elements = it->elements;
+          it = output_sets.insert(it, CT(overlap));
+          it->elements = temp_elements;
+          it->elements.insert(pit->first);
+          remaining -= overlap;
+          continue;
+        }
+        if (!inserted)
+        {
+          output_sets.push_back(CT(remaining));
+          CT &last = output_sets.back();
+          last.elements.insert(pit->first);
+        }
+      }
+      // For any fields which need copies but don't have
+      // any elements, but them in their own set.
+      // Put it on the front because it is the copy with
+      // no elements so it can start right away!
+      if (!!universe_mask)
+        output_sets.push_front(CT(universe_mask));
+    }
+
     /**
      * \class FieldMaskSet 
      * A template helper class for tracking collections of 
