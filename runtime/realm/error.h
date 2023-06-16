@@ -18,6 +18,7 @@
 
 namespace Realm {
 
+#ifndef REALM_ON_WINDOWS
   template<typename T>
   struct ErrorHelper {
   public:
@@ -40,9 +41,15 @@ namespace Realm {
       return (result == nullptr) ? buffer : result;
     }
   };
+#endif
 
   static inline const char* realm_strerror(int err, char *buffer, size_t size)
   {
+#ifdef REALM_ON_WINDOWS
+    int result = strerror_s(buffer, size, err);
+    assert(result == 0);
+    return buffer;
+#else
     // Deal with the fact that strerror_r has two different possible
     // return types on different systems, call the right one based
     // on the return type and get the result
@@ -53,6 +60,7 @@ namespace Realm {
       std::is_same<decltype(result),char*>::value,
       "Unknown strerror_r return type");
     return ErrorHelper<decltype(result)>::process_error_message(result, buffer);
+#endif
   }
 
 };
