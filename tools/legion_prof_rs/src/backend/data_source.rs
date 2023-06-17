@@ -762,6 +762,7 @@ impl StateDataSource {
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
                 title: name,
+                original_interval: point_interval,
                 fields,
             }
         });
@@ -825,6 +826,7 @@ impl StateDataSource {
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
                 title: name,
+                original_interval: point_interval,
                 fields,
             }
         });
@@ -888,6 +890,7 @@ impl StateDataSource {
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
                 title: name,
+                original_interval: point_interval,
                 fields,
             }
         });
