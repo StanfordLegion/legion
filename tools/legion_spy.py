@@ -9653,12 +9653,12 @@ class Task(object):
             replay_file.write(struct.pack('I',0))
 
 class Future(object):
-    __slots__ = ['state', 'iid', 'creator_uid', 'logical_creator', 
+    __slots__ = ['state', 'did', 'creator_uid', 'logical_creator', 
                  'physical_creators', 'point', 'user_ids',
                  'logical_users', 'physical_users']
-    def __init__(self, state, iid):
+    def __init__(self, state, did):
         self.state = state
-        self.iid = iid
+        self.did = did
         self.creator_uid = None
         # These can be different for index space operations
         self.logical_creator = None
@@ -11863,9 +11863,9 @@ mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 future_create_pat       = re.compile(
-    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
+    prefix+"Future Creation (?P<uid>[0-9]+) (?P<did>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
-    prefix+"Future Usage (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
+    prefix+"Future Usage (?P<uid>[0-9]+) (?P<did>[0-9]+)")
 predicate_use_pat       = re.compile(
     prefix+"Predicate Use (?P<uid>[0-9]+) (?P<pred>[0-9]+)")
 # Physical instance and mapping decision patterns
@@ -12222,7 +12222,7 @@ def parse_legion_spy_line(line, state):
         return True
     m = future_create_pat.match(line)
     if m is not None:
-        future = state.get_future(int(m.group('iid'),16))
+        future = state.get_future(int(m.group('did')))
         future.set_creator(int(m.group('uid')))
         dim = int(m.group('dim'))
         point = Point(dim)
@@ -12233,7 +12233,7 @@ def parse_legion_spy_line(line, state):
         return True 
     m = future_use_pat.match(line)
     if m is not None:
-        future = state.get_future(int(m.group('iid'),16))
+        future = state.get_future(int(m.group('did')))
         future.add_uid(int(m.group('uid')))
         return True
     m = predicate_use_pat.match(line)
@@ -14102,11 +14102,11 @@ class State(object):
         self.replicants[repl] = result
         return result
 
-    def get_future(self, iid):
-        if iid in self.futures:
-            return self.futures[iid]
-        result = Future(self, iid)
-        self.futures[iid] = result
+    def get_future(self, did):
+        if did in self.futures:
+            return self.futures[did]
+        result = Future(self, did)
+        self.futures[did] = result
         return result
 
     def get_variant(self, vid):

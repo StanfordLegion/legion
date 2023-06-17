@@ -541,8 +541,7 @@ namespace Legion {
       // invalidate_region_tree_contexts have been applied 
       virtual void free_region_tree_context(void) = 0;
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(
-                                                   Legion::Runtime *&runtime);
+      virtual const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
@@ -673,11 +672,11 @@ namespace Legion {
                              InstanceSet instances,
                              bool global_indexing, bool valid);
       void finalize_output_regions(void);
-      void initialize_overhead_tracker(void);
+      void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
-      inline void begin_task_wait(bool from_runtime);
-      inline void end_task_wait(void); 
+      inline void begin_wait(void);
+      inline void end_wait(void);
       void remap_unmapped_regions(LogicalTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions,
                            Provenance *provenance);
@@ -740,8 +739,22 @@ namespace Legion {
       Processor                             executing_processor;
       size_t                                total_tunable_count;
     protected:
-      Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
-      long long                                previous_profiling_time; 
+      class OverheadProfiler : 
+        public Mapping::ProfilingMeasurements::RuntimeOverhead {
+      public:
+        OverheadProfiler(void) : inside_runtime_call(false) { }
+      public:
+        long long previous_profiling_time;
+        bool inside_runtime_call;
+      };
+      OverheadProfiler *overhead_profiler; 
+    protected:
+      class ImplicitProfiler {
+      public:
+        std::vector<std::pair<long long,long long> > waits; 
+        long long start_time;
+      };
+      ImplicitProfiler *implicit_profiler;
     protected:
       std::map<LocalVariableID,
                std::pair<void*,void (*)(void*)> > task_local_variables;
@@ -1740,8 +1753,7 @@ namespace Legion {
       virtual bool remove_subscriber_reference(PhysicalManager *manager)
         { return remove_nested_resource_ref(manager->did); }
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(
-                                                    Legion::Runtime *&runtime);
+      virtual const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -3966,12 +3978,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(implicit_reference_tracker == NULL);
 #endif
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      overhead_tracker->application_time += diff;
-      previous_profiling_time = current;
+      if (overhead_profiler != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->application_time += diff;
+        overhead_profiler->previous_profiling_time = current;
+        overhead_profiler->inside_runtime_call = true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3983,39 +3998,56 @@ namespace Legion {
         delete implicit_reference_tracker;
         implicit_reference_tracker = NULL;
       }
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      overhead_tracker->runtime_time += diff;
-      previous_profiling_time = current;
+      if (overhead_profiler != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->runtime_time += diff;
+        overhead_profiler->previous_profiling_time = current;
+        overhead_profiler->inside_runtime_call = false;
+      }
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::begin_task_wait(bool from_runtime)
+    inline void TaskContext::begin_wait(void)
     //--------------------------------------------------------------------------
     {
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      if (from_runtime)
-        overhead_tracker->runtime_time += diff;
-      else
-        overhead_tracker->application_time += diff;
-      previous_profiling_time = current;
+      if (overhead_profiler != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        if (overhead_profiler->inside_runtime_call)
+          overhead_profiler->runtime_time += diff;
+        else
+          overhead_profiler->application_time += diff;
+        overhead_profiler->previous_profiling_time = current;
+      }
+      if (implicit_profiler != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        implicit_profiler->waits.emplace_back(std::make_pair(current, current));
+      }
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::end_task_wait(void)
+    inline void TaskContext::end_wait(void)
     //--------------------------------------------------------------------------
     {
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      overhead_tracker->wait_time += diff;
-      previous_profiling_time = current;
+      if (overhead_profiler != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->wait_time += diff;
+        overhead_profiler->previous_profiling_time = current;
+      }
+      if (implicit_profiler != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        implicit_profiler->waits.back().second = current;
+      }
     }
 
   };

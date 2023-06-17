@@ -63,7 +63,7 @@ namespace Legion {
     static const TypeTag TYPE_TAG_##DIM##D = \
       Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>();
     LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
+#undef DIMFUNC 
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -8050,8 +8050,12 @@ namespace Legion {
 #endif
       ctx = *((const Context*)data);
       task = ctx->get_task();
-
-      reg = &ctx->begin_task(runtime);
+      const Processor exec_proc = Processor::get_executing_processor();
+#ifdef DEBUG_LEGION
+      assert(exec_proc.exists());
+#endif
+      reg = &ctx->begin_task(exec_proc);
+      runtime = Internal::implicit_runtime->external;
     }
 
     //--------------------------------------------------------------------------

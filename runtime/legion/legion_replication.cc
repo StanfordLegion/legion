@@ -6145,11 +6145,7 @@ namespace Legion {
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
                                        future_result_size, source);
         if (runtime->legion_spy_enabled)
-        {
-          const ApEvent ready_event = impl->get_ready_event();
-          if (ready_event.exists())
-            LegionSpy::log_future_use(unique_op_id, ready_event);
-        }
+          LegionSpy::log_future_use(unique_op_id, impl->did);
       }
       // Now we need an all-to-all to get the values from other shards
       const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
@@ -6209,11 +6205,7 @@ namespace Legion {
               parent_ctx->get_unique_id(), instance->size, redop->sizeof_rhs)
         instances.push_back(instance);
         if (runtime->legion_spy_enabled)
-        {
-          const ApEvent ready_event = impl->get_ready_event();
-          if (ready_event.exists())
-            LegionSpy::log_future_use(unique_op_id, ready_event);
-        }
+          LegionSpy::log_future_use(unique_op_id, impl->did);
       }
 #ifdef DEBUG_LEGION
       assert(!targets.empty());
@@ -6231,11 +6223,7 @@ namespace Legion {
           local_precondition = it->second->reduce_from_canonical(local_target,
               this, redop_id, redop, true/*exclusive*/, local_precondition);
           if (runtime->legion_spy_enabled)
-          {
-            const ApEvent ready_event = it->second->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
+            LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
       }
       else
@@ -6250,11 +6238,7 @@ namespace Legion {
           if (postcondition.exists())
             postconditions.insert(postcondition);
           if (runtime->legion_spy_enabled)
-          {
-            const ApEvent ready_event = it->second->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
+            LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
         if (!postconditions.empty())
           local_precondition = Runtime::merge_events(NULL, postconditions);
@@ -10089,7 +10073,7 @@ namespace Legion {
             ctx->get_depth(), op->get_provenance(), collective_mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(), 
-                  result->get_ready_event(), index_point);
+                                         result->did, index_point);
         // Add a reference to it to keep it from being deleted and then 
         // register it with the runtime
         result->add_base_gc_ref(RUNTIME_REF);
@@ -10110,7 +10094,7 @@ namespace Legion {
             ctx->get_depth(), op->get_provenance(), collective_mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(), 
-                  impl->get_ready_event(), index_point);
+                                         impl->did, index_point);
         // Get a reference on it before we register it
         Future result(impl);
         impl->register_with_runtime();

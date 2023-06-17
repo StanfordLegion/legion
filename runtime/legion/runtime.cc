@@ -78,18 +78,18 @@ namespace Legion {
       Realm::Logger log_spy("legion_spy");
     };
 
-    __thread TaskContext *implicit_context = NULL;
-    __thread Runtime *implicit_runtime = NULL;
-    __thread AutoLock *local_lock_list = NULL;
-    __thread UniqueID implicit_provenance = 0;
-    __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
-    __thread ImplicitReferenceTracker *implicit_reference_tracker = NULL;
+    thread_local TaskContext *implicit_context = NULL;
+    thread_local Runtime *implicit_runtime = NULL;
+    thread_local AutoLock *local_lock_list = NULL;
+    thread_local UniqueID implicit_provenance = 0;
+    thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
+    thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 #ifdef DEBUG_LEGION_WAITS
-    __thread int meta_task_id = -1;
+    thread_local int meta_task_id = -1;
 #endif
 #ifdef DEBUG_LEGION_CALLERS
-    __thread LgTaskID implicit_task_kind = LG_SCHEDULER_ID;
-    __thread LgTaskID implicit_task_caller = LG_SCHEDULER_ID;
+    thread_local LgTaskID implicit_task_kind = LG_SCHEDULER_ID;
+    thread_local LgTaskID implicit_task_caller = LG_SCHEDULER_ID;
 #endif
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
@@ -101,6 +101,20 @@ namespace Legion {
     const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
     const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
     const PredUserEvent PredUserEvent::NO_PRED_USER_EVENT = PredUserEvent();
+
+    //--------------------------------------------------------------------------
+    void LgEvent::begin_context_wait(Context ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->begin_wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void LgEvent::end_context_wait(Context ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_wait();
+    }
 
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
@@ -971,17 +985,7 @@ namespace Legion {
       bool poisoned = false;
       const ApEvent complete = get_ready_event();
       if (!complete.has_triggered_faultaware(poisoned))
-      {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
-        {
-          context->begin_task_wait(false/*from runtime*/);
-          complete.wait_faultaware(poisoned);
-          context->end_task_wait();
-        }
-        else
-          complete.wait_faultaware(poisoned);
-      }
+        complete.wait_faultaware(poisoned);
       if (poisoned)
         implicit_context->raise_poison_exception();
       mark_sampled();
@@ -1063,17 +1067,7 @@ namespace Legion {
       bool poisoned = false;
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
-      {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
-        {
-          context->begin_task_wait(false/*from runtime*/);
-          inst_ready.wait_faultaware(poisoned);
-          context->end_task_wait();
-        }
-        else
-          inst_ready.wait_faultaware(poisoned);
-      }
+        inst_ready.wait_faultaware(poisoned);
       if (poisoned && (implicit_context != NULL))
         implicit_context->raise_poison_exception();
       return instance->get_data();
@@ -1147,17 +1141,7 @@ namespace Legion {
       bool poisoned = false;
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
-      {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
-        {
-          context->begin_task_wait(false/*from runtime*/);
-          inst_ready.wait_faultaware(poisoned);
-          context->end_task_wait();
-        }
-        else
-          inst_ready.wait_faultaware(poisoned);
-      }
+        inst_ready.wait_faultaware(poisoned);
       if (poisoned && (implicit_context != NULL))
         implicit_context->raise_poison_exception();
       return result;
@@ -3817,7 +3801,7 @@ namespace Legion {
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                   ApEvent::NO_AP_EVENT, point);
+                                         result->did, point);
         return Future(result);
       }
     }
@@ -3866,14 +3850,7 @@ namespace Legion {
             (warning_string == NULL) ? "" : warning_string)
       if ((op != NULL) && (Internal::implicit_context != NULL))
         Internal::implicit_context->record_blocking_call();
-      if (context != NULL)
-      {
-        context->begin_task_wait(false/*from runtime*/);
-        completion_event.wait();
-        context->end_task_wait();
-      }
-      else
-        completion_event.wait();
+      completion_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4546,7 +4523,7 @@ namespace Legion {
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                   ApEvent::NO_AP_EVENT, point);
+                                         result->did, point);
         return Future(result);
       }
     }
@@ -4634,14 +4611,7 @@ namespace Legion {
       }
       const ApBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
       Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, completion_event);
-      if (context != NULL)
-      {
-        context->begin_task_wait(false/*from runtime*/);
-        wait_bar.wait();
-        context->end_task_wait();
-      }
-      else
-        wait_bar.wait();
+      wait_bar.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4795,11 +4765,7 @@ namespace Legion {
               "the wait for you. Warning string: %s", source, 
               context->get_task_name(), context->get_unique_id(),
               (warning_string == NULL) ? "" : warning_string)
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
         mapped_event.wait();
-        if (context != NULL)
-          context->end_task_wait();
       }
       // If we've already gone through this process we're good
       if (valid)
@@ -4809,13 +4775,7 @@ namespace Legion {
       if (!ready_event.has_triggered_faultaware(poisoned))
       {
         if (!poisoned)
-        {
-          if (context != NULL)
-            context->begin_task_wait(false/*from runtime*/);
           ready_event.wait_faultaware(poisoned);
-          if (context != NULL)
-            context->end_task_wait();
-        }
       }
       if (poisoned)
         context->raise_poison_exception();
@@ -5122,11 +5082,7 @@ namespace Legion {
               "the wait for you. Warning string: %s", context->get_task_name(), 
               context->get_unique_id(), (warning_string == NULL) ? 
               "" : warning_string)
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
         mapped_event.wait();
-        if (context != NULL)
-          context->end_task_wait();
       }
       const InstanceSet &instances = references;
       for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -5203,11 +5159,7 @@ namespace Legion {
               "the wait for you. Warning string: %s", context->get_task_name(), 
               context->get_unique_id(), (warning_string == NULL) ? 
               "" : warning_string)
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
         mapped_event.wait();
-        if (context != NULL)
-          context->end_task_wait();
       }
       const InstanceSet &instances = references;
       for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -30747,6 +30699,10 @@ namespace Legion {
         attach_semantic_information(top_task_id, 
             LEGION_NAME_SEMANTIC_TAG, task_name, 
             strlen(task_name) + 1, true/*mutable*/);
+      // Record a fake variant if we're profiling
+      if (profiler != NULL)
+        profiler->register_task_variant(top_task_id, 0/*variant ID*/, 
+                                        task_name);
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
@@ -30873,11 +30829,9 @@ namespace Legion {
       increment_total_outstanding_tasks();
 #endif
       InnerContext *execution_context = local_task->create_implicit_context();
-      implicit_context = execution_context;
-      implicit_runtime = this;
-      Legion::Runtime *dummy_rt;
-      execution_context->begin_task(dummy_rt);
-      execution_context->set_executing_processor(proxy);
+      execution_context->begin_task(proxy);
+      // We still need to configure the context here 
+      local_task->configure_execution_context(execution_context);
       return execution_context;
     }
 
@@ -30890,6 +30844,7 @@ namespace Legion {
             "Illegal call to unbind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
+      ctx->begin_wait();
       implicit_context = NULL;
     }
 
@@ -30902,6 +30857,7 @@ namespace Legion {
             "Illegal call to bind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
+      ctx->end_wait();
       implicit_runtime = this;
       implicit_context = ctx;
       implicit_provenance = ctx->owner_task->get_unique_op_id();
@@ -32239,7 +32195,10 @@ namespace Legion {
       assert(userlen == sizeof(Runtime**));
 #endif
       Runtime *runtime = *((Runtime**)userdata); 
-      implicit_runtime = runtime;
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       runtime->initialize_runtime();
     }
 
@@ -32252,7 +32211,10 @@ namespace Legion {
       assert(userlen == sizeof(Runtime**));
 #endif
       Runtime *runtime = *((Runtime**)userdata); 
-      implicit_runtime = runtime;
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       // Finalize the runtime and then delete it
       runtime->finalize_runtime();
       delete runtime;
@@ -32282,7 +32244,10 @@ namespace Legion {
 #endif
       assert(implicit_reference_tracker == NULL);
 #endif
-      implicit_runtime = runtime;
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32857,7 +32822,10 @@ namespace Legion {
       assert(userlen == sizeof(Runtime**));
 #endif
       Runtime *runtime = *((Runtime**)userdata);
-      implicit_runtime = runtime;
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
         (const ProfilingResponseBase*)response.user_data();
@@ -32882,7 +32850,10 @@ namespace Legion {
       assert(userlen == sizeof(Runtime**));
 #endif
       Runtime *runtime = *((Runtime**)userdata);
-      implicit_runtime = runtime;
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       runtime->startup_runtime();
     }
 
@@ -32898,6 +32869,10 @@ namespace Legion {
       assert(userlen == sizeof(Runtime**));
 #endif
       Deserializer derez(args, arglen);
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       runtime->handle_endpoint_creation(derez);
     }
 
@@ -32913,7 +32888,10 @@ namespace Legion {
       assert(userlen == sizeof(Runtime**));
       assert(implicit_reference_tracker == NULL);
 #endif
-      implicit_runtime = runtime;
+      if (implicit_runtime == NULL)
+        implicit_runtime = runtime;
+      if (implicit_context != NULL)
+        implicit_context = NULL;
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);

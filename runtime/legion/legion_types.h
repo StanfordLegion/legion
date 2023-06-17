@@ -2055,16 +2055,16 @@ namespace Legion {
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
-    extern __thread TaskContext *implicit_context;
+    extern thread_local TaskContext *implicit_context;
     // Same thing for the runtime
-    extern __thread Runtime *implicit_runtime;
+    extern thread_local Runtime *implicit_runtime;
     // Another nasty global variable for tracking the fast
     // reservations that we are holding
-    extern __thread AutoLock *local_lock_list;
+    extern thread_local AutoLock *local_lock_list;
     // One more nasty global variable that we use for tracking
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
-    extern __thread ::legion_unique_id_t implicit_provenance;
+    extern thread_local ::legion_unique_id_t implicit_provenance;
     // Use this to track if we're inside of a registration 
     // callback function which we know to be deduplicated
     enum RegistrationCallbackMode {
@@ -2072,20 +2072,20 @@ namespace Legion {
       LOCAL_REGISTRATION_CALLBACK = 1,
       GLOBAL_REGISTRATION_CALLBACK = 2,
     };
-    extern __thread unsigned inside_registration_callback;
+    extern thread_local unsigned inside_registration_callback;
     // This data structure tracks references to any live
     // temporary index space expressions that have been
     // handed back by the region tree inside the execution
     // of a meta-task or a runtime API call. It also tracks
     // changes to remote distributed collectable that can be
     // delayed and batched together.
-    extern __thread ImplicitReferenceTracker *implicit_reference_tracker; 
+    extern thread_local ImplicitReferenceTracker *implicit_reference_tracker; 
 #ifdef DEBUG_LEGION_WAITS
-    extern __thread int meta_task_id;
+    extern thread_local int meta_task_id;
 #endif
 #ifdef DEBUG_LEGION_CALLERS
-    extern __thread LgTaskID implicit_task_kind;
-    extern __thread LgTaskID implicit_task_caller;
+    extern thread_local LgTaskID implicit_task_kind;
+    extern thread_local LgTaskID implicit_task_caller;
 #endif
 
     /**
@@ -2605,6 +2605,9 @@ namespace Legion {
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
       inline void wait_faultaware(bool &poisoned) const;
+    protected:
+      void begin_context_wait(Context ctx) const;
+      void end_context_wait(Context ctx) const;
     };
 
     class PredEvent : public LgEvent {
@@ -2979,11 +2982,15 @@ namespace Legion {
         // Make a user event and notify all the thread locks
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
+        if (local_ctx != NULL)
+          begin_context_wait(local_ctx); 
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
+        if (local_ctx != NULL)
+          end_context_wait(local_ctx);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -2993,10 +3000,14 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
+        if (local_ctx != NULL)
+          begin_context_wait(local_ctx);
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
+        if (local_ctx != NULL)
+          end_context_wait(local_ctx);
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
@@ -3052,11 +3063,15 @@ namespace Legion {
         // Make a user event and notify all the thread locks
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
+        if (local_ctx != NULL)
+          begin_context_wait(local_ctx);
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
+        if (local_ctx != NULL)
+          end_context_wait(local_ctx);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -3066,10 +3081,14 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
+        if (local_ctx != NULL)
+          begin_context_wait(local_ctx);
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
+        if (local_ctx != NULL)
+          end_context_wait(local_ctx);
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
