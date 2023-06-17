@@ -1181,13 +1181,6 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled)
-        {
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-          runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
-        }
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
