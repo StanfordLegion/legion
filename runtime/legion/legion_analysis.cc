@@ -13965,8 +13965,11 @@ namespace Legion {
                                          const bool already_deferred)
     //--------------------------------------------------------------------------
     {
+      std::vector<RtEvent> applied;
       set->clone_set(*this, expr, expr_covers, mask, deferral_events,
-                     applied_events, already_deferred);
+                     applied, already_deferred);
+      if (!applied.empty())
+        applied_events.insert(applied.begin(), applied.end());
       // No check for migration after this
       return false;
     }
@@ -21565,7 +21568,7 @@ namespace Legion {
                                    const bool expr_covers, 
                                    const FieldMask &clone_mask, 
                                    std::set<RtEvent> &deferral_events,
-                                   std::set<RtEvent> &applied_events,
+                                   std::vector<RtEvent> &applied_events,
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
@@ -21582,7 +21585,7 @@ namespace Legion {
           runtime->forest->intersect_index_spaces(expr, it->first->set_expr);
         if (overlap_expr->is_empty())
           continue;
-        it->first->clone_to_local(this, overlap, applied_events,
+        it->first->clone_to_local(this, overlap, overlap_expr, applied_events,
             false/*invalidate overlap*/, true/*forward to owner*/);
       }
     }
@@ -22034,30 +22037,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_from(const AddressSpaceID target_space,
                                     EquivalenceSet *src, const FieldMask &mask,
+                                    IndexSpaceExpression *clone_expr,
                                     const bool forward_to_owner,
-                                    std::set<RtEvent> &applied_events,
+                                    std::vector<RtEvent> &applied_events,
                                     const bool invalidate_overlap)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(this != src);
       assert(src->tree_id == tree_id);
 #endif
-      if (this == src)
-      {
-        // Empty equivalence sets can sometimes be asked to clone to themself
-#ifdef DEBUG_LEGION
-        assert(set_expr->is_empty());
-#endif
-        return;
-      }
       if (target_space == local_space)
       {
         AutoLock eq(eq_lock); 
-        src->clone_to_local(this, mask, applied_events, 
+        src->clone_to_local(this, mask, clone_expr, applied_events, 
                             invalidate_overlap, forward_to_owner);
       }
       else
-        src->clone_to_remote(did, target_space, set_expr,
+        src->clone_to_remote(did, target_space, set_expr, clone_expr,
              mask, applied_events, invalidate_overlap, forward_to_owner);
     }
 
@@ -22171,7 +22168,7 @@ namespace Legion {
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
 
-      std::set<RtEvent> ready_events;
+      std::vector<RtEvent> ready_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       set->unpack_state_and_apply(derez, source, false/*forward*/,ready_events);
@@ -22354,7 +22351,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::unpack_state_and_apply(Deserializer &derez,
                        const AddressSpaceID source, const bool forward_to_owner,
-                       std::set<RtEvent> &applied_events)
+                       std::vector<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
@@ -22564,7 +22561,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
                                        bool forward,
-                                       std::set<RtEvent> &applied_events,
+                                       std::vector<RtEvent> &applied_events,
                                        ExprLogicalViews &valid,
                                        FieldMaskSet<IndexSpaceExpression> &init,
                                        ExprReductionViews &reductions,
@@ -22618,7 +22615,7 @@ namespace Legion {
       released_updates->swap(released);
       read_only_updates->swap(read_only);
       reduction_fill_updates->swap(reduc_fill);
-      applied_events.insert(done_event);
+      applied_events.push_back(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -22655,7 +22652,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferApplyStateArgs *dargs = (const DeferApplyStateArgs*)args;
-      std::set<RtEvent> applied_events;
+      std::vector<RtEvent> applied_events;
       dargs->set->apply_state(*(dargs->valid_updates), 
           *(dargs->initialized_updates), *(dargs->reduction_updates),
           *(dargs->restricted_updates), *(dargs->released_updates),
@@ -22719,7 +22716,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_local(EquivalenceSet *dst, FieldMask mask,
-                     std::set<RtEvent> &applied_events, 
+                     IndexSpaceExpression *overlap,
+                     std::vector<RtEvent> &applied_events, 
                      const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
@@ -22738,13 +22736,14 @@ namespace Legion {
           rez.serialize(dst->did);
           rez.serialize(local_space);
           dst->set_expr->pack_expression(rez, logical_owner_space);
+          overlap->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
           rez.serialize<bool>(forward_to_owner);
         }
         runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
-        applied_events.insert(done_event);
+        applied_events.push_back(done_event);
         return;
       }
       // If we get here, we're performing the clone locally for these fields
@@ -22757,11 +22756,8 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
-      IndexSpaceExpression *overlap = NULL;
       if (!set_expr->is_empty())
       {
-        overlap = runtime->forest->intersect_index_spaces(set_expr, 
-                                                    dst->set_expr);
         const size_t overlap_volume = overlap->get_volume();
 #ifdef DEBUG_LEGION
         assert(overlap_volume > 0);
@@ -22804,10 +22800,19 @@ namespace Legion {
     void EquivalenceSet::clone_to_remote(DistributedID target, 
                      AddressSpaceID target_space, 
                      IndexSpaceExpression *target_expr, 
-                     FieldMask mask, std::set<RtEvent> &applied_events, 
+                     IndexSpaceExpression *overlap,
+                     FieldMask mask, std::vector<RtEvent> &applied_events, 
                      const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!overlap->is_empty());
+#endif
+      const size_t overlap_volume = overlap->get_volume();
+      const size_t set_volume = set_expr->get_volume();
+      const bool overlap_covers = (overlap_volume == set_volume); 
+      if (overlap_covers)
+        overlap = set_expr;
       // Lock in exclusive mode if we're doing an invalidate
       AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
       if (!is_logical_owner())
@@ -22820,48 +22825,39 @@ namespace Legion {
           rez.serialize(target);
           rez.serialize(target_space);
           target_expr->pack_expression(rez, logical_owner_space);
+          overlap->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
           rez.serialize<bool>(forward_to_owner);
         }
         runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
-        applied_events.insert(done_event);
-        return;
+        applied_events.push_back(done_event);
       }
-      IndexSpaceExpression *overlap =
-        runtime->forest->intersect_index_spaces(set_expr, target_expr);
-#ifdef DEBUG_LEGION
-      assert(!overlap->is_empty());
-#endif
-      const size_t overlap_volume = overlap->get_volume();
-      const size_t set_volume = set_expr->get_volume();
-      const bool overlap_covers = (overlap_volume == set_volume); 
-      if (overlap_covers)
-        overlap = set_expr;
-      else if (overlap_volume == target_expr->get_volume())
-        overlap = target_expr;
-      // If we make it here, then we've got valid data for the all the fields
-      const RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
+      else
       {
-        RezCheck z(rez);
-        rez.serialize(target);
-        rez.serialize(local_space);
-        rez.serialize(done_event);
-        rez.serialize<bool>(forward_to_owner);
-        pack_state(rez, target_space, target, target_expr, overlap,
-                   overlap_covers, mask, false/*pack guards*/);
+        // If we make it here, then we've got valid data for the all the fields
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(local_space);
+          rez.serialize(done_event);
+          rez.serialize<bool>(forward_to_owner);
+          pack_state(rez, target_space, target, target_expr, overlap,
+                     overlap_covers, mask, false/*pack guards*/);
+        }
+        runtime->send_equivalence_set_clone_response(target_space, rez);
+        if (invalidate_overlap)
+        {
+          if (!set_expr->is_empty())
+            invalidate_state(overlap, overlap_covers, mask);
+          else
+            invalidate_state(set_expr, true/*cover*/, mask);
+        }
+        applied_events.push_back(done_event);
       }
-      runtime->send_equivalence_set_clone_response(target_space, rez);
-      if (invalidate_overlap)
-      {
-        if (!set_expr->is_empty())
-          invalidate_state(overlap, overlap_covers, mask);
-        else
-          invalidate_state(set_expr, true/*cover*/, mask);
-      }
-      applied_events.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -23235,7 +23231,7 @@ namespace Legion {
                   TraceViewSet *postcondition_updates,
                   FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
                   FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
-                  std::set<RtEvent> &applied_events, 
+                  std::vector<RtEvent> &applied_events, 
                   const bool needs_lock, const bool forward_to_owner,
                   const bool unpack_references)
     //--------------------------------------------------------------------------
@@ -23304,7 +23300,7 @@ namespace Legion {
                      !unpack_references);
         }
         runtime->send_equivalence_set_clone_response(logical_owner_space, rez);
-        applied_events.insert(done_event);
+        applied_events.push_back(done_event);
         return;
       }
       const size_t dst_volume = set_expr->get_volume();
@@ -23464,6 +23460,8 @@ namespace Legion {
       derez.deserialize(target_space);
       IndexSpaceExpression *target_expr =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpaceExpression *overlap =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
       derez.deserialize(mask);
       RtUserEvent done_event;
@@ -23471,7 +23469,7 @@ namespace Legion {
       bool invalidate_overlap, forward_to_owner;
       derez.deserialize<bool>(invalidate_overlap);
       derez.deserialize<bool>(forward_to_owner);
-      std::set<RtEvent> applied_events;   
+      std::vector<RtEvent> applied_events;   
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       // Add a reference to make sure we don't race with sending the response
@@ -23483,12 +23481,12 @@ namespace Legion {
           runtime->find_or_request_equivalence_set(target, ready);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        dst->clone_from(target_space, set, mask, forward_to_owner,
+        dst->clone_from(target_space, set, mask, overlap, forward_to_owner,
                         applied_events, invalidate_overlap);
       }
       else
-        set->clone_to_remote(target, target_space, target_expr, mask,
-                  applied_events, invalidate_overlap, forward_to_owner);
+        set->clone_to_remote(target, target_space, target_expr, overlap, mask,
+                        applied_events, invalidate_overlap, forward_to_owner);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -23515,7 +23513,7 @@ namespace Legion {
       bool forward_to_owner;
       derez.deserialize(forward_to_owner);
 
-      std::set<RtEvent> applied_events;
+      std::vector<RtEvent> applied_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       set->unpack_state_and_apply(derez,source,forward_to_owner,applied_events);
@@ -24056,6 +24054,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression* EqSetTracker::SourceState::get_expression(void) const
+    //--------------------------------------------------------------------------
+    {
+      return source_expr;
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::SourceState::set_expression(IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(source_expr == NULL);
+#endif
+      source_expr = expr;
+      source_expr->add_base_expression_reference(DISJOINT_COMPLETE_REF);
+    }
+
+    //--------------------------------------------------------------------------
     void EqSetTracker::create_new_equivalence_sets(InnerContext *context,
          const FieldMask &mask, std::vector<RtEvent> &ready_events,
          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
@@ -24132,8 +24148,9 @@ namespace Legion {
         // is no point in making a new one and copying the data if we can
         // just reuse the existing one
         if (!(rit->set_mask * unique_sources.get_valid_mask()) &&
-            check_for_congruent_source_equivalence_sets(*rit, pending_sets,
-              unique_sources, creation_sources))
+            check_for_congruent_source_equivalence_sets(*rit, runtime,
+              ready_events, pending_sets, unique_sources,
+              create_now, creation_sources))
           continue;
         // First we need an expression for this equivalence set
         // If the total volume of all the rectangles is the same as the
@@ -24166,7 +24183,8 @@ namespace Legion {
               it = to_notify.begin(); it != to_notify.end(); it++)
           spaces.push_back(it->first);
         // Make sure we include our local space too
-        if (!spaces.empty())
+        if (!spaces.empty() && !std::binary_search(spaces.begin(), 
+                            spaces.end(), runtime->address_space))
         {
           spaces.push_back(runtime->address_space);
           std::sort(spaces.begin(), spaces.end());
@@ -24183,8 +24201,13 @@ namespace Legion {
         // Clone any meta-data from the source equivalence sets to
         // bring this new equivalence set up to date 
         RtEvent ready;
-        // TODO:
-
+        if (!creation_sources.empty())
+        {
+          ready = initialize_new_equivalence_set(set, rit->set_mask, 
+                                          runtime, creation_sources);
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
         // Notify any equivalence set kd tree nodes about the new set 
         if (mapping != NULL)
         {
@@ -24284,8 +24307,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EqSetTracker::check_for_congruent_source_equivalence_sets(
-        FieldSet<Domain> &dest, FieldMaskSet<EquivalenceSet> &pending_sets,
+        FieldSet<Domain> &dest, Runtime *runtime,
+        std::vector<RtEvent> &ready_events,
+        FieldMaskSet<EquivalenceSet> &pending_sets,
         FieldMaskSet<EquivalenceSet> &unique_sources,
+        LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
         std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources)
     //--------------------------------------------------------------------------
     {
@@ -24294,6 +24320,7 @@ namespace Legion {
             dest.elements.begin(); it != dest.elements.end(); it++)
         destination_volume += it->get_volume();
       std::vector<EquivalenceSet*> to_remove;
+      const AddressSpaceID local_space = runtime->address_space;
       for (FieldMaskSet<EquivalenceSet>::iterator eit =
             unique_sources.begin(); eit != unique_sources.end(); eit++)
       {
@@ -24331,9 +24358,90 @@ namespace Legion {
           {
             // This equivalence set is already valid for all the points
             // of the overlapping fields
-            // TODO
-
-
+            // Get the set of EqKDTree nodes that we need to notify
+            LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+            extract_remote_notifications(overlap, runtime->address_space,
+                                         create_now, to_notify);
+            std::vector<AddressSpaceID> spaces;
+            spaces.reserve(to_notify.size());
+            bool has_local_notifications = false;
+            for (LegionMap<AddressSpaceID,
+                           FieldMaskSet<EqKDTree> >::const_iterator
+                  it = to_notify.begin(); it != to_notify.end(); it++)
+            {
+              if (it->first == runtime->address_space)
+                has_local_notifications = true;;
+              spaces.push_back(it->first);
+            }
+            if (!spaces.empty())
+            {
+              if (!has_local_notifications)
+              {
+                // Make sure we include our local space too
+                spaces.push_back(local_space);
+                std::sort(spaces.begin(), spaces.end());
+              }
+              CollectiveMapping mapping(spaces, 
+                  runtime->legion_collective_radix);
+              std::vector<AddressSpaceID> children;
+              mapping.get_children(local_space, local_space, children);
+              for (std::vector<AddressSpaceID>::const_iterator cit =
+                    children.begin(); cit != children.end(); cit++)
+              {
+                const RtUserEvent notified = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  // Reference still held by at least one EqKDTree 
+                  // for which this is in the previous set
+                  rez.serialize(eit->first->did);
+                  rez.serialize(this);
+                  rez.serialize(local_space);
+                  mapping.pack(rez);
+                  if (has_local_notifications)
+                    rez.serialize<size_t>(to_notify.size() - 1);
+                  else
+                    rez.serialize<size_t>(to_notify.size());
+                  for (LegionMap<AddressSpaceID,
+                                 FieldMaskSet<EqKDTree> >::const_iterator nit =
+                        to_notify.begin(); nit != to_notify.end(); nit++)
+                  {
+                    if (nit->first == local_space)
+                      continue;
+                    rez.serialize(nit->first);
+                    rez.serialize(nit->second.size());
+                    for (FieldMaskSet<EqKDTree>::const_iterator it =
+                          nit->second.begin(); it != nit->second.end(); it++)
+                    {
+#ifdef DEBUG_LEGION
+                      assert(!(it->second - overlap));
+#endif
+                      rez.serialize(it->first);
+                      rez.serialize(it->second);
+                    }
+                  }
+                  rez.serialize(notified);
+                }
+                runtime->send_equivalence_set_reuse(*cit, rez);
+                ready_events.push_back(notified);
+              }
+            }
+            if (has_local_notifications)
+            {
+#ifdef DEBUG_LEGION
+              assert(to_notify.find(local_space) != to_notify.end());
+#endif
+              FieldMaskSet<EqKDTree> &local_trees = to_notify[local_space];
+              for (FieldMaskSet<EqKDTree>::const_iterator it =
+                    local_trees.begin(); it != local_trees.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(!(it->second - overlap));
+#endif
+                it->first->record_equivalence_set(eit->first, it->second,
+                    RtEvent::NO_RT_EVENT, this, local_space);
+              }
+            }
             pending_sets.insert(eit->first, overlap);
             dest.set_mask -= overlap;
             sit->set_mask -= overlap;
@@ -24405,6 +24513,66 @@ namespace Legion {
         else
           cit++;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent EqSetTracker::initialize_new_equivalence_set(EquivalenceSet *target,
+           const FieldMask &mask, Runtime *runtime, 
+           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RtEvent> ready_events;
+      for (std::map<EquivalenceSet*,LegionList<SourceState> >::iterator eit =
+           creation_sources.begin(); eit != creation_sources.end(); /*nothing*/)
+      {
+        for (LegionList<SourceState>::iterator sit =
+              eit->second.begin(); sit != eit->second.end(); /*nothing*/)
+        {
+          const FieldMask overlap = mask & sit->set_mask;
+          if (!overlap)
+          {
+            sit++;
+            continue;
+          }
+          IndexSpaceExpression *expression = sit->get_expression();
+          if (expression == NULL)
+          {
+            IndexSpaceExpression *intersection = 
+              runtime->forest->intersect_index_spaces(
+                  eit->first->set_expr, target->set_expr);
+            if (intersection->get_volume() == target->set_expr->get_volume())
+              intersection = target->set_expr;
+            else if (intersection->get_volume() == 
+                eit->first->set_expr->get_volume())
+              intersection = eit->first->set_expr;
+            expression = intersection->create_from_rectangles(sit->elements);
+            sit->set_expression(expression);
+          }
+          target->clone_from(runtime->address_space, eit->first, overlap,
+              expression, false/*forward to owner*/, ready_events, 
+              true/*invalidate overlap*/);
+          sit->set_mask -= overlap;
+          if (!sit->set_mask)
+          {
+            LegionList<SourceState>::iterator to_delete = sit++;
+            eit->second.erase(to_delete);
+          }
+          else
+            sit++;
+        }
+        if (eit->second.empty())
+        {
+          std::map<EquivalenceSet*,LegionList<SourceState> >::iterator
+            to_delete = eit++;
+          creation_sources.erase(to_delete);
+        }
+        else
+          eit++;
+      }
+      if (ready_events.empty())
+        return RtEvent::NO_RT_EVENT;
+      else
+        return Runtime::merge_events(ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -24608,6 +24776,98 @@ namespace Legion {
             Runtime::merge_events(notified_events));
       else
         Runtime::trigger_event(notified_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EqSetTracker::handle_equivalence_set_reuse(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      EqSetTracker *owner;
+      derez.deserialize(owner);
+      AddressSpaceID owner_space;
+      derez.deserialize(owner_space);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping mapping(derez, num_spaces);
+      size_t num_notifications;
+      derez.deserialize(num_notifications);
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+      for (unsigned idx1 = 0; idx1 < num_notifications; idx1++)
+      {
+        AddressSpaceID space;
+        derez.deserialize(space);
+        FieldMaskSet<EqKDTree> &trees = to_notify[space];
+        size_t num_trees;
+        derez.deserialize(num_trees);
+        for (unsigned idx2 = 0; idx2 < num_trees; idx2++)
+        {
+          EqKDTree *tree;
+          derez.deserialize(tree);
+          FieldMask mask;
+          derez.deserialize(mask);
+          trees.insert(tree, mask);
+        }
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      std::vector<AddressSpaceID> children;
+      mapping.get_children(owner_space, runtime->address_space, children);
+      std::vector<RtEvent> done_events;
+      for (std::vector<AddressSpaceID>::const_iterator cit =
+            children.begin(); cit != children.end(); cit++)
+      {
+        const RtUserEvent notified = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          // Reference still held by at least one EqKDTree 
+          // for which this is in the previous set
+          rez.serialize(did);
+          rez.serialize(owner);
+          rez.serialize(owner_space);
+          mapping.pack(rez);
+          rez.serialize<size_t>(to_notify.size() - 1);
+          for (LegionMap<AddressSpaceID,
+                         FieldMaskSet<EqKDTree> >::const_iterator nit =
+                to_notify.begin(); nit != to_notify.end(); nit++)
+          {
+            if (nit->first == runtime->address_space)
+              continue;
+            rez.serialize(nit->first);
+            rez.serialize(nit->second.size());
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  nit->second.begin(); it != nit->second.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+          }
+          rez.serialize(notified);
+        }
+        runtime->send_equivalence_set_reuse(*cit, rez);
+        done_events.push_back(notified);
+      }
+#ifdef DEBUG_LEGION
+      assert(to_notify.find(runtime->address_space) != to_notify.end());
+#endif
+      FieldMaskSet<EqKDTree> &local_trees = to_notify[runtime->address_space];
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      for (FieldMaskSet<EqKDTree>::const_iterator it =
+            local_trees.begin(); it != local_trees.end(); it++)
+        it->first->record_equivalence_set(set, it->second,
+            RtEvent::NO_RT_EVENT, owner, owner_space);
+      if (!done_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------

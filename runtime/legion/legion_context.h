@@ -1161,12 +1161,12 @@ namespace Legion {
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           size_t expected_responses, std::vector<RtEvent> &ready_events);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
+#if 0
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index, 
           std::set<RtEvent> &applied_events);
-#if 0
       virtual void compute_shard_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, IndexSpaceExpression *expr,
           LogicalPartition partition, std::set<RtEvent> &ready_events,
@@ -3001,11 +3001,13 @@ namespace Legion {
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
+#if 0
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index,
           std::set<RtEvent> &applied_events);
+#endif
       void handle_compute_equivalence_sets(Deserializer &derez);
       void handle_refine_equivalence_sets(Deserializer &derez);
 #if 0

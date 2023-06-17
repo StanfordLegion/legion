@@ -4107,6 +4107,7 @@ namespace Legion {
       return node->create_equivalence_set_kd_tree();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     EquivalenceSet* InnerContext::create_equivalence_set(RegionNode *node,
         size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
@@ -4131,6 +4132,7 @@ namespace Legion {
       }
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InnerContext::refine_equivalence_sets(unsigned req_index,
@@ -22105,6 +22107,7 @@ namespace Legion {
       return node->create_equivalence_set_kd_tree(total_shards);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     EquivalenceSet* ReplicateContext::create_equivalence_set(RegionNode *node,
         size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
@@ -22145,6 +22148,7 @@ namespace Legion {
                             creating_shards, mask, old_sets, 
                             refinement_number, index, applied_events);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::refine_equivalence_sets(unsigned req_index,

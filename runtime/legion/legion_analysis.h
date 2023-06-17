@@ -3578,6 +3578,8 @@ namespace Legion {
           Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_creation(Deserializer &derez,
                                                   Runtime *runtime);
+      static void handle_equivalence_set_reuse(Deserializer &derez,
+                                               Runtime *runtime);
       void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       static void handle_pending_equivalence_set(Deserializer &derez,
@@ -3602,17 +3604,26 @@ namespace Legion {
           FieldSet(m), source_expr(NULL), source_volume(0) { }
         ~SourceState(void);
       public:
+        IndexSpaceExpression* get_expression(void) const;
+        void set_expression(IndexSpaceExpression *expr);
+      public:
         IndexSpaceExpression *source_expr;
         size_t source_volume;
       };
-      bool check_for_congruent_source_equivalence_sets(FieldSet<Domain> &dest,
+      bool check_for_congruent_source_equivalence_sets(
+          FieldSet<Domain> &dest, Runtime *runtime,
+          std::vector<RtEvent> &ready_events,
           FieldMaskSet<EquivalenceSet> &pending_sets,
           FieldMaskSet<EquivalenceSet> &unique_sources,
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
       void extract_remote_notifications(const FieldMask &mask,
           AddressSpaceID local_space,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_notify);
+      RtEvent initialize_new_equivalence_set(EquivalenceSet *set,
+          const FieldMask &mask, Runtime *runtime,
+          std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
     protected:
       LocalLock &tracker_lock;
       FieldMaskSet<EquivalenceSet> equivalence_sets;
@@ -3683,7 +3694,7 @@ namespace Legion {
       public:
         DeferApplyStateArgs(EquivalenceSet *set,
                             const bool foward_to_owner,
-                            std::set<RtEvent> &applied_events,
+                            std::vector<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
                             FieldMaskSet<IndexSpaceExpression> &init_updates,
                             ExprReductionViews &reduction_updates,
@@ -3806,7 +3817,7 @@ namespace Legion {
                      IndexSpaceExpression *expr, const bool expr_covers,
                      const FieldMask &clone_mask,
                      std::set<RtEvent> &deferral_events,
-                     std::set<RtEvent> &applied_events,
+                     std::vector<RtEvent> &applied_events,
                      const bool already_deferred = false);
     public:
       void initialize_collective_references(unsigned local_valid_refs);
@@ -3814,8 +3825,9 @@ namespace Legion {
       void remove_reduction_fill_guard(CopyFillGuard *guard);
       void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
                       const FieldMask &clone_mask,
+                      IndexSpaceExpression *clone_expr,
                       const bool forward_to_owner,
-                      std::set<RtEvent> &applied_events, 
+                      std::vector<RtEvent> &applied_events, 
                       const bool invalidate_overlap = false);
       RtEvent make_owner(AddressSpaceID owner, 
                          RtEvent precondition = RtEvent::NO_RT_EVENT);
@@ -4026,16 +4038,18 @@ namespace Legion {
             const FieldMask &mask, const bool pack_guards);
       void unpack_state_and_apply(Deserializer &derez, 
           const AddressSpaceID source, const bool forward_to_owner,
-          std::set<RtEvent> &ready_events);
+          std::vector<RtEvent> &ready_events);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &mask);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
-                          std::set<RtEvent> &applied_events,
+                          IndexSpaceExpression *clone_expr,
+                          std::vector<RtEvent> &applied_events,
                           const bool invalidate_overlap,
                           const bool forward_to_owner);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
-                    IndexSpaceExpression *target_expr, FieldMask mask,
-                    std::set<RtEvent> &applied_events,
+                    IndexSpaceExpression *target_expr, 
+                    IndexSpaceExpression *overlap, FieldMask mask,
+                    std::vector<RtEvent> &applied_events,
                     const bool invalidate_overlap, const bool forward_to_owner);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask, 
@@ -4068,7 +4082,7 @@ namespace Legion {
             TraceViewSet *postcondition_updates,
             FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
-            std::set<RtEvent> &applied_events,
+            std::vector<RtEvent> &applied_events,
             const bool needs_lock, const bool forward_to_owner,
             const bool unpack_references);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,

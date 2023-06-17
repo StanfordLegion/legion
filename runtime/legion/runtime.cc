@@ -13017,6 +13017,11 @@ namespace Legion {
               runtime->handle_equivalence_set_creation(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_REUSE:
+            {
+              runtime->handle_equivalence_set_reuse(derez);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REQUEST:
             {
               runtime->handle_equivalence_set_request(derez); 
@@ -23109,13 +23114,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_reuse(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_EQUIVALENCE_SET_REUSE>(rez,
+                                              true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_response(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_EQUIVALENCE_SET_RESPONSE>(rez,
                                               true/*flush*/, true/*response*/);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_replication_request(
@@ -25427,6 +25441,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EqSetTracker::handle_equivalence_set_creation(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_reuse(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker::handle_equivalence_set_reuse(derez, this);
     }
 
     //--------------------------------------------------------------------------
