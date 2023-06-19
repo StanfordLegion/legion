@@ -12,6 +12,8 @@ use legion_prof_viewer::{
 #[cfg(feature = "client")]
 use url::Url;
 
+#[cfg(feature = "archiver")]
+use legion_prof::backend::archiver;
 #[cfg(feature = "server")]
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
@@ -35,27 +37,21 @@ struct Cli {
     )]
     output: OsString,
 
-    #[arg(
-        long = "start-trim",
-        help = "start time in microseconds to trim the profile"
-    )]
+    #[arg(long, help = "start time in microseconds to trim the profile")]
     start_trim: Option<u64>,
 
-    #[arg(
-        long = "stop-trim",
-        help = "stop time in microseconds to trim the profile"
-    )]
+    #[arg(long, help = "stop time in microseconds to trim the profile")]
     stop_trim: Option<u64>,
 
     #[arg(
-        long = "message-threshold",
+        long,
         default_value_t = 1000.0,
         help = "threshold for warning about message latencies in microseconds"
     )]
     message_threshold: f64,
 
     #[arg(
-        long = "message-percentage",
+        long,
         default_value_t = 5.0,
         help = "perentage of messages that must be over the threshold to trigger a warning"
     )]
@@ -65,7 +61,7 @@ struct Cli {
     nodes: Option<String>,
 
     #[arg(
-        long = "no-filter-input",
+        long,
         hide = true,
         help = "parse all log files, even when a subset of nodes are being shown (uses more memory)"
     )]
@@ -73,6 +69,9 @@ struct Cli {
 
     #[arg(short, long, help = "overwrite output directory if it exists")]
     force: bool,
+
+    #[arg(long, help = "dump an archive of the profile for sharing")]
+    archive: bool,
 
     #[arg(long, help = "connect viewer to the specified HTTP profile server")]
     attach: bool,
@@ -101,6 +100,12 @@ struct Cli {
 
     #[arg(long, default_value_t = 8080, help = "port to bind for HTTP server")]
     port: u16,
+
+    #[arg(long, default_value_t = 4, help = "number of zoom levels to archive")]
+    levels: u32,
+
+    #[arg(long, default_value_t = 4, help = "branch factor for archive")]
+    branch_factor: u64,
 }
 
 fn main() -> io::Result<()> {
@@ -131,6 +136,14 @@ fn main() -> io::Result<()> {
         filter_input = !cli.no_filter_input;
     }
 
+    #[cfg(not(feature = "archiver"))]
+    if cli.archive {
+        panic!(
+            "Legion Prof was not build with the \"archiver\" feature. \
+                Rebuild with --features=archiver to enable."
+        );
+    }
+
     #[cfg(not(feature = "client"))]
     if cli.attach {
         panic!(
@@ -155,10 +168,17 @@ fn main() -> io::Result<()> {
         );
     }
 
-    if [cli.attach, cli.serve, cli.view, cli.statistics, cli.trace]
-        .iter()
-        .filter(|x| **x)
-        .count()
+    if [
+        cli.archive,
+        cli.attach,
+        cli.serve,
+        cli.view,
+        cli.statistics,
+        cli.trace,
+    ]
+    .iter()
+    .filter(|x| **x)
+    .count()
         > 1
     {
         panic!(
@@ -251,6 +271,12 @@ fn main() -> io::Result<()> {
         analyze::print_statistics(&state);
     } else if cli.trace {
         trace_viewer::emit_trace(&state, cli.output, cli.force)?;
+    } else if cli.archive {
+        #[cfg(feature = "archiver")]
+        {
+            state.assign_colors();
+            archiver::write(state, cli.levels, cli.branch_factor, cli.output, cli.force)?;
+        }
     } else if cli.serve {
         #[cfg(feature = "server")]
         {

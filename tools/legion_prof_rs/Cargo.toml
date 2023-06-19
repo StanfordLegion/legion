@@ -6,9 +6,10 @@ rust-version = "1.67"
 
 [features]
 default = []
-viewer = ["dep:legion_prof_viewer"]
+archiver = ["dep:legion_prof_viewer"]
 client = ["dep:legion_prof_viewer", "dep:url", "legion_prof_viewer?/client"]
 server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
+viewer = ["dep:legion_prof_viewer"]
 
 [dependencies]
 clap = { version = "4", features = ["cargo", "derive"] }
