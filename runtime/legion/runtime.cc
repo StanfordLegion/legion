@@ -12958,10 +12958,10 @@ namespace Legion {
                                                    remote_address_space);
               break;
             }
-          case SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION:
+          case SEND_INVALIDATE_EQUIVALENCE_SETS_SUBSCRIPTION:
             {
-              runtime->handle_finish_equivalence_sets_subscription(derez,
-                                                    remote_address_space);
+              runtime->handle_invalidate_equivalence_sets_subscription(derez,
+                                                       remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_CREATION:
@@ -23047,12 +23047,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_finish_equivalence_sets_subscription(
+    void Runtime::send_invalidate_equivalence_sets_subscription(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-        SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION>(
+        SEND_INVALIDATE_EQUIVALENCE_SETS_SUBSCRIPTION>(
             rez, true/*flush*/, true/*response*/);
     }
 
@@ -25381,11 +25381,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_finish_equivalence_sets_subscription(
+    void Runtime::handle_invalidate_equivalence_sets_subscription(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      EqSetTracker::handle_finish_subscription(derez, this, source);
+      EqSetTracker::handle_invalidate_subscription(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

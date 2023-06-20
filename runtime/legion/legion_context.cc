@@ -3808,21 +3808,20 @@ namespace Legion {
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
       // Then ask the index space expression to traverse the tree for
       // all of its rectangles and find the equivalence sets that are needed
-      FieldMaskSet<EqKDTree> to_create;
+      FieldMaskSet<EqKDTree> to_create, new_subscriptions;
       FieldMaskSet<EquivalenceSet> eq_sets;
       std::vector<RtEvent> pending_sets;
-      std::vector<EqKDTree*> subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       expr->compute_equivalence_sets(tree, mask, target, target_space,
-          eq_sets, pending_sets, subscriptions, to_create, 
+          eq_sets, pending_sets, new_subscriptions, to_create, 
           creation_rects, creation_srcs, remote_shard_rects);
 #ifdef DEBUG_LEGION
       assert(remote_shard_rects.empty());
 #endif
       return report_equivalence_sets(target, target_space, mask,
-          eq_sets, subscriptions, to_create, creation_rects,
+          eq_sets, new_subscriptions, to_create, creation_rects,
           creation_srcs, 1/*expected responses*/, pending_sets);
     }
 
@@ -3830,7 +3829,7 @@ namespace Legion {
     RtEvent InnerContext::report_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, const FieldMask &mask,
           FieldMaskSet<EquivalenceSet> &eq_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &new_subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -3857,9 +3856,13 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          rez.serialize<size_t>(subscriptions.size());
-          for (unsigned idx = 0; idx < subscriptions.size(); idx++)
-            rez.serialize(subscriptions[idx]);
+          rez.serialize<size_t>(new_subscriptions.size());
+          for (FieldMaskSet<EqKDTree>::const_iterator it =
+                new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
           rez.serialize(to_create.size());
           for (FieldMaskSet<EqKDTree>::const_iterator it =
                 to_create.begin(); it != to_create.end(); it++)
@@ -3899,7 +3902,7 @@ namespace Legion {
         // We can report the results back immediately
         // Do the creation ones first if there are any to get them in flight
         target->record_equivalence_sets(this, mask, eq_sets, to_create, 
-            creation_rects, creation_srcs, subscriptions, local_space, 
+            creation_rects, creation_srcs, new_subscriptions, local_space, 
             expected_responses, ready_events);
       }
       if (!ready_events.empty())
@@ -3942,9 +3945,15 @@ namespace Legion {
       }
       size_t num_subscriptions;
       derez.deserialize(num_subscriptions);
-      std::vector<EqKDTree*> subscriptions(num_subscriptions);
+      FieldMaskSet<EqKDTree> new_subscriptions;
       for (unsigned idx = 0; idx < num_subscriptions; idx++)
-        derez.deserialize(subscriptions[idx]);
+      {
+        EqKDTree *tree;
+        derez.deserialize(tree);
+        FieldMask mask;
+        derez.deserialize(mask);
+        new_subscriptions.insert(tree, mask);
+      }
       size_t num_creations;
       derez.deserialize(num_creations);
       FieldMaskSet<EqKDTree> to_create;
@@ -3996,8 +4005,8 @@ namespace Legion {
       else if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
       target->record_equivalence_sets(context, mask, eq_sets, to_create,
-                                  creation_rects, creation_srcs, subscriptions,
-                                  source, expected_responses, done_events);
+                              creation_rects, creation_srcs, new_subscriptions,
+                              source, expected_responses, done_events);
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else
@@ -4148,7 +4157,7 @@ namespace Legion {
 #endif
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
       node->invalidate_equivalence_set_kd_tree(tree, refinement_mask,
-                                               true/*move to previous*/);
+                            applied_events, true/*move to previous*/);
     }
 
 #if 0
@@ -10853,8 +10862,12 @@ namespace Legion {
         // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
+        std::vector<RtEvent> applied_events;
         node->row_source->invalidate_equivalence_set_kd_tree(
-            equivalence_set_trees[idx], close_mask, false/*move to previous*/);
+            equivalence_set_trees[idx], close_mask, 
+            applied_events, false/*move to previous*/);
+        if (!applied_events.empty())
+          applied.insert(applied_events.begin(), applied_events.end());
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied,
@@ -10915,9 +10928,12 @@ namespace Legion {
           assert(return_regions.find(it->second.region) == 
                   return_regions.end());
 #endif
+          std::vector<RtEvent> applied;
           node->row_source->invalidate_equivalence_set_kd_tree(
-                equivalence_set_trees[it->first],
-                all_ones_mask, false/*move to previous*/);
+                equivalence_set_trees[it->first], all_ones_mask, 
+                applied, false/*move to previous*/);
+          if (!applied.empty())
+            applied_events.insert(applied.begin(), applied.end());
         }
       }
       if (!return_regions.empty())
@@ -10980,15 +10996,18 @@ namespace Legion {
           equivalence_set_trees[index] = current;
           // Filter all the current equivalence sets on to the previous
           const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+          std::vector<RtEvent> applied;
           created_nodes[idx]->row_source->invalidate_equivalence_set_kd_tree(
-              current, all_ones_mask, true/*move to previous*/);
+              current, all_ones_mask, applied, true/*move to previous*/);
+          if (!applied.empty())
+            applied_events.insert(applied.begin(), applied.end());
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_context(LogicalRegion handle,
-                                                      unsigned req_index)
+                          unsigned req_index, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(handle);
@@ -10998,9 +11017,12 @@ namespace Legion {
         find_equivalence_set_kd_tree(req_index, true/*null if doesn't exist*/);
       if (tree != NULL)
       {
+        std::vector<RtEvent> applied;
         const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         node->row_source->invalidate_equivalence_set_kd_tree(tree,
-            all_ones_mask, false/*move to previous*/);
+            all_ones_mask, applied, false/*move to previous*/);
+        if (!applied.empty())
+          applied_events.insert(applied.begin(), applied.end());
       }
     }
 
@@ -11066,7 +11088,7 @@ namespace Legion {
               continue;
             }
             // Found it so we can perform the invalidation
-            invalidate_region_tree_context(cit->first, it->first);
+            invalidate_region_tree_context(cit->first, it->first, preconds);
             break;
           }
         }
@@ -22061,12 +22083,12 @@ namespace Legion {
       FieldMaskSet<EqKDTree> to_create;
       FieldMaskSet<EquivalenceSet> eq_sets;
       std::vector<RtEvent> pending_sets;
-      std::vector<EqKDTree*> subscriptions;
+      FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       expr->compute_equivalence_sets(tree, mask, target, target_space,
-          eq_sets, pending_sets, subscriptions, to_create, creation_rects,
+          eq_sets, pending_sets, new_subscriptions, to_create, creation_rects,
           creation_srcs, remote_shard_rects, owner_shard->shard_id);
 #ifdef DEBUG_LEGION
       assert(to_create.size() == creation_rects.size());
@@ -22096,7 +22118,7 @@ namespace Legion {
         pending_sets.push_back(ready);
       }
       return report_equivalence_sets(target, target_space, mask, eq_sets,
-          subscriptions, to_create, creation_rects, creation_srcs,
+          new_subscriptions, to_create, creation_rects, creation_srcs,
           remote_shard_rects.size() + 1, pending_sets);
     }
 
@@ -22164,7 +22186,7 @@ namespace Legion {
         EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
         std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
         node->invalidate_shard_equivalence_set_kd_tree(tree, refinement_mask,
-                                   remote_shard_rects, owner_shard->shard_id);
+                   applied_events, remote_shard_rects, owner_shard->shard_id);
         // If there are any remote then send them to the target shard
         for (std::map<ShardID,LegionMap<Domain,FieldMask> >::const_iterator 
               sit = remote_shard_rects.begin();
@@ -22201,17 +22223,21 @@ namespace Legion {
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
       size_t num_rects;
       derez.deserialize(num_rects);
+      std::vector<RtEvent> invalidated;
       for (unsigned idx = 0; idx < num_rects; idx++)
       {
         Domain domain;
         derez.deserialize(domain);
         FieldMask mask;
         derez.deserialize(mask);
-        tree->invalidate_shard_tree(domain, mask);
+        tree->invalidate_shard_tree(domain, mask, invalidated);
       }
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
+      if (!invalidated.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(invalidated));
+      else
+        Runtime::trigger_event(done_event);
     }
 
 #if 0
@@ -22285,19 +22311,19 @@ namespace Legion {
       FieldMaskSet<EqKDTree> to_create;
       FieldMaskSet<EquivalenceSet> eq_sets;
       std::vector<RtEvent> pending_sets;
-      std::vector<EqKDTree*> subscriptions;
+      FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
       for (LegionMap<Domain,FieldMask>::const_iterator it =
             shard_rects.begin(); it != shard_rects.end(); it++)
         tree->compute_shard_equivalence_sets(it->first, it->second, target,
-            target_space, eq_sets, pending_sets, subscriptions, to_create,
+            target_space, eq_sets, pending_sets, new_subscriptions, to_create,
             creation_rects, creation_srcs, owner_shard->shard_id);
       // Now we can send the responses
       RtEvent ready = report_equivalence_sets(target, target_space, mask, 
-                            eq_sets, subscriptions, to_create, creation_rects,
-                            creation_srcs, expected_responses, pending_sets);
+                          eq_sets, new_subscriptions, to_create, creation_rects,
+                          creation_srcs, expected_responses, pending_sets);
       Runtime::trigger_event(ready_event, ready);
     }
 

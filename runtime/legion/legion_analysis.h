@@ -3525,16 +3525,13 @@ namespace Legion {
       FieldMask found_covered;
     };
 
-    /**
-     * \struct SubscriberInvalidations
-     * A small helper class for tracking data associated with invalidating
-     * subscriptions by EqSetTrackers
-     */
+    template<typename T>
     struct SubscriberInvalidations : 
-      public LegionHeapify<SubscriberInvalidations> {
-      FieldMaskSet<EqSetTracker> subscribers;
-      std::vector<EqSetTracker*> finished;
-      bool delete_all;
+      public LegionHeapify<SubscriberInvalidations<T> > {
+      SubscriberInvalidations(void) : all_subscribers_finished(false) { }
+      FieldMaskSet<T> subscribers;
+      std::vector<T*> finished;
+      bool all_subscribers_finished;
     };
 
     /**
@@ -3554,27 +3551,36 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           AddressSpaceID source, unsigned expected_responses,
           std::vector<RtEvent> &ready_events);
     public:
-      virtual void add_subscription_reference(void) = 0;
-      virtual bool remove_subscription_reference(void) = 0;
+      virtual void add_subscription_reference(unsigned count = 1) = 0;
+      virtual bool remove_subscription_reference(unsigned count = 1) = 0;
     public:
       virtual RegionTreeID get_region_tree_id(void) const = 0;
       virtual IndexSpaceExpression* get_tracker_expression(void) const = 0;
       virtual size_t count_outstanding_requests(void) const = 0;
-      virtual void invalidate_equivalence_sets(const FieldMask &mask) = 0;
+      virtual ReferenceSource get_reference_source_kind(void) const = 0;
     public:
+      bool invalidate_equivalence_sets(Runtime *runtime, const FieldMask &mask,
+                    EqKDTree *tree, AddressSpaceID source, 
+                    std::vector<RtEvent> &invalidated_events);
+      typedef SubscriberInvalidations<EqKDTree> TreeInvalidations;
       void cancel_subscriptions(Runtime *runtime,
-       const std::map<AddressSpaceID,std::vector<EqKDTree*> > &to_cancel);
-      bool finish_subscription(EqKDTree *owner, AddressSpaceID space);
-      static void finish_subscriptions(Runtime *runtime, EqKDTree &source,
-          LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-          std::set<RtEvent> &applied_events);
+          const LegionMap<AddressSpaceID,TreeInvalidations> &to_cancel,
+          std::vector<RtEvent> *cancelled_events = NULL);
+#if 0
+      bool finish_subscription(EqKDTree *owner, AddressSpaceID space,
+                               const FieldMask &mask);
+#endif
+      typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
+      static void invalidate_subscriptions(Runtime *runtime, EqKDTree *source,
+          LegionMap<AddressSpaceID,TrackerInvalidations> &subscribers,
+          std::vector<RtEvent> &applied_events);
       static void handle_cancel_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
-      static void handle_finish_subscription(Deserializer &derez,
+      static void handle_invalidate_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_creation(Deserializer &derez,
                                                   Runtime *runtime);
@@ -3585,6 +3591,8 @@ namespace Legion {
       static void handle_pending_equivalence_set(Deserializer &derez,
                                                  Runtime *runtime);
     protected:
+      void record_subscriptions(AddressSpaceID source,
+                const FieldMaskSet<EqKDTree> &new_subs);
       void record_creation_sets(FieldMaskSet<EqKDTree> &to_create,
          std::map<EqKDTree*,Domain> &creation_rects, AddressSpaceID source,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
@@ -3628,14 +3636,10 @@ namespace Legion {
       LocalLock &tracker_lock;
       FieldMaskSet<EquivalenceSet> equivalence_sets;
       FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
-      // Keep track of our subscription owners
-      // Note that from the owners perspective it only has at most one
-      // reference to this subscriber at a time, but in practice the
-      // removal of references can be delayed arbitrarily so we need to
-      // keep a count of how many outstanding references there are for
-      // each owner so we know when it is done
-      std::map<
-        std::pair<EqKDTree*,AddressSpaceID>,unsigned>     subscription_owners;
+      // These are the EqKDTree objects that we are currently subscribed to
+      // for different fields in each address space, this data mirrors the 
+      // same data structure in EqKDNode
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > current_subscriptions;
       // These all help with the creation of equivalence sets for which we
       // are the first request to access them 
       LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >     creation_requests;
@@ -4320,12 +4324,13 @@ namespace Legion {
                                    const bool expr_covers,
                                    std::set<RtEvent> &ready_events) const;
     public:
-      virtual void add_subscription_reference(void);
-      virtual bool remove_subscription_reference(void);
+      virtual void add_subscription_reference(unsigned count = 1);
+      virtual bool remove_subscription_reference(unsigned count = 1);
       virtual RegionTreeID get_region_tree_id(void) const;
       virtual IndexSpaceExpression* get_tracker_expression(void) const;
       virtual size_t count_outstanding_requests(void) const;
-      virtual void invalidate_equivalence_sets(const FieldMask &mask);
+      virtual ReferenceSource get_reference_source_kind(void) const 
+        { return VERSION_MANAGER_REF; } 
     public:
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);

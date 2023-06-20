@@ -1387,12 +1387,12 @@ namespace Legion {
                   std::set<IndexSpaceExpression*> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
-      virtual void compute_equivalence_sets(
+      virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -1695,12 +1695,12 @@ namespace Legion {
                   std::set<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
-      virtual void compute_equivalence_sets(
+      virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -2317,9 +2317,11 @@ namespace Legion {
                                         bool current) = 0;
       virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
                                         bool move_to_previous) = 0;
       virtual void invalidate_shard_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
                                         ShardID local_shard) = 0;
     public:
@@ -2627,12 +2629,12 @@ namespace Legion {
                                         EquivalenceSet *set,
                                         const FieldMask &mask,
                                         bool current);
-      virtual void compute_equivalence_sets(
+      virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -2640,9 +2642,11 @@ namespace Legion {
           ShardID local_shard = 0);
       virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
                                         bool move_to_previous);
       virtual void invalidate_shard_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
                                         ShardID local_shard);
     public:
@@ -3020,12 +3024,12 @@ namespace Legion {
     public:
       virtual ~EqKDTree(void) = 0;
     public:
-      virtual void compute_shard_equivalence_sets(
+      virtual unsigned compute_shard_equivalence_sets(
           const Domain &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -3042,9 +3046,11 @@ namespace Legion {
           ShardID source_shard, size_t total_source_shards,
           size_t total_target_shards, RegionNode *region) = 0;
       virtual void invalidate_shard_tree(const Domain &domain,
-                                         const FieldMask &mask) = 0;
+                                         const FieldMask &mask,
+                                         std::vector<RtEvent> &invalidated) = 0;
+      // Return true if we should remove the reference on the origin tracker
       virtual bool cancel_subscription(EqSetTracker *tracker,
-                                       AddressSpaceID space) = 0;
+                               AddressSpaceID space, const FieldMask &mask) = 0;
       // Just use this method of indirecting into template land
       virtual IndexSpaceExpression* create_from_rectangles(
                           RegionTreeForest *forest, 
@@ -3067,22 +3073,22 @@ namespace Legion {
                                   const Rect<DIM,T> &rect,
                                   const FieldMask &mask,
                                   bool current) = 0;
-      virtual void compute_shard_equivalence_sets(
+      virtual unsigned compute_shard_equivalence_sets(
           const Domain &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           ShardID local_shard);
-      virtual void compute_equivalence_sets(
+      virtual unsigned compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -3098,15 +3104,18 @@ namespace Legion {
           size_t total_target_shards, RegionNode *region);
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask,
+                                   std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous) = 0;
       virtual void invalidate_shard_tree(const Domain &domain,
-                                         const FieldMask &mask);
+                                         const FieldMask &mask,
+                                         std::vector<RtEvent> &invalidated);
       virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
+                                         std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0) = 0;
       virtual bool cancel_subscription(EqSetTracker *tracker,
-                                       AddressSpaceID space) = 0;
+                           AddressSpaceID space, const FieldMask &mask) = 0;
       // Just use this method of indirecting into template land
       virtual IndexSpaceExpression* create_from_rectangles(
                           RegionTreeForest *forest,
@@ -3133,12 +3142,12 @@ namespace Legion {
                                   const Rect<DIM,T> &rect,
                                   const FieldMask &mask,
                                   bool current);
-      virtual void compute_equivalence_sets(
+      virtual unsigned compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -3152,20 +3161,22 @@ namespace Legion {
           ShardID local_shard, size_t total_shards) const; 
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask,
+                                   std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous);
       virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
+                                         std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
       virtual bool cancel_subscription(EqSetTracker *tracker,
-                                       AddressSpaceID space);
+                                 AddressSpaceID space, const FieldMask &mask);
     public:
       void find_all_previous_sets(FieldMask mask,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
       void invalidate_all_previous_sets(const FieldMask &mask);
     protected:
       void refine_node(const Rect<DIM,T> &rect, const FieldMask &mask);
-      void record_subscription(EqSetTracker *tracker, 
+      bool record_subscription(EqSetTracker *tracker, 
           AddressSpaceID tracker_space, const FieldMask &mask);
       void clone_current(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
                          FieldMask clone_mask);
@@ -3195,7 +3206,7 @@ namespace Legion {
       // Postconditions for the creation of each of the pending sets
       std::map<RtUserEvent,std::vector<RtEvent> > *pending_postconditions;
       // Trackers on different nodes that are currently tracking the state
-      // of this node
+      // of this node for different fields
       LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > *subscriptions;
     };
 
@@ -3218,12 +3229,12 @@ namespace Legion {
                                   const Rect<DIM,T> &rect,
                                   const FieldMask &mask,
                                   bool current);
-      virtual void compute_equivalence_sets(
+      virtual unsigned compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -3237,13 +3248,15 @@ namespace Legion {
           ShardID local_shard, size_t total_shards) const;
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask,
+                                   std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous);
       virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
+                                         std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
       virtual bool cancel_subscription(EqSetTracker *tracker,
-                                       AddressSpaceID space);
+                               AddressSpaceID space, const FieldMask &mask);
     protected:
       std::vector<EqKDTreeT<DIM,T>*> children;
     };

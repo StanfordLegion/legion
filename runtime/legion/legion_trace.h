@@ -854,16 +854,17 @@ namespace Legion {
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
     public:
-      virtual void add_subscription_reference(void) 
-        { add_reference(); }
-      virtual bool remove_subscription_reference(void) 
-        { return remove_reference(); }
+      virtual void add_subscription_reference(unsigned count = 1)
+        { add_reference(count); }
+      virtual bool remove_subscription_reference(unsigned count = 1)
+        { return remove_reference(count); }
       virtual RegionTreeID get_region_tree_id(void) const
         { return tree_id; }
       virtual IndexSpaceExpression* get_tracker_expression(void) const
         { return condition_expr; }
       virtual size_t count_outstanding_requests(void) const { return 1; }
-      virtual void invalidate_equivalence_sets(const FieldMask &mask);
+      virtual ReferenceSource get_reference_source_kind(void) const 
+        { return TRACE_REF; }
     public:
       void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, const FieldMask &mask,
@@ -886,7 +887,8 @@ namespace Legion {
       static void handle_postcondition_test(const void *args);
       static void handle_finalize_sets(const void *args);
     public:
-      RtEvent recompute_equivalence_sets(UniqueID opid);
+      RtEvent recompute_equivalence_sets(UniqueID opid, 
+                        const FieldMask &invalid_mask);
       void finalize_computed_sets(void);
     public:
       InnerContext *const context;
@@ -897,7 +899,6 @@ namespace Legion {
       const unsigned parent_req_index;
     private:
       mutable LocalLock set_lock;
-      FieldMask invalid_mask;
     private:
       TraceViewSet *precondition_views;
       TraceViewSet *anticondition_views;

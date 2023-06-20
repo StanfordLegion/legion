@@ -1168,7 +1168,7 @@ namespace Legion {
       RtEvent report_equivalence_sets(EqSetTracker *target, 
           AddressSpaceID target_space, const FieldMask &mask,
           FieldMaskSet<EquivalenceSet> &eq_sets,
-          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &new_subscriptions,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
@@ -1725,7 +1725,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
       void invalidate_region_tree_context(LogicalRegion handle, 
-                                          unsigned req_index);
+          unsigned req_index, std::set<RtEvent> &applied_events);
       virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:

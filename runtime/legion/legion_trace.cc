@@ -4209,9 +4209,8 @@ namespace Legion {
                    const FieldMask &mask, RegionTreeID tid)
       : EqSetTracker(set_lock), context(trace->logical_trace->context),
         forest(f), condition_expr(expr), condition_mask(mask), tree_id(tid),
-        parent_req_index(parent_req_idx), invalid_mask(mask),
-        precondition_views(NULL), anticondition_views(NULL),
-        postcondition_views(NULL)
+        parent_req_index(parent_req_idx), precondition_views(NULL),
+        anticondition_views(NULL), postcondition_views(NULL)
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
@@ -4328,10 +4327,10 @@ namespace Legion {
       AutoLock s_lock(set_lock);
       pending_sets.insert(set, mask);
     }
-#endif
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::invalidate_equivalence_sets(const FieldMask &mask)
+    bool TraceConditionSet::invalidate_equivalence_sets(const FieldMask &mask,
+                                 const std::vector<RtEvent> &invalidated_events)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(set_lock);
@@ -4355,16 +4354,17 @@ namespace Legion {
       }
       equivalence_sets.tighten_valid_mask();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::invalidate_equivalence_sets(void)
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EquivalenceSet> to_remove;
-      std::map<AddressSpaceID,std::vector<EqKDTree*> > to_cancel;
+      LegionMap<AddressSpaceID,TreeInvalidations> to_cancel;
       {
         AutoLock s_lock(set_lock);
-        if (subscription_owners.empty())
+        if (current_subscriptions.empty())
         {
 #ifdef DEBUG_LEGION
           assert(equivalence_sets.empty());
@@ -4373,11 +4373,16 @@ namespace Legion {
         }
         // Copy and not remove since we need to see the acknowledgement
         // before we know when it is safe to remove our references
-        for (std::map<std::pair<EqKDTree*,AddressSpaceID>,unsigned>::
-              const_iterator it = subscription_owners.begin(); 
-              it != subscription_owners.end(); it++)
-          to_cancel[it->first.second].push_back(it->first.first);
         to_remove.swap(equivalence_sets);
+        for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator it =
+              current_subscriptions.begin(); it != 
+              current_subscriptions.end(); it++)
+        {
+          TreeInvalidations &invalidations = to_cancel[it->first];
+          invalidations.subscribers.swap(it->second);
+          invalidations.all_subscribers_finished = true;
+        }
+        current_subscriptions.clear();
       }
       cancel_subscriptions(context->runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -4567,10 +4572,12 @@ namespace Legion {
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
       // First check to see if we need to recompute our equivalence sets
+      const FieldMask invalid_mask = 
+        condition_mask - equivalence_sets.get_valid_mask();
       if (!!invalid_mask)
       {
         const UniqueID opid = op->get_unique_op_id();
-        const RtEvent ready = recompute_equivalence_sets(opid);
+        const RtEvent ready = recompute_equivalence_sets(opid, invalid_mask);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent tested = Runtime::create_rt_user_event();
@@ -4701,10 +4708,12 @@ namespace Legion {
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
       // First check to see if we need to recompute our equivalence sets
+      const FieldMask invalid_mask = 
+        condition_mask - equivalence_sets.get_valid_mask();
       if (!!invalid_mask)
       {
         const UniqueID opid = op->get_unique_op_id();
-        const RtEvent ready = recompute_equivalence_sets(opid);
+        const RtEvent ready = recompute_equivalence_sets(opid, invalid_mask);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent applied= Runtime::create_rt_user_event();
@@ -4770,7 +4779,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid)
+    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid,
+                                                  const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4779,7 +4789,6 @@ namespace Legion {
       AddressSpaceID space = forest->runtime->address_space;
       RtEvent ready = context->compute_equivalence_sets(this, space,
                       parent_req_index, condition_expr, invalid_mask);
-      invalid_mask.clear();
       if (ready.exists() && !ready.has_triggered())
       {
         // Launch a meta-task to finalize this trace condition set
@@ -5067,7 +5076,8 @@ namespace Legion {
         // really what we're doing here is registering the condition with 
         // the VersionManager that owns this equivalence set which is a
         // necessary thing for us to do
-        const RtEvent ready = condition->recompute_equivalence_sets(opid);
+        const RtEvent ready = 
+          condition->recompute_equivalence_sets(opid, it->second);
         if (ready.exists())
           ready_events.push_back(ready);
         condition->capture(it->first, it->second, ready_events);

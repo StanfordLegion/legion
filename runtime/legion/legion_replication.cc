@@ -4148,7 +4148,7 @@ namespace Legion {
         {
           const RegionRequirement &req = deletion_requirements[idx];
           repl_ctx->invalidate_region_tree_context(req.region, 
-                                      find_parent_index(idx));
+              find_parent_index(idx), map_applied_conditions);
         }
         if (!preconditions.empty())
           complete_mapping(Runtime::merge_events(preconditions));

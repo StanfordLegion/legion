@@ -918,7 +918,7 @@ namespace Legion {
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
       SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
-      SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION,
+      SEND_INVALIDATE_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_EQUIVALENCE_SET_CREATION,
       SEND_EQUIVALENCE_SET_REUSE,
       SEND_EQUIVALENCE_SET_REQUEST,
@@ -1188,7 +1188,7 @@ namespace Legion {
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \
         "Send Cancel Equivalence Sets Subscription",                  \
-        "Send Finish Equivalence Sets Subscription",                  \
+        "Send Invalidate Equivalence Sets Subscription",              \
         "Send Equivalence Set Creation",                              \
         "Send Equivalence Set Reuse",                                 \
         "Send Equivalence Set Request",                               \
