@@ -600,6 +600,7 @@ impl StateDataSource {
         &self,
         cont: &C,
         tile_id: TileID,
+        full: bool,
         mut item_metas: Option<&mut Vec<Vec<ItemMeta>>>,
         get_meta: impl Fn(&C::Entry, ItemInfo) -> ItemMeta,
     ) -> Vec<Vec<Item>>
@@ -633,12 +634,13 @@ impl StateDataSource {
 
             let level = base.level.unwrap() as usize;
 
-            let expand = Self::expand_item(
-                &mut view_interval,
-                tile_id,
-                items[level].last(),
-                merged[level],
-            );
+            let expand = !full
+                && Self::expand_item(
+                    &mut view_interval,
+                    tile_id,
+                    items[level].last(),
+                    merged[level],
+                );
 
             if let Some(last) = items[level].last_mut() {
                 let last_meta = if let Some(ref mut item_metas) = item_metas {
@@ -715,9 +717,10 @@ impl StateDataSource {
         entry_id: &EntryID,
         proc_id: ProcID,
         tile_id: TileID,
+        full: bool,
     ) -> SlotTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let items = self.build_items(proc, tile_id, None, |_, _| unreachable!());
+        let items = self.build_items(proc, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -730,10 +733,11 @@ impl StateDataSource {
         entry_id: &EntryID,
         proc_id: ProcID,
         tile_id: TileID,
+        full: bool,
     ) -> SlotMetaTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(proc, tile_id, Some(&mut item_metas), |entry, info| {
+        let items = self.build_items(proc, tile_id, full, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -782,9 +786,10 @@ impl StateDataSource {
         entry_id: &EntryID,
         mem_id: MemID,
         tile_id: TileID,
+        full: bool,
     ) -> SlotTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let items = self.build_items(mem, tile_id, None, |_, _| unreachable!());
+        let items = self.build_items(mem, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -797,10 +802,11 @@ impl StateDataSource {
         entry_id: &EntryID,
         mem_id: MemID,
         tile_id: TileID,
+        full: bool,
     ) -> SlotMetaTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(mem, tile_id, Some(&mut item_metas), |entry, info| {
+        let items = self.build_items(mem, tile_id, full, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -846,9 +852,10 @@ impl StateDataSource {
         entry_id: &EntryID,
         chan_id: ChanID,
         tile_id: TileID,
+        full: bool,
     ) -> SlotTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let items = self.build_items(chan, tile_id, None, |_, _| unreachable!());
+        let items = self.build_items(chan, tile_id, full, None, |_, _| unreachable!());
         SlotTile {
             entry_id: entry_id.clone(),
             tile_id,
@@ -861,10 +868,11 @@ impl StateDataSource {
         entry_id: &EntryID,
         chan_id: ChanID,
         tile_id: TileID,
+        full: bool,
     ) -> SlotMetaTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        let items = self.build_items(chan, tile_id, Some(&mut item_metas), |entry, info| {
+        let items = self.build_items(chan, tile_id, full, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
                 point_interval,
                 expand,
@@ -938,25 +946,36 @@ impl DataSource for StateDataSource {
         }
     }
 
-    fn fetch_slot_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SlotTile {
+    fn fetch_slot_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SlotTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
-            EntryKind::Proc(proc_id) => self.generate_proc_slot_tile(entry_id, *proc_id, tile_id),
-            EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(entry_id, *mem_id, tile_id),
-            EntryKind::Chan(chan_id) => self.generate_chan_slot_tile(entry_id, *chan_id, tile_id),
+            EntryKind::Proc(proc_id) => {
+                self.generate_proc_slot_tile(entry_id, *proc_id, tile_id, full)
+            }
+            EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(entry_id, *mem_id, tile_id, full),
+            EntryKind::Chan(chan_id) => {
+                self.generate_chan_slot_tile(entry_id, *chan_id, tile_id, full)
+            }
             _ => unreachable!(),
         }
     }
 
-    fn fetch_slot_meta_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SlotMetaTile {
+    fn fetch_slot_meta_tile(
+        &self,
+        entry_id: &EntryID,
+        tile_id: TileID,
+        full: bool,
+    ) -> SlotMetaTile {
         let entry = self.entry_map.get(entry_id).unwrap();
         match entry {
             EntryKind::Proc(proc_id) => {
-                self.generate_proc_slot_meta_tile(entry_id, *proc_id, tile_id)
+                self.generate_proc_slot_meta_tile(entry_id, *proc_id, tile_id, full)
             }
-            EntryKind::Mem(mem_id) => self.generate_mem_slot_meta_tile(entry_id, *mem_id, tile_id),
+            EntryKind::Mem(mem_id) => {
+                self.generate_mem_slot_meta_tile(entry_id, *mem_id, tile_id, full)
+            }
             EntryKind::Chan(chan_id) => {
-                self.generate_chan_slot_meta_tile(entry_id, *chan_id, tile_id)
+                self.generate_chan_slot_meta_tile(entry_id, *chan_id, tile_id, full)
             }
             _ => unreachable!(),
         }
