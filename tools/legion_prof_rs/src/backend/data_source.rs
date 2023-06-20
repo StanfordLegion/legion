@@ -918,11 +918,8 @@ impl DataSource for StateDataSource {
         DataSourceInfo {
             entry_info: self.info.clone(),
             interval: self.interval(),
+            tile_set: TileSet::default(),
         }
-    }
-
-    fn fetch_tile_set(&self) -> TileSet {
-        TileSet::default()
     }
 
     fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SummaryTile {
