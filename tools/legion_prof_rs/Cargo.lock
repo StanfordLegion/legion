@@ -39,9 +39,9 @@ dependencies = [
 
 [[package]]
 name = "accesskit_macos"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfea17e5bb5dcbfcf5b256ab2f5889a3e6f6582de78b9db9b6689adad3b002f3"
+checksum = "4baea9413f0daf1cd4aab199bc09f8139cd726ce7673d523c27d186b8b878325"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -80,9 +80,9 @@ dependencies = [
 
 [[package]]
 name = "accesskit_winit"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f741b54fba827e49a73d55fdd43e8d3d5133aa7710a48581013c7802f232b83"
+checksum = "14f1bd64cd0b480cafb7bdd91eb489a1ff50f0f5702437b9efa32a25b8bb82a1"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -797,10 +797,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "clap"
-version = "4.3.4"
+name = "ciborium"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80672091db20273a15cf9fdd4e47ed43b5091ec9841bf4c6145c9dfbbcae09ed"
+checksum = "effd91f6c78e5a4ace8a5d3c0b6bfaec9e2baaef55f3efc00e45fb2e477ee926"
+dependencies = [
+ "ciborium-io",
+ "ciborium-ll",
+ "serde",
+]
+
+[[package]]
+name = "ciborium-io"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdf919175532b369853f5d5e20b26b43112613fd6fe7aee757e35f7a44642656"
+
+[[package]]
+name = "ciborium-ll"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "defaa24ecc093c77630e6c15e17c51f5e187bf35ee514f4e2d67baaa96dae22b"
+dependencies = [
+ "ciborium-io",
+ "half",
+]
+
+[[package]]
+name = "clap"
+version = "4.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2686c4115cb0810d9a984776e197823d08ec94f176549a89a9efded477c456dc"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -809,9 +836,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.3.4"
+version = "4.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1458a1df40e1e2afebb7ab60ce55c1fa8f431146205aa5f4887e0b111c27636"
+checksum = "2e53afce1efce6ed1f633cf0e57612fe51db54a1ee4fd8f8503d078fe02d69ae"
 dependencies = [
  "anstream",
  "anstyle",
@@ -960,13 +987,12 @@ dependencies = [
 
 [[package]]
 name = "core-graphics-types"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a68b68b3446082644c91ac778bf50cd4104bfb002b5a6a7c44cca5a2c70788b"
+checksum = "2bb142d41022986c1d8ff29103a1411c8a3dfad3552f87a4f8dc50d61d4f4e33"
 dependencies = [
  "bitflags",
  "core-foundation",
- "foreign-types",
  "libc",
 ]
 
@@ -1614,6 +1640,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "half"
+version = "1.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1892,10 +1924,12 @@ dependencies = [
 [[package]]
 name = "legion_prof_viewer"
 version = "0.1.0"
-source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#30043bb449f95c3137e242bbbe89cad05eeb70ea"
+source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#eefb8237e5605cfa339cd439f3ece23d7a37a58f"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "bytes",
+ "ciborium",
  "eframe",
  "egui",
  "env_logger",
@@ -1905,11 +1939,11 @@ dependencies = [
  "rayon",
  "reqwest",
  "serde",
- "serde_json",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zstd",
 ]
 
 [[package]]

@@ -14,6 +14,7 @@ pub fn write(
     branch_factor: u64,
     path: impl AsRef<Path>,
     force: bool,
+    zstd_compression: i32,
 ) -> io::Result<()> {
     let archive = DataSourceArchiveWriter::new(
         ParallelDeferredDataSource::new(StateDataSource::new(state)),
@@ -21,6 +22,7 @@ pub fn write(
         branch_factor,
         path,
         force,
+        zstd_compression,
     );
     archive.write()
 }
