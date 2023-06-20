@@ -106,6 +106,13 @@ struct Cli {
 
     #[arg(long, default_value_t = 4, help = "branch factor for archive")]
     branch_factor: u64,
+
+    #[arg(
+        long,
+        default_value_t = 10,
+        help = "zstd compression factor for archive"
+    )]
+    zstd_compression: i32,
 }
 
 fn main() -> io::Result<()> {
@@ -275,7 +282,14 @@ fn main() -> io::Result<()> {
         #[cfg(feature = "archiver")]
         {
             state.assign_colors();
-            archiver::write(state, cli.levels, cli.branch_factor, cli.output, cli.force)?;
+            archiver::write(
+                state,
+                cli.levels,
+                cli.branch_factor,
+                cli.output,
+                cli.force,
+                cli.zstd_compression,
+            )?;
         }
     } else if cli.serve {
         #[cfg(feature = "server")]
