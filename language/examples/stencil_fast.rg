@@ -62,7 +62,8 @@ if USE_FOREIGN then
 
   local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O3 " .. march_flag .. " -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
-  if os.execute('test "$(uname)" = Darwin') == 0 then
+  local ffi = require("ffi")
+  if ffi.os == "OSX" then
     cxx_flags =
       (cxx_flags ..
          " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
@@ -120,7 +121,8 @@ do
   local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
-  if os.execute('test "$(uname)" = Darwin') == 0 then
+  local ffi = require("ffi")
+  if ffi.os == "OSX" then
     cxx_flags =
       (cxx_flags ..
          " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
