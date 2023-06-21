@@ -4790,6 +4790,14 @@ namespace Legion {
           }
         }
       }
+      // Make a RtEvent copy of the false_guard in the case that we
+      // are going to execute this task with a predicate and we'll
+      // need to launch the misspeculation task after we launch the 
+      // actual task itself. We have to pull this onto the stack before 
+      // launching the task itself as the task might ultimately be cleaned
+      // up before we're done executing this function so we can't touch 
+      // any member variables after we launch it
+      const RtEvent misspeculation_precondition = RtEvent(false_guard);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_variant_decision(unique_op_id, selected_variant);
@@ -4848,13 +4856,13 @@ namespace Legion {
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
-      if (false_guard.exists())
+      if (misspeculation_precondition.exists())
       {
         MisspeculationTaskArgs args(this);
         // Make sure this runs on an application processor where the
         // original task was going to go 
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                         RtEvent(false_guard));
+                                         misspeculation_precondition);
         // Fun little trick here: decrement the outstanding meta-task
         // counts for the mis-speculation task in case it doesn't run
         // If it does run, we'll increment the counts again
