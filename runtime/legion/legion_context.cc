@@ -22230,7 +22230,7 @@ namespace Legion {
         derez.deserialize(domain);
         FieldMask mask;
         derez.deserialize(mask);
-        tree->invalidate_shard_tree(domain, mask, invalidated);
+        tree->invalidate_shard_tree(domain, mask, runtime, invalidated);
       }
       RtUserEvent done_event;
       derez.deserialize(done_event);

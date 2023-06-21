@@ -5038,7 +5038,7 @@ namespace Legion {
         for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
               itr.valid; itr.step())
           rects.push_back(itr.rect);
-        return new EqKDSparse<DIM,T>(rects);
+        return new EqKDSparse<DIM,T>(realm_index_space.bounds, rects);
       }
       else
       {
@@ -5101,7 +5101,8 @@ namespace Legion {
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
-        typed_tree->invalidate_tree(itr.rect,mask,invalidated,move_to_previous);
+        typed_tree->invalidate_tree(itr.rect, mask, context->runtime,
+                                    invalidated, move_to_previous);
     }
 
     //--------------------------------------------------------------------------
@@ -5118,8 +5119,8 @@ namespace Legion {
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
-        typed_tree->invalidate_shard_tree(itr.rect, mask,
-            invalidated, remote_shard_rects, local_shard);
+        typed_tree->invalidate_shard_tree(itr.rect, mask, context->runtime,
+                              invalidated, remote_shard_rects, local_shard);
     }
     
     //--------------------------------------------------------------------------
@@ -5934,6 +5935,162 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    /*static*/ inline bool KDTree::compute_best_splitting_plane(
+        const Rect<DIM,T> &bounds, const std::vector<Rect<DIM,T> > &rects,
+        Rect<DIM,T> &best_left_bounds, Rect<DIM,T> &best_right_bounds,
+        std::vector<Rect<DIM,T> > &best_left_set,
+        std::vector<Rect<DIM,T> > &best_right_set)
+    //--------------------------------------------------------------------------
+    {
+      // If we have sub-optimal bad sets we will track them here
+      // so we can iterate through other dimensions to look for
+      // better splitting planes
+      int best_dim = -1;
+      float best_cost = 2.f; // worst possible cost
+      for (int d = 0; d < DIM; d++)
+      {
+        // Try to compute a splitting plane for this dimension
+        // Count how many rectangles start and end at each location
+        std::map<std::pair<T,bool/*stop*/>,unsigned> forward_lines;
+        std::map<std::pair<T,bool/*start*/>,unsigned> backward_lines;
+        for (unsigned idx = 0; idx < rects.size(); idx++)
+        {
+          const Rect<DIM,T> &subset_bounds = rects[idx];
+          // Start forward
+          std::pair<T,bool> start_key(subset_bounds.lo[d],false);
+          typename std::map<std::pair<T,bool>,unsigned>::iterator finder =
+            forward_lines.find(start_key);
+          if (finder == forward_lines.end())
+            forward_lines[start_key] = 1;
+          else
+            finder->second++;
+          // Start backward 
+          start_key.second = true;
+          finder = backward_lines.find(start_key);
+          if (finder == backward_lines.end())
+            backward_lines[start_key] = 1;
+          else
+            finder->second++;
+          // Stop forward 
+          std::pair<T,bool> stop_key(subset_bounds.hi[d],true);
+          finder = forward_lines.find(stop_key);
+          if (finder == forward_lines.end())
+            forward_lines[stop_key] = 1;
+          else
+            finder->second += 1;
+          // Stop backward 
+          stop_key.second = false;
+          finder = backward_lines.find(stop_key);
+          if (finder == backward_lines.end())
+            backward_lines[stop_key] = 1;
+          else
+            finder->second++;
+        }
+        // Construct two lists by scanning from left-to-right and
+        // from right-to-left of the number of rectangles that would
+        // be inlcuded on the left or right side by each splitting plane
+        std::map<T,unsigned> lower_inclusive, upper_exclusive;
+        unsigned count = 0;
+        for (typename std::map<std::pair<T,bool>,unsigned>::const_iterator
+              it = forward_lines.begin(); it != forward_lines.end(); it++)
+        {
+          // Increment first for starts for inclusivity
+          if (!it->first.second)
+            count += it->second;
+          // Always record the count for all splits
+          lower_inclusive[it->first.first] = count;
+        }
+        // If all the lines exist at the same value
+        // then we'll never have a splitting plane
+        if (lower_inclusive.size() == 1)
+          continue;
+        count = 0;
+        for (typename std::map<
+              std::pair<T,bool>,unsigned>::const_reverse_iterator it = 
+              backward_lines.rbegin(); it != backward_lines.rend(); it++)
+        {
+          // Always record the count for all splits
+          upper_exclusive[it->first.first] = count;
+          // Increment last for stops for exclusivity
+          if (!it->first.second)
+            count += it->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(lower_inclusive.size() == upper_exclusive.size());
+#endif
+        // We want to take the mini-max of the two numbers in order
+        // to try to balance the splitting plane across the two sets
+        T split = 0;
+        unsigned split_max = rects.size();
+        for (typename std::map<T,unsigned>::const_iterator it = 
+              lower_inclusive.begin(); it != lower_inclusive.end(); it++)
+        {
+          const unsigned left = it->second;
+          const unsigned right = upper_exclusive[it->first];
+          const unsigned max = (left > right) ? left : right;
+          if (max < split_max)
+          {
+            split_max = max;
+            split = it->first;
+          }
+        }
+        // Check for the case where we can't find a splitting plane
+        if (split_max == rects.size())
+          continue;
+        // Sort the subsets into left and right
+        Rect<DIM,T> left_bounds(bounds);
+        Rect<DIM,T> right_bounds(bounds);
+        left_bounds.hi[d] = split;
+        right_bounds.lo[d] = split+1;
+        std::vector<Rect<DIM,T> > left_set, right_set;
+        for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+              rects.begin(); it != rects.end(); it++)
+        {
+          const Rect<DIM,T> left_rect = it->intersection(left_bounds);
+          if (!left_rect.empty())
+            left_set.push_back(left_rect);
+          const Rect<DIM,T> right_rect = it->intersection(right_bounds);
+          if (!right_rect.empty())
+            right_set.push_back(right_rect);
+        }
+#ifdef DEBUG_LEGION
+        assert(left_set.size() < rects.size());
+        assert(right_set.size() < rects.size());
+#endif
+        // Compute the cost of this refinement
+        // First get the percentage reductions of both sets
+        float cost_left = float(left_set.size()) / float(rects.size());
+        float cost_right = float(right_set.size()) / float(rects.size());
+        // We want to give better scores to sets that are closer together
+        // so we'll include the absolute value of the difference in the
+        // two costs as part of computing the average cost
+        // If the savings are identical then this will be zero extra cost
+        // Note this cost metric should always produce values between
+        // 1.0 and 2.0, with 1.0 being a perfect 50% reduction on each side
+        float cost_diff = (cost_left < cost_right) ? 
+          (cost_right - cost_left) : (cost_left - cost_right);
+        float total_cost = (cost_left + cost_right + cost_diff);
+#ifdef DEBUG_LEGION
+        assert((1.f <= total_cost) && (total_cost <= 2.f));
+#endif
+        // Check to see if the cost is considered to be a "good" refinement
+        // For now we'll say that this is a good cost if it is less than
+        // or equal to 1.5, halfway between the range of costs from 1.0 to 2.0
+        if ((total_cost <= 1.5f) && (total_cost < best_cost))
+        {
+          best_dim = d;
+          best_cost = total_cost;
+          best_left_set.swap(left_set);
+          best_right_set.swap(right_set);
+          best_left_bounds = left_bounds;
+          best_right_bounds = right_bounds;
+        }
+      }
+      return (best_dim >= 0);
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, typename T, typename RT>
     KDNode<DIM,T,RT>::KDNode(const Rect<DIM,T> &b,
                              std::vector<std::pair<Rect<DIM,T>,RT> > &subrects)
@@ -6187,154 +6344,12 @@ namespace Legion {
         rects.swap(subrects);
         return;
       }
-      // If we have sub-optimal bad sets we will track them here
-      // so we can iterate through other dimensions to look for
-      // better splitting planes
-      int best_dim = -1;
-      float best_cost = 2.f; // worst possible cost
       Rect<DIM,T> best_left_bounds, best_right_bounds;
       std::vector<Rect<DIM,T> > best_left_set, best_right_set;
-      for (int d = 0; d < DIM; d++)
-      {
-        // Try to compute a splitting plane for this dimension
-        // Count how many rectangles start and end at each location
-        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> forward_lines;
-        std::map<std::pair<coord_t,bool/*start*/>,unsigned> backward_lines;
-        for (unsigned idx = 0; idx < subrects.size(); idx++)
-        {
-          const Rect<DIM,T> &subset_bounds = subrects[idx];
-          // Start forward
-          std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
-          std::map<std::pair<coord_t,bool>,unsigned>::iterator finder =
-            forward_lines.find(start_key);
-          if (finder == forward_lines.end())
-            forward_lines[start_key] = 1;
-          else
-            finder->second++;
-          // Start backward 
-          start_key.second = true;
-          finder = backward_lines.find(start_key);
-          if (finder == backward_lines.end())
-            backward_lines[start_key] = 1;
-          else
-            finder->second++;
-          // Stop forward 
-          std::pair<coord_t,bool> stop_key(subset_bounds.hi[d],true);
-          finder = forward_lines.find(stop_key);
-          if (finder == forward_lines.end())
-            forward_lines[stop_key] = 1;
-          else
-            finder->second += 1;
-          // Stop backward 
-          stop_key.second = false;
-          finder = backward_lines.find(stop_key);
-          if (finder == backward_lines.end())
-            backward_lines[stop_key] = 1;
-          else
-            finder->second++;
-        }
-        // Construct two lists by scanning from left-to-right and
-        // from right-to-left of the number of rectangles that would
-        // be inlcuded on the left or right side by each splitting plane
-        std::map<coord_t,unsigned> lower_inclusive, upper_exclusive;
-        unsigned count = 0;
-        for (typename std::map<std::pair<coord_t,bool>,unsigned>::const_iterator
-              it = forward_lines.begin(); it != forward_lines.end(); it++)
-        {
-          // Increment first for starts for inclusivity
-          if (!it->first.second)
-            count += it->second;
-          // Always record the count for all splits
-          lower_inclusive[it->first.first] = count;
-        }
-        // If all the lines exist at the same value
-        // then we'll never have a splitting plane
-        if (lower_inclusive.size() == 1)
-          continue;
-        count = 0;
-        for (typename std::map<
-              std::pair<coord_t,bool>,unsigned>::const_reverse_iterator it = 
-              backward_lines.rbegin(); it != backward_lines.rend(); it++)
-        {
-          // Always record the count for all splits
-          upper_exclusive[it->first.first] = count;
-          // Increment last for stops for exclusivity
-          if (!it->first.second)
-            count += it->second;
-        }
-#ifdef DEBUG_LEGION
-        assert(lower_inclusive.size() == upper_exclusive.size());
-#endif
-        // We want to take the mini-max of the two numbers in order
-        // to try to balance the splitting plane across the two sets
-        T split = 0;
-        unsigned split_max = subrects.size();
-        for (std::map<coord_t,unsigned>::const_iterator it = 
-              lower_inclusive.begin(); it != lower_inclusive.end(); it++)
-        {
-          const unsigned left = it->second;
-          const unsigned right = upper_exclusive[it->first];
-          const unsigned max = (left > right) ? left : right;
-          if (max < split_max)
-          {
-            split_max = max;
-            split = it->first;
-          }
-        }
-        // Check for the case where we can't find a splitting plane
-        if (split_max == subrects.size())
-          continue;
-        // Sort the subsets into left and right
-        Rect<DIM,T> left_bounds(bounds);
-        Rect<DIM,T> right_bounds(bounds);
-        left_bounds.hi[d] = split;
-        right_bounds.lo[d] = split+1;
-        std::vector<Rect<DIM,T> > left_set, right_set;
-        for (typename std::vector<Rect<DIM,T> >::const_iterator it =
-              subrects.begin(); it != subrects.end(); it++)
-        {
-          const Rect<DIM,T> left_rect = it->intersection(left_bounds);
-          if (!left_rect.empty())
-            left_set.push_back(left_rect);
-          const Rect<DIM,T> right_rect = it->intersection(right_bounds);
-          if (!right_rect.empty())
-            right_set.push_back(right_rect);
-        }
-#ifdef DEBUG_LEGION
-        assert(left_set.size() < subrects.size());
-        assert(right_set.size() < subrects.size());
-#endif
-        // Compute the cost of this refinement
-        // First get the percentage reductions of both sets
-        float cost_left = float(left_set.size()) / float(subrects.size());
-        float cost_right = float(right_set.size()) / float(subrects.size());
-        // We want to give better scores to sets that are closer together
-        // so we'll include the absolute value of the difference in the
-        // two costs as part of computing the average cost
-        // If the savings are identical then this will be zero extra cost
-        // Note this cost metric should always produce values between
-        // 1.0 and 2.0, with 1.0 being a perfect 50% reduction on each side
-        float cost_diff = (cost_left < cost_right) ? 
-          (cost_right - cost_left) : (cost_left - cost_right);
-        float total_cost = (cost_left + cost_right + cost_diff);
-#ifdef DEBUG_LEGION
-        assert((1.f <= total_cost) && (total_cost <= 2.f));
-#endif
-        // Check to see if the cost is considered to be a "good" refinement
-        // For now we'll say that this is a good cost if it is less than
-        // or equal to 1.5, halfway between the range of costs from 1.0 to 2.0
-        if ((total_cost <= 1.5f) && (total_cost < best_cost))
-        {
-          best_dim = d;
-          best_cost = total_cost;
-          best_left_set.swap(left_set);
-          best_right_set.swap(right_set);
-          best_left_bounds = left_bounds;
-          best_right_bounds = right_bounds;
-        }
-      }
+      bool success = compute_best_splitting_plane<DIM,T>(bounds, subrects,
+          best_left_bounds, best_right_bounds, best_left_set, best_right_set);
       // See if we had at least one good refinement
-      if (best_dim >= 0)
+      if (success)
       {
         // Always clear the old-subrects before recursing to reduce memory usage
         {
@@ -6462,6 +6477,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void EqKDTreeT<DIM,T>::extract_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, size_t total_source_shards,
+          size_t total_target_shards, RegionNode *region)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceExpression* EqKDTreeT<DIM,T>::create_from_rectangles(
                RegionTreeForest *forest, const std::vector<Domain> &rects) const
     //--------------------------------------------------------------------------
@@ -6479,11 +6507,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDTreeT<DIM,T>::invalidate_shard_tree(const Domain &domain,
-                       const FieldMask &mask, std::vector<RtEvent> &invalidated)
+     const FieldMask &mask, Runtime *runtime, std::vector<RtEvent> &invalidated)
     //--------------------------------------------------------------------------
     {
       const Rect<DIM,T> rect = domain;
-      invalidate_tree(rect, mask, invalidated, true/*move to previous*/);
+      invalidate_tree(rect, mask, runtime,invalidated,true/*move to previous*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7559,11 +7587,14 @@ namespace Legion {
     template<int DIM, typename T>
     void EqKDNode<DIM,T>::invalidate_tree(const Rect<DIM,T> &rect,
                                           const FieldMask &mask,
+                                          Runtime *runtime,
                                           std::vector<RtEvent> &invalidated,
                                           bool move_to_previous)
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
+      typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
+      LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
       {
         AutoLock n_lock(node_lock);
         if ((current_sets != NULL) || (previous_sets != NULL))
@@ -7682,6 +7713,67 @@ namespace Legion {
                 current_set_preconditions = NULL;
               }
             }
+            if (subscriptions != NULL)
+            {
+              for (LegionMap<AddressSpaceID,
+                             FieldMaskSet<EqSetTracker> >::iterator
+                    sit = subscriptions->begin(); 
+                    sit != subscriptions->end(); /*nothing*/)
+              {
+                if (sit->second.get_valid_mask() * mask)
+                {
+                  sit++;
+                  continue;
+                }
+                TrackerInvalidations &invalidations = to_invalidate[sit->first];
+                if (!(sit->second.get_valid_mask() - mask))
+                {
+                  // Going to invalidate all the trackers 
+                  invalidations.subscribers.swap(sit->second);
+                  invalidations.all_subscribers_finished = true;
+                  LegionMap<AddressSpaceID,
+                    FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
+                  subscriptions->erase(to_delete);
+                }
+                else
+                {
+                  // Selectively filter the trackers
+                  std::vector<EqSetTracker*> to_delete;
+                  for (FieldMaskSet<EqSetTracker>::iterator it =
+                        sit->second.begin(); it != sit->second.end(); it++)
+                  {
+                    const FieldMask overlap = mask & it->second;
+                    if (!overlap)
+                      continue;
+                    invalidations.subscribers.insert(it->first, overlap);
+                    it.filter(overlap);
+                    if (!it->second)
+                      to_delete.push_back(it->first);
+                  }
+                  for (std::vector<EqSetTracker*>::const_iterator it =
+                        to_delete.begin(); it != to_delete.end(); it++)
+                    sit->second.erase(*it);
+                  if (sit->second.empty())
+                  {
+                    invalidations.all_subscribers_finished = true;
+                    LegionMap<AddressSpaceID,
+                      FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
+                    subscriptions->erase(to_delete);
+                  }
+                  else
+                  {
+                    invalidations.finished.swap(to_delete);
+                    sit->second.tighten_valid_mask();
+                    sit++;
+                  }
+                }
+              }
+              if (subscriptions->empty())
+              {
+                delete subscriptions;
+                subscriptions = NULL;
+              }
+            }
 #ifdef DEBUG_LEGION
             assert(observed * all_previous_below);
 #endif
@@ -7727,6 +7819,9 @@ namespace Legion {
           }
         }
       }
+      if (!to_invalidate.empty())
+        EqSetTracker::invalidate_subscriptions(runtime, this, 
+                                  to_invalidate, invalidated);
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -7734,7 +7829,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!intersection.empty());
 #endif
-        it->first->invalidate_tree(intersection, it->second, 
+        it->first->invalidate_tree(intersection, it->second, runtime, 
                                    invalidated, move_to_previous);
       }
     }
@@ -7742,12 +7837,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDNode<DIM,T>::invalidate_shard_tree(const Rect<DIM,T> &rect,
-          const FieldMask &mask, std::vector<RtEvent> &invalidated,
+          const FieldMask &mask, Runtime *runtime, 
+          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      invalidate_tree(rect, mask, invalidated, false/*move to previous*/);
+      invalidate_tree(rect, mask,runtime,invalidated,false/*move to previous*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7789,6 +7885,64 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // Equivalence Set KD Sparse
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDSparse<DIM,T>::EqKDSparse(const Rect<DIM,T> &bound,
+                           std::vector<Rect<DIM,T> > &rects)
+      : EqKDTreeT<DIM,T>(bound)
+    //--------------------------------------------------------------------------
+    {
+      if (rects.size() <= LEGION_MAX_BVH_FANOUT)
+      {
+        // Base case of a small enough number of children
+        children.reserve(rects.size());
+        for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+              rects.begin(); it != rects.end(); it++)
+        {
+          EqKDNode<DIM,T> *child = new EqKDNode<DIM,T>(*it);
+          child->add_reference();
+          children.push_back(child);
+        }
+        return;
+      }
+      // Unlike some of our other KDNode implementations, we know that all of
+      // these rectangles are non-overlapping with each other which means that
+      // we should always be able to find good splitting planes
+      Rect<DIM,T> best_left_bounds, best_right_bounds;
+      std::vector<Rect<DIM,T> > best_left_set, best_right_set;
+      bool success = KDTree::compute_best_splitting_plane<DIM,T>(bound, rects,
+          best_left_bounds, best_right_bounds, best_left_set, best_right_set);
+      // See if we had at least one good refinement
+      if (success)
+      {
+        EqKDSparse<DIM,T> *left = 
+          new EqKDSparse<DIM,T>(best_left_bounds, best_left_set); 
+        left->add_reference();
+        children.push_back(left);
+        EqKDSparse<DIM,T> *right =
+          new EqKDSparse<DIM,T>(best_right_bounds, best_right_set);
+        right->add_reference();
+        children.push_back(right);
+      }
+      else
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_KDTREE_REFINEMENT_FAILED,
+            "Failed to find a refinement for Equivalence Set KD tree with %d " 
+            "dimensions and %zd rectangles. Please report your application to "
+            "the Legion developers' mailing list.", DIM, rects.size())
+        // If we make it here then we couldn't find a splitting plane to refine
+        // anymore so just record all the subrects as our rects
+        children.reserve(rects.size());
+        for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+              rects.begin(); it != rects.end(); it++)
+        {
+          EqKDNode<DIM,T> *child = new EqKDNode<DIM,T>(*it);
+          child->add_reference();
+          children.push_back(child);
+        }
+      }
+    }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -7870,6 +8024,7 @@ namespace Legion {
     template<int DIM, typename T>
     void EqKDSparse<DIM,T>::invalidate_tree(const Rect<DIM,T> &rect,
                                             const FieldMask &mask,
+                                            Runtime *runtime,
                                             std::vector<RtEvent> &invalidated,
                                             bool move_to_previous)
     //--------------------------------------------------------------------------
@@ -7879,19 +8034,21 @@ namespace Legion {
       {
         const Rect<DIM,T> overlap = rect.intersection((*it)->bounds);
         if (!overlap.empty())
-          (*it)->invalidate_tree(overlap, mask, invalidated, move_to_previous);
+          (*it)->invalidate_tree(overlap, mask, runtime, 
+                          invalidated, move_to_previous);
       }
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDSparse<DIM,T>::invalidate_shard_tree(const Rect<DIM,T> &rect,
-          const FieldMask &mask, std::vector<RtEvent> &invalidated,
+          const FieldMask &mask, Runtime *runtime, 
+          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      invalidate_tree(rect, mask, invalidated, false/*move to previous*/);
+      invalidate_tree(rect, mask,runtime,invalidated,false/*move to previous*/);
     }
 
     //--------------------------------------------------------------------------

@@ -1263,6 +1263,12 @@ namespace Legion {
     public:
       template<int DIM, typename T>
       inline KDNode<DIM,T>* as_kdnode(void);
+      template<int DIM, typename T>
+      static inline bool compute_best_splitting_plane(
+          const Rect<DIM,T> &bounds, const std::vector<Rect<DIM,T> > &rects,
+          Rect<DIM,T> &best_left_bounds, Rect<DIM,T> &best_right_bounds,
+          std::vector<Rect<DIM,T> > &best_left_set,
+          std::vector<Rect<DIM,T> > &best_right_set);
     };
 
     /**
@@ -3022,7 +3028,7 @@ namespace Legion {
      */
     class EqKDTree : public Collectable {
     public:
-      virtual ~EqKDTree(void) = 0;
+      virtual ~EqKDTree(void) { }
     public:
       virtual unsigned compute_shard_equivalence_sets(
           const Domain &rect, const FieldMask &mask,
@@ -3047,6 +3053,7 @@ namespace Legion {
           size_t total_target_shards, RegionNode *region) = 0;
       virtual void invalidate_shard_tree(const Domain &domain,
                                          const FieldMask &mask,
+                                         Runtime *runtime,
                                          std::vector<RtEvent> &invalidated) = 0;
       // Return true if we should remove the reference on the origin tracker
       virtual bool cancel_subscription(EqSetTracker *tracker,
@@ -3067,7 +3074,7 @@ namespace Legion {
     class EqKDTreeT : public EqKDTree {
     public:
       EqKDTreeT(const Rect<DIM,T> &rect);
-      virtual ~EqKDTreeT(void) = 0;
+      virtual ~EqKDTreeT(void) { }
     public:
       virtual void initialize_set(EquivalenceSet *set,
                                   const Rect<DIM,T> &rect,
@@ -3103,14 +3110,16 @@ namespace Legion {
           ShardID source_shard, size_t total_source_shards,
           size_t total_target_shards, RegionNode *region);
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
-                                   const FieldMask &mask,
+                                   const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous) = 0;
       virtual void invalidate_shard_tree(const Domain &domain,
                                          const FieldMask &mask,
+                                         Runtime *runtime,
                                          std::vector<RtEvent> &invalidated);
       virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
+                                         Runtime *runtime,
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0) = 0;
@@ -3160,11 +3169,12 @@ namespace Legion {
           FieldMaskSet<EquivalenceSet> &eq_sets,
           ShardID local_shard, size_t total_shards) const; 
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
-                                   const FieldMask &mask,
+                                   const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous);
       virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
+                                         Runtime *runtime,
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
@@ -3219,7 +3229,7 @@ namespace Legion {
     template<int DIM, typename T>
     class EqKDSparse : public EqKDTreeT<DIM,T> {
     public:
-      EqKDSparse(std::vector<Rect<DIM,T> > &rects);
+      EqKDSparse(const Rect<DIM,T> &bound, std::vector<Rect<DIM,T> > &rects);
       EqKDSparse(const EqKDSparse &rhs) = delete;
       virtual ~EqKDSparse(void);
     public:
@@ -3247,11 +3257,12 @@ namespace Legion {
           FieldMaskSet<EquivalenceSet> &eq_sets,
           ShardID local_shard, size_t total_shards) const;
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
-                                   const FieldMask &mask,
+                                   const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous);
       virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
+                                         Runtime *runtime,
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
