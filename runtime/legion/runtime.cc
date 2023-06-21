@@ -16261,7 +16261,8 @@ namespace Legion {
       else
         result = new ProjectionPartition(root->as_partition_node());
       IndexSpaceNode *launch_space = info.projection_space;
-      IndexSpace local_space = info.sharding_function->find_shard_space(
+      IndexSpace local_space = (info.sharding_function == NULL) ? 
+        IndexSpace::NO_SPACE : info.sharding_function->find_shard_space(
                   local_shard, launch_space, info.sharding_space->handle,
                   op->get_provenance());
       if (!local_space.exists())

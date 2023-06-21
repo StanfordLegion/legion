@@ -7257,24 +7257,6 @@ namespace Legion {
             }
             else
               Runtime::trigger_event(it->first);
-            if (it->first.has_triggered())
-            {
-              // Remove this from the current set preconditions
-#ifdef DEBUG_LEGION
-              assert(current_set_preconditions != NULL);
-#endif
-              LegionMap<RtEvent,FieldMask>::iterator finder =
-                current_set_preconditions->find(it->first);
-#ifdef DEBUG_LEGION
-              assert(finder != current_set_preconditions->end());
-#endif
-              current_set_preconditions->erase(finder);
-              if (current_set_preconditions->empty())
-              {
-                delete current_set_preconditions;
-                current_set_preconditions = NULL;
-              }
-            }
             LegionMap<RtUserEvent,FieldMask>::iterator to_delete = it++;
             pending_set_creations->erase(to_delete);
           }
@@ -7601,7 +7583,6 @@ namespace Legion {
         {
           if (rect == this->bounds)
           {
-            FieldMask observed;
             // Filter current sets back to the previous sets
             // We only remove previous sets if there is one to replace it
             // from the current sets, otherwise they need to stay in the
@@ -7615,7 +7596,6 @@ namespace Legion {
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
                   continue;
-                observed |= overlap;
                 it.filter(overlap);
                 if (!it->second)
                   to_delete.push_back(it->first);
@@ -7642,7 +7622,6 @@ namespace Legion {
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
                   continue;
-                observed |= overlap;
                 if (move_to_previous)
                 {
                   if (previous_sets != NULL)
@@ -7773,18 +7752,6 @@ namespace Legion {
                 delete subscriptions;
                 subscriptions = NULL;
               }
-            }
-#ifdef DEBUG_LEGION
-            assert(observed * all_previous_below);
-#endif
-            // If we filter all the fields there's no need to traverse
-            if (observed == mask)
-            {
-#ifdef DEBUG_LEGION
-              assert((lefts == NULL) || (mask * lefts->get_valid_mask()));
-              assert((rights == NULL) || (mask * rights->get_valid_mask()));
-#endif
-              return;
             }
           }
           else

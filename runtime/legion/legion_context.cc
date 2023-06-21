@@ -2893,11 +2893,6 @@ namespace Legion {
     InnerContext::~InnerContext(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<EqKDTree*>::const_iterator it =
-            equivalence_set_trees.begin(); it != 
-            equivalence_set_trees.end(); it++)
-        if (((*it) != NULL) && (*it)->remove_reference())
-          delete (*it);
       if (ready_comp_queue.exists())
         ready_comp_queue.destroy();
       if (enqueue_task_comp_queue.exists())
@@ -2984,6 +2979,8 @@ namespace Legion {
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
+      for (unsigned idx = 0; idx < equivalence_set_trees.size(); idx++)
+        assert(equivalence_set_trees[idx] == NULL);
 #endif
     }
 
@@ -10858,6 +10855,8 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                        false/*users only*/, node);
+        if (equivalence_set_trees[idx] == NULL)
+          continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
@@ -10866,6 +10865,11 @@ namespace Legion {
         node->row_source->invalidate_equivalence_set_kd_tree(
             equivalence_set_trees[idx], close_mask, 
             applied_events, false/*move to previous*/);
+        if (equivalence_set_trees[idx]->remove_reference())
+          delete equivalence_set_trees[idx];
+#ifdef DEBUG_LEGION
+        equivalence_set_trees[idx] = NULL;
+#endif
         if (!applied_events.empty())
           applied.insert(applied_events.begin(), applied_events.end());
       }
@@ -10922,8 +10926,9 @@ namespace Legion {
 #endif
           return_regions[it->second.region] = equivalence_set_trees[it->first];
         }
-        else // Not returning so invalidate the full thing 
+        else if (equivalence_set_trees[it->first] != NULL) 
         {
+          // Not returning so invalidate the full thing
 #ifdef DEBUG_LEGION
           assert(return_regions.find(it->second.region) == 
                   return_regions.end());
@@ -10932,9 +10937,14 @@ namespace Legion {
           node->row_source->invalidate_equivalence_set_kd_tree(
                 equivalence_set_trees[it->first], all_ones_mask, 
                 applied, false/*move to previous*/);
+          if (equivalence_set_trees[it->first]->remove_reference())
+            delete equivalence_set_trees[it->first];
           if (!applied.empty())
             applied_events.insert(applied.begin(), applied.end());
         }
+#ifdef DEBUG_LEGION
+        equivalence_set_trees[it->first] = NULL;
+#endif
       }
       if (!return_regions.empty())
       {
@@ -10952,6 +10962,10 @@ namespace Legion {
         parent_ctx->receive_created_region_contexts(
             created_nodes, created_trees, applied_events, 
             shard_mapping, source_shard);
+        for (std::vector<EqKDTree*>::const_iterator it =
+              created_trees.begin(); it != created_trees.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
       }
     }
 
@@ -10974,6 +10988,8 @@ namespace Legion {
                             false/*task local*/, false/*output region*/);
         if (equivalence_set_trees.size() <= index)
           equivalence_set_trees.resize(index+1, NULL);
+        if (created_trees[idx] == NULL)
+          continue;
         // Check to see if we're the first one or whether we're merging
         EqKDTree *current = equivalence_set_trees[index];
         if (current != NULL)
@@ -11021,8 +11037,13 @@ namespace Legion {
         const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         node->row_source->invalidate_equivalence_set_kd_tree(tree,
             all_ones_mask, applied, false/*move to previous*/);
+        if (tree->remove_reference())
+          delete tree;
         if (!applied.empty())
           applied_events.insert(applied.begin(), applied.end());
+#ifdef DEBUG_LEGION
+        equivalence_set_trees[req_index] = NULL;
+#endif
       }
     }
 
@@ -13752,9 +13773,10 @@ namespace Legion {
         std::map<ShardID,LegionMap<RegionNode*,FieldMaskSet<EquivalenceSet> > >
           eq_sets;
         for (unsigned idx = 0; idx < created_nodes.size(); idx++)
-          created_trees[idx]->extract_shard_equivalence_sets(eq_sets,
-              source_shard, (mapping == NULL) ? 1 : mapping->size(), 
-              total_shards, created_nodes[idx]);
+          if (created_trees[idx] != NULL)
+            created_trees[idx]->extract_shard_equivalence_sets(eq_sets,
+                source_shard, (mapping == NULL) ? 1 : mapping->size(), 
+                total_shards, created_nodes[idx]);
         for (std::map<ShardID,LegionMap<RegionNode*,
                       FieldMaskSet<EquivalenceSet> > >::const_iterator sit =
               eq_sets.begin(); sit != eq_sets.end(); sit++)
@@ -13803,8 +13825,9 @@ namespace Legion {
             RegionNode *region = created_nodes[idx];
             rez.serialize(region->handle);
             FieldMaskSet<EquivalenceSet> eq_sets;
-            created_trees[idx]->extract_equivalence_sets(eq_sets,
-                source_shard, mapping->size());
+            if (created_trees[idx] != NULL)
+              created_trees[idx]->extract_equivalence_sets(eq_sets,
+                  source_shard, mapping->size());
             rez.serialize<size_t>(eq_sets.size());
             for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                   eq_sets.begin(); it != eq_sets.end(); it++)

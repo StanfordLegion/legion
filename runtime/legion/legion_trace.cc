@@ -206,7 +206,7 @@ namespace Legion {
         frontiers.insert(key);
         // First make any close operations needed for this operation and
         // register their dependences
-        for (std::vector<CloseInfo>::const_iterator cit = 
+        for (LegionVector<CloseInfo>::const_iterator cit = 
               info.closes.begin(); cit != info.closes.end(); cit++)
         {
 #ifdef DEBUG_LEGION_COLLECTIVES

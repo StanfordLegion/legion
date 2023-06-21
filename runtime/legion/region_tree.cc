@@ -17926,15 +17926,14 @@ namespace Legion {
           }
           if (!to_delete.empty())
           {
-            if (to_delete.size() != children.size())
+            for (std::vector<RegionTreeNode*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
             {
-              for (std::vector<RegionTreeNode*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-                children.erase(*it);
-              children.tighten_valid_mask();
+              children.erase(*it);
+              if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
+                delete (*it);
             }
-            else
-              children.clear();
+            children.tighten_valid_mask();
           }
         }
         // Now handle the next child
@@ -17952,6 +17951,8 @@ namespace Legion {
               if (!finder->second)
               {
                 children.erase(finder);
+                if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
+                  assert(false); // should never delete the next child
                 children.tighten_valid_mask();
               }
             }
@@ -17991,15 +17992,14 @@ namespace Legion {
         }
         if (!to_delete.empty())
         {
-          if (to_delete.size() != children.size())
+          for (std::vector<RegionTreeNode*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
           {
-            for (std::vector<RegionTreeNode*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-              children.erase(*it);
-            children.tighten_valid_mask();
+            children.erase(*it);
+            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
+              delete (*it);
           }
-          else
-            children.clear();
+          children.tighten_valid_mask();
         }
       }
     }
@@ -19827,7 +19827,9 @@ namespace Legion {
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
       FieldMask observed_mask; 
+#ifndef LEGION_SPY
       const bool tracing = user.op->is_tracing();
+#endif
       const bool validates_local = arrived && (!proj_info.is_projecting() || 
                                 proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))

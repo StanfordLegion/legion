@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <cmath>
 #include "legion.h"
 #include "legion/runtime.h"
 #include "legion/legion_ops.h"
@@ -4001,8 +4002,10 @@ namespace Legion {
       assert(proj_info.is_projecting());
       assert(result != NULL);
 #endif
-      domain->add_base_gc_ref(PROJECTION_REF);
-      sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      if (domain != NULL)
+        domain->add_base_gc_ref(PROJECTION_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_gc_ref(PROJECTION_REF);
       result->add_reference();
       if (arglen > 0)
         memcpy(args, req.projection_args, arglen);
@@ -5210,7 +5213,7 @@ namespace Legion {
             allow_refinement = true;
             child->add_base_resource_ref(REFINEMENT_REF);
             children.push_back(child);
-            if (partition->row_source->total_children <= 
+            if (((uint64_t)partition->row_source->total_children) <= 
                 CHANGE_REFINEMENT_PARTITION_FRACTION)
               refinement_state = IS_WRITE(usage) ?
                 COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
@@ -5258,7 +5261,7 @@ namespace Legion {
               child->add_base_resource_ref(REFINEMENT_REF);
               children.push_back(child);
               std::sort(children.begin(), children.end());
-              if (partition->row_source->total_children <= 
+              if (((uint64_t)partition->row_source->total_children) <= 
                   (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
               {
                 refinement_state = COMPLETE_NONWRITE_REFINED_STATE;
@@ -5287,7 +5290,7 @@ namespace Legion {
                 std::sort(children.begin(), children.end());
                 // See if we dominate the projection at this point
                 if ((refined_projection != NULL) && 
-                    (partition->row_source->total_children <=
+                    (((uint64_t)partition->row_source->total_children) <=
                      (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION)))
                 {
                   if (refined_projection->remove_reference())
@@ -5308,7 +5311,7 @@ namespace Legion {
                 child->add_base_resource_ref(REFINEMENT_REF);
                 children.push_back(child);
                 std::sort(children.begin(), children.end());
-                if (partition->row_source->total_children <=
+                if (((uint64_t)partition->row_source->total_children) <=
                     (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
                 {
                   refinement_state = COMPLETE_WRITE_REFINED_STATE;
@@ -5513,7 +5516,7 @@ namespace Legion {
                                                           bool is_current)
     //--------------------------------------------------------------------------
     {
-      if (partition->row_source->total_children <=
+      if (((uint64_t)partition->row_source->total_children) <=
           (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
       {
         // Recompute the children score and compare it
@@ -8446,6 +8449,11 @@ namespace Legion {
         finder = pending_closes.insert(
             std::make_pair(path_node, close_op)).first;
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_mapping_dependence(context->get_unique_id(),
+          user->uid, user->idx, finder->second->get_unique_op_id(),
+          0/*index*/, LEGION_TRUE_DEPENDENCE);
+#endif
       finder->second->register_region_dependence(0/*index*/, user->op,
         user->gen, user->idx, LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
       finder->second->update_close_mask(mask);
@@ -8636,7 +8644,7 @@ namespace Legion {
           LEGION_TRUE_DEPENDENCE, false/*validates*/, internal_mask);
 #ifdef LEGION_SPY
       LegionSpy::log_mapping_dependence(context->get_unique_id(),
-          internal_op->get_unique_id(), 0/*index*/, op->get_unique_op_id(),
+          internal_op->get_unique_op_id(), 0/*index*/, op->get_unique_op_id(),
           internal_op->get_internal_index(), LEGION_TRUE_DEPENDENCE);
 #endif
       // Mark that we are done, this puts the op in the pipeline!
@@ -24926,7 +24934,7 @@ namespace Legion {
           {
             equivalence_sets.erase(*it);
             if ((*it)->remove_base_resource_ref(source_kind))
-              assert(false); // should never end up deleting this here
+              delete (*it);
           }
           equivalence_sets.tighten_valid_mask();
         }

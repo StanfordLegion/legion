@@ -2445,7 +2445,7 @@ namespace Legion {
           // half as many children as there are shards then we will shard
           // the traversal, otherwise we can replicate the refinements and
           // do them without any communication
-          if (repl_ctx->total_shards <= (2*partition->total_children))
+          if (repl_ctx->total_shards <= uint64_t(2*partition->total_children))
           {
             for (ColorSpaceIterator itr(partition,
                   repl_ctx->owner_shard->shard_id, repl_ctx->total_shards);
