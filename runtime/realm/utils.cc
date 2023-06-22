@@ -107,5 +107,8 @@ namespace Realm {
 #endif
   }
   
-
+  // allocation for thread-local error buffer for reporting error messages
+  namespace ThreadLocal {
+    REALM_THREAD_LOCAL char error_buffer[REALM_ERROR_BUFFER_SIZE];
+  }
 };

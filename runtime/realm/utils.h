@@ -419,23 +419,28 @@ namespace Realm {
   };
 #endif
 
-  static inline const char* realm_strerror(int err, char *buffer, size_t size)
+  namespace ThreadLocal {
+    // Thread-local buffer for error messages
+    extern REALM_THREAD_LOCAL char error_buffer[REALM_ERROR_BUFFER_SIZE];
+  };
+
+  static inline const char* realm_strerror(int err)
   {
 #ifdef REALM_ON_WINDOWS
-    int result = strerror_s(buffer, size, err);
+    int result = strerror_s<REALM_ERROR_BUFFER_SIZE>(ThreadLocal::error_buffer, err);
     assert(result == 0);
     return buffer;
 #else
     // Deal with the fact that strerror_r has two different possible
     // return types on different systems, call the right one based
     // on the return type and get the result
-    auto result = strerror_r(err, buffer, size);
+    auto result = strerror_r(err, ThreadLocal::error_buffer, REALM_ERROR_BUFFER_SIZE);
     // Return types should either be int or char*
     static_assert(
       std::is_same<decltype(result),int>::value ||
       std::is_same<decltype(result),char*>::value,
       "Unknown strerror_r return type");
-    return ErrorHelper<decltype(result)>::process_error_message(result, buffer);
+    return ErrorHelper<decltype(result)>::process_error_message(result, ThreadLocal::error_buffer);
 #endif
   }
 

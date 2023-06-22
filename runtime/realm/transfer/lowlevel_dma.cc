@@ -219,10 +219,7 @@ namespace Realm {
             continue;
           default:
             {
-              // Should be big enough for most error messages
-              constexpr size_t BUFFER_SIZE = 1024;
-              char buffer[BUFFER_SIZE];
-              const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+              const char *message = realm_strerror(errno);
               log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
               abort();
             }
@@ -232,9 +229,7 @@ namespace Realm {
       int ret = pwrite(cb.aio_fildes, (const void*)cb.aio_buf, cb.aio_nbytes, cb.aio_offset);
       if (ret < 0)
       {
-        constexpr size_t BUFFER_SIZE = 1024;
-        char buffer[BUFFER_SIZE];
-        const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+        const char *message = realm_strerror(errno);
         log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
         abort();
       }
@@ -251,10 +246,7 @@ namespace Realm {
         log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
         if (ret != 0)
         {
-          // Should be big enough for most error messages
-          constexpr size_t BUFFER_SIZE = 1024;
-          char buffer[BUFFER_SIZE];
-          const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+          const char *message = realm_strerror(errno);
           log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
           abort();
         }
@@ -304,10 +296,7 @@ namespace Realm {
             continue;
           default:
             {
-              // Should be big enough for most error messages
-              constexpr size_t BUFFER_SIZE = 1024;
-              char buffer[BUFFER_SIZE];
-              const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+              const char *message = realm_strerror(errno);
               log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
               abort();
             }
@@ -317,9 +306,7 @@ namespace Realm {
       int ret = pread(cb.aio_fildes, (void*)cb.aio_buf, cb.aio_nbytes, cb.aio_offset);
       if (ret < 0)
       {
-        constexpr size_t BUFFER_SIZE = 1024;
-        char buffer[BUFFER_SIZE];
-        const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+        const char *message = realm_strerror(errno);
         log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
         abort();
       }
@@ -336,10 +323,7 @@ namespace Realm {
         log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
         if (ret != 0)
         {
-          // Should be big enough for most error messages
-          constexpr size_t BUFFER_SIZE = 1024;
-          char buffer[BUFFER_SIZE];
-          const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+          const char *message = realm_strerror(errno);
           log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
           abort();
         }
