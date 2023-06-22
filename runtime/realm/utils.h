@@ -29,7 +29,7 @@
 #include <cassert>
 #include <cstdint>
 #include <sstream>
-#include <cerrno>
+#include <cstring>
 #include <type_traits> // std::is_same
 
 namespace Realm {
@@ -429,7 +429,7 @@ namespace Realm {
 #ifdef REALM_ON_WINDOWS
     int result = strerror_s<REALM_ERROR_BUFFER_SIZE>(ThreadLocal::error_buffer, err);
     assert(result == 0);
-    return buffer;
+    return ThreadLocal::error_buffer;
 #else
     // Deal with the fact that strerror_r has two different possible
     // return types on different systems, call the right one based
