@@ -1347,8 +1347,7 @@ namespace Legion {
       virtual bool update_projection(ProjectionSummary *summary,
                                      const RegionUsage &usage,
                                      bool &allow_refinement) = 0;
-      virtual bool update_arrival(const RegionUsage &usage,
-                                  bool &allow_refinement) = 0;
+      virtual bool update_arrival(const RegionUsage &usage) = 0;
       virtual void invalidate_refinement(ContextID ctx, 
                                 const FieldMask &invalidation_mask) = 0;
 #if 0
@@ -1425,8 +1424,7 @@ namespace Legion {
       virtual bool update_projection(ProjectionSummary *summary,
                                      const RegionUsage &usage,
                                      bool &allow_refinement);
-      virtual bool update_arrival(const RegionUsage &usage,
-                                  bool &allow_refinement);
+      virtual bool update_arrival(const RegionUsage &usage);
       virtual void invalidate_refinement(ContextID ctx, 
                                          const FieldMask &invalidation_mask);
 #if 0
@@ -1515,8 +1513,7 @@ namespace Legion {
       virtual bool update_projection(ProjectionSummary *summary,
                                      const RegionUsage &usage,
                                      bool &allow_refinement);
-      virtual bool update_arrival(const RegionUsage &usage,
-                                  bool &allow_refinement);
+      virtual bool update_arrival(const RegionUsage &usage);
       virtual void invalidate_refinement(ContextID ctx, 
                                          const FieldMask &invalidation_mask);
 #if 0

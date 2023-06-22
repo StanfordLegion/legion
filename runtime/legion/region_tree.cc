@@ -19840,7 +19840,14 @@ namespace Legion {
         {
           // Don't record dependences on any other users from the same op
           LogicalUser &prev = *(it->first);
-          if (prev.ctx_index == user.ctx_index)
+          if ((prev.ctx_index == user.ctx_index) && 
+              // Note this second condition only happens for must-epoch 
+              // operations where multiple tasks are coming through here
+              // and we still need to record their mapping dependences
+              // so we don't want to go into the scope. If we ever get
+              // rid of must-epoch operations we can get rid of the 
+              // second part of this condition
+              ((prev.op == user.op) || (user.op->get_must_epoch_op() == NULL)))
           {
             if (TRACK_DOM)
               dominator_mask -= it->second;

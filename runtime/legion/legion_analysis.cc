@@ -4429,11 +4429,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionRefinementTracker::update_arrival(const RegionUsage &usage,
-                                                 bool &allow_refinement)
+    bool RegionRefinementTracker::update_arrival(const RegionUsage &usage)
     //--------------------------------------------------------------------------
     {
-      allow_refinement = (refinement_state == UNREFINED_STATE);
+      // We don't change the state because of an arrival right now
       return false;
     }
 
@@ -5493,8 +5492,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionRefinementTracker::update_arrival(const RegionUsage &usage,
-                                                    bool &allow_refinement)
+    bool PartitionRefinementTracker::update_arrival(const RegionUsage &usage)
     //--------------------------------------------------------------------------
     {
       assert(false); // should never arrive on a partition without a projection 
@@ -6678,13 +6676,12 @@ namespace Legion {
             to_add.insert(diff, diff_mask);
             it.filter(diff_mask);
           }
-          bool allow_refinement = false;
-          if (it->first->update_arrival(usage, allow_refinement))
+          if (it->first->update_arrival(usage))
           {
             it->first->invalidate_refinement(ctx, overlap);
             to_delete.push_back(it->first);
           }
-          else if (!allow_refinement)
+          else
           {
             refinement_mask -= overlap;
             if (!refinement_mask)
@@ -6706,12 +6703,8 @@ namespace Legion {
       if (!!refinement_mask)
       {
         RefinementTracker *new_tracker = owner->create_refinement_tracker();
-        bool allow_refinement = false;
-        if (new_tracker->update_arrival(usage, allow_refinement))
+        if (new_tracker->update_arrival(usage))
           assert(false); // should never get here
-#ifdef DEBUG_LEGION
-        assert(allow_refinement);
-#endif
         refinement_trackers.insert(new_tracker, refinement_mask);
       }
     }
@@ -24394,23 +24387,15 @@ namespace Legion {
                                          create_now, to_notify);
             std::vector<AddressSpaceID> spaces;
             spaces.reserve(to_notify.size());
-            bool has_local_notifications = false;
             for (LegionMap<AddressSpaceID,
                            FieldMaskSet<EqKDTree> >::const_iterator
                   it = to_notify.begin(); it != to_notify.end(); it++)
-            {
-              if (it->first == runtime->address_space)
-                has_local_notifications = true;;
               spaces.push_back(it->first);
-            }
             if (!spaces.empty())
             {
-              if (!has_local_notifications)
-              {
-                // Make sure we include our local space too
-                spaces.push_back(local_space);
-                std::sort(spaces.begin(), spaces.end());
-              }
+              // Make sure we include our local space too
+              spaces.push_back(local_space);
+              std::sort(spaces.begin(), spaces.end());
               CollectiveMapping mapping(spaces, 
                   runtime->legion_collective_radix);
               std::vector<AddressSpaceID> children;
@@ -24428,10 +24413,7 @@ namespace Legion {
                   rez.serialize(this);
                   rez.serialize(local_space);
                   mapping.pack(rez);
-                  if (has_local_notifications)
-                    rez.serialize<size_t>(to_notify.size() - 1);
-                  else
-                    rez.serialize<size_t>(to_notify.size());
+                  rez.serialize<size_t>(to_notify.size());
                   for (LegionMap<AddressSpaceID,
                                  FieldMaskSet<EqKDTree> >::const_iterator nit =
                         to_notify.begin(); nit != to_notify.end(); nit++)
@@ -24456,21 +24438,35 @@ namespace Legion {
                 ready_events.push_back(notified);
               }
             }
-            if (has_local_notifications)
+            // Check to see if there are any local notifications to perform
+            LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator 
+              local_finder = create_now.find(local_space);
+            if ((local_finder != create_now.end()) && 
+                !(overlap * local_finder->second.get_valid_mask()))
             {
-#ifdef DEBUG_LEGION
-              assert(to_notify.find(local_space) != to_notify.end());
-#endif
-              FieldMaskSet<EqKDTree> &local_trees = to_notify[local_space];
-              for (FieldMaskSet<EqKDTree>::const_iterator it =
-                    local_trees.begin(); it != local_trees.end(); it++)
+              std::vector<EqKDTree*> to_delete;
+              for (FieldMaskSet<EqKDTree>::iterator it = 
+                    local_finder->second.begin(); it != 
+                    local_finder->second.end(); it++)
               {
-#ifdef DEBUG_LEGION
-                assert(!(it->second - overlap));
-#endif
-                it->first->record_equivalence_set(eit->first, it->second,
+                const FieldMask local_overlap = overlap & it->second;
+                if (!local_overlap)
+                  continue;
+                it->first->record_equivalence_set(eit->first, local_overlap,
                     RtEvent::NO_RT_EVENT, this, local_space);
+                it.filter(local_overlap);
+                if (!it->second)
+                  to_delete.push_back(it->first);
               }
+              if (to_delete.size() < local_finder->second.size())
+              {
+                for (std::vector<EqKDTree*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  local_finder->second.erase(*it);
+                local_finder->second.tighten_valid_mask();
+              }
+              else if (to_delete.size() == local_finder->second.size())
+                create_now.erase(local_finder);
             }
             pending_sets.insert(eit->first, overlap);
             dest.set_mask -= overlap;
@@ -24510,9 +24506,15 @@ namespace Legion {
             create_now.begin(); cit != create_now.end(); /*nothing*/)
       {
         if (cit->first == local_space)
+        {
+          cit++;
           continue;
+        }
         if (mask * cit->second.get_valid_mask())
+        {
+          cit++;
           continue;
+        }
         FieldMaskSet<EqKDTree> &notify = to_notify[cit->first];
         if (mask != cit->second.get_valid_mask())
         {

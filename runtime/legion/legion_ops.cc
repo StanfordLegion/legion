@@ -1369,6 +1369,7 @@ namespace Legion {
       assert(epoch != NULL);
 #endif
       must_epoch = epoch;
+      context_index = must_epoch->get_ctx_index();
       if (do_registration)
         must_epoch->register_subop(this);
     }
