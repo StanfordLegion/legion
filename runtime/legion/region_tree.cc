@@ -3284,14 +3284,7 @@ namespace Legion {
         {
           index_nodes[sp] = result;
           index_space_requests.erase(sp);
-          if (parent != NULL)
-          {
-#ifdef DEBUG_LEGION
-            assert(!add_root_reference);
-#endif
-            parent->add_child(result);
-          }
-          else if (add_root_reference)
+          if (add_root_reference)
             result->add_base_valid_ref(APPLICATION_REF);
           // If we didn't give it a value add a reference to be removed once
           // the index space node has been set
@@ -3306,6 +3299,14 @@ namespace Legion {
           }
           else
             result->set_bounds(bounds, is_domain, true/*init*/, is_ready);
+          if (parent != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(!add_root_reference);
+#endif
+            // Only do this after we've added all the references
+            parent->add_child(result);
+          }
           result->register_with_runtime();
           return result;
         }
@@ -3351,12 +3352,12 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // Always add a valid reference from the parent
-        parent.add_child(result);
         // Add a reference for when we set this index space node
         // Hold the reference on the parent partition to keep both it
         // and the child index space alive 
         parent.add_base_gc_ref(REGION_TREE_REF);
+        // Only record this with the parent after all the references are added
+        parent.add_child(result);
         result->register_with_runtime();
       } 
       return result;
