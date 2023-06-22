@@ -4,17 +4,17 @@ use std::sync::{Arc, Mutex};
 
 use legion_prof_viewer::{
     data::{
-        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, Item, ItemMeta, ItemUID,
-        Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData, SummaryTile, SummaryTileData,
-        TileID, TileSet, UtilPoint,
+        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, Item, ItemLink, ItemMeta,
+        ItemUID, Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData, SummaryTile,
+        SummaryTileData, TileID, TileSet, UtilPoint,
     },
     timestamp as ts,
 };
 
 use crate::backend::common::{MemGroup, ProcGroup, StatePostprocess};
 use crate::state::{
-    ChanID, ChanKind, Color, Container, ContainerEntry, MemID, MemKind, NodeID, ProcID, ProcKind,
-    ProfUID, State, Timestamp,
+    ChanID, ChanKind, Color, Container, ContainerEntry, MemID, MemKind, NodeID, OpID, ProcID,
+    ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -26,6 +26,12 @@ impl Into<ts::Timestamp> for Timestamp {
 impl Into<Timestamp> for ts::Timestamp {
     fn into(self) -> Timestamp {
         Timestamp(self.0.try_into().unwrap())
+    }
+}
+
+impl Into<ts::Interval> for TimeRange {
+    fn into(self) -> ts::Interval {
+        ts::Interval::new(self.start.unwrap().into(), self.stop.unwrap().into())
     }
 }
 
@@ -66,6 +72,7 @@ pub struct StateDataSource {
     state: State,
     info: EntryInfo,
     entry_map: BTreeMap<EntryID, EntryKind>,
+    proc_entries: BTreeMap<ProcID, EntryID>,
     proc_groups: BTreeMap<ProcGroup, Vec<ProcID>>,
     mem_groups: BTreeMap<MemGroup, Vec<MemID>>,
     chan_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
@@ -75,6 +82,7 @@ pub struct StateDataSource {
 impl StateDataSource {
     pub fn new(state: State) -> Self {
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
+        let mut proc_entries = BTreeMap::new();
 
         let mut proc_groups = state.group_procs();
         let mem_groups = state.group_mems();
@@ -144,7 +152,8 @@ impl StateDataSource {
                 if node.is_some() {
                     for (proc_index, proc) in procs.iter().enumerate() {
                         let proc_id = kind_id.child(proc_index as u64);
-                        entry_map.insert(proc_id, EntryKind::Proc(*proc));
+                        entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc));
+                        proc_entries.insert(*proc, proc_id);
 
                         let rows = state.procs.get(proc).unwrap().max_levels as u64 + 1;
                         proc_slots.push(EntryInfo::Slot {
@@ -355,6 +364,7 @@ impl StateDataSource {
             state,
             info,
             entry_map,
+            proc_entries,
             proc_groups,
             mem_groups,
             chan_groups,
@@ -620,13 +630,9 @@ impl StateDataSource {
             }
 
             let entry = cont.entry(point.entry);
-            let (base, time_range, waiters) =
-                (&entry.base(), &entry.time_range(), &entry.waiters());
+            let (base, time_range, waiters) = (&entry.base(), entry.time_range(), &entry.waiters());
 
-            let point_interval = ts::Interval::new(
-                time_range.start.unwrap().into(),
-                time_range.stop.unwrap().into(),
-            );
+            let point_interval: ts::Interval = time_range.into();
             if !point_interval.overlaps(tile_id.0) {
                 continue;
             }
@@ -728,6 +734,22 @@ impl StateDataSource {
         }
     }
 
+    fn generate_op_link(&self, op_id: OpID) -> Field {
+        if let Some(proc_id) = self.state.tasks.get(&op_id) {
+            let proc = self.state.procs.get(proc_id).unwrap();
+            let op = proc.find_task(op_id).unwrap();
+            let op_name = op.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: op.base().prof_uid.into(),
+                title: op_name,
+                interval: op.time_range().into(),
+                entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+            })
+        } else {
+            Field::U64(op_id.0)
+        }
+    }
+
     fn generate_proc_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -755,7 +777,10 @@ impl StateDataSource {
                 fields.push(("Operation".to_owned(), Field::U64(op_id.0)));
             }
             if let Some(initiation_op) = entry.initiation_op {
-                fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
+                fields.push((
+                    "Initiation".to_owned(),
+                    self.generate_op_link(initiation_op),
+                ));
             }
             if let Some(provenance) = provenance {
                 fields.push((
@@ -821,7 +846,10 @@ impl StateDataSource {
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
             if let Some(initiation_op) = entry.initiation() {
-                fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
+                fields.push((
+                    "Initiation".to_owned(),
+                    self.generate_op_link(initiation_op),
+                ));
             }
             if let Some(provenance) = provenance {
                 fields.push((
@@ -887,7 +915,10 @@ impl StateDataSource {
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
             if let Some(initiation_op) = entry.initiation() {
-                fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
+                fields.push((
+                    "Initiation".to_owned(),
+                    self.generate_op_link(initiation_op),
+                ));
             }
             if let Some(provenance) = provenance {
                 fields.push((

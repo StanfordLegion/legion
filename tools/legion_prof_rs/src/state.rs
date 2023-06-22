@@ -274,7 +274,7 @@ pub trait Container {
 pub trait ContainerEntry {
     fn base(&self) -> &Base;
     fn base_mut(&mut self) -> &mut Base;
-    fn time_range(&self) -> &TimeRange;
+    fn time_range(&self) -> TimeRange;
     fn time_range_mut(&mut self) -> &mut TimeRange;
     fn waiters(&self) -> Option<&Waiters>;
     fn initiation(&self) -> Option<OpID>;
@@ -335,8 +335,8 @@ impl ContainerEntry for ProcEntry {
         &mut self.base
     }
 
-    fn time_range(&self) -> &TimeRange {
-        &self.time_range
+    fn time_range(&self) -> TimeRange {
+        self.time_range
     }
 
     fn time_range_mut(&mut self) -> &mut TimeRange {
@@ -857,11 +857,11 @@ impl ContainerEntry for ChanEntry {
         }
     }
 
-    fn time_range(&self) -> &TimeRange {
+    fn time_range(&self) -> TimeRange {
         match self {
-            ChanEntry::Copy(copy) => &copy.time_range,
-            ChanEntry::Fill(fill) => &fill.time_range,
-            ChanEntry::DepPart(deppart) => &deppart.time_range,
+            ChanEntry::Copy(copy) => copy.time_range,
+            ChanEntry::Fill(fill) => fill.time_range,
+            ChanEntry::DepPart(deppart) => deppart.time_range,
         }
     }
 
@@ -1058,7 +1058,7 @@ impl Chan {
     }
 
     fn sort_time_range(&mut self) {
-        fn add(time: &TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
+        fn add(time: TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
             points.push(ChanPoint::new(
@@ -1534,8 +1534,8 @@ impl ContainerEntry for Inst {
         &mut self.base
     }
 
-    fn time_range(&self) -> &TimeRange {
-        &self.time_range
+    fn time_range(&self) -> TimeRange {
+        self.time_range
     }
 
     fn time_range_mut(&mut self) -> &mut TimeRange {
@@ -1729,7 +1729,7 @@ impl Base {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
