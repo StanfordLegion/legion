@@ -29,7 +29,7 @@
 #include <cassert>
 #include <cstdint>
 #include <sstream>
-#include <errno.h>
+#include <cerrno>
 #include <type_traits> // std::is_same
 
 namespace Realm {
