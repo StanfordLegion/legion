@@ -1,4 +1,8 @@
-# Deferred Allocation
+---
+layout: page
+permalink: /tutorial/realm/deferred_allocation.html
+title: Realm Deferred Allocation
+---
 
 ## Introduction
 In a previous tutorial, we covered how Realm's programming model
