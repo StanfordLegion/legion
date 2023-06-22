@@ -29,6 +29,8 @@
 #include <cassert>
 #include <cstdint>
 #include <sstream>
+#include <errno.h>
+#include <type_traits> // std::is_same
 
 namespace Realm {
     
@@ -388,6 +390,53 @@ namespace Realm {
   void call_destructor(T *obj)
   {
     obj->~T();
+  }
+
+  // Provide support for a generic function realm_strerror that converts
+  // OS error codes back to strings in portable way across OSes
+#ifndef REALM_ON_WINDOWS
+  template<typename T>
+  struct ErrorHelper {
+  public:
+    static inline const char* process_error_message(T result, char *buffer)
+    {
+      // this is the version of strerror_r that returns an int so make
+      // sure that it is not zero and then return the buffer
+      assert(result == 0);
+      return buffer;
+    }
+  };
+
+  template<>
+  struct ErrorHelper<char*> {
+  public:
+    static inline const char* process_error_message(char *result, char *buffer)
+    {
+      // this is the version of strerror_r that returns a string so use
+      // that if it is not null
+      return (result == nullptr) ? buffer : result;
+    }
+  };
+#endif
+
+  static inline const char* realm_strerror(int err, char *buffer, size_t size)
+  {
+#ifdef REALM_ON_WINDOWS
+    int result = strerror_s(buffer, size, err);
+    assert(result == 0);
+    return buffer;
+#else
+    // Deal with the fact that strerror_r has two different possible
+    // return types on different systems, call the right one based
+    // on the return type and get the result
+    auto result = strerror_r(err, buffer, size);
+    // Return types should either be int or char*
+    static_assert(
+      std::is_same<decltype(result),int>::value ||
+      std::is_same<decltype(result),char*>::value,
+      "Unknown strerror_r return type");
+    return ErrorHelper<decltype(result)>::process_error_message(result, buffer);
+#endif
   }
 
 }; // namespace Realm

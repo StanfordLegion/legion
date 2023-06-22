@@ -21,7 +21,7 @@
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/ib_memory.h"
-#include "realm/error.h"
+#include "realm/utils.h"
 
 #include <errno.h>
 // included for file memory data transfer
