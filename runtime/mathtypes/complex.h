@@ -31,6 +31,10 @@
 #elif __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ == 0
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 10.0"
 #else
+// The cuda_runtime.h is included here due to a bug in libcudacxx with 
+// cuda 12 (https://github.com/StanfordLegion/legion/issues/1469#)
+// TODO: remove it once the bug is fixed in the future release of cuda.
+#include <cuda_runtime.h>
 #include <thrust/complex.h>
 #define COMPLEX_NAMESPACE thrust
 #endif

@@ -4664,7 +4664,8 @@ function std.start(main_task, extra_setup_thunk)
   if #objfiles > 0 then
     local dylib = os.tmpname()
     local cmd = os.getenv('CXX') or 'c++'
-    if os.execute('test "$(uname)" = Darwin') == 0 then
+    local ffi = require("ffi")
+    if ffi.os == "OSX" then
       cmd = cmd .. ' -dynamiclib -single_module -undefined dynamic_lookup -fPIC'
     else
       cmd = cmd .. ' -shared -fPIC'

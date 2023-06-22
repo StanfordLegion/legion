@@ -873,7 +873,7 @@ class Field(StatObject):
         if self.name is None:
             return 'fid:' + str(self.field_id)
         else:
-            return self.name
+            return 'fid:' + str(self.field_id) + ':' + self.name
 
 class Align(StatObject):
     __slots__ = ['field_id', 'eqk', 'align_desc', 'has_align']

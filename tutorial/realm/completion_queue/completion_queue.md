@@ -1,4 +1,8 @@
-# Realm Completion Queue
+---
+layout: page
+permalink: /tutorial/realm/completion_queue.html
+title: Realm Completion Queue
+---
 
 ## Introduction
 In some scenarios, we want to test the completion/triggerness of any event
@@ -17,13 +21,16 @@ Here is a list of covered topics:
 
 * [Creating a CompletionQueue](#creating-a-completionqueue)
 * [Using CompletionQueue to Track Triggerness of Events](#using-completionqueue-to-track-triggerness-of-events)
+* [Destroying a CompletionQueue](#destroying-a-completionqueue)
 
 ## Creating a CompletionQueue
 
 A CompletionQueue can be created by calling:
+
 ```c++
 CompletionQueue::create_completion_queue(size_t max_size);
 ```
+
 The `max_size` parameter specifies the maximum number of triggered 
 events the CompletionQueue can hold. If the `max_size` is set to 0,
 the queue can grow arbitrarily, but at the cost of additional overhead.
@@ -41,6 +48,7 @@ The `get_nonempty_event` returns a `NO_EVENT` if the CompletionQueue is not empt
 Let's take the following code for an example, the `nonempty_test` variable is `NO_EVENT` 
 because the event `e` added is triggered and becomes available in
 the CompletionQueue after `nonempty.wait()` is returned.
+
 ```c++
 Event nonempty = completion_queue.get_nonempty_event();
   ...
@@ -54,6 +62,7 @@ completion_queue.pop_events(&popped[0], 1);
 nonempty_test = completion_queue.get_nonempty_event();
 assert(nonempty_test != Event::NO_EVENT);
 ```
+
 Once the event `e` is popped out of the CompletionQueue using `pop_events`, 
 the CompletionQueue becomes empty, and therefore, the new value of `nonempty_test` 
 returned by `get_nonempty_event` is no longer `NO_EVENT`.

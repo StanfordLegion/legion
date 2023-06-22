@@ -8,7 +8,14 @@ Version 23.06.0 (June ??, 2023)
   * Realm
     - Support for better backtraces via libdw
   * Tools
-    - Fix rendering of profiles over HTTP
+    - Legion Prof now supports search in the new profiler UI
+    - Legion Prof now supports an HTTP client/server interface. Launch the
+       server with `--serve` (on port 8080 by default) and attach a client to
+       it with `--attach http://127.0.0.1:8080`
+    - Legion Prof modes (client/server/viewer) are now parallel by
+       default, and perform heavy computations off the UI thread for
+       better responsiveness
+    - Fix rendering of profiles over HTTP with old profiler UI
     - Fix profiling of copies with different numbers of hops between instances
 
 Version 23.03.0 (March 27, 2023)

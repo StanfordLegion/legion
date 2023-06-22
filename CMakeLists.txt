@@ -547,7 +547,17 @@ if(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     list(APPEND HIPCC_FLAGS -D__HIP_PLATFORM_NVCC__)
   elseif(Legion_HIP_TARGET STREQUAL "ROCM")
+    # find the hip library
+    find_package(HIP REQUIRED)
+
     set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
+
+    set(HIPCC_FLAGS "-fno-strict-aliasing")
+    if("${Legion_HIP_ARCH}" STREQUAL "")
+      set(HIP_GENCODE "")
+    else()
+      set(HIP_GENCODE "--offload-arch=${Legion_HIP_ARCH}")
+    endif()
 
     if(BUILD_SHARED_LIBS)
       list(APPEND HIPCC_FLAGS -fPIC)
@@ -556,20 +566,10 @@ if(Legion_USE_HIP)
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
-
-    list(APPEND HIPCC_FLAGS -fno-strict-aliasing)
-
-    if("${Legion_HIP_ARCH}" STREQUAL "")
-      set(HIP_GENCODE "")
-    else()
-      set(HIP_GENCODE "--offload-arch=${Legion_HIP_ARCH}")
-    endif()
   endif()
 
   option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
 
-  # find the hip library
-  find_package(HIP REQUIRED)
   # define variable for legion_defines.h
   set(LEGION_USE_HIP ON)
   # define variable for realm_defines.h

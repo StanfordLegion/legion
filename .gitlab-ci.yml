@@ -7,6 +7,7 @@ variables:
   WARN_AS_ERROR: "1"
   # MAKEFLAGS: "-s"
   REALM_BACKTRACE: "1"
+  UCX_HANDLE_ERRORS: "none" # Disable UCX-based backtrace.
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
   TIMELIMIT: "600"  # each test should take less than 10 minutes
   USE_DEFCHECK: "1"

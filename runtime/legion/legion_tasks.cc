@@ -3880,12 +3880,18 @@ namespace Legion {
           get_depth(), false/*is inner*/, regions, parent_req_indexes,
           virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT,
           false/*remote*/, false/*inline*/, true/*implicit*/);
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id);
-      inner_ctx->configure_context(mapper, task_priority);
       execution_context = inner_ctx;
       execution_context->add_reference();
       return inner_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::configure_execution_context(InnerContext *inner_ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      inner_ctx->configure_context(mapper, task_priority);
     }
 
     //--------------------------------------------------------------------------
@@ -4634,9 +4640,7 @@ namespace Legion {
               get_depth(), variant->is_inner(), regions, parent_req_indexes,
               virtual_mapped, unique_op_id, execution_fence_event, 
               false/*remote*/, inline_task);
-          if (mapper == NULL)
-            mapper = runtime->find_mapper(current_proc, map_id);
-          inner_ctx->configure_context(mapper, task_priority);
+          configure_execution_context(inner_ctx); 
           execution_context = inner_ctx;
         }
         else
@@ -4759,7 +4763,7 @@ namespace Legion {
           if ((*it) < Mapping::PMID_LEGION_FIRST)
             realm_measurements.insert((Realm::ProfilingMeasurementID)(*it));
           else if ((*it) == Mapping::PMID_RUNTIME_OVERHEAD)
-            execution_context->initialize_overhead_tracker();
+            execution_context->initialize_overhead_profiler();
           else
             assert(false); // should never get here
         }
@@ -4786,6 +4790,14 @@ namespace Legion {
           }
         }
       }
+      // Make a RtEvent copy of the false_guard in the case that we
+      // are going to execute this task with a predicate and we'll
+      // need to launch the misspeculation task after we launch the 
+      // actual task itself. We have to pull this onto the stack before 
+      // launching the task itself as the task might ultimately be cleaned
+      // up before we're done executing this function so we can't touch 
+      // any member variables after we launch it
+      const RtEvent misspeculation_precondition = RtEvent(false_guard);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_variant_decision(unique_op_id, selected_variant);
@@ -4844,13 +4856,13 @@ namespace Legion {
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
-      if (false_guard.exists())
+      if (misspeculation_precondition.exists())
       {
         MisspeculationTaskArgs args(this);
         // Make sure this runs on an application processor where the
         // original task was going to go 
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                         RtEvent(false_guard));
+                                         misspeculation_precondition);
         // Fun little trick here: decrement the outstanding meta-task
         // counts for the mis-speculation task in case it doesn't run
         // If it does run, we'll increment the counts again
@@ -4934,10 +4946,12 @@ namespace Legion {
           rez.serialize(orig_task);
           rez.serialize(orig_length);
           rez.serialize(orig, orig_length);
-          if (execution_context->overhead_tracker)
+          if (execution_context->overhead_profiler)
           {
             rez.serialize<bool>(true);
-            rez.serialize(*execution_context->overhead_tracker);
+            // Only pack the bits that we need for the profiling response
+            rez.serialize((const void*)execution_context->overhead_profiler,
+                sizeof(Mapping::ProfilingMeasurements::RuntimeOverhead));
           }
           else
             rez.serialize<bool>(false);
@@ -4969,10 +4983,10 @@ namespace Legion {
             {
               // If we had an overhead tracker 
               // see if this is the callback for the task
-              if (execution_context->overhead_tracker != NULL)
+              if (execution_context->overhead_profiler != NULL)
                 // This is the callback for the task itself
                 info.profiling_responses.attach_overhead(
-                    execution_context->overhead_tracker);
+                    execution_context->overhead_profiler);
             }
             return;
           }
@@ -4988,10 +5002,10 @@ namespace Legion {
         {
           // If we had an overhead tracker 
           // see if this is the callback for the task
-          if (execution_context->overhead_tracker != NULL)
+          if (execution_context->overhead_profiler!= NULL)
             // This is the callback for the task itself
             info.profiling_responses.attach_overhead(
-                execution_context->overhead_tracker);
+                execution_context->overhead_profiler);
         }
         mapper->invoke_task_report_profiling(this, &info);
       }

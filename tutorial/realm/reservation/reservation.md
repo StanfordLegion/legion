@@ -1,4 +1,10 @@
-# Realm Reservation
+---
+layout: page
+permalink: /tutorial/realm/reservation.html
+title: Realm Reservation
+tags: [Mermaid]
+mermaid: true
+---
 
 ## Introduction
 
@@ -29,6 +35,7 @@ Here is a list of covered topics:
 
 We create a reservation to protect the shared region instance that is accessed
 by both reader and writer tasks.
+
 ```c++
 Reservation reservation = Reservation::create_reservation();
 ```
@@ -65,12 +72,13 @@ because all writer tasks have already been finished. However, to demonstrate the
 of the reservation, we also launch a writer task concurrently with the reader tasks.
 To acquire the shared ownership of the reservation, we can pass 
 `mode=1, exclusive=false` to the acquire method.
+
 ```c++
 Event e1 = reservation.acquire(1 /* mode */, false /* exclusive */, writer_event /* wait on */);
 Event e2 = cpus[i % cpus.size()].spawn(READER_TASK, &task_args, sizeof(ReaderTaskArgs), e1);
 reservation.release(e2);
-
 ``` 
+
 It is worth mentioning that `mode=0` indicates exclusive ownership, 
 so we need to set the mode to a different number to obtain shared ownership.
 
@@ -79,11 +87,11 @@ so we need to set the mode to a different number to obtain shared ownership.
 There are several limitations when using a reservation.
 
 - Currently, Realm does not allow multiple nodes to hold a reservation 
-simultaneously. Therefore, acquiring a reservation in shared mode on different nodes is impossible.
+  simultaneously. Therefore, acquiring a reservation in shared mode on different nodes is impossible.
 - If multiple reservations need to be acquired, they must be acquired in 
-a specific order to avoid deadlock, similar to how normal locks are acquired.
-- Realm is not obligated to grant reservations in any specific order. For example,
-in the following code:
+  a specific order to avoid deadlock, similar to how normal locks are acquired.
+- Realm is not obligated to grant reservations in any specific order. 
+  For example, in the following code:
 
 ```c++
 // Launch task 1
@@ -96,15 +104,18 @@ e4 = merge(e2, e3);
 e5 = proc.spawn(TASK2, e4);
 reservation.release(e5);
 ```
+
 A corresponding sequence diagram is shown below:
-```mermaid
-graph TD
-A{acquire} --> B{TASK1}
-B --> C{release}
-D{acquire} --> E{TASK2}
-B --> E
-E --> F{release}
-```
+
+<div class="mermaid">
+    graph TD
+    A{acquire} --> B{TASK1}
+    B --> C{release}
+    D{acquire} --> E{TASK2}
+    B --> E
+    E --> F{release}
+</div>
+
 It is possible for the reservation e3 to be granted before the reservation e1, 
 resulting in a deadlock because the second task launch 
 will not run until the first task launch is done. Instead, the second acquire can wait on e2 rather than in the copy, thus forcing a proper total order free of deadlocks.
