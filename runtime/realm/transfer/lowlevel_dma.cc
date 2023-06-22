@@ -18,10 +18,10 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
 #include "realm/threads.h"
-#include "realm/error.h"
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/ib_memory.h"
+#include "realm/error.h"
 
 #include <errno.h>
 // included for file memory data transfer
@@ -228,16 +228,37 @@ namespace Realm {
             }
         }
       }
-      log_aio.fatal("exceeeded max aio write attempts %d", MAX_ATTEMPTS);
-      abort();
+      log_aio.warning("exceeeded max aio write attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
+      int ret = pwrite(cb.aio_fildes, (const void*)cb.aio_buf, cb.aio_nbytes, cb.aio_offset);
+      if (ret < 0)
+      {
+        constexpr size_t BUFFER_SIZE = 1024;
+        char buffer[BUFFER_SIZE];
+        const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+        log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
+        abort();
+      }
+      else
+        completed = true;
     }
 
     bool PosixAIOWrite::check_completion(void)
     {
-      int ret = aio_error(&cb);
-      if(ret == EINPROGRESS) return false;
-      log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
-      assert(ret == 0);
+      if (!completed)
+      {
+        int ret = aio_error(&cb);
+        if(ret == EINPROGRESS) return false;
+        log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
+        if (ret != 0)
+        {
+          // Should be big enough for most error messages
+          constexpr size_t BUFFER_SIZE = 1024;
+          char buffer[BUFFER_SIZE];
+          const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+          log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+          abort();
+        }
+      }
       return true;
     }
 
@@ -292,16 +313,37 @@ namespace Realm {
             }
         }
       }
-      log_aio.fatal("exceeeded max aio read attempts %d", MAX_ATTEMPTS);
-      abort();
+      log_aio.warning("exceeeded max aio read attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
+      int ret = pread(cb.aio_fildes, (void*)cb.aio_buf, cb.aio_nbytes, cb.aio_offset);
+      if (ret < 0)
+      {
+        constexpr size_t BUFFER_SIZE = 1024;
+        char buffer[BUFFER_SIZE];
+        const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+        log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
+        abort();
+      }
+      else
+        completed = true;
     }
 
     bool PosixAIORead::check_completion(void)
     {
-      int ret = aio_error(&cb);
-      if(ret == EINPROGRESS) return false;
-      log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
-      assert(ret == 0);
+      if (!completed)
+      {
+        int ret = aio_error(&cb);
+        if(ret == EINPROGRESS) return false;
+        log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
+        if (ret != 0)
+        {
+          // Should be big enough for most error messages
+          constexpr size_t BUFFER_SIZE = 1024;
+          char buffer[BUFFER_SIZE];
+          const char *message = realm_strerror(errno, buffer, BUFFER_SIZE);
+          log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+          abort();
+        }
+      }
       return true;
     }
 #endif
