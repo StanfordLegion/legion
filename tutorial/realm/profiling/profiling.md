@@ -1,4 +1,8 @@
-# Realm Profiling
+---
+layout: page
+permalink: /tutorial/realm/profiling.html
+title: Realm Profiling 
+---
 
 ## Introduction
 
@@ -25,10 +29,12 @@ instance creation. To tell Realm which profiling information
 we want to collect, we need to create a `ProfilingRequestSet` object. Then we can use the
 `add_request` method to create a `ProfilingRequest` object and add it to the ProfilingRequestSet
 created before. 
+
 ```c++
 ProfilingRequestSet task_prs;
 task_prs.add_request(profile_proc, COMPUTE_PROF_TASK, &task_result, sizeof(ComputeProfResultWrapper))
 ```
+
 Realm profiling adopts a callback design, where a profiling task is launched
 to report profiling results when an operation is completed. Therefore, as shown on the code above, 
 we need to specify the task (`COMPUTE_PROF_TASK`) and processor (`profile_proc`) to be used to launch the task for the ProfilingRequest.
@@ -41,17 +47,19 @@ can not be launched on cpu processors.
 Once the ProfilingRequest is created, we can add performance metrics that need to be profiled into it. 
 Realm supports a variety of performance metrics that can be specified by the `add_measurement`
 method of the ProfilingRequest object. 
+
 ```c++
 task_prs.add_request(profile_proc, COMPUTE_PROF_TASK, &task_result, sizeof(ComputeProfResultWrapper))
   .add_measurement<ProfilingMeasurements::OperationTimeline>()
 ```
+
 The following metrics are used in the tutorial.
 
-- `OperationTimeline` tracks the timestamps of different stages of an operation. In this example,
-we use it for tasks and copy operations.
+- `OperationTimeline` tracks the timestamps of different stages of an operation. 
+  In this example, we use it for tasks and copy operations.
 - `OperationProcessorUsage` contains the processor where the task is launched. 
 - `InstanceTimeline` tracks the timeline of an instance, including when the instance is created, 
-ready for use, and destroyed. 
+  ready for use, and destroyed. 
 - `InstanceMemoryUsage` includes the memory where the instance is located and the size of the instance. 
 - `OperationCopyInfo` tracks the transfer details for copy and fill operations. 
 - `OperationMemoryUsage` tracks the memory usage for copy and fill operations.
@@ -59,6 +67,7 @@ ready for use, and destroyed.
 Realm supports many other kinds of `ProfilingMeasurements`, and they can be found in the [profiling header file](#profiling-header-file).
 Once the metrics are set, we can pass the ProfilingRequestSet object to Realm APIs that
 support profiling. For example, the following code is an example of setting the `ProfilingRequestSet` for tasks.
+
 ```c++
 worker_procs[0].spawn(COMPUTE_TASK, &compute_task_args, sizeof(ComputeTaskArgs), task_prs).wait();
 ```
@@ -69,21 +78,26 @@ As mentioned earlier, after an operation is completed, a profiling task is launc
 profiling results can be collected. Now we demonstrate how to collect
 the results of the task launched in the `main_task`. 
 1. To gather profiling results of a task, a `ProfilingResponse` object is created by passing the `args` and `arglen`.
+
 ```c++
 ProfilingResponse resp(args, arglen);
 ```
+
 It is worth mentioning that for each `ProfilingRequest`, there will be one and only 
 one `ProfilingResponse` reported back to the client, such that the client can use 
 this feature to make sure all the profiling responses are collected.
 
 2. The argument of the profiling task can be retrieved by the `user_data` method of the
 ProfilingResponse object. 
+
 ```c++
 const ComputeProfResultWrapper *result = static_cast<const ComputeProfResultWrapper *>(resp.user_data());
 ```
+
 3. Then, the `get_measurement` method can be used to
 obtain the results of performance metrics requested by the `add_measurement` method described
 in the previous section.
+
 ```c++
 ProfilingMeasurements::OperationTimeline timeline;
 if(resp.get_measurement(timeline)) {
@@ -114,14 +128,15 @@ Then we profile the tasks and use the profiling results to pick the best worker 
 for future iterations dynamically.
 
 Here is the performance comparison between round-robin and profiling guided scheduling:
+
 ```
 $ ./profiling -ll:cpu 6
 [0 - 7f59ba4f3800]    0.189922 {3}{app}: With round-robin 38358 us
 [0 - 7f59ba4f3800]    0.212061 {3}{app}: With profiling 21299 us
 ```
+
 It turns out the profiling guided one achieves better task load balance.
 
 ## References
 
-<div id="profiling-header-file"></div>
-[1]: [profiling header file](https://github.com/StanfordLegion/legion/blob/stable/runtime/realm/profiling.h)
+1. [profiling header file](https://github.com/StanfordLegion/legion/blob/stable/runtime/realm/profiling.h)

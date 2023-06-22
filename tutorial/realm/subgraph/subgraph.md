@@ -1,4 +1,10 @@
-# Realm Subgraph
+---
+layout: page
+permalink: /tutorial/realm/subgraph.html
+title: Realm Subgraph
+tags: [Mermaid]
+mermaid: true
+---
 
 ## Introduction
 
@@ -12,7 +18,7 @@ Here is a list of covered topics:
 * [Instantiating A Subgraph](#instantiating-a-subgraph)
 * [Performance Comparison with Non-subgraph Implementation](#performance-comparison-with-non-subgraph-implementation)
 * [Other Use Cases of Subgraph](#other-use-cases-of-subgraph)
-* [Example](#example)
+* [References](#references)
 
 ## Creating A Subgraph
 
@@ -20,27 +26,27 @@ In the upcoming example, we will examine a task graph consisting of repeated dia
 Each subtask graph contains five tasks: Init1, Init2, Add1, Add2, and Add3. Clients can use the `Subgraph` 
 feature to represent these subtask graphs and avoid the need to construct them repeatedly.
 
-```mermaid
-stateDiagram
-StartEvent --> Init1_1
-StartEvent --> Init2_1
-Init1_1 --> Add1_1
-Init1_1 --> Add2_1
-Init2_1 --> Add1_1
-Init2_1 --> Add2_1
-Add1_1 --> Add3_1
-Add2_1 --> Add3_1
+<div class="mermaid">
+    graph TD
+    StartEvent --> Init1_1
+    StartEvent --> Init2_1
+    Init1_1 --> Add1_1
+    Init1_1 --> Add2_1
+    Init2_1 --> Add1_1
+    Init2_1 --> Add2_1
+    Add1_1 --> Add3_1
+    Add2_1 --> Add3_1
 
-Add3_1 --> Init1_2
-Add3_1 --> Init2_2
-Init1_2 --> Add1_2
-Init1_2 --> Add2_2
-Init2_2 --> Add1_2
-Init2_2 --> Add2_2
-Add1_2 --> Add3_2
-Add2_2 --> Add3_2
-Add3_2 --> repeat
-```
+    Add3_1 --> Init1_2
+    Add3_1 --> Init2_2
+    Init1_2 --> Add1_2
+    Init1_2 --> Add2_2
+    Init2_2 --> Add1_2
+    Init2_2 --> Add2_2
+    Add1_2 --> Add3_2
+    Add2_2 --> Add3_2
+    Add3_2 --> repeat
+</div>
 
 1. To create a subgraph, the first step is to create a `SubgraphDefinition` object to describe the graph.
 ```c++
