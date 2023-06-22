@@ -1,4 +1,8 @@
-# Index Spaces
+---
+layout: page
+permalink: /tutorial/realm/index_spaces.html
+title: Realm Index Spaces
+---
 
 ## Introduction
 Index space is a core data structure offered by Realm to applications
@@ -12,6 +16,7 @@ Here is a list of covered topics:
 * [Set Operations](#set-operations)
 * [Iterating Over Index Spaces](#iterating-over-index-spaces)
 * [Managing Memory In Index Spaces](#managing-memory-in-index-spaces)
+* [References](#references)
 
 ## Index Space Basics
 An IndexSpace (index space) is a Plain Old Data (POD) structure in
@@ -51,6 +56,7 @@ as a pre- or post-condition for subsequent calls.
 
 The tutorial begins by creating a list of disjoint dense index spaces
 in two-dimensional space:
+
 ```c++
   std::vector<IndexSpace<2>> subspaces;
   for (size_t y = 0; y <= size; y++) {
@@ -89,7 +95,7 @@ initially because Realm defers the computation of the union
 to make the sparsity map disappear, so the result is just a
 dense rectangle:
 
-```
+```c++
 /**
  * Return the tightest description possible of the index space.
  * @param precise false is the sparsity map may be preserved even
