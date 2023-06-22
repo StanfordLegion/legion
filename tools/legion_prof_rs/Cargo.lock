@@ -1934,7 +1934,7 @@ dependencies = [
 [[package]]
 name = "legion_prof_viewer"
 version = "0.1.0"
-source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#67bd6732e8e45b3a72fd460d38e2ae408cf9c469"
+source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#fe10f86baafbb10be307d7176dffa31e485cecf4"
 dependencies = [
  "actix-cors",
  "actix-web",

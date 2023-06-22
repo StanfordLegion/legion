@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use legion_prof_viewer::{
     data::{
-        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, Item, ItemLink, ItemMeta,
-        ItemUID, Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData, SummaryTile,
-        SummaryTileData, TileID, TileSet, UtilPoint,
+        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, FieldID, FieldSchema, Item,
+        ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData,
+        SummaryTile, SummaryTileData, TileID, TileSet, UtilPoint,
     },
     timestamp as ts,
 };
@@ -70,6 +70,16 @@ struct ItemInfo {
 #[derive(Debug)]
 pub struct StateDataSource {
     state: State,
+    field_schema: FieldSchema,
+    expanded_for_visibility_field: FieldID,
+    initiation_field: FieldID,
+    interval_field: FieldID,
+    num_items_field: FieldID,
+    operation_field: FieldID,
+    provenance_field: FieldID,
+    status_ready_field: FieldID,
+    status_running_field: FieldID,
+    status_waiting_field: FieldID,
     info: EntryInfo,
     entry_map: BTreeMap<EntryID, EntryKind>,
     proc_entries: BTreeMap<ProcID, EntryID>,
@@ -81,6 +91,19 @@ pub struct StateDataSource {
 
 impl StateDataSource {
     pub fn new(state: State) -> Self {
+        let mut field_schema = FieldSchema::new();
+
+        let expanded_for_visibility_field =
+            field_schema.insert("(Expanded for Visibility)".to_owned(), false);
+        let initiation_field = field_schema.insert("Initiation".to_owned(), true);
+        let interval_field = field_schema.insert("Interval".to_owned(), false);
+        let num_items_field = field_schema.insert("Number of Items".to_owned(), false);
+        let operation_field = field_schema.insert("Operation".to_owned(), false);
+        let provenance_field = field_schema.insert("Provenance".to_owned(), true);
+        let status_ready_field = field_schema.insert("Ready".to_owned(), false);
+        let status_running_field = field_schema.insert("Running".to_owned(), false);
+        let status_waiting_field = field_schema.insert("Waiting".to_owned(), false);
+
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
         let mut proc_entries = BTreeMap::new();
 
@@ -362,6 +385,16 @@ impl StateDataSource {
 
         Self {
             state,
+            field_schema,
+            expanded_for_visibility_field,
+            initiation_field,
+            interval_field,
+            num_items_field,
+            operation_field,
+            provenance_field,
+            status_ready_field,
+            status_running_field,
+            status_waiting_field,
             info,
             entry_map,
             proc_entries,
@@ -576,6 +609,7 @@ impl StateDataSource {
         tile_id: TileID,
         last: &mut Item,
         last_meta: Option<&mut ItemMeta>,
+        num_items_field: FieldID,
         merged: &mut u64,
     ) -> bool {
         // Check for overlap with previous task. If so, either one or the
@@ -595,7 +629,7 @@ impl StateDataSource {
                         *value += 1;
                     } else {
                         last_meta.title = "Merged Tasks".to_owned();
-                        last_meta.fields = vec![("Number of Tasks".to_owned(), Field::U64(2))];
+                        last_meta.fields = vec![(num_items_field, Field::U64(2))];
                     }
                 }
                 *merged += 1;
@@ -654,7 +688,14 @@ impl StateDataSource {
                 } else {
                     None
                 };
-                if Self::merge_items(view_interval, tile_id, last, last_meta, &mut merged[level]) {
+                if Self::merge_items(
+                    view_interval,
+                    tile_id,
+                    last,
+                    last_meta,
+                    self.num_items_field,
+                    &mut merged[level],
+                ) {
                     continue;
                 }
             }
@@ -673,7 +714,7 @@ impl StateDataSource {
                 )
             });
 
-            let mut add_item = |interval: ts::Interval, opacity: f32, status: Option<&str>| {
+            let mut add_item = |interval: ts::Interval, opacity: f32, status: Option<FieldID>| {
                 if !interval.overlaps(tile_id.0) {
                     return;
                 }
@@ -690,7 +731,7 @@ impl StateDataSource {
                     if let Some(status) = status {
                         item_meta
                             .fields
-                            .insert(1, (status.to_owned(), Field::Interval(interval)));
+                            .insert(1, (status, Field::Interval(interval)));
                     }
                     item_metas[level].push(item_meta);
                 }
@@ -701,15 +742,15 @@ impl StateDataSource {
                     let running_interval = ts::Interval::new(start.into(), wait.start.into());
                     let waiting_interval = ts::Interval::new(wait.start.into(), wait.ready.into());
                     let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
-                    add_item(running_interval, 1.0, Some("Running"));
-                    add_item(waiting_interval, 0.15, Some("Waiting"));
-                    add_item(ready_interval, 0.45, Some("Ready"));
+                    add_item(running_interval, 1.0, Some(self.status_running_field));
+                    add_item(waiting_interval, 0.15, Some(self.status_waiting_field));
+                    add_item(ready_interval, 0.45, Some(self.status_ready_field));
                     start = max(start, wait.end);
                 }
                 let stop = time_range.stop.unwrap();
                 if start < stop {
                     let running_interval = ts::Interval::new(start.into(), stop.into());
-                    add_item(running_interval, 1.0, Some("Running"));
+                    add_item(running_interval, 1.0, Some(self.status_running_field));
                 }
             } else {
                 add_item(view_interval, 1.0, None);
@@ -770,23 +811,17 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
+                fields.push((self.expanded_for_visibility_field, Field::Empty));
             }
-            fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
+            fields.push((self.interval_field, Field::Interval(point_interval)));
             if let Some(op_id) = entry.op_id {
-                fields.push(("Operation".to_owned(), Field::U64(op_id.0)));
+                fields.push((self.operation_field, Field::U64(op_id.0)));
             }
             if let Some(initiation_op) = entry.initiation_op {
-                fields.push((
-                    "Initiation".to_owned(),
-                    self.generate_op_link(initiation_op),
-                ));
+                fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
-                fields.push((
-                    "Provenance".to_owned(),
-                    Field::String(provenance.to_string()),
-                ));
+                fields.push((self.provenance_field, Field::String(provenance.to_string())));
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -842,20 +877,14 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
+                fields.push((self.expanded_for_visibility_field, Field::Empty));
             }
-            fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
+            fields.push((self.interval_field, Field::Interval(point_interval)));
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((
-                    "Initiation".to_owned(),
-                    self.generate_op_link(initiation_op),
-                ));
+                fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
-                fields.push((
-                    "Provenance".to_owned(),
-                    Field::String(provenance.to_string()),
-                ));
+                fields.push((self.provenance_field, Field::String(provenance.to_string())));
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -911,20 +940,14 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
+                fields.push((self.expanded_for_visibility_field, Field::Empty));
             }
-            fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
+            fields.push((self.interval_field, Field::Interval(point_interval)));
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((
-                    "Initiation".to_owned(),
-                    self.generate_op_link(initiation_op),
-                ));
+                fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
-                fields.push((
-                    "Provenance".to_owned(),
-                    Field::String(provenance.to_string()),
-                ));
+                fields.push((self.provenance_field, Field::String(provenance.to_string())));
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -958,6 +981,7 @@ impl DataSource for StateDataSource {
             entry_info: self.info.clone(),
             interval: self.interval(),
             tile_set: TileSet::default(),
+            field_schema: self.field_schema.clone(),
         }
     }
 
