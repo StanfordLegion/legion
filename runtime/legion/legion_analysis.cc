@@ -6530,6 +6530,7 @@ namespace Legion {
       // them as necessary. Since the refinement trackers are not field aware,
       // this function will clone them and delete them as necessary to make
       // sure that each field is accurately represented
+      FieldMask need_tracker = refinement_mask;
       if (!(refinement_mask * refinement_trackers.get_valid_mask()))
       {
         FieldMaskSet<RefinementTracker> to_add;
@@ -6553,10 +6554,12 @@ namespace Legion {
             it->first->invalidate_refinement(ctx, overlap);
             to_delete.push_back(it->first);
           }
-          else if (!allow_refinement)
+          else 
           {
-            refinement_mask -= overlap;
-            if (!refinement_mask)
+            if (!allow_refinement)
+              refinement_mask -= overlap;
+            need_tracker -= overlap;
+            if (!need_tracker)
               break;
           }
         }
@@ -6572,16 +6575,15 @@ namespace Legion {
               to_add.begin(); it != to_add.end(); it++)
           refinement_trackers.insert(it->first, it->second);
       }
-      if (!!refinement_mask)
+      if (!!need_tracker)
       {
         RefinementTracker *new_tracker = owner->create_refinement_tracker();
         bool allow_refinement = false;
         if (new_tracker->update_child(child, usage, allow_refinement))
           assert(false); // should never get here
-#ifdef DEBUG_LEGION
-        assert(allow_refinement);
-#endif
-        refinement_trackers.insert(new_tracker, refinement_mask);
+        if (!allow_refinement)
+          refinement_mask -= need_tracker;
+        refinement_trackers.insert(new_tracker, need_tracker);
       }
     }
 
@@ -7174,6 +7176,56 @@ namespace Legion {
         delete (*it);
       }
       refinement_trackers.tighten_valid_mask();
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::record_refinement_dependences(ContextID ctx,
+        const LogicalUser &refinement_user, const FieldMask &refinement_mask,
+        const ProjectionInfo &no_proj_info, RegionTreeNode *previous_child,
+        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask dummy_open_below;
+      // First register dependences on any local users, we can't dominate
+      // anything here since we need to leave things here for later
+      owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
+                       refinement_user, curr_epoch_users, 
+                       refinement_mask, dummy_open_below, false/*arrived*/,
+                       no_proj_info, *this, logical_analysis);
+      owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
+                        refinement_user, prev_epoch_users,
+                        refinement_mask, dummy_open_below, false/*arrived*/,
+                        no_proj_info, *this, logical_analysis);
+      // If we have a previous child and all the children are independent
+      // then we know we don't need to traverse anything else
+      if ((previous_child == NULL) || !owner->are_all_children_disjoint())
+      {
+        // Now traverse any open children and record dependences on them as well
+        for (LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC>::const_iterator 
+              fit = field_states.begin(); fit != field_states.end(); fit++)
+        {
+          const FieldMask field_overlap = fit->valid_fields() & refinement_mask;
+          if (!field_overlap)
+            continue;
+          for (FieldState::OrderedFieldMaskChildren::const_iterator it =
+                fit->open_children.begin(); it != 
+                fit->open_children.end(); it++)
+          {
+            // Can skip the previous child if we've already done it
+            if (it->first == previous_child)
+              continue;
+            const FieldMask overlap = refinement_mask & it->second;
+            if (!overlap)
+              continue;
+            if ((previous_child != NULL) && owner->are_children_disjoint(
+                  previous_child->get_color(), it->first->get_color()))
+              continue;
+            it->first->record_refinement_dependences(ctx, refinement_user,
+                overlap, no_proj_info, NULL/*previous child*/,
+                privilege_root, logical_analysis);
+          }
+        }
+      }
     }
 
 #if 0
@@ -21577,6 +21629,9 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)
       {
+        // Skip cloning to ourselves
+        if (it->first == this)
+          continue;
         // Check that the fields overlap 
         const FieldMask overlap = clone_mask & it->second;
         if (!overlap)
@@ -23873,7 +23928,7 @@ namespace Legion {
       }
       // See if we have any equivalence sets for us to create right now
       if (!create_now.empty())
-        create_new_equivalence_sets(context, mask, ready_events,
+        create_new_equivalence_sets(context, ready_events,
             create_now, create_now_rectangles, create_now_sources);
     }
 
@@ -24096,7 +24151,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EqSetTracker::create_new_equivalence_sets(InnerContext *context,
-         const FieldMask &mask, std::vector<RtEvent> &ready_events,
+         std::vector<RtEvent> &ready_events,
          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
          LegionMap<Domain,FieldMask> &create_now_rectangles,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs)
@@ -24157,7 +24212,17 @@ namespace Legion {
       // Sort the rectangles into field sets and make an equivlaence set
       // for each of them if their sources are not the same
       LegionList<FieldSet<Domain> > rectangle_sets;
-      compute_field_sets(mask, create_now_rectangles, rectangle_sets);
+      // In release mode we just leave the unverse mask empty as that tells
+      // the field sets routine to just make sets for the represented field
+      // In debug mode, we populate the universe mask to make sure it aligns
+      // with all the kd-nodes that we're supposed to target
+      FieldMask universe_mask;
+#ifdef DEBUG_LEGION
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+            it = create_now.begin(); it != create_now.end(); it++)
+        universe_mask |= it->second.get_valid_mask();
+#endif
+      compute_field_sets(universe_mask, create_now_rectangles, rectangle_sets);
       FieldMaskSet<EquivalenceSet> pending_sets;
       IndexSpaceExpression *tracker_expr = get_tracker_expression();
       for (LegionList<FieldSet<Domain> >::iterator rit =

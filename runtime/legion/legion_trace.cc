@@ -136,36 +136,65 @@ namespace Legion {
     size_t LogicalTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!op->is_internal_op());
-#endif
       std::pair<Operation*,GenerationID> key(op,gen);
       const size_t index = operations.size();
-      if (has_physical_trace() && op->get_memoizable() == NULL)
-        REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
-            "Invalid memoization request. Operation of type %s (UID %lld) "
-            "at index %zd in trace %d requested memoization, but physical "
-            "tracing does not support this operation type yet.",
-            Operation::get_string_rep(op->get_operation_kind()),
-            op->get_unique_op_id(), index, tid);
       if (recording)
       {
         // Recording
-        operations.push_back(key);
-        op_map[key] = index;
-        replay_info.push_back(OperationInfo(op));
-        if (static_translator != NULL)
+        if (op->is_internal_op())
         {
-          // Add a mapping reference since we might need to refer to it later
-          op->add_mapping_reference(gen);
-          // Recording a static trace so see if we have dependences to translate
-          std::vector<StaticDependence> to_translate;
-          static_translator->pop_dependences(to_translate);
-          translate_dependence_records(op, index, to_translate);
+          // See if this one of the close operations we already recorded
+          if (op->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
+          {
+            // We should be able to find this in the set of operations
+            // because it was recorded during register_close
+#ifdef DEBUG_LEGION
+            assert(!operations.empty());
+#endif
+            for (std::vector<std::pair<Operation*,
+                    GenerationID> >::reverse_iterator it =
+                  operations.rbegin(); it != operations.rend(); it++)
+              if ((*it) == key)
+                return std::distance(operations.begin(), it.base());
+            // Should always find this in the set already
+            assert(false);
+          }
+#ifdef DEBUG_LEGION
+          // This should be a refinement operation
+          assert(op->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+          // We don't need to register internal operations
+          return SIZE_MAX;
+        }
+        else
+        {
+          if (has_physical_trace() && op->get_memoizable() == NULL)
+            REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+                "Invalid memoization request. Operation of type %s (UID %lld) "
+                "at index %zd in trace %d requested memoization, but physical "
+                "tracing does not support this operation type yet.",
+                Operation::get_string_rep(op->get_operation_kind()),
+                op->get_unique_op_id(), index, tid);
+          operations.push_back(key);
+          op_map[key] = index;
+          replay_info.push_back(OperationInfo(op));
+          if (static_translator != NULL)
+          {
+            // Add a mapping reference since we might need to refer to it later
+            op->add_mapping_reference(gen);
+            // Recording a static trace so see if we have 
+            // dependences to translate
+            std::vector<StaticDependence> to_translate;
+            static_translator->pop_dependences(to_translate);
+            translate_dependence_records(op, index, to_translate);
+          }
         }
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(!op->is_internal_op());
+#endif
         // Replaying
         if (index >= replay_info.size())
           REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
@@ -330,6 +359,13 @@ namespace Legion {
       DependenceRecord record(target_finder->second);
       if (source->is_internal_op())
       {
+        if (source->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND)
+        {
+#ifdef DEBUG_LEGION
+          assert(source->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+          return true;
+        }
 #ifdef DEBUG_LEGION
         bool found = false;
         assert(!info.closes.empty());
@@ -395,6 +431,13 @@ namespace Legion {
                               validates, dtype, dep_mask);
       if (source->is_internal_op())
       {
+        if (source->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND)
+        {
+#ifdef DEBUG_LEGION
+          assert(source->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+          return true;
+        }
 #ifdef DEBUG_LEGION
         bool found = false;
         assert(!info.closes.empty());
@@ -450,11 +493,11 @@ namespace Legion {
     void LogicalTrace::end_trace_execution(FenceOp *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(trace_fence != NULL);
-#endif
       if (!recording)
       {
+#ifdef DEBUG_LEGION
+        assert(trace_fence != NULL);
+#endif
         op->register_dependence(trace_fence, trace_fence_gen);
         trace_fence->remove_mapping_reference(trace_fence_gen);
         trace_fence = NULL;

@@ -10745,11 +10745,11 @@ namespace Legion {
           region_node->initialize_refined_fields(ctx, user_mask); 
           continue;
         }
-        EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req); 
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
         if (!virtual_mapped[idx1])
         {
+          EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req); 
           const InstanceSet &sources = physical_instances[idx1];
 #ifdef DEBUG_LEGION
           assert(!sources.empty());
@@ -10800,6 +10800,10 @@ namespace Legion {
                                  corresponding);
           region_node->row_source->initialize_equivalence_set_kd_tree(tree,
                                       eq_set, user_mask, false/*current*/);
+          // Each equivalence set here comes with a reference that we
+          // need to remove after we've registered it
+          if (eq_set->remove_base_gc_ref(CONTEXT_REF))
+            assert(false); // should never hit this
         }
         else
         {
@@ -10817,10 +10821,6 @@ namespace Legion {
             region_node->row_source->initialize_equivalence_set_kd_tree(
                 tree, it->first, it->second, false/*current*/);
         }
-        // Each equivalence set here comes with a reference that we
-        // need to remove after we've registered it
-        if (eq_set->remove_base_gc_ref(CONTEXT_REF))
-          assert(false); // should never hit this
       }
     }
 

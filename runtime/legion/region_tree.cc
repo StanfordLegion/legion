@@ -16475,28 +16475,12 @@ namespace Legion {
         for (FieldMaskSet<RefinementOp>::const_iterator it =
               refinements.begin(); it != refinements.end(); it++)
         {
-          // First we need to perform another pass at removing any
-          // interfering children since our definition of interfering
-          // for refinements might be different than the operation's
           const LogicalUser refinement_user(it->first, 0/*index*/, ref_usage);
-          open_below.clear();
-          siphon_interfering_children(state, logical_analysis,
-              unopened_field_mask, refinement_user, privilege_root, 
-              next_child, open_below);
-          // Perform a local dependence analysis for this refinement
-          FieldMask dominator_mask = 
-                 perform_dependence_checks<true/*track dom*/>(privilege_root,
-                              refinement_user, state.curr_epoch_users, 
-                              it->second, open_below, arrived,
-                              no_projection_info, state, logical_analysis);
-          FieldMask non_dominated_mask = it->second - dominator_mask;
-          // For the fields that weren't dominated, we have to check
-          // those fields against the previous epoch's users
-          if (!!non_dominated_mask)
-            perform_dependence_checks<false/*track dom*/>(privilege_root,
-                              refinement_user, state.prev_epoch_users,
-                              non_dominated_mask, open_below, arrived,
-                              no_projection_info, state, logical_analysis);
+          // Recording refinement dependences will record dependences on 
+          // anything in an interfering sub-tree without changing the
+          // state of the region tree states
+          state.record_refinement_dependences(ctx, user, it->second,
+              no_projection_info, next_child, privilege_root, logical_analysis);
         }
       }
 #if 0
@@ -16554,6 +16538,25 @@ namespace Legion {
         }
       }
 #endif
+#ifdef DEBUG_LEGION
+      state.sanity_check();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::record_refinement_dependences(ContextID ctx,
+        const LogicalUser &refinement_user, const FieldMask &refinement_mask,
+        const ProjectionInfo &no_proj_info, RegionTreeNode *previous_child,
+        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+#ifdef DEBUG_LEGION
+      state.sanity_check();
+#endif
+      state.record_refinement_dependences(ctx, refinement_user, 
+          refinement_mask, no_proj_info, previous_child,
+          privilege_root, logical_analysis);
     }
 
 #if 0

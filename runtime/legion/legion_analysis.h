@@ -1635,6 +1635,13 @@ namespace Legion {
       void update_refinement_arrival(ContextID ctx, const RegionUsage &usage,
                                      FieldMask &refinement_mask);
       void invalidate_refinements(ContextID ctx, FieldMask invalidation_mask);
+      void record_refinement_dependences(ContextID ctx,
+                                         const LogicalUser &refinement_user,
+                                         const FieldMask &refinement_mask,
+                                         const ProjectionInfo &proj_info,
+                                         RegionTreeNode *previous_child,
+                                         LogicalRegion privilege_root,
+                                         LogicalAnalysis &logical_analysis);
 #if 0
       void initialize_unrefined_fields(const FieldMask &mask, 
           const unsigned index, LogicalAnalysis &analysis);
@@ -3598,7 +3605,7 @@ namespace Legion {
          LegionMap<Domain,FieldMask> &create_now_rectangles,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
       void create_new_equivalence_sets(InnerContext *context,
-         const FieldMask &mask, std::vector<RtEvent> &ready_events,
+         std::vector<RtEvent> &ready_events,
          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
          LegionMap<Domain,FieldMask> &create_now_rectangles,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);

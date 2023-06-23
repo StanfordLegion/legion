@@ -7072,6 +7072,19 @@ namespace Legion {
       Rect<DIM,T> right_bounds = this->bounds;
       left_bounds.hi[dim] = split;
       right_bounds.lo[dim] = split+1;
+#ifdef DEBUG_LEGION
+      if (pending_set_creations != NULL)
+      {
+        // Invalidations should never be racing with pending set
+        // creations, this should be guaranteed by the logical dependence
+        // analysis which ensures refinements are serialized with respect
+        // to all other operations
+        for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
+              pending_set_creations->begin(); it !=
+              pending_set_creations->end(); it++)
+          assert(mask * it->second);
+      }
+#endif
       // See if we can reuse any existing subnodes or whether we
       // need to make new ones
       if (lefts != NULL)
@@ -7422,6 +7435,37 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_sets != NULL);
 #endif
+      // Copy over the preconditions before we go messing with the mask
+      if (current_set_preconditions != NULL)
+      {
+        for (LegionMap<RtEvent,FieldMask>::iterator it =
+              current_set_preconditions->begin(); it !=
+              current_set_preconditions->end(); /*nothing*/)
+        {
+          const FieldMask overlap = it->second & mask; 
+          if (!overlap)
+          {
+            it++;
+            continue;
+          }
+          left->record_precondition(it->first, overlap);
+          right->record_precondition(it->first, overlap);
+          it->second -= overlap;
+          if (!it->second)
+          {
+            LegionMap<RtEvent,FieldMask>::iterator delete_it = it++;
+            current_set_preconditions->erase(delete_it);
+          }
+          else
+            it++;
+        }
+        if (current_set_preconditions->empty())
+        {
+          delete current_set_preconditions;
+          current_set_preconditions = NULL;
+        }
+      }
+      // Copy over the sets themselves
       std::vector<EquivalenceSet*> to_delete;
       for (FieldMaskSet<EquivalenceSet>::iterator it =
             current_sets->begin(); it != current_sets->end(); it++)
@@ -7449,7 +7493,7 @@ namespace Legion {
       {
         delete current_sets;
         current_sets = NULL;
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -7489,6 +7533,18 @@ namespace Legion {
         delete previous_sets;
         previous_sets = NULL;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::record_precondition(RtEvent precondition,
+                                              const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      if (current_set_preconditions == NULL)
+        current_set_preconditions = new LegionMap<RtEvent,FieldMask>();
+      (*current_set_preconditions)[precondition] |= mask;
     }
 
     //--------------------------------------------------------------------------
@@ -7578,11 +7634,16 @@ namespace Legion {
       typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
       LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
       {
+        FieldMask unrefined = mask;
         AutoLock n_lock(node_lock);
-        if ((current_sets != NULL) || (previous_sets != NULL))
+        if (lefts != NULL)
+          unrefined -= lefts->get_valid_mask();
+        if (!!unrefined)
         {
           if (rect == this->bounds)
           {
+            // These are the fields for which we have arrived and therefor
+            // the ones we need to filter here locally
             // Filter current sets back to the previous sets
             // We only remove previous sets if there is one to replace it
             // from the current sets, otherwise they need to stay in the
@@ -7754,10 +7815,10 @@ namespace Legion {
               }
             }
           }
-          else
-            refine_node(rect, mask);
+          else // Refine for the unrefined fields
+            refine_node(rect, unrefined);
         }
-        if (lefts != NULL)
+        if ((lefts != NULL) && !(mask * lefts->get_valid_mask()))
         {
           for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
                 lefts->begin(); it != lefts->end(); it++)
@@ -7773,7 +7834,7 @@ namespace Legion {
             }
           }
         }
-        if (rights != NULL)
+        if ((rights != NULL) && !(mask * rights->get_valid_mask()))
         {
           for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
                 rights->begin(); it != rights->end(); it++)

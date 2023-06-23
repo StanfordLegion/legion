@@ -3192,6 +3192,7 @@ namespace Legion {
                          FieldMask clone_mask);
       void clone_previous(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
                           FieldMask clone_mask);
+      void record_precondition(RtEvent pre, const FieldMask &mask);
       void record_current(EquivalenceSet *set, const FieldMask &mask);
       void record_previous(EquivalenceSet *set, const FieldMask &mask);
       void invalidate_previous_sets(const FieldMask &mask,
@@ -4150,7 +4151,14 @@ namespace Legion {
                                                  unsigned index,
                                                  const RegionRequirement &req,
                                                  LogicalAnalysis &analysis,
-                                                 const ProjectionInfo &info);
+                                                 const ProjectionInfo &info); 
+      void record_refinement_dependences(ContextID ctx,
+                                         const LogicalUser &refinement_user,
+                                         const FieldMask &refinement_mask,
+                                         const ProjectionInfo &proj_info,
+                                         RegionTreeNode *previous_child,
+                                         LogicalRegion privilege_root,
+                                         LogicalAnalysis &logical_analysis);
 #if 0
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,

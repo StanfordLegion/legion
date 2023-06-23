@@ -211,6 +211,9 @@ namespace Legion {
       std::deque<OperationInfo> replay_info;
       // Only need this backwards lookup for trace capture
       std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      // Only need this for converting internal dependences during trace capture
+      std::map<std::pair<Operation*,GenerationID>,
+               LegionVector<DependenceRecord> > internal_dependences;
       FenceOp *trace_fence;
       GenerationID trace_fence_gen;
       StaticTranslator *static_translator;
