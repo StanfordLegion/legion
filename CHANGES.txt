@@ -12,6 +12,10 @@ Version 23.06.0 (June ??, 2023)
     - Legion Prof now supports an HTTP client/server interface. Launch the
        server with `--serve` (on port 8080 by default) and attach a client to
        it with `--attach http://127.0.0.1:8080`
+    - Legion Prof now supports a new achival mode via the `--archive`
+       flag. Generate an offline profile and view it either via `--attach` or
+       by uploading it to a server and navigating to
+       `https://legion.stanford.edu/prof-viewer/?url=...`
     - Legion Prof modes (client/server/viewer) are now parallel by
        default, and perform heavy computations off the UI thread for
        better responsiveness
