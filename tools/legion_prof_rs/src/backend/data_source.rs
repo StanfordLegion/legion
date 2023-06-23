@@ -1045,14 +1045,15 @@ impl DataSource for StateDataSource {
         }
     }
 
-    fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID) -> SummaryTile {
+    fn fetch_summary_tile(&self, entry_id: &EntryID, tile_id: TileID, full: bool) -> SummaryTile {
         // Pick this number to be approximately the number of pixels we expect
-        // the user to have on their screen
-        const SAMPLES: u64 = 1000;
+        // the user to have on their screen. If this is a full tile, increase
+        // 10x so that we get more resolution when zoomed in.
+        let samples = if full { 10_000 } else { 1_000 };
 
         let step_utilization = self.generate_step_utilization(entry_id);
 
-        let utilization = Self::compute_sample_utilization(&step_utilization, tile_id.0, SAMPLES);
+        let utilization = Self::compute_sample_utilization(&step_utilization, tile_id.0, samples);
 
         SummaryTile {
             entry_id: entry_id.clone(),
