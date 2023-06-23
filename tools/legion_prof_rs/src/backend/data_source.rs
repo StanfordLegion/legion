@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -658,10 +658,55 @@ impl StateDataSource {
             item_metas.resize_with(cont.max_levels() + 1, Vec::new);
         }
         merged.resize(cont.max_levels() + 1, 0u64);
-        for point in cont.time_points() {
-            if !point.first {
-                continue;
+        let points = cont.time_points();
+
+        // We want to binary search to the first/last points in this time
+        // interval. But points are stacked: higher points may end earlier
+        // than lower points in the stack. Make sure to walk to the bottom of
+        // the stack or else we may miss a longer-running task stacked lower.
+        let first_index = points.partition_point_by_index(|mut i| {
+            let mut p = points[i];
+            loop {
+                let entry = cont.entry(p.entry);
+                let (base, time_range) = (entry.base(), entry.time_range());
+                let stop: ts::Timestamp = time_range.stop.unwrap().into();
+                if stop >= tile_id.0.start {
+                    return false;
+                }
+                if base.level == Some(0) {
+                    return true;
+                }
+                if i == 0 {
+                    return true;
+                }
+                i = i - 1;
+                p = points[i];
             }
+        });
+
+        let last_index = points.partition_point(|p| {
+            let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
+            start < tile_id.0.stop
+        });
+
+        #[cfg(debug_assertions)]
+        {
+            dbg!("Debug assertions enabled: checking point overlap");
+            for point in &points[..first_index] {
+                let time_range = cont.entry(point.entry).time_range();
+                let point_interval: ts::Interval = time_range.into();
+                assert!(!point_interval.overlaps(tile_id.0));
+            }
+
+            for point in &points[last_index..] {
+                let time_range = cont.entry(point.entry).time_range();
+                let point_interval: ts::Interval = time_range.into();
+                assert!(!point_interval.overlaps(tile_id.0));
+            }
+        }
+
+        for point in &points[first_index..last_index] {
+            assert!(point.first);
 
             let entry = cont.entry(point.entry);
             let (base, time_range, waiters) = (&entry.base(), entry.time_range(), &entry.waiters());
@@ -1034,5 +1079,68 @@ impl DataSource for StateDataSource {
             }
             _ => unreachable!(),
         }
+    }
+}
+
+trait BinarySearchByIndex {
+    fn binary_search_by_index<F>(&self, f: F) -> Result<usize, usize>
+    where
+        F: FnMut(usize) -> Ordering;
+    fn partition_point_by_index<F>(&self, pred: F) -> usize
+    where
+        F: FnMut(usize) -> bool;
+}
+
+impl<'a, T> BinarySearchByIndex for &'a [T] {
+    fn binary_search_by_index<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(usize) -> Ordering,
+    {
+        let mut size = self.len();
+        let mut left = 0;
+        let mut right = size;
+        while left < right {
+            let mid = left + size / 2;
+            let cmp = f(mid);
+            if cmp == Ordering::Less {
+                left = mid + 1;
+            } else if cmp == Ordering::Greater {
+                right = mid;
+            } else {
+                return Ok(mid);
+            }
+            size = right - left;
+        }
+        Err(left)
+    }
+
+    fn partition_point_by_index<F>(&self, mut pred: F) -> usize
+    where
+        F: FnMut(usize) -> bool,
+    {
+        self.binary_search_by_index(|x| {
+            if pred(x) {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        })
+        .unwrap_or_else(|i| i)
+    }
+}
+
+impl<'a, T> BinarySearchByIndex for Vec<T> {
+    fn binary_search_by_index<F>(&self, f: F) -> Result<usize, usize>
+    where
+        F: FnMut(usize) -> Ordering,
+    {
+        (&self[..]).binary_search_by_index(f)
+    }
+
+    fn partition_point_by_index<F>(&self, pred: F) -> usize
+    where
+        F: FnMut(usize) -> bool,
+    {
+        (&self[..]).partition_point_by_index(pred)
     }
 }
