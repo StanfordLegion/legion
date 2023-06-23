@@ -825,9 +825,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.5"
+version = "4.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2686c4115cb0810d9a984776e197823d08ec94f176549a89a9efded477c456dc"
+checksum = "6320c6d1c98b6981da7bb2dcecbd0be9dc98d42165fa8326b21000f7dbfde6d0"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1934,7 +1934,7 @@ dependencies = [
 [[package]]
 name = "legion_prof_viewer"
 version = "0.1.0"
-source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#b8264a6806dcc7214a5a35983ea679451da19438"
+source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#80cf6fa312b3defc0218e5b3ea205b209fe757f5"
 dependencies = [
  "actix-cors",
  "actix-web",
