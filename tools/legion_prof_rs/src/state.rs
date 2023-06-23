@@ -635,6 +635,10 @@ impl Proc {
             }
         }
 
+        // Rendering of the profile will never use non-first points, so we can
+        // throw those away now.
+        points.retain(|p| p.first);
+
         self.time_points = points;
         self.util_time_points = util_points;
     }
@@ -692,6 +696,7 @@ pub struct Mem {
     pub capacity: u64,
     pub insts: BTreeMap<InstUID, Inst>,
     pub time_points: Vec<MemPoint>,
+    pub util_time_points: Vec<MemPoint>,
     pub max_live_insts: u32,
     visible: bool,
 }
@@ -704,6 +709,7 @@ impl Mem {
             capacity,
             insts: BTreeMap::new(),
             time_points: Vec::new(),
+            util_time_points: Vec::new(),
             max_live_insts: 0,
             visible: true,
         }
@@ -722,17 +728,17 @@ impl Mem {
     }
 
     fn sort_time_range(&mut self) {
+        let mut time_points = Vec::new();
         let mut time_points_level = Vec::new();
 
         for (key, inst) in &self.insts {
-            self.time_points.push(MemPoint::new(
+            time_points.push(MemPoint::new(
                 inst.time_range.start.unwrap(),
                 *key,
                 true,
                 std::u64::MAX - inst.time_range.stop.unwrap().0,
             ));
-            self.time_points
-                .push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
+            time_points.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
 
             time_points_level.push(MemPoint::new(
                 inst.time_range.create.unwrap(),
@@ -742,7 +748,7 @@ impl Mem {
             ));
             time_points_level.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
         }
-        self.time_points.sort_by_key(|a| a.time_key());
+        time_points.sort_by_key(|a| a.time_key());
         time_points_level.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
@@ -765,6 +771,11 @@ impl Mem {
                 free_levels.push(Reverse(level));
             }
         }
+
+        // Rendering of the profile will never use non-first points, so we can
+        // throw those away now.
+        self.time_points = time_points.iter().filter(|p| p.first).copied().collect();
+        self.util_time_points = time_points;
     }
 
     pub fn is_visible(&self) -> bool {
@@ -1007,6 +1018,7 @@ pub struct Chan {
     pub fills: BTreeMap<EventID, ProfUID>,
     pub depparts: BTreeMap<OpID, Vec<ProfUID>>,
     pub time_points: Vec<ChanPoint>,
+    pub util_time_points: Vec<ChanPoint>,
     pub max_levels: u32,
     visible: bool,
 }
@@ -1020,6 +1032,7 @@ impl Chan {
             fills: BTreeMap::new(),
             depparts: BTreeMap::new(),
             time_points: Vec::new(),
+            util_time_points: Vec::new(),
             max_levels: 0,
             visible: true,
         }
@@ -1095,7 +1108,8 @@ impl Chan {
             }
         }
 
-        self.time_points = points;
+        self.time_points = points.iter().filter(|p| p.first).copied().collect();
+        self.util_time_points = points;
     }
 
     pub fn is_visible(&self) -> bool {

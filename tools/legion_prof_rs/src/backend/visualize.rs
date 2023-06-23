@@ -333,9 +333,8 @@ impl Proc {
             .from_path(path.as_ref().join(&filename))?;
 
         for point in &self.time_points {
-            if point.first {
-                self.emit_tsv_point(&mut f, point, state, spy_state)?;
-            }
+            assert!(point.first);
+            self.emit_tsv_point(&mut f, point, state, spy_state)?;
         }
 
         let level = max(self.max_levels, 1);
@@ -596,9 +595,8 @@ impl Chan {
             .from_path(path.as_ref().join(&filename))?;
 
         for point in &self.time_points {
-            if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
-            }
+            assert!(point.first);
+            self.emit_tsv_point(&mut f, point, state)?;
         }
 
         let level = max(self.max_levels + 1, 4) - 1;
@@ -694,9 +692,8 @@ impl Mem {
             .from_path(path.as_ref().join(&filename))?;
 
         for point in &self.time_points {
-            if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
-            }
+            assert!(point.first);
+            self.emit_tsv_point(&mut f, point, state)?;
         }
 
         let level = max(self.max_live_insts + 1, 4) - 1;

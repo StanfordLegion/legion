@@ -173,7 +173,7 @@ impl StatePostprocess for State {
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
             if mem.is_visible() {
-                timepoints.push(&mem.time_points);
+                timepoints.push(&mem.util_time_points);
             }
         }
         timepoints
@@ -184,7 +184,7 @@ impl StatePostprocess for State {
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
             if chan.is_visible() {
-                timepoints.push(&chan.time_points);
+                timepoints.push(&chan.util_time_points);
             }
         }
         timepoints
@@ -232,7 +232,7 @@ impl StatePostprocess for State {
                     result
                         .entry(group)
                         .or_insert_with(Vec::new)
-                        .push((mem.mem_id, &mem.time_points))
+                        .push((mem.mem_id, &mem.util_time_points))
                 }
             }
         }
@@ -264,7 +264,7 @@ impl StatePostprocess for State {
                         result
                             .entry(node)
                             .or_insert_with(Vec::new)
-                            .push((*chan_id, &chan.time_points))
+                            .push((*chan_id, &chan.util_time_points))
                     }
                 }
             }
