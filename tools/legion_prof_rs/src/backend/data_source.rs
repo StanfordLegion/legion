@@ -12,9 +12,10 @@ use legion_prof_viewer::{
 };
 
 use crate::backend::common::{MemGroup, ProcGroup, StatePostprocess};
+use crate::conditional_assert;
 use crate::state::{
-    ChanID, ChanKind, Color, Container, ContainerEntry, MemID, MemKind, NodeID, OpID, ProcID,
-    ProcKind, ProfUID, State, TimeRange, Timestamp,
+    ChanID, ChanKind, Color, Config, Container, ContainerEntry, InstUID, MemID, MemKind, NodeID,
+    OpID, ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -73,6 +74,7 @@ pub struct StateDataSource {
     field_schema: FieldSchema,
     expanded_for_visibility_field: FieldID,
     initiation_field: FieldID,
+    instances_field: FieldID,
     interval_field: FieldID,
     num_items_field: FieldID,
     operation_field: FieldID,
@@ -84,6 +86,7 @@ pub struct StateDataSource {
     entry_map: BTreeMap<EntryID, EntryKind>,
     proc_entries: BTreeMap<ProcID, EntryID>,
     proc_groups: BTreeMap<ProcGroup, Vec<ProcID>>,
+    mem_entries: BTreeMap<MemID, EntryID>,
     mem_groups: BTreeMap<MemGroup, Vec<MemID>>,
     chan_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
     step_utilization_cache: Mutex<BTreeMap<EntryID, Arc<Vec<(Timestamp, f64)>>>>,
@@ -96,6 +99,7 @@ impl StateDataSource {
         let expanded_for_visibility_field =
             field_schema.insert("(Expanded for Visibility)".to_owned(), false);
         let initiation_field = field_schema.insert("Initiation".to_owned(), true);
+        let instances_field = field_schema.insert("Instances".to_owned(), false);
         let interval_field = field_schema.insert("Interval".to_owned(), false);
         let num_items_field = field_schema.insert("Number of Items".to_owned(), false);
         let operation_field = field_schema.insert("Operation".to_owned(), false);
@@ -106,6 +110,7 @@ impl StateDataSource {
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
         let mut proc_entries = BTreeMap::new();
+        let mut mem_entries = BTreeMap::new();
 
         let mut proc_groups = state.group_procs();
         let mem_groups = state.group_mems();
@@ -251,7 +256,8 @@ impl StateDataSource {
                     let mems = mem_groups.get(&group).unwrap();
                     for (mem_index, mem) in mems.iter().enumerate() {
                         let mem_id = kind_id.child(mem_index as u64);
-                        entry_map.insert(mem_id, EntryKind::Mem(*mem));
+                        entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
+                        mem_entries.insert(*mem, mem_id);
 
                         let rows = state.mems.get(mem).unwrap().max_live_insts as u64 + 1;
                         mem_slots.push(EntryInfo::Slot {
@@ -388,6 +394,7 @@ impl StateDataSource {
             field_schema,
             expanded_for_visibility_field,
             initiation_field,
+            instances_field,
             interval_field,
             num_items_field,
             operation_field,
@@ -399,6 +406,7 @@ impl StateDataSource {
             entry_map,
             proc_entries,
             proc_groups,
+            mem_entries,
             mem_groups,
             chan_groups,
             step_utilization_cache: Mutex::new(BTreeMap::new()),
@@ -851,6 +859,19 @@ impl StateDataSource {
         }
     }
 
+    fn generate_inst_link(&self, inst_uid: InstUID) -> Option<Field> {
+        let mem_id = self.state.insts.get(&inst_uid)?;
+        let mem = self.state.mems.get(mem_id)?;
+        let inst = mem.insts.get(&inst_uid)?;
+
+        Some(Field::ItemLink(ItemLink {
+            item_uid: inst.base().prof_uid.into(),
+            title: format!("0x{:x}", inst.inst_id.unwrap().0),
+            interval: inst.time_range().into(),
+            entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
+        }))
+    }
+
     fn generate_proc_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -879,6 +900,26 @@ impl StateDataSource {
             }
             if let Some(initiation_op) = entry.initiation_op {
                 fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
+            }
+            if let Some(op_id) = entry.op_id {
+                let op = self.state.find_op(op_id).unwrap();
+                let inst_set: BTreeSet<_> =
+                    op.operation_inst_infos.iter().map(|i| i.inst_uid).collect();
+
+                let insts: Vec<_> = inst_set
+                    .iter()
+                    .flat_map(|i| {
+                        let result = self.generate_inst_link(*i);
+                        conditional_assert!(
+                            result.is_some(),
+                            Config::all_logs(),
+                            "Cannot find instance 0x{:x}",
+                            i.0
+                        );
+                        result
+                    })
+                    .collect();
+                fields.push((self.instances_field, Field::Vec(insts)));
             }
             if let Some(provenance) = provenance {
                 fields.push((self.provenance_field, Field::String(provenance.to_string())));
