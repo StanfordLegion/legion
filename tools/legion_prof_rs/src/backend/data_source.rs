@@ -522,10 +522,25 @@ impl StateDataSource {
         let start_time = interval.start.0 as u64;
         let duration = interval.duration_ns() as u64;
 
+        let first_index = step_utilization
+            .partition_point(|&(t, _)| {
+                let t: ts::Timestamp = t.into();
+                t < interval.start
+            })
+            .saturating_sub(1);
+
+        let mut last_index = step_utilization.partition_point(|&(t, _)| {
+            let t: ts::Timestamp = t.into();
+            t < interval.stop
+        });
+        if last_index + 1 < step_utilization.len() {
+            last_index = last_index + 1;
+        }
+
         let mut utilization = Vec::new();
         let mut last_t = Timestamp(0);
         let mut last_u = 0.0;
-        let mut step_it = step_utilization.iter().peekable();
+        let mut step_it = step_utilization[first_index..last_index].iter().peekable();
         for sample in 0..samples {
             let sample_start = Timestamp(duration * sample / samples + start_time);
             let sample_stop = Timestamp(duration * (sample + 1) / samples + start_time);
