@@ -11,11 +11,17 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
-use crate::backend::common::{MemGroup, ProcGroup, StatePostprocess};
+use slice_group_by::GroupBy;
+
+use crate::backend::common::{
+    ChanEntryFieldsPretty, ChanEntryShort, DimOrderPretty, FSpaceShort, FieldsPretty, ISpacePretty,
+    InstShort, MemGroup, ProcGroup, SizePretty, StatePostprocess,
+};
 use crate::conditional_assert;
 use crate::state::{
-    ChanID, ChanKind, Color, Config, Container, ContainerEntry, InstUID, MemID, MemKind, NodeID,
-    OpID, ProcID, ProcKind, ProfUID, State, TimeRange, Timestamp,
+    ChanEntry, ChanID, ChanKind, Color, Config, Container, ContainerEntry, Copy, CopyInstInfo,
+    Fill, FillInstInfo, Inst, InstUID, MemID, MemKind, NodeID, OpID, ProcID, ProcKind, ProfUID,
+    State, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -68,20 +74,31 @@ struct ItemInfo {
     expand: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct Fields {
+    chan_reqs: FieldID,
+    expanded_for_visibility: FieldID,
+    initiation: FieldID,
+    insts: FieldID,
+    inst_fields: FieldID,
+    inst_fspace: FieldID,
+    inst_ispace: FieldID,
+    inst_layout: FieldID,
+    size: FieldID,
+    interval: FieldID,
+    num_items: FieldID,
+    op_id: FieldID,
+    provenance: FieldID,
+    status_ready: FieldID,
+    status_running: FieldID,
+    status_waiting: FieldID,
+}
+
 #[derive(Debug)]
 pub struct StateDataSource {
     state: State,
     field_schema: FieldSchema,
-    expanded_for_visibility_field: FieldID,
-    initiation_field: FieldID,
-    instances_field: FieldID,
-    interval_field: FieldID,
-    num_items_field: FieldID,
-    operation_field: FieldID,
-    provenance_field: FieldID,
-    status_ready_field: FieldID,
-    status_running_field: FieldID,
-    status_waiting_field: FieldID,
+    fields: Fields,
     info: EntryInfo,
     entry_map: BTreeMap<EntryID, EntryKind>,
     proc_entries: BTreeMap<ProcID, EntryID>,
@@ -96,17 +113,25 @@ impl StateDataSource {
     pub fn new(state: State) -> Self {
         let mut field_schema = FieldSchema::new();
 
-        let expanded_for_visibility_field =
-            field_schema.insert("(Expanded for Visibility)".to_owned(), false);
-        let initiation_field = field_schema.insert("Initiation".to_owned(), true);
-        let instances_field = field_schema.insert("Instances".to_owned(), false);
-        let interval_field = field_schema.insert("Interval".to_owned(), false);
-        let num_items_field = field_schema.insert("Number of Items".to_owned(), false);
-        let operation_field = field_schema.insert("Operation".to_owned(), false);
-        let provenance_field = field_schema.insert("Provenance".to_owned(), true);
-        let status_ready_field = field_schema.insert("Ready".to_owned(), false);
-        let status_running_field = field_schema.insert("Running".to_owned(), false);
-        let status_waiting_field = field_schema.insert("Waiting".to_owned(), false);
+        let fields = Fields {
+            chan_reqs: field_schema.insert("Requirements".to_owned(), true),
+            expanded_for_visibility: field_schema
+                .insert("(Expanded for Visibility)".to_owned(), false),
+            initiation: field_schema.insert("Initiation".to_owned(), true),
+            insts: field_schema.insert("Instances".to_owned(), true),
+            inst_fields: field_schema.insert("Fields".to_owned(), true),
+            inst_fspace: field_schema.insert("Field Space".to_owned(), true),
+            inst_ispace: field_schema.insert("Index Space".to_owned(), true),
+            inst_layout: field_schema.insert("Layout".to_owned(), true),
+            interval: field_schema.insert("Interval".to_owned(), false),
+            num_items: field_schema.insert("Number of Items".to_owned(), false),
+            op_id: field_schema.insert("Operation".to_owned(), false),
+            provenance: field_schema.insert("Provenance".to_owned(), true),
+            size: field_schema.insert("Size".to_owned(), true),
+            status_ready: field_schema.insert("Ready".to_owned(), false),
+            status_running: field_schema.insert("Running".to_owned(), false),
+            status_waiting: field_schema.insert("Waiting".to_owned(), false),
+        };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
         let mut proc_entries = BTreeMap::new();
@@ -392,16 +417,7 @@ impl StateDataSource {
         Self {
             state,
             field_schema,
-            expanded_for_visibility_field,
-            initiation_field,
-            instances_field,
-            interval_field,
-            num_items_field,
-            operation_field,
-            provenance_field,
-            status_ready_field,
-            status_running_field,
-            status_waiting_field,
+            fields,
             info,
             entry_map,
             proc_entries,
@@ -761,7 +777,7 @@ impl StateDataSource {
                     tile_id,
                     last,
                     last_meta,
-                    self.num_items_field,
+                    self.fields.num_items,
                     &mut merged[level],
                 ) {
                     continue;
@@ -810,15 +826,15 @@ impl StateDataSource {
                     let running_interval = ts::Interval::new(start.into(), wait.start.into());
                     let waiting_interval = ts::Interval::new(wait.start.into(), wait.ready.into());
                     let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
-                    add_item(running_interval, 1.0, Some(self.status_running_field));
-                    add_item(waiting_interval, 0.15, Some(self.status_waiting_field));
-                    add_item(ready_interval, 0.45, Some(self.status_ready_field));
+                    add_item(running_interval, 1.0, Some(self.fields.status_running));
+                    add_item(waiting_interval, 0.15, Some(self.fields.status_waiting));
+                    add_item(ready_interval, 0.45, Some(self.fields.status_ready));
                     start = max(start, wait.end);
                 }
                 let stop = time_range.stop.unwrap();
                 if start < stop {
                     let running_interval = ts::Interval::new(start.into(), stop.into());
-                    add_item(running_interval, 1.0, Some(self.status_running_field));
+                    add_item(running_interval, 1.0, Some(self.fields.status_running));
                 }
             } else {
                 add_item(view_interval, 1.0, None);
@@ -859,14 +875,14 @@ impl StateDataSource {
         }
     }
 
-    fn generate_inst_link(&self, inst_uid: InstUID) -> Option<Field> {
+    fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
         let mem_id = self.state.insts.get(&inst_uid)?;
         let mem = self.state.mems.get(mem_id)?;
         let inst = mem.insts.get(&inst_uid)?;
 
         Some(Field::ItemLink(ItemLink {
             item_uid: inst.base().prof_uid.into(),
-            title: format!("0x{:x}", inst.inst_id.unwrap().0),
+            title: format!("{}0x{:x}", prefix, inst.inst_id.unwrap().0),
             interval: inst.time_range().into(),
             entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
         }))
@@ -892,14 +908,14 @@ impl StateDataSource {
 
             let mut fields = Vec::new();
             if expand {
-                fields.push((self.expanded_for_visibility_field, Field::Empty));
+                fields.push((self.fields.expanded_for_visibility, Field::Empty));
             }
-            fields.push((self.interval_field, Field::Interval(point_interval)));
+            fields.push((self.fields.interval, Field::Interval(point_interval)));
             if let Some(op_id) = entry.op_id {
-                fields.push((self.operation_field, Field::U64(op_id.0)));
+                fields.push((self.fields.op_id, Field::U64(op_id.0)));
             }
             if let Some(initiation_op) = entry.initiation_op {
-                fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
+                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
             }
             if let Some(op_id) = entry.op_id {
                 let op = self.state.find_op(op_id).unwrap();
@@ -909,7 +925,7 @@ impl StateDataSource {
                 let insts: Vec<_> = inst_set
                     .iter()
                     .flat_map(|i| {
-                        let result = self.generate_inst_link(*i);
+                        let result = self.generate_inst_link(*i, "");
                         conditional_assert!(
                             result.is_some(),
                             Config::all_logs(),
@@ -919,10 +935,13 @@ impl StateDataSource {
                         result
                     })
                     .collect();
-                fields.push((self.instances_field, Field::Vec(insts)));
+                fields.push((self.fields.insts, Field::Vec(insts)));
             }
             if let Some(provenance) = provenance {
-                fields.push((self.provenance_field, Field::String(provenance.to_string())));
+                fields.push((
+                    self.fields.provenance,
+                    Field::String(provenance.to_string()),
+                ));
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -958,6 +977,30 @@ impl StateDataSource {
         }
     }
 
+    fn generate_inst_regions(&self, inst: &Inst, result: &mut Vec<(FieldID, Field)>) {
+        for (ispace_id, fspace_id) in inst.ispace_ids.iter().zip(inst.fspace_ids.iter()) {
+            let ispace = format!("{}", ISpacePretty(*ispace_id, &self.state),);
+            result.push((self.fields.inst_ispace, Field::String(ispace)));
+
+            let fspace = self.state.field_spaces.get(&fspace_id).unwrap();
+            let fspace_name = format!("{}", FSpaceShort(&fspace));
+            result.push((self.fields.inst_fspace, Field::String(fspace_name)));
+
+            let fields = format!("{}", FieldsPretty(&fspace, inst));
+            result.push((self.fields.inst_fields, Field::String(fields)));
+        }
+    }
+
+    fn generate_inst_layout(&self, inst: &Inst, result: &mut Vec<(FieldID, Field)>) {
+        let layout = format!("{}", DimOrderPretty(inst, false));
+        result.push((self.fields.inst_layout, Field::String(layout)));
+    }
+
+    fn generate_inst_size(&self, inst: &Inst, result: &mut Vec<(FieldID, Field)>) {
+        let size = format!("{}", SizePretty(inst.size.unwrap()));
+        result.push((self.fields.size, Field::String(size)));
+    }
+
     fn generate_mem_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -973,19 +1016,25 @@ impl StateDataSource {
                 expand,
             } = info;
 
-            let name = entry.name(&self.state);
+            let name = format!("Instance {}", InstShort(entry));
             let provenance = entry.provenance(&self.state);
 
             let mut fields = Vec::new();
             if expand {
-                fields.push((self.expanded_for_visibility_field, Field::Empty));
+                fields.push((self.fields.expanded_for_visibility, Field::Empty));
             }
-            fields.push((self.interval_field, Field::Interval(point_interval)));
+            fields.push((self.fields.interval, Field::Interval(point_interval)));
+            self.generate_inst_regions(entry, &mut fields);
+            self.generate_inst_layout(entry, &mut fields);
+            self.generate_inst_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
+                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
-                fields.push((self.provenance_field, Field::String(provenance.to_string())));
+                fields.push((
+                    self.fields.provenance,
+                    Field::String(provenance.to_string()),
+                ));
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
@@ -1021,6 +1070,147 @@ impl StateDataSource {
         }
     }
 
+    fn generate_copy_reqs(&self, copy: &Copy, result_reqs: &mut Vec<Field>) {
+        let groups = copy.copy_inst_infos.linear_group_by(|a, b| {
+            a.src_inst_uid == b.src_inst_uid
+                && a.dst_inst_uid == b.dst_inst_uid
+                && a.num_hops == b.num_hops
+        });
+        let mut i = 0;
+        for group in groups {
+            let req_nums = if group.len() == 1 {
+                format!("Requirement {}", i)
+            } else {
+                format!("Requirements {}-{}", i, i + group.len() - 1)
+            };
+            result_reqs.push(Field::String(req_nums));
+
+            let CopyInstInfo {
+                src_inst_uid,
+                dst_inst_uid,
+                num_hops,
+                ..
+            } = group[0];
+
+            let src_inst = self.state.find_inst(src_inst_uid);
+            let dst_inst = self.state.find_inst(dst_inst_uid);
+
+            let src_fids = group.iter().map(|x| x.src_fid).collect();
+            let src_fields = format!(
+                "Fields: {}",
+                ChanEntryFieldsPretty(src_inst, &src_fids, &self.state)
+            );
+
+            let dst_fids = group.iter().map(|x| x.dst_fid).collect();
+            let dst_fields = format!(
+                "Fields: {}",
+                ChanEntryFieldsPretty(dst_inst, &dst_fids, &self.state)
+            );
+
+            match (src_inst_uid.0, dst_inst_uid.0) {
+                (0, 0) => unreachable!(),
+                (0, _) => {
+                    let prefix = "Scatter: destination indirect instance ";
+                    if let Some(dst) = self.generate_inst_link(dst_inst_uid, prefix) {
+                        result_reqs.push(dst);
+                    } else {
+                        result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
+                    }
+                    result_reqs.push(Field::String(dst_fields));
+                }
+                (_, 0) => {
+                    let prefix = "Gather: source indirect instance ";
+                    if let Some(src) = self.generate_inst_link(src_inst_uid, prefix) {
+                        result_reqs.push(src);
+                    } else {
+                        result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
+                    }
+                    result_reqs.push(Field::String(src_fields));
+                }
+                (_, _) => {
+                    let prefix = "Source: ";
+                    if let Some(src) = self.generate_inst_link(src_inst_uid, prefix) {
+                        result_reqs.push(src);
+                    } else {
+                        result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
+                    }
+                    result_reqs.push(Field::String(src_fields));
+
+                    let prefix = "Destination: ";
+                    if let Some(dst) = self.generate_inst_link(dst_inst_uid, prefix) {
+                        result_reqs.push(dst);
+                    } else {
+                        result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
+                    }
+                    result_reqs.push(Field::String(dst_fields));
+                }
+            }
+
+            result_reqs.push(Field::String(format!("Number of Hops: {}", num_hops)));
+
+            i += group.len();
+        }
+    }
+
+    fn generate_fill_reqs(&self, fill: &Fill, result_reqs: &mut Vec<Field>) {
+        let groups = fill
+            .fill_inst_infos
+            .linear_group_by(|a, b| a.dst_inst_uid == b.dst_inst_uid);
+        let mut i = 0;
+        for group in groups {
+            let req_nums = if group.len() == 1 {
+                format!("Requirement {}", i)
+            } else {
+                format!("Requirements {}-{}", i, i + group.len() - 1)
+            };
+            result_reqs.push(Field::String(req_nums));
+
+            let FillInstInfo { dst_inst_uid, .. } = group[0];
+
+            let dst_inst = self.state.find_inst(dst_inst_uid);
+
+            let dst_fids = group.iter().map(|x| x.fid).collect();
+            let dst_fields = format!(
+                "Fields: {}",
+                ChanEntryFieldsPretty(dst_inst, &dst_fids, &self.state)
+            );
+
+            let prefix = "Destination: ";
+            if let Some(dst) = self.generate_inst_link(dst_inst_uid, prefix) {
+                result_reqs.push(dst);
+            } else {
+                result_reqs.push(Field::String(format!("{}<unknown instance>", prefix)));
+            }
+            result_reqs.push(Field::String(dst_fields));
+
+            i += group.len();
+        }
+    }
+
+    fn generate_chan_reqs(&self, entry: &ChanEntry, result: &mut Vec<(FieldID, Field)>) {
+        let mut result_reqs = Vec::new();
+        match entry {
+            ChanEntry::Copy(copy) => {
+                self.generate_copy_reqs(copy, &mut result_reqs);
+            }
+            ChanEntry::Fill(fill) => {
+                self.generate_fill_reqs(fill, &mut result_reqs);
+            }
+            ChanEntry::DepPart(_) => {}
+        }
+        result.push((self.fields.chan_reqs, Field::Vec(result_reqs)));
+    }
+
+    fn generate_chan_size(&self, entry: &ChanEntry, result: &mut Vec<(FieldID, Field)>) {
+        let size = match entry {
+            ChanEntry::Copy(copy) => copy.size,
+            ChanEntry::Fill(fill) => fill.size,
+            ChanEntry::DepPart(_) => return,
+        };
+        let size = format!("{}", SizePretty(size));
+        result.push((self.fields.size, Field::String(size)));
+    }
+
     fn generate_chan_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -1036,19 +1226,24 @@ impl StateDataSource {
                 expand,
             } = info;
 
-            let name = entry.name(&self.state);
+            let name = format!("{}", ChanEntryShort(entry));
             let provenance = entry.provenance(&self.state);
 
             let mut fields = Vec::new();
             if expand {
-                fields.push((self.expanded_for_visibility_field, Field::Empty));
+                fields.push((self.fields.expanded_for_visibility, Field::Empty));
             }
-            fields.push((self.interval_field, Field::Interval(point_interval)));
+            fields.push((self.fields.interval, Field::Interval(point_interval)));
+            self.generate_chan_reqs(entry, &mut fields);
+            self.generate_chan_size(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
-                fields.push((self.initiation_field, self.generate_op_link(initiation_op)));
+                fields.push((self.fields.initiation, self.generate_op_link(initiation_op)));
             }
             if let Some(provenance) = provenance {
-                fields.push((self.provenance_field, Field::String(provenance.to_string())));
+                fields.push((
+                    self.fields.provenance,
+                    Field::String(provenance.to_string()),
+                ));
             }
             ItemMeta {
                 item_uid: entry.base().prof_uid.into(),
