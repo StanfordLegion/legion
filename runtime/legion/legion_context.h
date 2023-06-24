@@ -1692,9 +1692,7 @@ namespace Legion {
       static InnerContext* unpack_task_context(Deserializer &derez,
           Runtime *runtime, RtEvent &ctx_ready);
     public:
-#if 0
       bool nonexclusive_virtual_mapping(unsigned index);
-#endif
       virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       // Override by RemoteTask and TopLevelTask

@@ -1393,6 +1393,10 @@ namespace Legion {
                   std::set<IndexSpaceExpression*> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        bool current) = 0;
       virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -1701,6 +1705,10 @@ namespace Legion {
                   std::set<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        bool current);
       virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -2317,10 +2325,6 @@ namespace Legion {
     public:
       virtual EqKDTree* create_equivalence_set_kd_tree(
                                         size_t total_shards = 1) = 0;
-      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
-                                        EquivalenceSet *set,
-                                        const FieldMask &mask,
-                                        bool current) = 0;
       virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
                                         std::vector<RtEvent> &invalidated,

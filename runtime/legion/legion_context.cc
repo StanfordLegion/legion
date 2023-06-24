@@ -4399,7 +4399,6 @@ namespace Legion {
     }
 #endif
 
-#if 0
     //--------------------------------------------------------------------------
     bool InnerContext::nonexclusive_virtual_mapping(unsigned index)
     //--------------------------------------------------------------------------
@@ -4419,7 +4418,6 @@ namespace Legion {
       return ((index < virtual_mapped.size()) && virtual_mapped[index] && 
               !IS_WRITE(regions[index]));
     }
-#endif
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_physical_context(unsigned index)
@@ -10737,8 +10735,8 @@ namespace Legion {
 #endif
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            region_node->row_source->initialize_equivalence_set_kd_tree(
-                            tree, it->first, it->second, true/*current*/);
+            it->first->set_expr->initialize_equivalence_set_kd_tree(
+                        tree, it->first, it->second, true/*current*/);
           // In this case we also tell the region tree that this is
           // already refined so that no read or reduce refinements can
           // be performed in this context
@@ -10818,7 +10816,7 @@ namespace Legion {
             version_infos[idx1].get_equivalence_sets();
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            region_node->row_source->initialize_equivalence_set_kd_tree(
+            it->first->set_expr->initialize_equivalence_set_kd_tree(
                 tree, it->first, it->second, false/*current*/);
         }
       }
@@ -11002,7 +11000,7 @@ namespace Legion {
               source_shard, (mapping == NULL) ? 1 : mapping->size());
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            created_nodes[idx]->row_source->initialize_equivalence_set_kd_tree(
+            it->first->set_expr->initialize_equivalence_set_kd_tree(
                 current, it->first, it->second, true/*current*/);
         }
         else
@@ -21106,7 +21104,7 @@ namespace Legion {
         // of equivalence sets so new accesses will make new sets
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               eq_sets.begin(); it != eq_sets.end(); it++)
-          node->row_source->initialize_equivalence_set_kd_tree(
+          it->first->set_expr->initialize_equivalence_set_kd_tree(
               current, it->first, it->second, false/*current*/);
       }
     }
@@ -23447,7 +23445,7 @@ namespace Legion {
           derez.deserialize(mask);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
-          node->row_source->initialize_equivalence_set_kd_tree(
+          set->set_expr->initialize_equivalence_set_kd_tree(
               tree, set, mask, true/*current*/);
           set->unpack_global_ref();
         }

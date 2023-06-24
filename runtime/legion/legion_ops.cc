@@ -2574,14 +2574,12 @@ namespace Legion {
         trigger_commit();
     }
 
-#if 0
     //--------------------------------------------------------------------------
     bool Operation::is_parent_nonexclusive_virtual_mapping(unsigned index)
     //--------------------------------------------------------------------------
     {
       return parent_ctx->nonexclusive_virtual_mapping(find_parent_index(index));
     }
-#endif
 
     //--------------------------------------------------------------------------
     InnerContext* Operation::find_physical_context(unsigned index)

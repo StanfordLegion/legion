@@ -1467,6 +1467,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void IndexSpaceOperationT<DIM,T>::initialize_equivalence_set_kd_tree(
+       EqKDTree *tree, EquivalenceSet *set, const FieldMask &mask, bool current)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+      {
+        const Rect<DIM,T> overlap = itr.rect.intersection(typed_tree->bounds);
+        if (!overlap.empty())
+          typed_tree->initialize_set(set, overlap, mask, current);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     unsigned IndexSpaceOperationT<DIM,T>::compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -5059,7 +5077,11 @@ namespace Legion {
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
-        typed_tree->initialize_set(set, itr.rect, mask, current);
+      {
+        const Rect<DIM,T> overlap = itr.rect.intersection(typed_tree->bounds);
+        if (!overlap.empty())
+          typed_tree->initialize_set(set, overlap, mask, current);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6581,82 +6603,91 @@ namespace Legion {
                    const Rect<DIM,T> &rect, const FieldMask &mask, bool current)
     //--------------------------------------------------------------------------
     {
-      // This should all be sequential so no need for the lock
-      FieldMask remaining;
-      if (rect == this->bounds)
+      FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
       {
-        FieldMask unrefined = mask;
+        FieldMask remaining, unrefined = mask;
+        AutoLock n_lock(node_lock);
         if (lefts != NULL)
           unrefined -= lefts->get_valid_mask();
         if (!!unrefined)
         {
-          if (current)
+          if (rect == this->bounds)
           {
-            if (current_sets == NULL)
-              current_sets = new FieldMaskSet<EquivalenceSet>();
-            if (current_sets->insert(set, unrefined))
-              set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+            if (current)
+            {
+              if (current_sets == NULL)
+                current_sets = new FieldMaskSet<EquivalenceSet>();
+              if (current_sets->insert(set, unrefined))
+                set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+            }
+            else
+            {
+              if (previous_sets == NULL)
+                previous_sets = new FieldMaskSet<EquivalenceSet>();
+              if (previous_sets->insert(set, unrefined))
+                set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+            }
+            remaining = mask - unrefined;
+            if (!remaining)
+              return;
           }
           else
           {
-            if (previous_sets == NULL)
-              previous_sets = new FieldMaskSet<EquivalenceSet>();
-            if (previous_sets->insert(set, unrefined))
-              set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+            // Refine for all the fields which aren't refined yet
+            refine_node(rect, unrefined);
+            remaining = mask;
           }
-          remaining = mask - unrefined;
-          if (!remaining)
-            return;
         }
         else
           remaining = mask;
-      }
-      else
-      {
-        // Refine for all the fields which aren't refined yet
-        FieldMask to_refine = mask;
-        if (lefts != NULL)
-          to_refine -= lefts->get_valid_mask();
-        if (!!to_refine)
-          refine_node(rect, to_refine);
-        remaining = mask;
-      }
-      // If we get here, we're traversing refinements
+        // If we get here, we're traversing refinements
 #ifdef DEBUG_LEGION
-      assert(!!remaining);
-      assert((lefts != NULL) && (rights != NULL));
+        assert(!!remaining);
+        assert((lefts != NULL) && (rights != NULL));
 #endif
-      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-            lefts->begin(); it != lefts->end(); it++)
-      {
-        const FieldMask overlap = remaining & it->second;
-        if (!overlap)
-          continue;
-        Rect<DIM,T> intersection = rect.intersection(it->first->bounds);
-        if (intersection.empty())
-          continue;
-        it->first->initialize_set(set, intersection, overlap, current);
-        if (intersection == rect)
+        for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+              lefts->begin(); it != lefts->end(); it++)
         {
-          remaining -= overlap;
-          if (!remaining)
-            return;
+          const FieldMask overlap = remaining & it->second;
+          if (!overlap)
+            continue;
+          Rect<DIM,T> intersection = rect.intersection(it->first->bounds);
+          if (intersection.empty())
+            continue;
+          to_traverse.insert(it->first, overlap);
+          if (intersection == rect)
+          {
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
+        }
+        if (!!remaining)
+        {
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                rights->begin(); it != rights->end(); it++)
+          {
+            const FieldMask overlap = remaining & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            assert(rect.overlaps(it->first->bounds));
+#endif
+            to_traverse.insert(it->first, overlap);
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
         }
       }
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-            lefts->begin(); it != lefts->end(); it++)
+            to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        const FieldMask overlap = remaining & it->second;
-        if (!overlap)
-          continue;
-        Rect<DIM,T> intersection = rect.intersection(it->first->bounds);
+        const Rect<DIM,T> overlap = rect.intersection(it->first->bounds);
 #ifdef DEBUG_LEGION
-        assert(!intersection.empty());
+        assert(!overlap.empty());
 #endif
-        it->first->initialize_set(set, intersection, overlap, current);
-        remaining -= overlap;
-        if (!remaining)
-          return;
+        it->first->initialize_set(set, overlap, it->second, current);   
       }
     }
 
@@ -6687,7 +6718,7 @@ namespace Legion {
         // below are previous-only then we can skip traversing them here
         if (!!all_previous_below && (rect == this->bounds))
           remaining -= all_previous_below;
-        if (lefts != NULL)
+        if ((lefts != NULL) && !(remaining * lefts->get_valid_mask()))
         {
           FieldMask right_mask;
           for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
@@ -7494,6 +7525,8 @@ namespace Legion {
         delete current_sets;
         current_sets = NULL;
       } 
+      else
+        current_sets->tighten_valid_mask();
     }
 
     //--------------------------------------------------------------------------
@@ -7726,6 +7759,8 @@ namespace Legion {
                 delete current_sets;
                 current_sets = NULL;
               }
+              else
+                current_sets->tighten_valid_mask();
             }
             if (current_set_preconditions != NULL)
             {

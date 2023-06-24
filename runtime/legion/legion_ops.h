@@ -659,10 +659,8 @@ namespace Legion {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
-#if 0
       // Help for seeing if the parent region is non-exclusively virtual mapped
       bool is_parent_nonexclusive_virtual_mapping(unsigned index);
-#endif
       // Help for finding the contexts for an operation
       InnerContext* find_physical_context(unsigned index);
     public:

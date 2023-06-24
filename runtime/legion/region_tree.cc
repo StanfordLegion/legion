@@ -1628,7 +1628,11 @@ namespace Legion {
       // analysis for a single context are performed in order
       {
         FieldMask unopened_mask = user_mask;
-        FieldMask refinement_mask = user_mask;
+        FieldMask refinement_mask;
+        // Only check for refinements if we're not a parent of a 
+        // non-exlcuisve virtual mapping
+        if (!op->is_parent_nonexclusive_virtual_mapping(idx))
+          refinement_mask = user_mask;
 #if 0
         FieldMask first_touch_refinement = user_mask;
 #endif

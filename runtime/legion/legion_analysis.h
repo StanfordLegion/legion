@@ -3705,6 +3705,7 @@ namespace Legion {
                             std::vector<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
                             FieldMaskSet<IndexSpaceExpression> &init_updates,
+                            FieldMaskSet<IndexSpaceExpression> &invalid_updates,
                             ExprReductionViews &reduction_updates,
                             ExprInstanceViews &restricted_updates,
                             ExprInstanceViews &released_updates,
@@ -3718,6 +3719,7 @@ namespace Legion {
         EquivalenceSet *const set;
         ExprLogicalViews *const valid_updates;
         FieldMaskSet<IndexSpaceExpression> *const initialized_updates;
+        FieldMaskSet<IndexSpaceExpression> *const invalidated_updates;
         ExprReductionViews *const reduction_updates;
         ExprInstanceViews *const restricted_updates;
         ExprInstanceViews *const released_updates;
@@ -3835,6 +3837,7 @@ namespace Legion {
                       const FieldMask &clone_mask,
                       IndexSpaceExpression *clone_expr,
                       const bool forward_to_owner,
+                      const bool record_invalidate,
                       std::vector<RtEvent> &applied_events, 
                       const bool invalidate_overlap = false);
       RtEvent make_owner(AddressSpaceID owner, 
@@ -4043,27 +4046,31 @@ namespace Legion {
       void pack_state(Serializer &rez, const AddressSpaceID target,
             DistributedID target_did, IndexSpaceExpression *target_expr,
             IndexSpaceExpression *expr, const bool expr_covers,
-            const FieldMask &mask, const bool pack_guards);
+            const FieldMask &mask, const bool pack_guards, 
+            const bool pack_invalidates);
       void unpack_state_and_apply(Deserializer &derez, 
           const AddressSpaceID source, const bool forward_to_owner,
           std::vector<RtEvent> &ready_events);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
-                            const FieldMask &mask);
+                            const FieldMask &mask, bool record_invalidation);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           IndexSpaceExpression *clone_expr,
                           std::vector<RtEvent> &applied_events,
                           const bool invalidate_overlap,
-                          const bool forward_to_owner);
+                          const bool forward_to_owner,
+                          const bool record_invalidate);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
-                    const bool invalidate_overlap, const bool forward_to_owner);
+                    const bool invalidate_overlap, const bool forward_to_owner,
+                    const bool record_invalidate);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
-            const bool overlap_covers, const FieldMask &mask, 
-            LegionMap<IndexSpaceExpression*,
+            const bool overlap_covers, const FieldMask &mask,
+            const bool find_invalidates, LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+            FieldMaskSet<IndexSpaceExpression> &invalidated_updates,
             std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             LegionMap<IndexSpaceExpression*,
@@ -4079,6 +4086,7 @@ namespace Legion {
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+            FieldMaskSet<IndexSpaceExpression> &invalidated_updates,
             std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             LegionMap<IndexSpaceExpression*,
@@ -4097,6 +4105,7 @@ namespace Legion {
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+            const FieldMaskSet<IndexSpaceExpression> &invalidated_updates,
             const std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             const LegionMap<IndexSpaceExpression*,
@@ -4154,6 +4163,11 @@ namespace Legion {
       FieldMask                                         partial_valid_fields;
       // Expressions and fields that have valid data
       FieldMaskSet<IndexSpaceExpression>                initialized_data;
+      // Expressions for fields that have been invalidated and no long 
+      // contain valid meta-data, even though the set_expr is encompasses
+      // them. This occurs when we have partial invalidations of an equivalence
+      // set and therefore we need to record this information
+      FieldMaskSet<IndexSpaceExpression>                partial_invalidations;
       // Reductions always need to be applied in order so keep them in order
       std::map<unsigned/*fidx*/,std::list<std::pair<
         InstanceView*,IndexSpaceExpression*> > >        reduction_instances;
