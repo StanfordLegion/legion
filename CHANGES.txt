@@ -6,7 +6,18 @@ Version 23.06.0 (June ??, 2023)
     - Fixes for CMake build on macOS
     - Fixes for HIP build when arch is specified
   * Realm
-    - Support for better backtraces via libdw
+    - Support for better backtraces via libdw and unwind
+    - Improve scalability and performance in task spawning by caching the triggering operation of an event if one is provided
+    - Fix a minor issue with affinity queries to properly clear a given vector before populating it
+    - Add more accurate GPU memory bandwidth affinity calculations if nvml is available
+    - Refactor CPU core topology enumeration to serve systems without numa capabilities (like Jetson ARM systems)
+    - Improve scalability and performance of task spawning by moving event reuse freelists to be per-processor, reducing lock contention
+    - Add a microbenchmark for measuring task throughput in a more accurate manner
+    - Add a serial of realm API tutorials
+    - Replace CU_EVENT_DEFAULT with CU_EVENT_DISABLE_TIMING for better performance of cuda event
+    - Update the OperationCopyInfo logging statement to record isntances of indirection copies
+    - Support Kokkos interop for the HIP module
+    - Fixes for Realm tests on macOS
   * Tools
     - Legion Prof now supports search in the new profiler UI
     - Legion Prof now supports an HTTP client/server interface. Launch the
