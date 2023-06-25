@@ -6125,8 +6125,14 @@ namespace Legion {
         // Actually valid should be greater than or equal
         assert(!(actually_valid - fit->valid_fields()));
       }
+#if 0
       // Also check that for each field it is either only open in one mode
       // or two children in different modes are disjoint
+      // Note this is no longer a valid check since we are just
+      // tracking which sub-trees have open users in them and we
+      // might have two projection region requirements from the same 
+      // operation that appear interferring based on which sub-trees
+      // they are using but really aren't interfering
       for (std::list<FieldState>::const_iterator it1 = 
             field_states.begin(); it1 != field_states.end(); it1++)
       {
@@ -6162,6 +6168,7 @@ namespace Legion {
           }
         }
       }
+#endif
       // Make sure that each refinement has a disjoint set of fields
       if (!refinement_trackers.empty())
       {
@@ -6597,6 +6604,7 @@ namespace Legion {
       // them as necessary. Since the refinement trackers are not field aware,
       // this function will clone them and delete them as necessary to make
       // sure that each field is accurately represented
+      FieldMask need_tracker = refinement_mask;
       if (!(refinement_mask * refinement_trackers.get_valid_mask()))
       {
         FieldMaskSet<RefinementTracker> to_add;
@@ -6620,10 +6628,12 @@ namespace Legion {
             it->first->invalidate_refinement(ctx, overlap);
             to_delete.push_back(it->first);
           }
-          else if (!allow_refinement)
+          else
           {
-            refinement_mask -= overlap;
-            if (!refinement_mask)
+            if (!allow_refinement)
+              refinement_mask -= overlap;
+            need_tracker -= overlap;
+            if (!need_tracker)
               break;
           }
         }
@@ -6639,16 +6649,15 @@ namespace Legion {
               to_add.begin(); it != to_add.end(); it++)
           refinement_trackers.insert(it->first, it->second);
       }
-      if (!!refinement_mask)
+      if (!!need_tracker)
       {
         RefinementTracker *new_tracker = owner->create_refinement_tracker();
         bool allow_refinement = false;
         if (new_tracker->update_projection(summary, usage, allow_refinement))
           assert(false); // should never get here
-#ifdef DEBUG_LEGION
-        assert(allow_refinement);
-#endif
-        refinement_trackers.insert(new_tracker, refinement_mask);
+        if (!allow_refinement)
+          refinement_mask -= need_tracker;
+        refinement_trackers.insert(new_tracker, need_tracker);
       }
     }
 
@@ -24378,7 +24387,14 @@ namespace Legion {
             if (!src_fields)
               continue;
           }
-          unique_sources.insert(eit->first, src_fields);
+          // We only allow the unique source optimization when the 
+          // equivalence set comes from the same context. If it 
+          // doesn't then we don't have any way to scope its
+          // invalidation set down to just this set of points safely
+          if (eit->first->context->get_depth() == context->get_depth())
+            unique_sources.insert(eit->first, src_fields);
+          else
+            multiple_sources |= src_fields;
         }
       }
       // Sort the rectangles into field sets and make an equivlaence set

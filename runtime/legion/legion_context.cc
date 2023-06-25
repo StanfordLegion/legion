@@ -10136,7 +10136,8 @@ namespace Legion {
                                     LogicalTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      if ((previous_trace != NULL) && (previous_trace != trace))
+      if (!invalidator->is_internal_op() &&
+          (previous_trace != NULL) && (previous_trace != trace))
         previous_trace->invalidate_trace_cache(invalidator);
     }
 
@@ -10977,7 +10978,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapping == NULL);
-      assert(created_regions.size() == created_trees.size());
+      assert(created_nodes.size() == created_trees.size());
 #endif
       AutoLock priv_lock(privilege_lock);
       for (unsigned idx = 0; idx < created_trees.size(); idx++)

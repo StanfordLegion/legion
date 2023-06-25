@@ -6635,12 +6635,16 @@ namespace Legion {
           {
             // Refine for all the fields which aren't refined yet
             refine_node(rect, unrefined);
+            if (!current)
+              all_previous_below |= unrefined;
             remaining = mask;
           }
         }
         else
           remaining = mask;
         // If we get here, we're traversing refinements
+        if (current && !!all_previous_below)
+          all_previous_below -= remaining;
 #ifdef DEBUG_LEGION
         assert(!!remaining);
         assert((lefts != NULL) && (rights != NULL));
@@ -6883,27 +6887,12 @@ namespace Legion {
                   }
                 }
                 // Check for any previous sets below us to get as well
-                if (!(remaining * all_previous_below))
+                if (!!remaining && !!all_previous_below)
                 {
-#ifdef DEBUG_LEGION
-                  assert((lefts != NULL) && (rights != NULL));
-#endif
-                  for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator
-                        it = lefts->begin(); it != lefts->end(); it++)
-                  {
-                    const FieldMask overlap = remaining & it->second;
-                    if (!overlap)
-                      continue;
-                    to_get_previous.insert(it->first, overlap);
-                  }
-                  for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator
-                        it = rights->begin(); it != rights->end(); it++)
-                  {
-                    const FieldMask overlap = remaining & it->second;
-                    if (!overlap)
-                      continue;
-                    to_get_previous.insert(it->first, overlap);
-                  }
+                  FieldMask all_prev_below = all_previous_below & remaining;
+                  if (!!all_prev_below)
+                    // These fields will no longer be all_prevous_below now
+                    find_to_get_previous(all_prev_below, to_get_previous);
                 }
               }
               else
@@ -6951,7 +6940,15 @@ namespace Legion {
             }
           }
         }
+        // If we're traversing for any fields then remove them from the set
+        // of all previous below since we know what we'll no longer have
+        // all previous below at this point
+        if (!to_traverse.empty() && !!all_previous_below)
+          all_previous_below -= to_traverse.get_valid_mask();
       }
+#ifdef DEBUG_LEGION
+      assert(to_traverse.get_valid_mask() * to_get_previous.get_valid_mask());
+#endif
       unsigned new_subs = subscribed ? 1 : 0;
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -6996,28 +6993,47 @@ namespace Legion {
         }
 #ifdef DEBUG_LEGION
         assert(!(mask - all_previous_below));
-        assert((lefts != NULL) && (rights != NULL));
 #endif
-        for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator
-              it = lefts->begin(); it != lefts->end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          to_get_previous.insert(it->first, overlap);
-        }
-        for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator
-              it = rights->begin(); it != rights->end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          to_get_previous.insert(it->first, overlap);
-        }
+        find_to_get_previous(mask, to_get_previous);
       }
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_get_previous.begin(); it != to_get_previous.end(); it++)
         it->first->find_all_previous_sets(it->second, creation_srcs);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::find_to_get_previous(FieldMask &all_prev_below,
+                          FieldMaskSet<EqKDNode<DIM,T> > &to_get_previous) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((lefts != NULL) && (rights != NULL));
+#endif
+      // We're going to pull these out of the lefts and rights
+      // since we're just going to use them to get the sets
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            lefts->begin(); it != lefts->end(); it++)
+      {
+        const FieldMask overlap = all_prev_below & it->second;
+        if (!overlap)
+          continue;
+        to_get_previous.insert(it->first, overlap);
+      }
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            rights->begin(); it != rights->end(); it++)
+      {
+        const FieldMask overlap = all_prev_below & it->second;
+        if (!overlap)
+          continue;
+        to_get_previous.insert(it->first, overlap);
+        all_prev_below -= overlap;
+        if (!all_prev_below)
+          break;
+      }
+#ifdef DEBUG_LEGION
+      assert(!all_prev_below);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7147,10 +7163,17 @@ namespace Legion {
           assert(left_bounds.contains(rect) || 
               right_bounds.contains(rect));
 #endif
-          if (current_sets != NULL)
-            clone_current(prior_left, prior_right, mask);
           if (previous_sets != NULL)
+          {
+            all_previous_below |= mask & previous_sets->get_valid_mask();
             clone_previous(prior_left, prior_right, mask);
+          }
+          if (current_sets != NULL)
+          {
+            if (!!all_previous_below)
+              all_previous_below -= mask & current_sets->get_valid_mask();
+            clone_current(prior_left, prior_right, mask);
+          }
           return;
         }
       }
@@ -7168,10 +7191,17 @@ namespace Legion {
         rights = new FieldMaskSet<EqKDNode<DIM,T> >();
       if (rights->insert(new_right, mask))
         new_right->add_reference();
-      if (current_sets != NULL)
-        clone_current(new_left, new_right, mask);
       if (previous_sets != NULL)
+      {
+        all_previous_below |= mask & previous_sets->get_valid_mask();
         clone_previous(new_left, new_right, mask);
+      }
+      if (current_sets != NULL)
+      {
+        if (!!all_previous_below)
+          all_previous_below -= mask & current_sets->get_valid_mask();
+        clone_current(new_left, new_right, mask);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7376,6 +7406,8 @@ namespace Legion {
           delete previous_sets;
           previous_sets = NULL;
         }
+        else
+          previous_sets->tighten_valid_mask();
       }
       if (!(mask * all_previous_below))
       {
@@ -7566,6 +7598,8 @@ namespace Legion {
         delete previous_sets;
         previous_sets = NULL;
       }
+      else
+        previous_sets->tighten_valid_mask();
     }
 
     //--------------------------------------------------------------------------
@@ -7701,11 +7735,13 @@ namespace Legion {
                 if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
                   delete (*it);
               }
-              if ((previous_sets != NULL) && previous_sets->empty())
+              if (previous_sets->empty())
               {
                 delete previous_sets;
                 previous_sets = NULL;
               }
+              else
+                previous_sets->tighten_valid_mask();
             }
             if (current_sets != NULL)
             {
@@ -7737,6 +7773,7 @@ namespace Legion {
                       if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
                         delete (*it);
                     }
+                    previous_sets->tighten_valid_mask();
                   }
                   else
                     previous_sets = new FieldMaskSet<EquivalenceSet>();

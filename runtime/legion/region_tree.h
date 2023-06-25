@@ -3199,6 +3199,8 @@ namespace Legion {
       void record_precondition(RtEvent pre, const FieldMask &mask);
       void record_current(EquivalenceSet *set, const FieldMask &mask);
       void record_previous(EquivalenceSet *set, const FieldMask &mask);
+      void find_to_get_previous(FieldMask &all_prev_below,
+          FieldMaskSet<EqKDNode<DIM,T> > &to_get_previous) const;
       void invalidate_previous_sets(const FieldMask &mask,
               FieldMaskSet<EqKDNode<DIM,T> > &to_invalidate_previous);
     protected:

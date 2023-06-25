@@ -110,12 +110,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalTrace::initialize_op_tracing(Operation *op,
+    bool LogicalTrace::initialize_op_tracing(Operation *op, bool internal,
                                const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
-      if (fixed)
-        return false;
+      if (internal)
+      {
+        if (!recording)
+          return false;
+      }
+      else
+      {
+        if (fixed)
+          return false;
+      }
       if (static_translator != NULL)
         static_translator->push_dependences(dependences);
       return true;
@@ -136,59 +144,36 @@ namespace Legion {
     size_t LogicalTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
-      std::pair<Operation*,GenerationID> key(op,gen);
-      const size_t index = operations.size();
+      const std::pair<Operation*,GenerationID> key(op,gen);
       if (recording)
       {
         // Recording
         if (op->is_internal_op())
-        {
-          // See if this one of the close operations we already recorded
-          if (op->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
-          {
-            // We should be able to find this in the set of operations
-            // because it was recorded during register_close
-#ifdef DEBUG_LEGION
-            assert(!operations.empty());
-#endif
-            for (std::vector<std::pair<Operation*,
-                    GenerationID> >::reverse_iterator it =
-                  operations.rbegin(); it != operations.rend(); it++)
-              if ((*it) == key)
-                return std::distance(operations.begin(), it.base());
-            // Should always find this in the set already
-            assert(false);
-          }
-#ifdef DEBUG_LEGION
-          // This should be a refinement operation
-          assert(op->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
-#endif
           // We don't need to register internal operations
           return SIZE_MAX;
-        }
-        else
+        const size_t index = replay_info.size();
+        if (has_physical_trace() && op->get_memoizable() == NULL)
+          REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+              "Invalid memoization request. Operation of type %s (UID %lld) "
+              "at index %zd in trace %d requested memoization, but physical "
+              "tracing does not support this operation type yet.",
+              Operation::get_string_rep(op->get_operation_kind()),
+              op->get_unique_op_id(), index, tid);
+        const size_t op_index = operations.size();
+        op_map[key] = op_index;
+        operations.push_back(key);
+        replay_info.push_back(OperationInfo(op));
+        if (static_translator != NULL)
         {
-          if (has_physical_trace() && op->get_memoizable() == NULL)
-            REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
-                "Invalid memoization request. Operation of type %s (UID %lld) "
-                "at index %zd in trace %d requested memoization, but physical "
-                "tracing does not support this operation type yet.",
-                Operation::get_string_rep(op->get_operation_kind()),
-                op->get_unique_op_id(), index, tid);
-          operations.push_back(key);
-          op_map[key] = index;
-          replay_info.push_back(OperationInfo(op));
-          if (static_translator != NULL)
-          {
-            // Add a mapping reference since we might need to refer to it later
-            op->add_mapping_reference(gen);
-            // Recording a static trace so see if we have 
-            // dependences to translate
-            std::vector<StaticDependence> to_translate;
-            static_translator->pop_dependences(to_translate);
-            translate_dependence_records(op, index, to_translate);
-          }
+          // Add a mapping reference since we might need to refer to it later
+          op->add_mapping_reference(gen);
+          // Recording a static trace so see if we have 
+          // dependences to translate
+          std::vector<StaticDependence> to_translate;
+          static_translator->pop_dependences(to_translate);
+          translate_dependence_records(op, op_index, to_translate);
         }
+        return index;
       }
       else
       {
@@ -196,6 +181,7 @@ namespace Legion {
         assert(!op->is_internal_op());
 #endif
         // Replaying
+        const size_t index = replay_index++;
         if (index >= replay_info.size())
           REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
                         "Trace violation! Recorded %zd operations in trace "
@@ -245,9 +231,10 @@ namespace Legion {
 #endif
           close_op->initialize(context, cit->requirement, cit->creator_idx, op);
           close_op->update_close_mask(cit->close_mask);
+          const GenerationID close_gen = close_op->get_generation();
           const std::pair<Operation*,GenerationID> close_key(close_op, 
-                                            close_op->get_generation());
-          close_op->add_mapping_reference(gen);
+                                                             close_gen);
+          close_op->add_mapping_reference(close_gen);
           operations.push_back(close_key);
           close_op->begin_dependence_analysis();
           close_op->trigger_dependence_analysis();
@@ -259,8 +246,8 @@ namespace Legion {
           replay_operation_dependences(op, info.dependences);
         else // need to at least record a dependence on the fence event
           op->register_dependence(trace_fence, trace_fence_gen);
+        return index;
       }
-      return index;
     }
 
     //--------------------------------------------------------------------------
@@ -486,6 +473,7 @@ namespace Legion {
         trace_fence = fence_op;
         trace_fence_gen = fence_op->get_generation();
         fence_op->add_mapping_reference(trace_fence_gen);
+        replay_index = 0;
       }
     }
 
@@ -498,25 +486,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_fence != NULL);
 #endif
+        if (replay_index != replay_info.size())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
+                        "Trace violation! Recorded %zd operations in trace "
+                        "%d in task %s (UID %lld) but only %zd operations "
+                        "have been issued at the end of the trace!", 
+                        replay_info.size(), tid,
+                        context->get_task_name(), 
+                        context->get_unique_id(), replay_index)
         op->register_dependence(trace_fence, trace_fence_gen);
         trace_fence->remove_mapping_reference(trace_fence_gen);
         trace_fence = NULL;
-        if (is_replaying())
-        {
-#ifdef LEGION_SPY
-          for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
-                it = operations.begin(); it != operations.end(); it++)
-            it->first->remove_mapping_reference(it->second);
-          operations.clear();
-          current_uids.clear();
-#else
-#ifdef DEBUG_LEGION
-          assert(operations.empty());
-#endif
-#endif
-          return;
-        }
-
         // Register for this fence on every one of the operations in
         // the trace and then clear out the operations data structure
         for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
@@ -5060,7 +5040,8 @@ namespace Legion {
         std::map<RegionNode*,unsigned>::const_iterator req_it =
           trace_region_parent_req_indexes.begin();
         for (FieldMaskSet<RegionNode>::const_iterator it =
-              trace_regions.begin(); it != trace_regions.end(); it++, index++)
+              trace_regions.begin(); it != trace_regions.end(); 
+              it++, req_it++, index++)
         {
 #ifdef DEBUG_LEGION
           // Make sure the parent_req_indexes zip with the trace_regions

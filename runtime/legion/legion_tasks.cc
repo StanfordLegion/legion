@@ -3428,6 +3428,9 @@ namespace Legion {
             map_applied_conditions.insert(future_mapped);
         }
       }
+      if (!single_task_termination.exists())
+        single_task_termination = Runtime::create_ap_user_event(NULL);
+      set_origin_mapped(true); // it's like this was origin mapped
     }
 
     //--------------------------------------------------------------------------
@@ -3436,6 +3439,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(output_regions.empty());
+      assert(single_task_termination.exists());
 #endif
       virtual_mapped.resize(regions.size(), false);
       bool needs_reservations = false;
@@ -3453,9 +3457,6 @@ namespace Legion {
       if (needs_reservations)
         // We group all reservations together anyway
         tpl->get_task_reservations(this, atomic_locks);
-      if (!single_task_termination.exists())
-        single_task_termination = Runtime::create_ap_user_event(NULL);
-      set_origin_mapped(true); // it's like this was origin mapped
       return single_task_termination;
     }
 
@@ -6922,10 +6923,12 @@ namespace Legion {
         perform_concurrent_analysis(target_processors.back(),
                   slice_owner->get_concurrent_precondition());
       }
+      RtEvent applied_condition;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        applied_condition = Runtime::merge_events(map_applied_conditions);
+      slice_owner->record_point_mapped(applied_condition,
+          single_task_termination, acquired_instances);
+      complete_mapping(applied_condition);
     }
 
     //--------------------------------------------------------------------------
@@ -7492,11 +7495,6 @@ namespace Legion {
       {
         if (completion_postcondition.exists())
           record_completion_effect(completion_postcondition);
-        slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
-                  single_task_termination, acquired_instances);
-        // Record this slice as an origin-mapped slice so that it
-        // will be deactivated accordingly
-        slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
@@ -7513,9 +7511,6 @@ namespace Legion {
       else
       {
         // This is the local case
-        if (!is_remote())
-          slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
-                      completion_postcondition, acquired_instances);
         region_preconditions.resize(regions.size(), instance_ready_event);
         execution_fence_event = instance_ready_event;
         update_no_access_regions();

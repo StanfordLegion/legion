@@ -141,7 +141,7 @@ namespace Legion {
     public:
       inline TraceID get_trace_id(void) const { return tid; }
     public:
-      bool initialize_op_tracing(Operation *op,
+      bool initialize_op_tracing(Operation *op, bool internal,
                      const std::vector<StaticDependence> *dependences);
       bool skip_analysis(RegionTreeID tid) const;
       size_t register_operation(Operation *op, GenerationID gen);
@@ -206,14 +206,12 @@ namespace Legion {
       bool has_intermediate_ops;
       bool fixed;
       bool recording;
+      size_t replay_index;
+      std::deque<OperationInfo> replay_info;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
       std::vector<std::pair<Operation*,GenerationID> > operations;
-      std::deque<OperationInfo> replay_info;
       // Only need this backwards lookup for trace capture
       std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
-      // Only need this for converting internal dependences during trace capture
-      std::map<std::pair<Operation*,GenerationID>,
-               LegionVector<DependenceRecord> > internal_dependences;
       FenceOp *trace_fence;
       GenerationID trace_fence_gen;
       StaticTranslator *static_translator;

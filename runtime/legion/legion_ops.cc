@@ -1357,7 +1357,8 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      tracing = trace->initialize_op_tracing(this, dependences);
+      tracing =
+        trace->initialize_op_tracing(this, false/*internal*/, dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -10734,7 +10735,8 @@ namespace Legion {
       trace = creator->get_trace();
       if (trace != NULL)
       {
-        tracing = trace->initialize_op_tracing(this, NULL/*no deps*/); 
+        tracing =
+          trace->initialize_op_tracing(this, true/*internal*/, NULL/*no deps*/);
         if (tracing)
 #ifdef DEBUG_LEGION_COLLECTIVES
           trace->register_close(this, creator_req_idx,
@@ -10744,6 +10746,8 @@ namespace Legion {
 #else
           trace->register_close(this, creator_req_idx, req);
 #endif
+        else
+          trace = NULL;
       }
     }
 

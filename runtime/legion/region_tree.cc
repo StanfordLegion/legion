@@ -1593,7 +1593,6 @@ namespace Legion {
       // If we've already replayed the analysis we don't need to do it
       if (trace_info.skip_analysis)
         return;
-      InnerContext *context = op->get_context();
       RegionNode *parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
@@ -1615,6 +1614,7 @@ namespace Legion {
       LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),shard_proj);
       user->add_reference();
 #ifdef DEBUG_LEGION
+      InnerContext *context = op->get_context();
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
                                      context->get_context_id(),
