@@ -151,7 +151,7 @@ impl StateDataSource {
 
         let mut node_slots = Vec::new();
         let root_id = EntryID::root();
-        for (node_index, node) in nodes.iter().enumerate() {
+        for node in &nodes {
             let node_short_name;
             let node_long_name;
             match node {
@@ -164,7 +164,8 @@ impl StateDataSource {
                     node_long_name = "All Nodes".to_owned();
                 }
             }
-            let node_id = root_id.child(node_index as u64);
+            let node_index = node_slots.len() as u64;
+            let node_id = root_id.child(node_index);
 
             let mut kind_slots = Vec::new();
             let mut kind_index = 0;
@@ -298,17 +299,15 @@ impl StateDataSource {
                     }
                 }
 
-                if !mem_slots.is_empty() {
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::MemKind(group));
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::MemKind(group));
 
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: kind_name.to_lowercase(),
-                        long_name: format!("{} {}", node_long_name, kind_name),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: mem_slots,
-                    });
-                }
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: kind_name.to_lowercase(),
+                    long_name: format!("{} {}", node_long_name, kind_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: mem_slots,
+                });
             }
 
             // Channels
@@ -391,17 +390,15 @@ impl StateDataSource {
                     }
                 }
 
-                if !chan_slots.is_empty() {
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::ChanKind(*node));
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::ChanKind(*node));
 
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: "chan".to_owned(),
-                        long_name: format!("{} Channel", node_long_name),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: chan_slots,
-                    });
-                }
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: "chan".to_owned(),
+                    long_name: format!("{} Channel", node_long_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: chan_slots,
+                });
             }
             node_slots.push(EntryInfo::Panel {
                 short_name: node_short_name,
