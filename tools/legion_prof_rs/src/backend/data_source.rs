@@ -865,18 +865,18 @@ impl StateDataSource {
 
     fn generate_op_link(&self, op_id: OpID) -> Field {
         if let Some(proc_id) = self.state.tasks.get(&op_id) {
-            let proc = self.state.procs.get(proc_id).unwrap();
-            let op = proc.find_task(op_id).unwrap();
-            let op_name = op.name(&self.state);
-            Field::ItemLink(ItemLink {
-                item_uid: op.base().prof_uid.into(),
-                title: op_name,
-                interval: op.time_range().into(),
-                entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
-            })
-        } else {
-            Field::U64(op_id.0)
+            if let Some(proc) = self.state.procs.get(proc_id) {
+                let op = proc.find_task(op_id).unwrap();
+                let op_name = op.name(&self.state);
+                return Field::ItemLink(ItemLink {
+                    item_uid: op.base().prof_uid.into(),
+                    title: op_name,
+                    interval: op.time_range().into(),
+                    entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                });
+            }
         }
+        Field::U64(op_id.0)
     }
 
     fn generate_inst_link(&self, inst_uid: InstUID, prefix: &str) -> Option<Field> {
