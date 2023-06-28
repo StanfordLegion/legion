@@ -25,6 +25,8 @@ once_cell = "1.17.1"
 legion_prof_viewer = { git = "https://github.com/StanfordLegion/prof-viewer", branch = "master", optional = true }
 url = { version = "2", optional = true }
 slice-group-by = "0.3" # because &[]::group_by is unstable
+log = "0.4"
+env_logger = "0.10"
 
 [profile.dev]
 opt-level = 2

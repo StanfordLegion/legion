@@ -116,6 +116,8 @@ struct Cli {
 }
 
 fn main() -> io::Result<()> {
+    env_logger::init();
+
     let cli = Cli::parse();
 
     let start_trim = cli.start_trim.map(Timestamp::from_us);

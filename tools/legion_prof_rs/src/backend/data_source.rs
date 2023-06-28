@@ -11,6 +11,8 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
+use log::info;
+
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{
@@ -706,29 +708,10 @@ impl StateDataSource {
         merged.resize(cont.max_levels() + 1, 0u64);
         let points = cont.time_points();
 
-        // We want to binary search to the first/last points in this time
-        // interval. But points are stacked: higher points may end earlier
-        // than lower points in the stack. Make sure to walk to the bottom of
-        // the stack or else we may miss a longer-running task stacked lower.
-        let first_index = points.partition_point_by_index(|mut i| {
-            let mut p = points[i];
-            loop {
-                let entry = cont.entry(p.entry);
-                let (base, time_range) = (entry.base(), entry.time_range());
-                let stop: ts::Timestamp = time_range.stop.unwrap().into();
-                if stop >= tile_id.0.start {
-                    return false;
-                }
-                if base.level == Some(0) {
-                    return true;
-                }
-                if i == 0 {
-                    return true;
-                }
-                i = i - 1;
-                p = points[i];
-            }
-        });
+        // For efficiency, binary search to the part of the timeline we're
+        // interested in. This only works for the upper bound; because tasks
+        // are stacked, there is no safe (and efficient) way to determine a
+        // conservative lower bound.
 
         let last_index = points.partition_point(|p| {
             let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
@@ -737,13 +720,7 @@ impl StateDataSource {
 
         #[cfg(debug_assertions)]
         {
-            dbg!("Debug assertions enabled: checking point overlap");
-            for point in &points[..first_index] {
-                let time_range = cont.entry(point.entry).time_range();
-                let point_interval: ts::Interval = time_range.into();
-                assert!(!point_interval.overlaps(tile_id.0));
-            }
-
+            info!("Debug assertions enabled: checking point overlap");
             for point in &points[last_index..] {
                 let time_range = cont.entry(point.entry).time_range();
                 let point_interval: ts::Interval = time_range.into();
@@ -751,7 +728,7 @@ impl StateDataSource {
             }
         }
 
-        for point in &points[first_index..last_index] {
+        for point in &points[..last_index] {
             assert!(point.first);
 
             let entry = cont.entry(point.entry);
