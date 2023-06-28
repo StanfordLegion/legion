@@ -260,8 +260,8 @@ where
 
 // Common methods that apply to Proc, Mem, Chan
 pub trait Container {
-    type E: std::marker::Copy;
-    type S: std::marker::Copy;
+    type E: std::marker::Copy + std::fmt::Debug;
+    type S: std::marker::Copy + std::fmt::Debug;
     type Entry: ContainerEntry;
 
     fn max_levels(&self) -> usize;

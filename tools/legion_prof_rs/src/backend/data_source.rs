@@ -1,4 +1,4 @@
-use std::cmp::{max, Ordering};
+use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -10,6 +10,9 @@ use legion_prof_viewer::{
     },
     timestamp as ts,
 };
+
+#[cfg(debug_assertions)]
+use log::info;
 
 use slice_group_by::GroupBy;
 
@@ -151,7 +154,7 @@ impl StateDataSource {
 
         let mut node_slots = Vec::new();
         let root_id = EntryID::root();
-        for (node_index, node) in nodes.iter().enumerate() {
+        for node in &nodes {
             let node_short_name;
             let node_long_name;
             match node {
@@ -164,7 +167,8 @@ impl StateDataSource {
                     node_long_name = "All Nodes".to_owned();
                 }
             }
-            let node_id = root_id.child(node_index as u64);
+            let node_index = node_slots.len() as u64;
+            let node_id = root_id.child(node_index);
 
             let mut kind_slots = Vec::new();
             let mut kind_index = 0;
@@ -276,9 +280,10 @@ impl StateDataSource {
                 };
                 let color: Color32 = color.into();
 
+                let mems = mem_groups.get(&group);
+
                 let mut mem_slots = Vec::new();
                 if node.is_some() {
-                    let mems = mem_groups.get(&group);
                     for (mem_index, mem) in mems.iter().copied().flatten().enumerate() {
                         let mem_id = kind_id.child(mem_index as u64);
                         entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
@@ -298,7 +303,7 @@ impl StateDataSource {
                     }
                 }
 
-                if !mem_slots.is_empty() {
+                if mems.is_some() {
                     let summary_id = kind_id.summary();
                     entry_map.insert(summary_id, EntryKind::MemKind(group));
 
@@ -317,9 +322,10 @@ impl StateDataSource {
 
                 let color: Color32 = Color::ORANGERED.into();
 
+                let chans = chan_groups.get(node);
+
                 let mut chan_slots = Vec::new();
                 if node.is_some() {
-                    let chans = chan_groups.get(node);
                     for (chan_index, chan) in chans.iter().copied().flatten().enumerate() {
                         let chan_id = kind_id.child(chan_index as u64);
                         entry_map.insert(chan_id, EntryKind::Chan(*chan));
@@ -391,7 +397,7 @@ impl StateDataSource {
                     }
                 }
 
-                if !chan_slots.is_empty() {
+                if chans.is_some() {
                     let summary_id = kind_id.summary();
                     entry_map.insert(summary_id, EntryKind::ChanKind(*node));
 
@@ -703,29 +709,10 @@ impl StateDataSource {
         merged.resize(cont.max_levels() + 1, 0u64);
         let points = cont.time_points();
 
-        // We want to binary search to the first/last points in this time
-        // interval. But points are stacked: higher points may end earlier
-        // than lower points in the stack. Make sure to walk to the bottom of
-        // the stack or else we may miss a longer-running task stacked lower.
-        let first_index = points.partition_point_by_index(|mut i| {
-            let mut p = points[i];
-            loop {
-                let entry = cont.entry(p.entry);
-                let (base, time_range) = (entry.base(), entry.time_range());
-                let stop: ts::Timestamp = time_range.stop.unwrap().into();
-                if stop >= tile_id.0.start {
-                    return false;
-                }
-                if base.level == Some(0) {
-                    return true;
-                }
-                if i == 0 {
-                    return true;
-                }
-                i = i - 1;
-                p = points[i];
-            }
-        });
+        // For efficiency, binary search to the part of the timeline we're
+        // interested in. This only works for the upper bound; because tasks
+        // are stacked, there is no safe (and efficient) way to determine a
+        // conservative lower bound.
 
         let last_index = points.partition_point(|p| {
             let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
@@ -734,13 +721,7 @@ impl StateDataSource {
 
         #[cfg(debug_assertions)]
         {
-            dbg!("Debug assertions enabled: checking point overlap");
-            for point in &points[..first_index] {
-                let time_range = cont.entry(point.entry).time_range();
-                let point_interval: ts::Interval = time_range.into();
-                assert!(!point_interval.overlaps(tile_id.0));
-            }
-
+            info!("Debug assertions enabled: checking point overlap");
             for point in &points[last_index..] {
                 let time_range = cont.entry(point.entry).time_range();
                 let point_interval: ts::Interval = time_range.into();
@@ -748,7 +729,7 @@ impl StateDataSource {
             }
         }
 
-        for point in &points[first_index..last_index] {
+        for point in &points[..last_index] {
             assert!(point.first);
 
             let entry = cont.entry(point.entry);
@@ -1335,68 +1316,5 @@ impl DataSource for StateDataSource {
             }
             _ => unreachable!(),
         }
-    }
-}
-
-trait BinarySearchByIndex {
-    fn binary_search_by_index<F>(&self, f: F) -> Result<usize, usize>
-    where
-        F: FnMut(usize) -> Ordering;
-    fn partition_point_by_index<F>(&self, pred: F) -> usize
-    where
-        F: FnMut(usize) -> bool;
-}
-
-impl<'a, T> BinarySearchByIndex for &'a [T] {
-    fn binary_search_by_index<F>(&self, mut f: F) -> Result<usize, usize>
-    where
-        F: FnMut(usize) -> Ordering,
-    {
-        let mut size = self.len();
-        let mut left = 0;
-        let mut right = size;
-        while left < right {
-            let mid = left + size / 2;
-            let cmp = f(mid);
-            if cmp == Ordering::Less {
-                left = mid + 1;
-            } else if cmp == Ordering::Greater {
-                right = mid;
-            } else {
-                return Ok(mid);
-            }
-            size = right - left;
-        }
-        Err(left)
-    }
-
-    fn partition_point_by_index<F>(&self, mut pred: F) -> usize
-    where
-        F: FnMut(usize) -> bool,
-    {
-        self.binary_search_by_index(|x| {
-            if pred(x) {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            }
-        })
-        .unwrap_or_else(|i| i)
-    }
-}
-
-impl<'a, T> BinarySearchByIndex for Vec<T> {
-    fn binary_search_by_index<F>(&self, f: F) -> Result<usize, usize>
-    where
-        F: FnMut(usize) -> Ordering,
-    {
-        (&self[..]).binary_search_by_index(f)
-    }
-
-    fn partition_point_by_index<F>(&self, pred: F) -> usize
-    where
-        F: FnMut(usize) -> bool,
-    {
-        (&self[..]).partition_point_by_index(pred)
     }
 }
