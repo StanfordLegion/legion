@@ -1,4 +1,4 @@
-use std::cmp::{max, Ordering};
+use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -1316,68 +1316,5 @@ impl DataSource for StateDataSource {
             }
             _ => unreachable!(),
         }
-    }
-}
-
-trait BinarySearchByIndex {
-    fn binary_search_by_index<F>(&self, f: F) -> Result<usize, usize>
-    where
-        F: FnMut(usize) -> Ordering;
-    fn partition_point_by_index<F>(&self, pred: F) -> usize
-    where
-        F: FnMut(usize) -> bool;
-}
-
-impl<'a, T> BinarySearchByIndex for &'a [T] {
-    fn binary_search_by_index<F>(&self, mut f: F) -> Result<usize, usize>
-    where
-        F: FnMut(usize) -> Ordering,
-    {
-        let mut size = self.len();
-        let mut left = 0;
-        let mut right = size;
-        while left < right {
-            let mid = left + size / 2;
-            let cmp = f(mid);
-            if cmp == Ordering::Less {
-                left = mid + 1;
-            } else if cmp == Ordering::Greater {
-                right = mid;
-            } else {
-                return Ok(mid);
-            }
-            size = right - left;
-        }
-        Err(left)
-    }
-
-    fn partition_point_by_index<F>(&self, mut pred: F) -> usize
-    where
-        F: FnMut(usize) -> bool,
-    {
-        self.binary_search_by_index(|x| {
-            if pred(x) {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            }
-        })
-        .unwrap_or_else(|i| i)
-    }
-}
-
-impl<'a, T> BinarySearchByIndex for Vec<T> {
-    fn binary_search_by_index<F>(&self, f: F) -> Result<usize, usize>
-    where
-        F: FnMut(usize) -> Ordering,
-    {
-        (&self[..]).binary_search_by_index(f)
-    }
-
-    fn partition_point_by_index<F>(&self, pred: F) -> usize
-    where
-        F: FnMut(usize) -> bool,
-    {
-        (&self[..]).partition_point_by_index(pred)
     }
 }
