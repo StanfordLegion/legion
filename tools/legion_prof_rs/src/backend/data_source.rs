@@ -11,6 +11,7 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
+#[cfg(debug_assertions)]
 use log::info;
 
 use slice_group_by::GroupBy;
