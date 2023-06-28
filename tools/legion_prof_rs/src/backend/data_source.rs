@@ -277,9 +277,10 @@ impl StateDataSource {
                 };
                 let color: Color32 = color.into();
 
+                let mems = mem_groups.get(&group);
+
                 let mut mem_slots = Vec::new();
                 if node.is_some() {
-                    let mems = mem_groups.get(&group);
                     for (mem_index, mem) in mems.iter().copied().flatten().enumerate() {
                         let mem_id = kind_id.child(mem_index as u64);
                         entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
@@ -299,15 +300,17 @@ impl StateDataSource {
                     }
                 }
 
-                let summary_id = kind_id.summary();
-                entry_map.insert(summary_id, EntryKind::MemKind(group));
+                if mems.is_some() {
+                    let summary_id = kind_id.summary();
+                    entry_map.insert(summary_id, EntryKind::MemKind(group));
 
-                kind_slots.push(EntryInfo::Panel {
-                    short_name: kind_name.to_lowercase(),
-                    long_name: format!("{} {}", node_long_name, kind_name),
-                    summary: Some(Box::new(EntryInfo::Summary { color })),
-                    slots: mem_slots,
-                });
+                    kind_slots.push(EntryInfo::Panel {
+                        short_name: kind_name.to_lowercase(),
+                        long_name: format!("{} {}", node_long_name, kind_name),
+                        summary: Some(Box::new(EntryInfo::Summary { color })),
+                        slots: mem_slots,
+                    });
+                }
             }
 
             // Channels
@@ -316,9 +319,10 @@ impl StateDataSource {
 
                 let color: Color32 = Color::ORANGERED.into();
 
+                let chans = chan_groups.get(node);
+
                 let mut chan_slots = Vec::new();
                 if node.is_some() {
-                    let chans = chan_groups.get(node);
                     for (chan_index, chan) in chans.iter().copied().flatten().enumerate() {
                         let chan_id = kind_id.child(chan_index as u64);
                         entry_map.insert(chan_id, EntryKind::Chan(*chan));
@@ -390,15 +394,17 @@ impl StateDataSource {
                     }
                 }
 
-                let summary_id = kind_id.summary();
-                entry_map.insert(summary_id, EntryKind::ChanKind(*node));
+                if chans.is_some() {
+                    let summary_id = kind_id.summary();
+                    entry_map.insert(summary_id, EntryKind::ChanKind(*node));
 
-                kind_slots.push(EntryInfo::Panel {
-                    short_name: "chan".to_owned(),
-                    long_name: format!("{} Channel", node_long_name),
-                    summary: Some(Box::new(EntryInfo::Summary { color })),
-                    slots: chan_slots,
-                });
+                    kind_slots.push(EntryInfo::Panel {
+                        short_name: "chan".to_owned(),
+                        long_name: format!("{} Channel", node_long_name),
+                        summary: Some(Box::new(EntryInfo::Summary { color })),
+                        slots: chan_slots,
+                    });
+                }
             }
             node_slots.push(EntryInfo::Panel {
                 short_name: node_short_name,
