@@ -860,6 +860,7 @@ def build_legion_prof_rs(root_dir, tmp_dir, env):
     cmd(['cargo', 'install',
          '--all-features',
          '--locked',
+         '--debug', # Enables debug checks. Still optimizes like -O2.
          '--path', legion_prof_dir,
          '--root', tmp_dir],
         env=env)
