@@ -619,7 +619,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_weights(Operation *op,
                                                        IndexPartition pid,
-                                                       const FutureMap &weights,
+                               const std::map<DomainPoint,FutureImpl*> &weights,
                                                        size_t granularity)
     //--------------------------------------------------------------------------
     {
@@ -692,13 +692,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_domain(Operation *op,
                                                     IndexPartition pid,
-                                                    const FutureMap &future_map,
+                              const std::map<DomainPoint,FutureImpl*> &weights,
+                                                const Domain &future_map_domain,
                                                     bool perform_intersections)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->parent->create_by_domain(op, new_part, future_map.impl, 
-                                                perform_intersections);
+      return new_part->parent->create_by_domain(op, new_part, weights,
+                            future_map_domain, perform_intersections);
     }
 
     //--------------------------------------------------------------------------
@@ -10392,10 +10393,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_weights(Operation *op, 
-                                   const FutureMap &weights, size_t granularity)
+           const std::map<DomainPoint,FutureImpl*> &weights, size_t granularity)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_weights(op, this, weights.impl, granularity);
+      return parent->create_by_weights(op, this, weights, granularity);
     }
 
     //--------------------------------------------------------------------------

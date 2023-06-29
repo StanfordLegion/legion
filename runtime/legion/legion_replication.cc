@@ -4594,9 +4594,9 @@ namespace Legion {
       ApEvent ready_event;
       // One the first shard will perform the pending partition computations
       if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
-        ready_event = thunk->perform(this, runtime->forest);
+        ready_event = thunk->perform(this, runtime->forest, sources);
       else if (thunk->is_cross_product())
-        ready_event = thunk->perform(this, runtime->forest);
+        ready_event = thunk->perform(this, runtime->forest, sources);
       if (ready_event.exists())
         record_completion_effect(ready_event);
       complete_execution();

@@ -16081,7 +16081,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new WeightPartitionThunk(pid, weights, granularity);
+      thunk = new WeightPartitionThunk(pid, granularity);
       // Also save this locally for analysis
       populate_sources(weights, pid, true/*needs all futures*/);
       if (runtime->legion_spy_enabled)
@@ -16385,7 +16385,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Perform the partitioning operation
-      const ApEvent ready_event = thunk->perform(this, runtime->forest);
+      const ApEvent ready_event =
+        thunk->perform(this, runtime->forest, sources);
       if (ready_event.exists())
         record_completion_effect(ready_event);
       complete_execution();
