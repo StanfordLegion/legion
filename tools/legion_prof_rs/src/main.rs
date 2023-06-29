@@ -37,6 +37,24 @@ struct Cli {
     )]
     output: OsString,
 
+    #[arg(long, help = "dump an archive of the profile for sharing")]
+    archive: bool,
+
+    #[arg(long, help = "connect viewer to the specified HTTP profile server")]
+    attach: bool,
+
+    #[arg(long, help = "start profile HTTP server")]
+    serve: bool,
+
+    #[arg(long, help = "start interactive profile viewer")]
+    view: bool,
+
+    #[arg(long, hide = true, help = "print statistics")]
+    statistics: bool,
+
+    #[arg(long, hide = true, help = "emit JSON for Google Trace Viewer")]
+    trace: bool,
+
     #[arg(long, help = "start time in microseconds to trim the profile")]
     start_trim: Option<u64>,
 
@@ -70,24 +88,6 @@ struct Cli {
     #[arg(short, long, help = "overwrite output directory if it exists")]
     force: bool,
 
-    #[arg(long, help = "dump an archive of the profile for sharing")]
-    archive: bool,
-
-    #[arg(long, help = "connect viewer to the specified HTTP profile server")]
-    attach: bool,
-
-    #[arg(long, help = "start profile HTTP server")]
-    serve: bool,
-
-    #[arg(long, help = "start interactive profile viewer")]
-    view: bool,
-
-    #[arg(short, long, help = "print statistics")]
-    statistics: bool,
-
-    #[arg(short, long, help = "emit JSON for Google Trace Viewer")]
-    trace: bool,
-
     #[arg(short, long, help = "print verbose profiling information")]
     verbose: bool,
 
@@ -116,6 +116,8 @@ struct Cli {
 }
 
 fn main() -> io::Result<()> {
+    env_logger::init();
+
     let cli = Cli::parse();
 
     let start_trim = cli.start_trim.map(Timestamp::from_us);

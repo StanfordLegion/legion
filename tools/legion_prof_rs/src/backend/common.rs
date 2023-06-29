@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::state::{
-    Bounds, ChanID, ChanPoint, Config, CopyInstInfo, DimKind, FSpace, FieldID, FillInstInfo,
-    ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind, ProcPoint, State,
-    TimePoint, Timestamp,
+    Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, CopyInstInfo, DimKind, FSpace, FieldID,
+    FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind,
+    ProcPoint, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -173,7 +173,7 @@ impl StatePostprocess for State {
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
             if mem.is_visible() {
-                timepoints.push(&mem.time_points);
+                timepoints.push(&mem.util_time_points);
             }
         }
         timepoints
@@ -184,7 +184,7 @@ impl StatePostprocess for State {
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
             if chan.is_visible() {
-                timepoints.push(&chan.time_points);
+                timepoints.push(&chan.util_time_points);
             }
         }
         timepoints
@@ -232,7 +232,7 @@ impl StatePostprocess for State {
                     result
                         .entry(group)
                         .or_insert_with(Vec::new)
-                        .push((mem.mem_id, &mem.time_points))
+                        .push((mem.mem_id, &mem.util_time_points))
                 }
             }
         }
@@ -264,7 +264,7 @@ impl StatePostprocess for State {
                         result
                             .entry(node)
                             .or_insert_with(Vec::new)
-                            .push((*chan_id, &chan.time_points))
+                            .push((*chan_id, &chan.util_time_points))
                     }
                 }
             }
@@ -530,6 +530,62 @@ impl fmt::Display for ISpacePretty<'_> {
 }
 
 #[derive(Debug)]
+pub struct FSpaceShort<'a>(pub &'a FSpace);
+
+impl fmt::Display for FSpaceShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FSpaceShort(fspace) = self;
+
+        if let Some(name) = &fspace.name {
+            write!(f, "{} <{}>", name, fspace.fspace_id.0)
+        } else {
+            write!(f, "<{}>", fspace.fspace_id.0)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FieldPretty<'a>(pub &'a FSpace, pub FieldID, pub &'a Align);
+
+impl fmt::Display for FieldPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FieldPretty(fspace, field_id, align) = self;
+
+        if let Some(field) = fspace.fields.get(field_id) {
+            write!(f, "{} <{}>", field.name, field_id.0)?;
+        } else {
+            write!(f, "<{}>", field_id.0)?;
+        }
+
+        if align.has_align {
+            write!(f, " (align={})", align.align_desc)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FieldsPretty<'a>(pub &'a FSpace, pub &'a Inst);
+
+impl fmt::Display for FieldsPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FieldsPretty(fspace, inst) = self;
+
+        let field_ids = inst.fields.get(&fspace.fspace_id).unwrap();
+        let align_desc = inst.align_desc.get(&fspace.fspace_id).unwrap();
+        let mut i = field_ids.iter().zip(align_desc.iter()).peekable();
+        while let Some((field_id, align)) = i.next() {
+            write!(f, "{}", FieldPretty(&fspace, *field_id, align))?;
+            if i.peek().is_some() {
+                write!(f, ", ")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct FSpacePretty<'a>(pub &'a FSpace, pub &'a Inst);
 
 impl fmt::Display for FSpacePretty<'_> {
@@ -572,11 +628,11 @@ impl fmt::Display for FSpacePretty<'_> {
 }
 
 #[derive(Debug)]
-pub struct DimOrderPretty<'a>(pub &'a Inst);
+pub struct DimOrderPretty<'a>(pub &'a Inst, pub bool);
 
 impl fmt::Display for DimOrderPretty<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inst = self.0;
+        let DimOrderPretty(inst, brackets) = self;
 
         let mut aos = false;
         let mut soa = false;
@@ -620,27 +676,67 @@ impl fmt::Display for DimOrderPretty<'_> {
                 }
             }
         }
+
+        let open = |f: &mut fmt::Formatter<'_>, previous: &mut bool| -> fmt::Result {
+            if *brackets {
+                write!(f, "[")?;
+            } else if *previous {
+                write!(f, ", ")?;
+            }
+            Ok(())
+        };
+        let close = |f: &mut fmt::Formatter<'_>, previous: &mut bool| -> fmt::Result {
+            if *brackets {
+                write!(f, "]")?;
+            }
+            *previous = true;
+            Ok(())
+        };
+
+        let mut previous = false;
+
         if dim_last.map_or(false, |(d, _)| d.0 != 1) {
             if column_major == dim_last.unwrap().0 .0 && !cmpx_order {
-                write!(f, "[Column Major]")?;
+                open(f, &mut previous)?;
+                write!(f, "Column Major")?;
+                close(f, &mut previous)?;
             } else if row_major == dim_last.unwrap().0 .0 && !cmpx_order {
-                write!(f, "[Row Major]")?;
+                open(f, &mut previous)?;
+                write!(f, "Row Major")?;
+                close(f, &mut previous)?;
             }
         }
         if cmpx_order {
+            open(f, &mut previous)?;
             for (dim, dim_order) in &inst.dim_order {
-                write!(f, "[{:?}]", dim_order)?;
-                if (dim.0 + 1) % 4 == 0 && dim != dim_last.unwrap().0 {
+                write!(f, "{:?}", dim_order)?;
+                if *brackets && (dim.0 + 1) % 4 == 0 && dim != dim_last.unwrap().0 {
                     write!(f, "$")?;
                 }
             }
+            close(f, &mut previous)?;
         } else if aos {
-            write!(f, "[Array-of-structs (AOS)]")?;
+            open(f, &mut previous)?;
+            write!(f, "Array-of-structs (AOS)")?;
+            close(f, &mut previous)?;
         } else if soa {
-            write!(f, "[Struct-of-arrays (SOA)]")?;
+            open(f, &mut previous)?;
+            write!(f, "Struct-of-arrays (SOA)")?;
+            close(f, &mut previous)?;
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct InstShort<'a>(pub &'a Inst);
+
+impl fmt::Display for InstShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let InstShort(inst) = self;
+
+        write!(f, "0x{:x}", inst.inst_id.unwrap().0)
     }
 }
 
@@ -667,7 +763,7 @@ impl fmt::Display for InstPretty<'_> {
             }
         }
         if inst.dim_order.len() > 0 {
-            write!(f, "$Layout Order: {} ", DimOrderPretty(inst))?;
+            write!(f, "$Layout Order: {} ", DimOrderPretty(inst, true))?;
         }
         write!(
             f,
@@ -676,6 +772,54 @@ impl fmt::Display for InstPretty<'_> {
             SizePretty(inst.size.unwrap())
         )?;
 
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ChanEntryShort<'a>(pub &'a ChanEntry);
+
+impl fmt::Display for ChanEntryShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ChanEntryShort(entry) = self;
+
+        match entry {
+            ChanEntry::Copy(copy) => write!(f, "{}", copy.copy_kind.unwrap()),
+            ChanEntry::Fill(_) => write!(f, "Fill"),
+            ChanEntry::DepPart(deppart) => write!(f, "{}", deppart.part_op),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ChanEntryFieldsPretty<'a>(pub Option<&'a Inst>, pub &'a Vec<FieldID>, pub &'a State);
+
+impl fmt::Display for ChanEntryFieldsPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ChanEntryFieldsPretty(inst, field_ids, state) = self;
+
+        let fspace = inst.and_then(|inst| {
+            // FIXME (Elliott): not sure how we're supposed to do this if we
+            // have more than one field space in an instance
+            if inst.fspace_ids.len() == 1 {
+                let fspace_id = inst.fspace_ids[0];
+                Some(state.field_spaces.get(&fspace_id).unwrap())
+            } else {
+                None
+            }
+        });
+
+        let mut i = field_ids.iter().peekable();
+        while let Some(fid) = i.next() {
+            if let Some(field) = fspace.and_then(|fs| fs.fields.get(fid)) {
+                write!(f, "{} <{}>", field.name, fid.0)?;
+            } else {
+                write!(f, "<{}>", fid.0)?;
+            }
+            if i.peek().is_some() {
+                write!(f, ", ")?;
+            }
+        }
         Ok(())
     }
 }
