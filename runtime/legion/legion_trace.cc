@@ -145,6 +145,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const std::pair<Operation*,GenerationID> key(op,gen);
+#ifdef LEGION_SPY
+      current_uids[key] = op->get_unique_op_id();
+      num_regions[key] = op->get_region_count();
+#endif
       if (recording)
       {
         // Recording
@@ -210,11 +214,6 @@ namespace Legion {
                         index, tid, context->get_task_name(),
                         context->get_unique_id(), info.region_count,
                         op->get_region_count())
-
-#ifdef LEGION_SPY
-        current_uids[key] = op->get_unique_op_id();
-        num_regions[key] = op->get_region_count();
-#endif
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
         operations.push_back(key);
@@ -236,6 +235,10 @@ namespace Legion {
                                                              close_gen);
           close_op->add_mapping_reference(close_gen);
           operations.push_back(close_key);
+#ifdef LEGION_SPY
+          current_uids[close_key] = close_op->get_unique_op_id();
+          num_regions[close_key] = close_op->get_region_count();
+#endif
           close_op->begin_dependence_analysis();
           close_op->trigger_dependence_analysis();
           replay_operation_dependences(close_op, cit->dependences);

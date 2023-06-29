@@ -39,9 +39,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                             ProjectionSummary *p)
-      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()), idx(id),
-        gen(o->get_generation()), shard_proj(p), timeout(0)
+                             ProjectionSummary *p, unsigned internal)
+      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()),
+        internal_idx(internal), idx(id), gen(o->get_generation()),
+        shard_proj(p), timeout(0)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
@@ -8162,7 +8163,7 @@ namespace Legion {
       // If we have any pending refinements, have them record dependences
       // on any pending closes that were done along their path and then
       // issue the refinements 
-      unsigned refinement_number = 0;
+      unsigned internal_index = 0;
       for (OrderedRefinements::const_iterator it =
             pending_refinements.begin(); it != pending_refinements.end(); it++)
       {
@@ -8182,8 +8183,8 @@ namespace Legion {
           }
           path_node = path_node->get_parent();
         }
-        it->first->record_refinement_mask(refinement_number++, it->second);
-        issue_internal_operation(node, it->first, it->second);
+        it->first->record_refinement_mask(internal_index, it->second);
+        issue_internal_operation(node, it->first, it->second, internal_index++);
       }
       // Issue the pending closes
       if (!pending_closes.empty())
@@ -8212,14 +8213,16 @@ namespace Legion {
               ordered_region_closes.end(); it++)
         {
           MergeCloseOp *close = pending_closes[it->second];
-          issue_internal_operation(it->second, close, close->get_close_mask());
+          issue_internal_operation(it->second, close, close->get_close_mask(),
+                                   internal_index++);
         }
         for (std::map<LogicalPartition,RegionTreeNode*>::const_iterator it =
               ordered_partition_closes.begin(); it !=
               ordered_partition_closes.end(); it++)
         {
           MergeCloseOp *close = pending_closes[it->second];
-          issue_internal_operation(it->second, close, close->get_close_mask());
+          issue_internal_operation(it->second, close, close->get_close_mask(),
+                                   internal_index++);
         }
       }
 #if 0
@@ -8681,14 +8684,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalAnalysis::issue_internal_operation(RegionTreeNode *node,
-                  InternalOp *internal_op, const FieldMask &internal_mask) const
+                  InternalOp *internal_op, const FieldMask &internal_mask,
+                  const unsigned internal_index) const
     //--------------------------------------------------------------------------
     {
       // Do any other work for the dependence analysis
       internal_op->trigger_dependence_analysis();
       // Record a user for this internal operation in the region tree 
       LogicalUser *user = new LogicalUser(internal_op, 0/*region index*/,
-          RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/));
+          RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/),
+          NULL/*projection*/, internal_index);
       LogicalState &state = node->get_logical_state(context->get_context_id());
       // This will take ownership of the user
       node->register_local_user(state, *user, internal_mask);

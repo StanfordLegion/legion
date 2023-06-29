@@ -71,7 +71,7 @@ namespace Legion {
     struct LogicalUser : public Collectable {
     public:
       LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                  ProjectionSummary *proj = NULL);
+          ProjectionSummary *proj = NULL, unsigned internal_idx = UINT_MAX);
       LogicalUser(const LogicalUser &rhs) = delete;
       ~LogicalUser(void);
     public:
@@ -84,6 +84,10 @@ namespace Legion {
           if (ctx_index < rhs->ctx_index)
             return true;
           if (ctx_index > rhs->ctx_index)
+            return false;
+          if (internal_idx < rhs->internal_idx)
+            return true;
+          if (internal_idx > rhs->internal_idx)
             return false;
           return (idx < rhs->idx);
         }
@@ -104,6 +108,9 @@ namespace Legion {
       const RegionUsage usage;
       Operation *const op;
       const size_t ctx_index;
+      // Since internal operations have the same ctx_index as their
+      // creator we need a way to distinguish them from the creator
+      const unsigned internal_idx;
       const unsigned idx;
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
@@ -1892,7 +1899,8 @@ namespace Legion {
                                    const FieldMask &mask);
     protected:
       void issue_internal_operation(RegionTreeNode *node,
-          InternalOp *close_op, const FieldMask &internal_mask) const;
+          InternalOp *close_op, const FieldMask &internal_mask,
+          const unsigned internal_index) const;
     public:
       Operation *const op;
       InnerContext *const context;

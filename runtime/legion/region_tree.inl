@@ -7474,10 +7474,6 @@ namespace Legion {
         subscriptions =
           new LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >();
       FieldMaskSet<EqSetTracker> &trackers = (*subscriptions)[tracker_space];
-#ifdef DEBUG_LEGION
-      assert((trackers.find(tracker) == trackers.end()) ||
-          (trackers.find(tracker)->second * mask));
-#endif
       // Add a reference if this is the first time this tracker has
       // subscribed to us which we'll remove when the subscription ends
       if (trackers.insert(tracker, mask))

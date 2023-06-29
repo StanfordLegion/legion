@@ -7488,13 +7488,13 @@ namespace Legion {
       assert(single_task_termination.exists());
       assert(region_preconditions.empty());
 #endif
+      if (completion_postcondition.exists())
+        record_completion_effect(completion_postcondition);
       const AddressSpaceID target_space =
         runtime->find_address_space(target_processors.front());
       // Check to see if we're replaying this locally or remotely
       if (target_space != runtime->address_space)
       {
-        if (completion_postcondition.exists())
-          record_completion_effect(completion_postcondition);
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
