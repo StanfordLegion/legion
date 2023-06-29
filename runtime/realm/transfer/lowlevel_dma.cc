@@ -226,15 +226,24 @@ namespace Realm {
         }
       }
       log_aio.warning("exceeeded max aio write attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
-      int ret = pwrite(cb.aio_fildes, (const void*)cb.aio_buf, cb.aio_nbytes, cb.aio_offset);
-      if (ret < 0)
-      {
-        const char *message = realm_strerror(errno);
-        log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
-        abort();
+      const uint8_t *buffer = (const uint8_t*)cb.aio_buf;
+      while (cb.aio_nbytes) {
+        int ret = pwrite(cb.aio_fildes, (const void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        if (ret < 0) {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
+          abort();
+        } else if (ret) {
+          assert(ret <= cb.aio_nbytes);
+          buffer += ret;
+          cb.aio_offset += ret;
+          cb.aio_nbytes -= ret;
+        } else {
+          log_aio.fatal("Synchronous IO write failed to make forward progress");
+          abort();
+        } 
       }
-      else
-        completed = true;
+      completed = true;
     }
 
     bool PosixAIOWrite::check_completion(void)
@@ -303,15 +312,24 @@ namespace Realm {
         }
       }
       log_aio.warning("exceeeded max aio read attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
-      int ret = pread(cb.aio_fildes, (void*)cb.aio_buf, cb.aio_nbytes, cb.aio_offset);
-      if (ret < 0)
-      {
-        const char *message = realm_strerror(errno);
-        log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
-        abort();
+      uint8_t *buffer = (uint8_t*)cb.aio_buf;
+      while (cb.aio_nbytes) {
+        int ret = pread(cb.aio_fildes, (void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        if (ret < 0) {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
+          abort();
+        } else if (ret) {
+          assert(ret <= cb.aio_nbytes);
+          buffer += ret;
+          cb.aio_offset += ret;
+          cb.aio_nbytes -= ret;
+        } else {
+          log_aio.fatal("Synchronous IO read failed to make forward progress");
+          abort();
+        }
       }
-      else
-        completed = true;
+      completed = true;
     }
 
     bool PosixAIORead::check_completion(void)
