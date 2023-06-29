@@ -4856,7 +4856,7 @@ namespace Legion {
             // Perform the exchange of the instance data and then 
             // trigger execution when it is ready
             exchange->perform_collective_async();
-            ready = exchange->perform_collective_wait(false/*block*/);
+            ready = exchange->get_done_event();
           }
           else
           {
@@ -4881,8 +4881,11 @@ namespace Legion {
               return;
             }
             else
-              ready = gather->perform_collective_wait(false/*block*/);
+              ready = gather->get_done_event();
           }
+#ifdef DEBUG_LEGION
+          assert(ready.exists());
+#endif
           parent_ctx->add_to_trigger_execution_queue(this, ready); 
         }
         else // If we have valid points then we do the base call
