@@ -234,7 +234,7 @@ namespace Realm {
           log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
           abort();
         } else if (ret) {
-          assert(ret <= cb.aio_nbytes);
+          assert(((size_t)ret) <= cb.aio_nbytes);
           buffer += ret;
           cb.aio_offset += ret;
           cb.aio_nbytes -= ret;
@@ -320,7 +320,7 @@ namespace Realm {
           log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
           abort();
         } else if (ret) {
-          assert(ret <= cb.aio_nbytes);
+          assert(((size_t)ret) <= cb.aio_nbytes);
           buffer += ret;
           cb.aio_offset += ret;
           cb.aio_nbytes -= ret;
