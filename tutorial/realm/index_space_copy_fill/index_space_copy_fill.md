@@ -1,4 +1,9 @@
-# Realm Copies and Fills
+---
+layout: page
+permalink: /tutorial/realm/index_space_copy_fill.html
+title: Realm Copies and Fills
+---
+
 
 ## Introduction
 In this example, we will discuss how to perform operations such
@@ -36,6 +41,7 @@ in a predictable, uniform pattern. Most of the time, the copy domain can
 be defined by a dense index space with a single bounding rectangle. For
 example, `src_index_space` and `dst_index_space` in this example have
 the following structure:
+
 ```
 ----------------------------------------------------------------------
 | P0:V0, P1:V1, P2:V2, P3:V3, P4:V4, P5:V5, P6:V6, P7:V7...PN-1:VN-1 |
@@ -77,6 +83,7 @@ dsts[0].set_field(inst, FID_BASE, sizeof(int));
 return is.fill(dsts, ProfilingRequestSet(), &fill_value, sizeof(fill_value),
                wait_on);
 ```
+
 This code sets up a vector of `CopySrcDstField` objects, specifying
 the destination region instance (`inst1` or `inst2`), the field
 ID (`FID_BASE`), and the size of the field data (`sizeof(int)`).
