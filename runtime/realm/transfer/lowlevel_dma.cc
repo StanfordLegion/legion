@@ -228,7 +228,7 @@ namespace Realm {
       log_aio.warning("exceeeded max aio write attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
       const uint8_t *buffer = (const uint8_t*)cb.aio_buf;
       while (cb.aio_nbytes) {
-        int ret = pwrite(cb.aio_fildes, (const void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        ssize_t ret = pwrite(cb.aio_fildes, (const void*)buffer, cb.aio_nbytes, cb.aio_offset);
         if (ret < 0) {
           const char *message = realm_strerror(errno);
           log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
@@ -314,7 +314,7 @@ namespace Realm {
       log_aio.warning("exceeeded max aio read attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
       uint8_t *buffer = (uint8_t*)cb.aio_buf;
       while (cb.aio_nbytes) {
-        int ret = pread(cb.aio_fildes, (void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        ssize_t ret = pread(cb.aio_fildes, (void*)buffer, cb.aio_nbytes, cb.aio_offset);
         if (ret < 0) {
           const char *message = realm_strerror(errno);
           log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
