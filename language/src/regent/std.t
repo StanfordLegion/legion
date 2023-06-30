@@ -2547,6 +2547,7 @@ std.ptr = std.index_type(opaque, "ptr")
 if max_dim >= 1 then
   std.int1d = std.index_type(int64, "int1d")
   std.rect1d = std.rect_type(std.int1d)
+  base.register_type_id(std.int1d)
 end
 do
   std.dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
@@ -2559,6 +2560,11 @@ do
     std["__int" .. dim .. "d"] = st
     std["int" .. dim .. "d"] = std.index_type(st, "int" .. dim .. "d")
     std["rect" .. dim .. "d"] = std.rect_type(std["int" .. dim .. "d"])
+    base.register_type_id(std["int" .. dim .. "d"])
+  end
+  for dim = max_dim, #std.dim_names do
+    -- Always pad the type IDs out for the highest max_dim we support.
+    base.register_type_id(nil)
   end
 end
 

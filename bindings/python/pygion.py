@@ -479,6 +479,9 @@ class Type(object):
     def __reduce__(self):
         return (Type, (self.numpy_type, self.cffi_type))
 
+    def __repr__(self):
+        return 'Type(%s,%s)' % (repr(self.numpy_type), repr(self.cffi_type))
+
 # Pre-defined Types
 void = Type(None, None)
 bool_ = Type(numpy.bool_, 'bool')
@@ -511,9 +514,11 @@ _type_ids = {
 
 _rect_types = []
 for dim in xrange(1, _max_dim + 1):
-    globals()["int{}d".format(dim)] = Type(
+    itype = Type(
         numpy.dtype([('x', numpy.int64, (dim,))], align=True),
         'legion_point_{}d_t'.format(dim))
+    globals()["int{}d".format(dim)] = itype
+    _type_ids[110 + dim] = itype
     rtype = Type(
         numpy.dtype([('lo', numpy.int64, (dim,)), ('hi', numpy.int64, (dim,))], align=True),
         'legion_rect_{}d_t'.format(dim))
@@ -1012,6 +1017,7 @@ class Fspace(object):
         raw_tag = ffi.new('const void **')
         tag_size = ffi.new('size_t *')
         for i, name in enumerate(names):
+            field_id = field_ids[name]
             ok = c.legion_field_id_retrieve_semantic_information(
                 _my.ctx.runtime, handle, field_id, _type_semantic_tag, raw_tag, tag_size, True, True)
             if ok:
