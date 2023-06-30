@@ -497,15 +497,6 @@ uint8 = Type(numpy.uint8, 'uint8_t')
 uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
-int1d = Type(numpy.dtype([('x', numpy.int64, 1)]), 'int64_t[1]')
-int2d = Type(numpy.dtype([('x', numpy.int64, 2)]), 'int64_t[2]')
-int3d = Type(numpy.dtype([('x', numpy.int64, 3)]), 'int64_t[3]')
-int4d = Type(numpy.dtype([('x', numpy.int64, 4)]), 'int64_t[4]')
-int5d = Type(numpy.dtype([('x', numpy.int64, 5)]), 'int64_t[5]')
-int6d = Type(numpy.dtype([('x', numpy.int64, 6)]), 'int64_t[6]')
-int7d = Type(numpy.dtype([('x', numpy.int64, 7)]), 'int64_t[7]')
-int8d = Type(numpy.dtype([('x', numpy.int64, 8)]), 'int64_t[8]')
-int9d = Type(numpy.dtype([('x', numpy.int64, 9)]), 'int64_t[9]')
 
 _type_semantic_tag = 54321 # keep in sync with Regent std_base.t
 _type_ids = {
@@ -519,22 +510,15 @@ _type_ids = {
     108: uint64,
     109: float32,
     110: float64,
-    111: int1d,
-    112: int2d,
-    113: int3d,
-    114: int4d,
-    115: int5d,
-    116: int6d,
-    117: int7d,
-    118: int8d,
-    119: int9d,
 }
 
 _rect_types = []
 for dim in xrange(1, _max_dim + 1):
-    globals()["int{}d".format(dim)] = Type(
+    itype = Type(
         numpy.dtype([('x', numpy.int64, (dim,))], align=True),
         'legion_point_{}d_t'.format(dim))
+    globals()["int{}d".format(dim)] = itype
+    _type_ids[110 + dim] = itype
     rtype = Type(
         numpy.dtype([('lo', numpy.int64, (dim,)), ('hi', numpy.int64, (dim,))], align=True),
         'legion_rect_{}d_t'.format(dim))
