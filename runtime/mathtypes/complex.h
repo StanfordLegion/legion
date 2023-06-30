@@ -25,6 +25,9 @@
 #endif
 
 #include <cmath>
+#ifdef COMPLEX_HALF
+#include "mathtypes/half.h"
+#endif
 #if defined (LEGION_USE_CUDA)
 #if __CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ == 2
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 9.2"
@@ -44,9 +47,6 @@
 #else
 #include <complex>
 #define COMPLEX_NAMESPACE std
-#endif 
-#ifdef COMPLEX_HALF
-#include "mathtypes/half.h"
 #endif
 
 using COMPLEX_NAMESPACE::complex;
