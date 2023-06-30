@@ -479,6 +479,9 @@ class Type(object):
     def __reduce__(self):
         return (Type, (self.numpy_type, self.cffi_type))
 
+    def __repr__(self):
+        return 'Type(%s,%s)' % (repr(self.numpy_type), repr(self.cffi_type))
+
 # Pre-defined Types
 void = Type(None, None)
 bool_ = Type(numpy.bool_, 'bool')
@@ -494,6 +497,15 @@ uint8 = Type(numpy.uint8, 'uint8_t')
 uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
+int1d = Type(numpy.dtype([('x', numpy.int64, 1)]), 'int64_t[1]')
+int2d = Type(numpy.dtype([('x', numpy.int64, 2)]), 'int64_t[2]')
+int3d = Type(numpy.dtype([('x', numpy.int64, 3)]), 'int64_t[3]')
+int4d = Type(numpy.dtype([('x', numpy.int64, 4)]), 'int64_t[4]')
+int5d = Type(numpy.dtype([('x', numpy.int64, 5)]), 'int64_t[5]')
+int6d = Type(numpy.dtype([('x', numpy.int64, 6)]), 'int64_t[6]')
+int7d = Type(numpy.dtype([('x', numpy.int64, 7)]), 'int64_t[7]')
+int8d = Type(numpy.dtype([('x', numpy.int64, 8)]), 'int64_t[8]')
+int9d = Type(numpy.dtype([('x', numpy.int64, 9)]), 'int64_t[9]')
 
 _type_semantic_tag = 54321 # keep in sync with Regent std_base.t
 _type_ids = {
@@ -507,6 +519,15 @@ _type_ids = {
     108: uint64,
     109: float32,
     110: float64,
+    111: int1d,
+    112: int2d,
+    113: int3d,
+    114: int4d,
+    115: int5d,
+    116: int6d,
+    117: int7d,
+    118: int8d,
+    119: int9d,
 }
 
 _rect_types = []
@@ -1012,6 +1033,7 @@ class Fspace(object):
         raw_tag = ffi.new('const void **')
         tag_size = ffi.new('size_t *')
         for i, name in enumerate(names):
+            field_id = field_ids[name]
             ok = c.legion_field_id_retrieve_semantic_information(
                 _my.ctx.runtime, handle, field_id, _type_semantic_tag, raw_tag, tag_size, True, True)
             if ok:
