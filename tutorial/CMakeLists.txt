@@ -22,6 +22,9 @@ endif()
 
 # enable build warnings for all tutorials/examples/tests/etc.
 add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+if (CMAKE_CXX_STANDARD)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++${CMAKE_CXX_STANDARD})
+endif()
 
 add_subdirectory(00_hello_world)
 add_subdirectory(01_tasks_and_futures)
