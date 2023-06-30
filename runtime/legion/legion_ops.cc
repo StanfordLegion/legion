@@ -7331,6 +7331,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
+      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -7353,7 +7354,6 @@ namespace Legion {
       }
       // Handle the case for marking when the copy completes
       record_completion_effect(copy_complete_event);
-      complete_mapping();
       complete_execution();
     }
 
@@ -14187,6 +14187,9 @@ namespace Legion {
             runtime->get_available_distributed_id(),
             get_provenance(), this));
       collective = dc;
+      const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
+      future.impl->set_future_result_size(redop->sizeof_rhs, 
+                                          runtime->address_space);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_dynamic_collective(ctx->get_unique_id(),
@@ -19321,6 +19324,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
+      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -19342,7 +19346,6 @@ namespace Legion {
         }
       }
       record_completion_effect(fill_complete_event);
-      complete_mapping();
       complete_execution();
     }
 

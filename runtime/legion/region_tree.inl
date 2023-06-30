@@ -5075,12 +5075,26 @@ namespace Legion {
       DomainT<DIM,T> realm_index_space;
       get_realm_index_space(realm_index_space, true/*tight*/);
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
-      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
-            itr.valid; itr.step())
+      if (realm_index_space.empty())
       {
-        const Rect<DIM,T> overlap = itr.rect.intersection(typed_tree->bounds);
-        if (!overlap.empty())
-          typed_tree->initialize_set(set, overlap, mask, current);
+        // For backwards compatibility we handle the empty case which will
+        // still store an equivalence set with names in it even though it
+        // doesn't have to be updated ever
+#ifdef DEBUG_LEGION
+        assert(realm_index_space.bounds.empty());
+        assert(typed_tree->bounds == realm_index_space.bounds);
+#endif
+        typed_tree->initialize_set(set, realm_index_space.bounds, mask,current);
+      }
+      else
+      {
+        for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+              itr.valid; itr.step())
+        {
+          const Rect<DIM,T> overlap = itr.rect.intersection(typed_tree->bounds);
+          if (!overlap.empty())
+            typed_tree->initialize_set(set, overlap, mask, current);
+        }
       }
     }
 

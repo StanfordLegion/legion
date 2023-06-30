@@ -414,7 +414,8 @@ namespace Legion {
         return false;
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
-      assert(op_map.find(std::make_pair(source, source_gen)) != op_map.end());
+      assert((op_map.find(std::make_pair(source, source_gen)) != op_map.end())
+          || (source->get_operation_kind() == Operation::REFINEMENT_OP_KIND));
 #endif
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second, target_idx, source_idx,

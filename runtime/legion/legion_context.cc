@@ -10731,9 +10731,6 @@ namespace Legion {
 #endif
           const FieldMaskSet<EquivalenceSet> &eq_sets =
             version_infos[idx1].get_equivalence_sets();
-#ifdef DEBUG_LEGION
-          assert(user_mask == eq_sets.get_valid_mask());
-#endif
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             it->first->set_expr->initialize_equivalence_set_kd_tree(
