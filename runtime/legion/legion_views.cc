@@ -11938,6 +11938,7 @@ namespace Legion {
           (source_fields != NULL) ? *source_fields : fields;
         std::map<unsigned,std::vector<Reservation> > local_reservations;
         std::map<unsigned,std::vector<ApEvent> > reduction_preconditions;
+        local_reservations[dst_index] = dst_reservations;
         // Note the reversed iterator <destination,source>
         for (std::vector<std::pair<unsigned,unsigned> >::const_reverse_iterator 
               it = spanning_copies.rbegin(); it != spanning_copies.rend(); it++)
