@@ -1672,6 +1672,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual unsigned find_parent_index(unsigned idx)
+        { return owner->find_parent_index(idx); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3611,6 +3613,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual unsigned find_parent_index(unsigned idx)
+        { return owner->find_parent_index(idx); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3805,6 +3809,8 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       virtual FillView* get_fill_view(void) const;
+      virtual unsigned find_parent_index(unsigned idx)
+        { return owner->find_parent_index(idx); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -4038,6 +4044,8 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual unsigned find_parent_index(unsigned idx)
+        { return owner->find_parent_index(idx); }
     protected:
       IndexAttachOp *owner;
       DomainPoint index_point;
@@ -4200,6 +4208,8 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual unsigned find_parent_index(unsigned idx)
+        { return owner->find_parent_index(idx); }
     protected:
       IndexDetachOp *owner;
       DomainPoint index_point;
