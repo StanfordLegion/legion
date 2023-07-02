@@ -11079,6 +11079,7 @@ namespace Legion {
       to_delete.insert(to_delete.end(), timeouts.begin(), timeouts.end());
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void InnerContext::report_leaks_and_duplicates(std::set<RtEvent> &preconds)
     //--------------------------------------------------------------------------
@@ -11113,6 +11114,7 @@ namespace Legion {
       // Now we can do the base call
       TaskContext::report_leaks_and_duplicates(preconds);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InnerContext::convert_individual_views(

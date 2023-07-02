@@ -617,7 +617,7 @@ namespace Legion {
     public:
       void register_index_partition_creation(IndexPartition handle);
     public:
-      virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
+      void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
     public:
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
@@ -1724,7 +1724,6 @@ namespace Legion {
                           const ShardMapping *mapping, ShardID source_shard);
       void invalidate_region_tree_context(LogicalRegion handle, 
           unsigned req_index, std::set<RtEvent> &applied_events);
-      virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:
       virtual ProjectionNode* construct_projection_tree(

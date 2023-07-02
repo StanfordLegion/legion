@@ -17948,12 +17948,17 @@ namespace Legion {
           children.find(next_child);
         if (finder != children.end())
         {
-          const FieldMask overlap = closing_mask & finder->second;
+          FieldMask overlap = closing_mask & finder->second;
           if (!!overlap)
           {
             open_below |= overlap;
             if (filter_next)
             {
+              FieldMask still_open;
+              next_child->close_logical_node(user, overlap, privilege_root,
+                                             path_node, analysis, still_open);
+              if (!!still_open)
+                overlap -= still_open;
               finder.filter(overlap);
               if (!finder->second)
               {
