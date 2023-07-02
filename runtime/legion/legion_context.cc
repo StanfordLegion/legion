@@ -10913,6 +10913,8 @@ namespace Legion {
                                         false/*users only*/, node);
           invalidated_regions.insert(it->second.region);
         }
+        if (equivalence_set_trees.size() <= it->first)
+          equivalence_set_trees.resize(it->first + 1, NULL);
         // See if we're a returnable privilege or not
         if (returnable_privileges[it->first] && !is_top)
         {
@@ -10960,7 +10962,7 @@ namespace Legion {
             shard_mapping, source_shard);
         for (std::vector<EqKDTree*>::const_iterator it =
               created_trees.begin(); it != created_trees.end(); it++)
-          if ((*it)->remove_reference())
+          if (((*it) != NULL) && (*it)->remove_reference())
             delete (*it);
       }
     }
