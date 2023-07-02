@@ -5155,8 +5155,8 @@ namespace Legion {
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
-        typed_tree->invalidate_shard_tree(itr.rect, mask, context->runtime,
-                              invalidated, remote_shard_rects, local_shard);
+        typed_tree->invalidate_shard_tree_remote(itr.rect, mask,
+            context->runtime, invalidated, remote_shard_rects, local_shard);
     }
     
     //--------------------------------------------------------------------------
@@ -7946,7 +7946,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void EqKDNode<DIM,T>::invalidate_shard_tree(const Rect<DIM,T> &rect,
+    void EqKDNode<DIM,T>::invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
           const FieldMask &mask, Runtime *runtime, 
           std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
@@ -8151,8 +8151,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void EqKDSparse<DIM,T>::invalidate_shard_tree(const Rect<DIM,T> &rect,
-          const FieldMask &mask, Runtime *runtime, 
+    void EqKDSparse<DIM,T>::invalidate_shard_tree_remote(
+          const Rect<DIM,T> &rect, const FieldMask &mask, Runtime *runtime, 
           std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard)

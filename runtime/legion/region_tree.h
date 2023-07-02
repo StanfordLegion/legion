@@ -3121,7 +3121,7 @@ namespace Legion {
                                          const FieldMask &mask,
                                          Runtime *runtime,
                                          std::vector<RtEvent> &invalidated);
-      virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
                                          Runtime *runtime,
                                          std::vector<RtEvent> &invalidated,
@@ -3176,7 +3176,7 @@ namespace Legion {
                                    const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous);
-      virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
                                          Runtime *runtime,
                                          std::vector<RtEvent> &invalidated,
@@ -3267,7 +3267,7 @@ namespace Legion {
                                    const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
                                    bool move_to_previous);
-      virtual void invalidate_shard_tree(const Rect<DIM,T> &rect,
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
                                          const FieldMask &mask,
                                          Runtime *runtime,
                                          std::vector<RtEvent> &invalidated,
