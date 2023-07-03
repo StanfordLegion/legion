@@ -63,6 +63,9 @@ if(Legion_USE_CUDA)
 
   list(APPEND REALM_TESTS cuda_arrays)
   set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)
+
+  list(APPEND REALM_TESTS task_stream)
+  set(CUDASRC_task_stream task_stream_gpu.cu)
 endif()
 
 if(Legion_USE_HIP)
@@ -79,6 +82,9 @@ if(Legion_USE_HIP)
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)
   # set(HIPSRC_cuda_arrays cuda_arrays_gpu.cu)
+
+  list(APPEND REALM_TESTS task_stream)
+  set(HIPSRC_task_stream task_stream_gpu.cu)
 endif()
 
 foreach(test IN LISTS REALM_TESTS)

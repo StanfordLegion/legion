@@ -40,6 +40,8 @@
 
 namespace Realm {
 
+  extern Logger log_taskreg;
+
   Logger log_py("python");
 
   ////////////////////////////////////////////////////////////////////////
@@ -937,6 +939,12 @@ namespace Realm {
                                            CodeDescriptor& codedesc,
                                            const ByteArrayRef& user_data)
   {
+    // make sure we have a function of the right type
+    if(codedesc.type() != TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+      log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+      assert(0);
+    }
+
     TaskRegistration *treg = new TaskRegistration;
     treg->proc = this;
     treg->func_id = func_id;

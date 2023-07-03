@@ -79,6 +79,7 @@ list(APPEND REALM_SRC
 if(Legion_USE_CUDA)
   list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
+    realm/cuda/cuda_module.inl
     realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
     realm/cuda/cuda_access.h    realm/cuda/cuda_access.cc
   )
@@ -92,6 +93,7 @@ endif()
 if(Legion_USE_HIP)
   list(APPEND REALM_SRC
     realm/hip/hip_module.h    realm/hip/hip_module.cc
+    realm/hip/hip_module.inl
     realm/hip/hip_internal.h  realm/hip/hip_internal.cc
     realm/hip/hip_access.h    realm/hip/hip_access.cc
 		realm/hip/hiphijack_api.h

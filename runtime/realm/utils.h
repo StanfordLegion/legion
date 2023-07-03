@@ -390,6 +390,10 @@ namespace Realm {
     obj->~T();
   }
 
+  // Provide support for a generic function realm_strerror that converts
+  // OS error codes back to strings in portable way across OSes
+  REALM_PUBLIC_API const char* realm_strerror(int err);
+
 }; // namespace Realm
 
 #include "realm/utils.inl"

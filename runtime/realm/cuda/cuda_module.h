@@ -18,8 +18,16 @@
 
 #include "realm/realm_config.h"
 #include "realm/module.h"
+#include "realm/processor.h"
 #include "realm/network.h"
 #include "realm/atomics.h"
+
+// realm/cuda_module.h is designed to be include-able even when the system
+//  doesn't actually have CUDA installed, so we need to declare types that
+//  are compatible with the CUDA driver and runtime APIs - we can't "extern"
+//  a typedef (e.g. cudaStream_t) but we can forward declare the underlying
+//  struct that those types are pointers to
+struct CUstream_st; // cudaStream_t == CUstream == CUstream_st *
 
 namespace Realm {
 
@@ -33,7 +41,47 @@ namespace Realm {
     static const MemoryType CudaManagedMem = 4;
   };
 
+  
   namespace Cuda {
+
+    // a running task on a CUDA processor is assigned a stream by Realm, and
+    //  any work placed on this stream is automatically captured by the
+    //  completion event for the task
+    // when using the CUDA runtime hijack, Realm will force work launched via
+    //  the runtime API to use the task's stream, but without hijack, or for
+    //  code that uses the CUDA driver API, the task must explicitly request
+    //  the stream that is associated with the task and place work on it to
+    //  avoid more expensive forms of completion detection for the task
+    // NOTE: this function will return a null pointer if called outside of a
+    //  task running on a CUDA processor
+    REALM_PUBLIC_API CUstream_st *get_task_cuda_stream();
+
+    // when Realm is not using the CUDA runtime hijack to force work onto the
+    //  task's stream, it conservatively uses a full context synchronization to
+    //  make sure all device work launched by the task is captured by the task
+    //  completion event - if a task uses `get_task_cuda_stream` and places all
+    //  work on that stream, this API can be used to tell Realm on a per-task
+    //  basis that full context synchronization is not required
+    REALM_PUBLIC_API void set_task_ctxsync_required(bool is_required);
+
+    // rather than using the APIs above, CUDA processors also support task
+    //  implementations that are natively stream aware - if a task function uses
+    //  the `Cuda::StreamAwareTaskFuncPtr` prototype below (instead of the normal
+    //  `Processor::TaskFuncPtr`), the following differences apply:
+    // a) it need not call `get_task_cuda_stream` because it gets the same value
+    //   directly as an argument
+    // b) by default, a context synchronization will NOT be performed as part of
+    //   task completion detection (this can still be overridden with a call to
+    //   `set_task_ctxsync_required(true)` if a task puts work outside the
+    //   specified stream for some reason
+    // c) if a stream-aware task has preconditions that involve device work, that
+    //   work will be tied into the task's stream, but the task body may start
+    //   executing BEFORE that work is complete (i.e. for correctness, all work
+    //   launched by the task must be properly ordered (using the CUDA APIs)
+    //   after anything already in the stream assigned to the task
+    typedef void (*StreamAwareTaskFuncPtr)(const void *args, size_t arglen,
+					   const void *user_data, size_t user_data_len,
+					   Processor proc, CUstream_st *stream);
 
     class GPU;
     class GPUWorker;
@@ -42,7 +90,7 @@ namespace Realm {
     class GPUReplHeapListener;
 
     // our interface to the rest of the runtime
-    class CudaModule : public Module {
+    class REALM_PUBLIC_API CudaModule : public Module {
     protected:
       CudaModule(RuntimeImpl *_runtime);
       
@@ -77,6 +125,11 @@ namespace Realm {
       // clean up any common resources created by the module - this will be called
       //  after all memories/processors/etc. have been shut down and destroyed
       virtual void cleanup(void);
+
+      // free functions above are normally used, but these can be used directly
+      //  if you already have a pointer to the CudaModule
+      CUstream_st *get_task_cuda_stream();
+      void set_task_ctxsync_required(bool is_required);
 
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
@@ -126,5 +179,7 @@ namespace Realm {
   }; // namespace Cuda
 
 }; // namespace Realm 
+
+#include "realm/cuda/cuda_module.inl"
 
 #endif
