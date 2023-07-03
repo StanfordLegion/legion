@@ -220,6 +220,14 @@ namespace Realm {
 			const Type &_param4_type,
 			const Type &_param5_type,
 			size_t _size_bits = 0, size_t _alignment_bits = 0);
+    FunctionPointerType(const Type &_return_type,
+			const Type &_param1_type,
+			const Type &_param2_type,
+			const Type &_param3_type,
+			const Type &_param4_type,
+			const Type &_param5_type,
+			const Type &_param6_type,
+			size_t _size_bits = 0, size_t _alignment_bits = 0);
 
     Type& return_type(void);
     const Type& return_type(void) const;

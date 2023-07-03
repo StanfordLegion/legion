@@ -411,6 +411,8 @@ namespace Realm {
       }
 
     protected:
+      friend class Runtime;
+
       Module *get_module_untyped(const char *name) const;
 
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;

@@ -47,6 +47,9 @@
   ((stream) == 0)
 
 namespace Realm {
+
+  extern Logger log_taskreg;
+
   namespace Hip {
 
     Logger log_gpu("hip");
@@ -1475,6 +1478,7 @@ namespace Realm {
       static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
       static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
       static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
+      static REALM_THREAD_LOCAL int context_sync_required = 0;
     };
 
 #ifdef REALM_USE_HIP_HIJACK
@@ -1513,6 +1517,10 @@ namespace Realm {
       GPUStream *s = gpu_proc->gpu->get_next_task_stream();
       ThreadLocal::current_gpu_stream = s;
       assert(!ThreadLocal::created_gpu_streams);
+
+      // a task can force context sync on task completion either on or off during
+      //  execution, so use -1 as a "no preference" value
+      ThreadLocal::context_sync_required = -1;
 
       // we'll use a "work fence" to track when the kernels launched by this task actually
       //  finish - this must be added to the task _BEFORE_ we execute
@@ -1569,7 +1577,8 @@ namespace Realm {
 #endif
       }
 
-      if(gpu_proc->gpu->module->cfg_task_context_sync)
+      if((ThreadLocal::context_sync_required > 0) ||
+	       ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->cfg_task_context_sync))
         gpu_proc->ctxsync.add_fence(fence);
       else
 	      fence->enqueue_on_stream(s);
@@ -2020,6 +2029,102 @@ namespace Realm {
           return &*it;
 
       return 0;
+    }
+
+    bool GPUProcessor::register_task(Processor::TaskFuncID func_id,
+                                     CodeDescriptor& codedesc,
+                                     const ByteArrayRef& user_data)
+    {
+      // see if we have a function pointer to register
+      const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+
+      // if we don't have a function pointer implementation, see if we can make one
+      if(!fpi) {
+        const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
+        for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+            it != translators.end();
+            it++)
+          if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
+            FunctionPointerImplementation *newfpi = (*it)->translate<FunctionPointerImplementation>(codedesc);
+            if(newfpi) {
+              log_taskreg.info() << "function pointer created: trans=" << (*it)->name << " fnptr=" << (void *)(newfpi->fnptr);
+              codedesc.add_implementation(newfpi);
+              fpi = newfpi;
+              break;
+            }
+          }
+      }
+
+      assert(fpi != 0);
+
+      {
+	RWLock::AutoWriterLock al(task_table_mutex);
+
+	// first, make sure we haven't seen this task id before
+	if(gpu_task_table.count(func_id) > 0) {
+	  log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
+	  return false;
+	}
+
+	GPUTaskTableEntry &tte = gpu_task_table[func_id];
+
+	// figure out what type of function we have
+	if(codedesc.type() == TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+	  tte.fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+	  tte.stream_aware_fnptr = 0;
+	} else if(codedesc.type() == TypeConv::from_cpp_type<Hip::StreamAwareTaskFuncPtr>()) {
+	  tte.fnptr = 0;
+	  tte.stream_aware_fnptr = (Hip::StreamAwareTaskFuncPtr)(fpi->fnptr);
+	} else {
+	  log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	  assert(0);
+	}
+
+	tte.user_data = user_data;
+      }
+
+      log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
+
+      return true;
+    }
+
+    void GPUProcessor::execute_task(Processor::TaskFuncID func_id,
+				    const ByteArrayRef& task_args)
+    {
+      if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
+	return;
+
+      std::map<Processor::TaskFuncID, GPUTaskTableEntry>::const_iterator it;
+      {
+	RWLock::AutoReaderLock al(task_table_mutex);
+	
+	it = gpu_task_table.find(func_id);
+	if(it == gpu_task_table.end()) {
+	  log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
+	  assert(0);
+	}
+      }
+
+      const GPUTaskTableEntry& tte = it->second;
+
+      if(tte.stream_aware_fnptr) {
+	// shouldn't be here without a valid stream
+	assert(ThreadLocal::current_gpu_stream);
+	hipStream_t stream = ThreadLocal::current_gpu_stream->get_stream();
+
+	log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.stream_aware_fnptr)) << " (stream aware)";
+      
+	(tte.stream_aware_fnptr)(task_args.base(), task_args.size(),
+				 tte.user_data.base(), tte.user_data.size(),
+				 me, stream);
+      } else {
+	assert(tte.fnptr);
+	log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
+      
+	(tte.fnptr)(task_args.base(), task_args.size(),
+		    tte.user_data.base(), tte.user_data.size(),
+		    me);
+      }
     }
 
     void GPUProcessor::shutdown(void)
@@ -4193,6 +4298,21 @@ namespace Realm {
       gpus.clear();
       
       Module::cleanup();
+    }
+
+    unifiedHipStream_t *HipModule::get_task_hip_stream()
+    {
+      // if we're not in a gpu task, this'll be null
+      if(ThreadLocal::current_gpu_stream)
+	return ThreadLocal::current_gpu_stream->get_stream();
+      else
+	return 0;
+    }
+
+    void HipModule::set_task_ctxsync_required(bool is_required)
+    {
+      // if we're not in a gpu task, setting this will have no effect
+      ThreadLocal::context_sync_required = (is_required ? 1 : 0);
     }
 
 
