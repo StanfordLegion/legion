@@ -654,6 +654,16 @@ namespace Realm {
       return result;
     }
 
+    Module *Runtime::get_module_untyped(const char *name)
+    {
+      if(runtime_singleton) {
+	return runtime_singleton->get_module_untyped(name);
+      } else {
+	// modules don't exist if we're not initialized yet
+	return 0;
+      }
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
