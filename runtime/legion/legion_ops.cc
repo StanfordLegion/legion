@@ -11338,7 +11338,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VirtualCloseOp::initialize(InnerContext *ctx, unsigned index,
                                     const RegionRequirement &req,
-                                    const VersionInfo *target)
+                                    const VersionInfo *target,
+                                    const bool pred)
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, req, true/*track*/);
@@ -11348,6 +11349,7 @@ namespace Legion {
       assert(target_version_info == NULL);
 #endif
       target_version_info = target;
+      predicated = pred;
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
@@ -11366,6 +11368,7 @@ namespace Legion {
     {
       CloseOp::activate();
       target_version_info = NULL;
+      predicated = false;
     }
 
     //--------------------------------------------------------------------------
@@ -11433,7 +11436,7 @@ namespace Legion {
       IndexSpaceExpression *expr = 
         runtime->forest->get_node(requirement.region.get_index_space()); 
       CloneAnalysis *analysis = new CloneAnalysis(runtime, expr, 
-          parent_ctx->owner_task, parent_idx, std::move(sources));
+          parent_ctx->owner_task, parent_idx, std::move(sources), predicated);
       analysis->add_reference();
       
       const RtEvent traversal_done = analysis->perform_traversal(

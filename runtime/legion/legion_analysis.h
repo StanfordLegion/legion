@@ -2629,10 +2629,12 @@ namespace Legion {
                           public LegionHeapify<CloneAnalysis> {
     public:
       CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr, Operation *op,
-                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
+                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources,
+                    const bool invalidate_first);
       CloneAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                     IndexSpaceExpression *expr, Operation *op,
-                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
+                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources,
+                    const bool invalidate_first);
       CloneAnalysis(const CloneAnalysis &rhs) = delete;
       virtual ~CloneAnalysis(void);
     public:
@@ -2653,6 +2655,7 @@ namespace Legion {
                                        AddressSpaceID previous);
     public:
       const FieldMaskSet<EquivalenceSet> sources;
+      const bool invalidate_first;
     };
 
     /**
@@ -3046,6 +3049,7 @@ namespace Legion {
                      const FieldMask &clone_mask,
                      std::set<RtEvent> &deferral_events,
                      std::set<RtEvent> &applied_events,
+                     const bool invalidate_first,
                      const bool already_deferred = false);
     public:
       void initialize_collective_references(unsigned local_valid_refs);

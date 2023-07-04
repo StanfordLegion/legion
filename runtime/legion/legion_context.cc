@@ -10231,7 +10231,8 @@ namespace Legion {
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const LegionVector<VersionInfo> &version_infos,
-                      const std::vector<ApUserEvent> &unmap_events)
+                      const std::vector<ApUserEvent> &unmap_events,
+                      const bool predicated)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_REGION_TREE_CONTEXTS_CALL);
@@ -10371,11 +10372,16 @@ namespace Legion {
           const FieldMaskSet<EquivalenceSet> &eq_sets = 
             version_infos[idx1].get_equivalence_sets();
           const AddressSpaceID space = runtime->address_space;
+          // Only invalidate if we were not predicated, if we were predicated
+          // then we'll wait to do the invalidation and copy back until we 
+          // know that the predicate has resolved to true, otherwise the 
+          // state of the existing equivalence sets will persist without
+          // us having to reset them due to the mispredication
+          const bool invalidate = IS_WRITE(regions[idx1]) && !predicated;
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            eq_set->clone_from(space, it->first, it->second, 
-                         false/*fowrard to owner*/, context_ready_events,
-                         IS_WRITE(regions[idx1])/*invalidate source overlap*/);
+            eq_set->clone_from(space, it->first, it->second,
+                false/*fowrard to owner*/, context_ready_events, invalidate);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
@@ -11515,7 +11521,8 @@ namespace Legion {
           // refinements so we don't need to do the copy out
           VirtualCloseOp *close_op = get_virtual_close_op(); 
           close_op->initialize(this, idx, regions[idx],
-              &(owner_task->get_version_info(idx)));
+              &(owner_task->get_version_info(idx)),
+              owner_task->is_predicated());
           add_to_dependence_queue(close_op);
         }
       }
@@ -23937,7 +23944,8 @@ namespace Legion {
     void LeafContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
                        const LegionVector<VersionInfo> &version_infos,
-                       const std::vector<ApUserEvent> &unmap_events)
+                       const std::vector<ApUserEvent> &unmap_events,
+                       const bool predicated)
     //--------------------------------------------------------------------------
     {
       // Nothing to do

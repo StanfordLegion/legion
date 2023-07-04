@@ -532,7 +532,8 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events) = 0;
+          const std::vector<ApUserEvent> &unmap_events,
+          const bool predicated) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -1665,7 +1666,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events);
+          const std::vector<ApUserEvent> &unmap_events, const bool predicated);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
@@ -3801,7 +3802,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events);
+          const std::vector<ApUserEvent> &unmap_events, const bool predicated);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,

@@ -2056,7 +2056,8 @@ namespace Legion {
         IndexSpaceExpression *expr = 
           runtime->forest->get_node(requirement.region.get_index_space()); 
         CloneAnalysis *analysis = new CloneAnalysis(runtime, expr, 
-            parent_ctx->owner_task, parent_idx, std::move(sources));
+            parent_ctx->owner_task, parent_idx, std::move(sources), 
+            parent_ctx->owner_task->is_predicated());
         analysis->add_reference();
         
         const RtEvent traversal_done = analysis->perform_traversal(
