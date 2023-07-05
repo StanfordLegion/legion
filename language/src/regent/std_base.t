@@ -476,7 +476,7 @@ end
 -- Assign the basic types IDs for interop with Pygion.
 do
   local primitive_types =
-    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double })
+    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double, bool})
   local base_id = 101
   local type_ids = data.newmap()
   function base.register_type_id(t)
