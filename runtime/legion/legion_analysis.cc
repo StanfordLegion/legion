@@ -25586,12 +25586,41 @@ namespace Legion {
                      VersionInfo *version_info, RegionNode *region_node,
                      IndexSpaceExpression *expr, const bool expr_covers,
                      const FieldMask &version_mask, UniqueID opid,
-                     unsigned parent_req_index, std::set<RtEvent> &ready_events)
+                     unsigned parent_req_index, std::set<RtEvent> &ready_events,
+                     RtEvent *output_region_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(node == region_node);
 #endif
+      if (output_region_ready != NULL)
+      {
+        // This is a special case for output regions
+        // Make a new equivalence set and record it in the current set
+        // and then we are done, we'll register this equivalence set
+        // with the EqKDTree later once we actually know the bounds
+        // Note that by registering it we're allowing others to find it
+        // here even before they can compute it in the EqKDTree which is
+        // an important optimization for many applications
+        const DistributedID did = runtime->get_available_distributed_id();
+        EquivalenceSet *set = new EquivalenceSet(runtime, did,
+            runtime->address_space/*logical owner*/, expr,
+            region_node->handle.get_tree_id(), context, true/*register*/);
+        version_info->record_equivalence_set(set, version_mask);
+        // Launch a meta-task to register this equivalence set with
+        // EqKDTree once the index space domain is ready
+        FinalizeOutputEquivalenceSetArgs args(this,
+            parent_req_index, region_node, set);
+        *output_region_ready = runtime->issue_runtime_meta_task(args,
+            region_node->row_source->get_ready_event());
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(version_mask * equivalence_sets.get_valid_mask());
+#endif
+        if (equivalence_sets.insert(set, version_mask))
+          set->add_base_resource_ref(VERSION_MANAGER_REF);
+        return;
+      }
       // If we don't have equivalence classes for this region yet we 
       // either need to compute them or request them from the owner
       FieldMask remaining_mask(version_mask);

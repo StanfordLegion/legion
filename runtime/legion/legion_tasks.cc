@@ -2610,6 +2610,7 @@ namespace Legion {
 #endif
       version_infos.resize(get_region_count());
       std::set<RtEvent> ready_events;
+      std::vector<RtEvent> output_events;
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         if (no_access_regions[idx] || (post_mapper && virtual_mapped[idx]))
@@ -2617,9 +2618,23 @@ namespace Legion {
         VersionInfo &version_info = version_infos[idx];
         if (version_info.has_version_info())
           continue;
-        runtime->forest->perform_versioning_analysis(this, idx,
-              logical_regions[idx], version_info, ready_events);
+        if ((regions.size() <= idx) && !is_output_valid(idx-regions.size()))
+        {
+          RtEvent output_ready;
+          runtime->forest->perform_versioning_analysis(this, idx,
+              logical_regions[idx], version_info, ready_events, &output_ready);
+#ifdef DEBUG_LEGION
+          assert(output_ready.exists());
+#endif
+          output_events.push_back(output_ready);
+        }
+        else
+          runtime->forest->perform_versioning_analysis(this, idx,
+              logical_regions[idx], version_info, ready_events); 
       }
+      if (!output_events.empty())
+        record_output_registered(
+            Runtime::merge_events(output_events), ready_events);
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
       return RtEvent::NO_RT_EVENT;
@@ -5140,6 +5155,7 @@ namespace Legion {
       point_arguments = FutureMap();
       point_futures.clear();
       output_region_options.clear();
+      output_region_extents.clear();
       slices.clear(); 
       if (predicate_false_result != NULL)
       {
@@ -5358,6 +5374,7 @@ namespace Legion {
       if (!rhs->point_futures.empty())
         this->point_futures = rhs->point_futures;
       this->output_region_options = rhs->output_region_options;
+      this->output_region_extents.resize(this->output_region_options.size());
       this->concurrent_precondition = rhs->concurrent_precondition;
       if (!elide_future_return)
       {
@@ -5579,6 +5596,7 @@ namespace Legion {
         output_region_options.resize(num_globals);
         for (unsigned idx = 0; idx < num_globals; idx++)
           derez.deserialize(output_region_options[idx]);
+        output_region_extents.resize(num_globals);
       }
     }
 
@@ -5711,6 +5729,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_INDIVIDUAL_CALL);
       SingleTask::activate();
+      output_regions_registered = RtEvent::NO_RT_EVENT;
       predicate_false_result = NULL;
       predicate_false_size = 0;
       orig_task = this;
@@ -6204,6 +6223,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::record_output_registered(RtEvent registered,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(registered.exists());
+#endif
+      if (is_remote())
+      {
+        // Send the message on to the origin node to tell it
+        // to launch the meta task to perform the registration
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<bool>(true); // inidivudal
+          rez.serialize(orig_task);
+          rez.serialize(registered);
+          rez.serialize(ready);
+        }
+        runtime->send_individual_remote_output_registration(orig_proc, rez);
+        ready_events.insert(ready);
+      }
+      else
+      {
+        // Launch the meta-task to perform the registration
+        // Make sure we don't complete the task until this is done
+        FinalizeOutputEqKDTreeArgs args(this);
+        output_regions_registered = 
+          runtime->issue_runtime_meta_task(args, registered);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::perform_inlining(VariantImpl *variant,
                                   const std::deque<InstanceSet> &parent_regions)
     //--------------------------------------------------------------------------
@@ -6278,6 +6331,8 @@ namespace Legion {
             execution_context->return_resources(parent_ctx, 
                    context_index, completion_preconditions);
         }
+        if (output_regions_registered.exists())
+          completion_preconditions.insert(output_regions_registered);
       }
       else
       {
@@ -7169,6 +7224,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::record_output_extent(unsigned idx,
+                            const DomainPoint &color, const DomainPoint &extent)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_output_extent(idx, color, extent);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_output_registered(RtEvent registered,
+                                             std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_output_registered(registered, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
@@ -7239,9 +7310,6 @@ namespace Legion {
       if (execution_context != NULL)
       {
         slice_owner->return_privileges(execution_context, preconditions);
-        if (!output_regions.empty())
-          slice_owner->record_output_sizes(
-              index_point, execution_context->get_output_regions());
         // Invalidate any context that we had so that the child
         // operations can begin committing
         std::set<RtEvent> point_preconditions;
@@ -8423,7 +8491,6 @@ namespace Legion {
           free(profiling_info[idx].buffer);
         profiling_info.clear();
       }
-      all_output_sizes.clear();
       interfering_requirements.clear();
       point_requirements.clear();
 #ifdef DEBUG_LEGION
@@ -8434,9 +8501,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::validate_output_sizes(unsigned index,
-                                          const OutputRequirement& req,
-                                          const SizeMap& output_sizes) const
+    void IndexTask::validate_output_extents(unsigned index,
+                                            const OutputRequirement& req,
+                                    const OutputExtentMap& output_extents) const
     //--------------------------------------------------------------------------
     {
       size_t num_tasks = 0;
@@ -8445,7 +8512,7 @@ namespace Legion {
       else
         num_tasks = launch_space->get_volume();
 
-      if (output_sizes.size() == num_tasks) return;
+      if (output_extents.size() == num_tasks) return;
 
       REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
         "A projection functor for every output requirement must be "
@@ -8456,20 +8523,84 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Domain IndexTask::compute_global_output_ranges(IndexSpaceNode *parent,
-                                                   IndexPartNode *part,
-                                                   const SizeMap& output_sizes,
-                                                   const SizeMap& local_sizes)
+    void IndexTask::record_output_extents(
+                                   std::vector<OutputExtentMap> &output_extents)
     //--------------------------------------------------------------------------
     {
-      RegionTreeForest *forest = runtime->forest;
+#ifdef DEBUG_LEGION
+      assert(output_region_extents.size() == output_extents.size());
+#endif
+      {
+        AutoLock o_lock(op_lock);
+        for (unsigned idx = 0; idx < output_extents.size(); idx++)
+        {
+          OutputExtentMap &target = output_region_extents[idx];
+          if (!target.empty())
+          {
+            // Merge the new extents in
+            OutputExtentMap &extents = output_extents[idx];
+            for (OutputExtentMap::const_iterator it =
+                  extents.begin(); it != extents.end(); it++)
+            {
+              if (target.find(it->first) != target.end()) 
+              {
+                const DomainPoint& color = it->first;
+                const OutputRequirement& req = output_regions[idx];
+                std::stringstream ss;
+                ss << "(" << color[0];
+                for (int dim = 1; dim < color.dim; ++dim)
+                  ss << "," << color[dim];
+                ss << ")";
+                REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+                  "A projection functor for every output requirement must be "
+                  "bijective, but projection functor %u for output requirement "
+                  "%u in task %s (UID: %lld) mapped more than one point "
+                  "in the launch domain to the same subregion of color %s.",
+                  req.projection, idx, get_task_name(), get_unique_op_id(),
+                  ss.str().c_str());
+              }
+              target.insert(*it);
+            }
+          }
+          else
+            target.swap(output_extents[idx]);
+        }
+        // Now Check to see if we've received all the extents
+        for (unsigned idx = 0; idx < output_region_extents.size(); idx++)
+        {
+          if (is_output_valid(idx))
+            continue;
+#ifdef DEBUG_LEGION
+          assert(output_region_extents[idx].size() <= total_points);
+#endif
+          if (output_region_extents[idx].size() < total_points)
+            return;
+        }
+      }
+      // If we get here then we can finalize our output regions
+      finalize_output_regions();
+    }
 
+    //--------------------------------------------------------------------------
+    void IndexTask::record_output_registered(RtEvent registered)
+    //--------------------------------------------------------------------------
+    {
+      // Record it in the set of output events and if we've seen all of them
+      // then we can launch the meta-task to do the final regisration
+
+    }
+
+    //--------------------------------------------------------------------------
+    Domain IndexTask::compute_global_output_ranges(IndexSpaceNode *parent,
+                                                   IndexPartNode *part,
+                                          const OutputExtentMap& output_extents,
+                                          const OutputExtentMap& local_extents)
+    //--------------------------------------------------------------------------
+    {
       // First, we collect all the extents of local outputs.
       // While doing this, we also check the alignment.
-      ApEvent ready = ApEvent::NO_AP_EVENT;
-      Domain color_space = part->color_space->get_domain(ready, true);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      ApEvent ignore; // can ignore this when asking for a tight domain
+      Domain color_space = part->color_space->get_domain(ignore, true/*tight*/);
 #ifdef DEBUG_LEGION
       assert(color_space.dense());
 #endif
@@ -8478,8 +8609,8 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
       // Check alignments between tiles
-      for (SizeMap::const_iterator it = output_sizes.begin();
-           it != output_sizes.end(); ++it)
+      for (OutputExtentMap::const_iterator it = output_extents.begin();
+           it != output_extents.end(); ++it)
       {
         const DomainPoint &color = it->first;
         const DomainPoint &extent = it->second;
@@ -8489,8 +8620,8 @@ namespace Legion {
           if (color[dim] == 0) continue;
           DomainPoint neighbor = color;
           --neighbor[dim];
-          auto finder = output_sizes.find(neighbor);
-          assert(finder != output_sizes.end());
+          auto finder = output_extents.find(neighbor);
+          assert(finder != output_extents.end());
 
           const DomainPoint &neighbor_extent = it->second;
           if (extent[dim] != neighbor_extent[dim])
@@ -8514,8 +8645,8 @@ namespace Legion {
         all_extents[dim].resize(color_extents[dim] + 1, 0);
 
       // Populate the extent vectors
-      for (SizeMap::const_iterator it = output_sizes.begin();
-           it != output_sizes.end(); ++it)
+      for (OutputExtentMap::const_iterator it = output_extents.begin();
+           it != output_extents.end(); ++it)
       {
         const DomainPoint &color = it->first;
         const DomainPoint &extent = it->second;
@@ -8543,14 +8674,14 @@ namespace Legion {
       }
 
       // Initialize the subspaces using the compute sub-ranges
-      for (SizeMap::const_iterator it = output_sizes.begin();
-           it != output_sizes.end(); ++it)
+      for (OutputExtentMap::const_iterator it = output_extents.begin();
+           it != output_extents.end(); ++it)
       {
         const DomainPoint &color = it->first;
 
         // If this subspace isn't local to us, we are not allowed to
         // set its range.
-        if (local_sizes.find(color) == local_sizes.end()) continue;
+        if (local_extents.find(color) == local_extents.end()) continue;
 
         IndexSpaceNode *child = part->get_child(
           part->color_space->linearize_color(color));
@@ -8564,7 +8695,8 @@ namespace Legion {
           lo[dim] = extents[c];
           hi[dim] = extents[c + 1] - 1;
         }
-        forest->set_pending_space_domain(child->handle, Domain(lo, hi));
+        if (child->set_domain(Domain(lo, hi), true/*broadcast*/))
+          delete child;
       }
 
       // Finally, compute the extents of the root index space and return it
@@ -8577,7 +8709,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::finalize_output_regions(void)
+    void IndexTask::finalize_output_regions(bool first_invocation)
     //--------------------------------------------------------------------------
     {
       RegionTreeForest *forest = runtime->forest;
@@ -8590,7 +8722,8 @@ namespace Legion {
         IndexSpaceNode *parent= forest->get_node(
             output_regions[idx].parent.get_index_space());
 #ifdef DEBUG_LEGION
-        validate_output_sizes(idx, output_regions[idx], all_output_sizes[idx]);
+        validate_output_extents(idx, output_regions[idx],
+                                output_region_extents[idx]);
 #endif
         if (options.global_indexing())
         {
@@ -8600,8 +8733,8 @@ namespace Legion {
 
           IndexPartNode *part = runtime->forest->get_node(
             output_regions[idx].partition.get_index_partition());
-          Domain root_domain = compute_global_output_ranges(
-            parent, part, all_output_sizes[idx], all_output_sizes[idx]);
+          Domain root_domain = compute_global_output_ranges(parent, part,
+              output_region_extents[idx], output_region_extents[idx]);
 
           log_index.debug()
             << "[Task " << get_task_name() << "(UID: " << get_unique_op_id()
@@ -8614,7 +8747,7 @@ namespace Legion {
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(all_output_sizes[idx]))
+        else if (parent->set_output_union(output_region_extents[idx]))
           delete parent;
       }
     }
@@ -9595,10 +9728,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMPLETE_CALL);
-      // We need to finalize sizes of output regions, and also of subregions
-      // when global indexing is requested.
-      if (!output_regions.empty())
-        finalize_output_regions();
       // Trigger all the futures or set the reduction future result
       // and then trigger it
       if (redop != 0)
@@ -10069,7 +10198,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_complete(unsigned points, RtEvent slice_done,
-                               const std::map<unsigned,SizeMap> &to_merge,
                                void *metadata/*= NULL*/, size_t metasize/*= 0*/)
     //--------------------------------------------------------------------------
     {
@@ -10079,6 +10207,7 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (slice_done.exists())
           complete_preconditions.insert(slice_done);
+#if 0
         // Merge in any output sizes
         if (!to_merge.empty())
         {
@@ -10111,6 +10240,7 @@ namespace Legion {
             }
           }
         }
+#endif
         complete_points += points;
 #ifdef DEBUG_LEGION
         assert(complete_points <= total_points);
@@ -10164,7 +10294,7 @@ namespace Legion {
           // Finish the index task reduction
           finish_index_task_reduction();
         }
-        complete_execution(finish_index_task_complete());
+        complete_execution();
         trigger_children_complete();
       }
       // If we didn't grab ownership then free this now
@@ -10219,14 +10349,6 @@ namespace Legion {
         else
           complete_mapping();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent IndexTask::finish_index_task_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing for us to do here, we've done it already
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10352,6 +10474,7 @@ namespace Legion {
           derez.advance_pointer(metasize);
         }
       }
+#if 0
       std::map<unsigned,SizeMap> to_merge;
       size_t map_size;
       derez.deserialize(map_size);
@@ -10367,17 +10490,18 @@ namespace Legion {
           derez.deserialize(output_sizes[point]);
         }
       }
+#endif
 
       if (resources_returned.exists())
       {
         if (complete_precondition.exists())
           return_slice_complete(points, Runtime::merge_events(
-                complete_precondition, resources_returned), to_merge);
+                complete_precondition, resources_returned));
         else
-          return_slice_complete(points, resources_returned, to_merge);
+          return_slice_complete(points, resources_returned);
       }
       else
-        return_slice_complete(points, complete_precondition, to_merge);
+        return_slice_complete(points, complete_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -10843,7 +10967,6 @@ namespace Legion {
       created_index_spaces.clear();
       created_index_partitions.clear();
       unique_intra_space_deps.clear();
-      all_output_sizes.clear();
       if (freeop)
         runtime->free_slice_task(this);
     }
@@ -11755,49 +11878,121 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_output_sizes(const DomainPoint &point,
-                                       const std::vector<OutputRegion> &outputs)
+    void SliceTask::record_output_extent(unsigned index,
+                            const DomainPoint &color, const DomainPoint &extent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(output_regions.size() == outputs.size());
+      assert(index < output_regions.size());
+      assert(output_regions.size() == output_region_extents.size());
       assert(output_regions.size() == output_region_options.size());
+      assert(is_output_global(index));
+      assert(!is_output_valid(index));
 #endif
-      AutoLock o_lock(op_lock);
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
-        if (output_region_options[idx].valid_requirement())
-          continue;
-        IndexTask::SizeMap &output_sizes = all_output_sizes[idx];
-        const OutputRequirement &req = outputs[idx].impl->get_requirement();
-        if (req.projection == 0)
+        AutoLock o_lock(op_lock);
+        OutputExtentMap &output_extents = output_region_extents[index];
+        if (output_extents.find(color) != output_extents.end())
         {
-#ifdef DEBUG_LEGION
-          assert(output_sizes.find(point) == output_sizes.end());
-#endif
-          output_sizes[point] = outputs[idx].impl->get_extents();
+          const OutputRequirement &req = output_regions[index];
+          std::stringstream ss;
+          ss << "(" << color[0];
+          for (int dim = 1; dim < color.dim; ++dim) ss << "," << color[dim];
+          ss << ")";
+          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+            "A projection functor for every output requirement must be "
+            "bijective, but projection functor %u for output requirement %u "
+            "in task %s (UID: %lld) mapped more than one point in the launch "
+            "domain to the same subregion of color %s.",
+            req.projection, index, get_task_name(), get_unique_op_id(),
+            ss.str().c_str());
         }
-        else
+        output_extents[color] = extent;
+#ifdef DEBUG_LEGION
+        assert(output_extents.size() <= points.size());
+#endif
+        if (output_extents.size() < points.size())
+          return;
+        // Check the other output regions to see if they are done as well
+        for (unsigned idx = 0; idx < output_regions.size(); idx++)
         {
-          DomainPoint color =
-            runtime->get_logical_region_color_point(req.region);
-          if (output_sizes.find(color) != output_sizes.end())
-          {
-            std::stringstream ss;
-            ss << "(" << color[0];
-            for (int dim = 1; dim < color.dim; ++dim) ss << "," << color[dim];
-            ss << ")";
-            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
-              "A projection functor for every output requirement must be "
-              "bijective, but projection functor %u for output requirement %u "
-              "in task %s (UID: %lld) mapped more than one point in the launch "
-              "domain to the same subregion of color %s.",
-              req.projection, idx, get_task_name(), get_unique_op_id(),
-              ss.str().c_str());
-          }
-          output_sizes[color] = outputs[idx].impl->get_extents();
+          if (idx == index)
+            continue;
+          if (is_output_valid(idx))
+            continue;
+#ifdef DEBUG_LEGION
+          assert(output_region_extents[idx].size() <= points.size());
+#endif
+          if (output_region_extents[idx].size() < points.size())
+            return;
         }
       }
+      // If we get here then we need to send the sizes back to the index owner
+      if (is_remote())
+      {
+        // Send a message back to the owner with the output region extents
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize<size_t>(output_region_extents.size());
+          for (unsigned idx = 0; idx < output_region_extents.size(); idx++)
+          {
+            const OutputExtentMap &extents = output_region_extents[idx];
+            rez.serialize<size_t>(extents.size());
+            for (OutputExtentMap::const_iterator it =
+                  extents.begin(); it != extents.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+          }
+        }
+        runtime->send_slice_output_extents(orig_proc, rez);
+      }
+      else
+        index_owner->record_output_extents(output_region_extents);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_remote_output_extents(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *index_owner;
+      derez.deserialize(index_owner);
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::vector<OutputExtentMap> output_region_extents(num_regions);
+      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+      {
+        OutputExtentMap &extents = output_region_extents[idx1];
+        size_t num_extents;
+        derez.deserialize(num_extents);
+        for (unsigned idx2 = 0; idx2 < num_extents; idx2++)
+        {
+          DomainPoint color;
+          derez.deserialize(color);
+          derez.deserialize(extents[color]);
+        }
+      }
+      index_owner->record_output_extents(output_region_extents);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::record_output_registered(RtEvent registered,
+                                             std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        // Send a message back to the index owner about the equivalence
+        // sets for the output regions being registered
+
+
+      }
+      else
+        index_owner->record_output_registered(registered);
     }
 
     //--------------------------------------------------------------------------
@@ -11954,7 +12149,7 @@ namespace Legion {
         assert(serdez_redop_state == NULL);
 #endif
         index_owner->return_slice_complete(points.size(), complete_precondition,
-            all_output_sizes, reduction_metadata, reduction_metasize);
+                                        reduction_metadata, reduction_metasize);
         // No longer own the buffer so clear it
         reduction_metadata = NULL;
       }
@@ -12087,6 +12282,7 @@ namespace Legion {
         else
           rez.serialize<size_t>(0);
       }
+#if 0
       rez.serialize(all_output_sizes.size());
       if (!all_output_sizes.empty())
       {
@@ -12102,6 +12298,7 @@ namespace Legion {
           }
         }
       }
+#endif
     }
 
     //--------------------------------------------------------------------------

@@ -603,8 +603,8 @@ namespace Legion {
       // for logging created region requirements
       void log_created_requirements(void);
     public:
-      void register_region_creation(LogicalRegion handle, const bool task_local,
-                                    const bool output_region);
+      unsigned register_region_creation(LogicalRegion handle,
+          const bool task_local, const bool output_region);
     public:
       void register_field_creation(FieldSpace space, FieldID fid, bool local);
       void register_all_field_creations(FieldSpace space, bool local,
@@ -669,9 +669,9 @@ namespace Legion {
                                   bool check_privileges = true) const;
     public:
       void add_output_region(const OutputRequirement &req,
-                             InstanceSet instances,
+                             const InstanceSet &instances,
                              bool global_indexing, bool valid);
-      void finalize_output_regions(void);
+      void finalize_output_regions(std::vector<RtEvent> &executed_events);
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);

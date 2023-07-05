@@ -1113,29 +1113,29 @@ namespace Legion {
     };
 
     /**
-     * \class OutputSizeExchange
+     * \class OutputExtentExchange
      * This class exchanges sizes of output subregions that are globally
      * indexed.
      */
-    class OutputSizeExchange : public AllGatherCollective<false> {
+    class OutputExtentExchange : public AllGatherCollective<false> {
     public:
-      typedef std::map<DomainPoint,DomainPoint> SizeMap;
+      typedef std::map<DomainPoint,DomainPoint> OutputExtentMap;
     public:
-      OutputSizeExchange(ReplicateContext *ctx,
-                         CollectiveIndexLocation loc,
-                         std::map<unsigned,SizeMap> &all_output_sizes);
-      OutputSizeExchange(const OutputSizeExchange &rhs);
-      virtual ~OutputSizeExchange(void);
+      OutputExtentExchange(ReplicateContext *ctx, ReplIndexTask *owner,
+                           CollectiveIndexLocation loc,
+                           std::vector<OutputExtentMap> &all_output_extents);
+      OutputExtentExchange(const OutputExtentExchange &rhs) = delete;
+      virtual ~OutputExtentExchange(void);
     public:
-      OutputSizeExchange& operator=(const OutputSizeExchange &rhs);
+      OutputExtentExchange& operator=(const OutputExtentExchange &rhs) = delete;
     public:
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
     public:
-      RtEvent exchange_output_sizes(void);
-    public:
-      std::map<unsigned,SizeMap> &all_output_sizes;
+      ReplIndexTask *const owner;
+      std::vector<OutputExtentMap> &all_output_extents;
     };
 
     /**
@@ -1748,7 +1748,6 @@ namespace Legion {
     protected:
       virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void finish_index_task_reduction(void);
-      virtual RtEvent finish_index_task_complete(void);
     public:
       // Have to override this too for doing output in the
       // case that we misspeculate
@@ -1769,8 +1768,10 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
-    protected:
-      virtual void finalize_output_regions(void);
+    public:
+      // Output regions
+      virtual void record_output_registered(RtEvent registered);
+      virtual void finalize_output_regions(bool first_invocation = true);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -1781,11 +1782,11 @@ namespace Legion {
       FutureAllReduceCollective *all_reduce_collective;
       FutureReductionCollective *reduction_collective;
       FutureBroadcastCollective *broadcast_collective;
-      OutputSizeExchange *output_size_collective;
+      OutputExtentExchange *output_size_collective;
       CollectiveID collective_check_id;
     protected:
       // Map of output sizes collected by this shard
-      std::map<unsigned,SizeMap> local_output_sizes;
+      std::vector<OutputExtentMap> local_output_extents;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
     protected:

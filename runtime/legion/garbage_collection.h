@@ -84,7 +84,8 @@ namespace Legion {
       COLLECTIVE_REF = 33,
       PROJECTION_REF = 34,
       REFINEMENT_REF = 35,
-      LAST_SOURCE_REF = 36,
+      OUTPUT_REGION_REF = 36,
+      LAST_SOURCE_REF = 37,
     };
 
     enum ReferenceKind {
@@ -131,6 +132,7 @@ namespace Legion {
       "Collective Reference",                       \
       "Projection Reference",                       \
       "Refinement Reference",                       \
+      "Output Region Reference",                    \
     }
 
     extern Realm::Logger log_garbage;

@@ -913,16 +913,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::set_pending_space_domain(IndexSpace target,
-                                                    Domain domain)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *child_node = get_node(target);
-      if (child_node->set_domain(domain, true/*broadcast*/))
-        delete child_node;
-    }
-
-    //--------------------------------------------------------------------------
     IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent,
                                                          Color color)
     //--------------------------------------------------------------------------
@@ -1751,7 +1741,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned index, const RegionRequirement &req, 
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events,
+                     RtEvent *output_region_ready)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1769,7 +1760,7 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context,
           &version_info, user_mask, op->get_unique_op_id(), 
-          op->find_parent_index(index), ready_events);
+          op->find_parent_index(index), ready_events, output_region_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -20891,12 +20882,14 @@ namespace Legion {
                                                  const FieldMask &mask,
                                                  UniqueID opid, 
                                                  unsigned parent_req_index,
-                                                 std::set<RtEvent> &applied)
+                                                 std::set<RtEvent> &applied,
+                                                 RtEvent *output_region_ready)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-        row_source, true/*expr covers*/, mask, opid, parent_req_index, applied);
+        row_source, true/*expr covers*/, mask, opid, 
+        parent_req_index, applied, output_region_ready);
     }
     
 #if 0

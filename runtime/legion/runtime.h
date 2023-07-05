@@ -994,15 +994,14 @@ namespace Legion {
     public:
       OutputRegionImpl(unsigned index,
                        const OutputRequirement &req,
-                       InstanceSet instance_set,
-                       TaskContext *ctx,
-                       Runtime *rt,
+                       const InstanceSet &instance_set,
+                       TaskContext *ctx, Runtime *rt,
                        const bool global_indexing,
                        const bool valid);
-      OutputRegionImpl(const OutputRegionImpl &rhs);
+      OutputRegionImpl(const OutputRegionImpl &rhs) = delete;
       ~OutputRegionImpl(void);
     public:
-      OutputRegionImpl& operator=(const OutputRegionImpl &rhs);
+      OutputRegionImpl& operator=(const OutputRegionImpl &rhs) = delete;
     public:
       Memory target_memory(void) const;
     public:
@@ -1037,7 +1036,7 @@ namespace Legion {
         OutputRegionImpl *region;
       };
     public:
-      void finalize(bool defer = true);
+      RtEvent finalize(void);
     public:
       static void handle_finalize_output(const void *args);
     public:
@@ -1046,27 +1045,25 @@ namespace Legion {
       const OutputRequirement &get_requirement(void) const { return req; }
       DomainPoint get_extents(void) const { return extents; }
     protected:
-      PhysicalManager *get_manager(FieldID field_id) const;
+      PhysicalManager* get_manager(FieldID field_id) const;
     public:
       Runtime *const runtime;
       TaskContext *const context;
+      const OutputRequirement &req;
+      RegionNode *const region;
+      const unsigned index;
+      const bool created_region;
+      const bool global_indexing;
     private:
       struct ReturnedInstanceInfo {
         uintptr_t ptr;
         size_t alignment;
       };
-    private:
-      OutputRequirement req;
-      InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ReturnedInstanceInfo> returned_instances;
-      std::map<FieldID,size_t> field_sizes;
-      std::map<FieldID,PhysicalManager*> managers;
+      std::vector<PhysicalManager*> managers;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
-      const unsigned index;
-      const bool created_region;
-      const bool global_indexing;
     };
 
     /**
@@ -3202,6 +3199,8 @@ namespace Legion {
                                            AddressSpaceID target,
                                            std::set<RtEvent> &applied);
       void send_individual_remote_future_size(Processor target,Serializer &rez);
+      void send_individual_remote_output_registration(Processor target,
+                                                      Serializer &rez);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -3214,6 +3213,7 @@ namespace Legion {
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
+      void send_slice_output_extents(Processor target, Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_request(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
@@ -3617,6 +3617,7 @@ namespace Legion {
       void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
+      void handle_slice_remote_output_extents(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_downgrade_request(Deserializer &derez,
@@ -5890,6 +5891,8 @@ namespace Legion {
         case SLICE_RECORD_INTRA_DEP:
           break;
         case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
+          break;
+        case SLICE_REMOTE_OUTPUT_EXTENTS:
           break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           break;

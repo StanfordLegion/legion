@@ -4338,7 +4338,8 @@ namespace Legion {
                                        const bool expr_covers,
                                        const FieldMask &version_mask,
                                        UniqueID opid, unsigned parent_req_index,
-                                       std::set<RtEvent> &ready);
+                                       std::set<RtEvent> &ready,
+                                       RtEvent *output_region_ready);
     protected:
 #if 0
       void add_node_disjoint_complete_ref(void) const;

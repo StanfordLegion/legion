@@ -794,7 +794,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(const OutputRequirement &req,
-                                        InstanceSet instances,
+                                        const InstanceSet &instances,
                                         bool global,
                                         bool valid)
     //--------------------------------------------------------------------------
@@ -831,7 +831,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::finalize_output_regions(void)
+    void TaskContext::finalize_output_regions(
+                                          std::vector<RtEvent> &executed_events)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -848,7 +849,9 @@ namespace Legion {
             owner_task->get_task_name(), owner_task->get_unique_id(),
             unbound_field, idx);
         }
-        output_region.impl->finalize();
+        RtEvent executed = output_region.impl->finalize();
+        if (executed.exists())
+          executed_events.push_back(executed);
       }
     }
 
@@ -906,9 +909,9 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_region_creation(LogicalRegion handle,
-                                               const bool task_local,
-                                               const bool output_region)
+    unsigned TaskContext::register_region_creation(LogicalRegion handle,
+                                                   const bool task_local,
+                                                   const bool output_region)
     //--------------------------------------------------------------------------
     {
       // Create a new logical region 
@@ -934,7 +937,7 @@ namespace Legion {
 #endif
         created_regions[handle] = 1;
       }
-      add_created_region(handle, task_local, output_region);
+      return add_created_region(handle, task_local, output_region);
     }
 
     //--------------------------------------------------------------------------
@@ -2202,8 +2205,9 @@ namespace Legion {
     {
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
+      std::vector<RtEvent> executed_events;
       if (!output_regions.empty())
-        finalize_output_regions();
+        finalize_output_regions(executed_events);
       // See if we need to pull the data in from a callback in the case
       // where we are going to be doing a reduction immediately, if we
       // are then we're going to overwrite 'owned' so save it to callback_owned
@@ -2285,7 +2289,10 @@ namespace Legion {
       if (!task_local_instances.empty())
         release_task_local_instances();
       // Mark that we are done executing this operation
-      owner_task->complete_execution();
+      if (!executed_events.empty())
+        owner_task->complete_execution(Runtime::merge_events(executed_events));
+      else
+        owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -6542,7 +6549,24 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       runtime->forest->create_logical_region(region, did, provenance);
       // Register the creation of a top-level region with the context
-      register_region_creation(region, task_local, output_region);
+      const unsigned created_index =
+        register_region_creation(region, task_local, output_region);
+      if (output_region)
+      {
+        // If this is an output region make sure nobody tries to compute
+        // the equivalence sets for it until we know it is ready
+        AutoLock priv_lock(privilege_lock);
+        if (equivalence_set_trees.size() <= created_index)
+          equivalence_set_trees.resize(created_index+1, NULL);
+#ifdef DEBUG_LEGION
+        assert(equivalence_set_trees[created_index] == NULL);
+        assert(pending_equivalence_set_trees.find(created_index) ==
+            pending_equivalence_set_trees.end());
+#endif
+        // Put in a guard so that nobody else tries to make it
+        pending_equivalence_set_trees[created_index] = 
+          RtUserEvent::NO_RT_USER_EVENT; 
+      }
       return region;
     }
 
@@ -17700,7 +17724,24 @@ namespace Legion {
       delete collective.first;
       pending_region_trees.pop_front();
       // Register the creation of a top-level region with the context
-      register_region_creation(handle, task_local, output_region);
+      const unsigned created_index =
+        register_region_creation(handle, task_local, output_region);
+      if (output_region)
+      {
+        // If this is an output region make sure nobody tries to compute
+        // the equivalence sets for it until we know it is ready
+        AutoLock priv_lock(privilege_lock);
+        if (equivalence_set_trees.size() <= created_index)
+          equivalence_set_trees.resize(created_index+1, NULL);
+#ifdef DEBUG_LEGION
+        assert(equivalence_set_trees[created_index] == NULL);
+        assert(pending_equivalence_set_trees.find(created_index) ==
+            pending_equivalence_set_trees.end());
+#endif
+        // Put in a guard so that nobody else tries to make it
+        pending_equivalence_set_trees[created_index] = 
+          RtUserEvent::NO_RT_USER_EVENT;
+      }
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency

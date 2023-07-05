@@ -1117,7 +1117,7 @@ namespace Legion {
         }
         if (redop > 0)
           finish_index_task_reduction();
-        complete_execution(finish_index_task_complete());
+        complete_execution();
         trigger_children_complete();
         trigger_children_committed();
       }
@@ -1208,7 +1208,7 @@ namespace Legion {
           create_future_instances(reduction_futures);
           finish_index_task_reduction();
         }
-        complete_execution(finish_index_task_complete());
+        complete_execution();
         trigger_children_complete();
         trigger_children_committed();
       }
@@ -1384,22 +1384,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::finish_index_task_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((output_size_collective != NULL) &&
-          (predication_state != PREDICATED_FALSE_STATE))
-      {
-        // Make a copy of the output sizes before we perform all-gather
-        local_output_sizes = all_output_sizes;
-        // We need to gather output region sizes from all the other shards
-        // to determine the sizes of globally indexed output regions
-        return output_size_collective->exchange_output_sizes();
-      }
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndexTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
@@ -1491,8 +1475,8 @@ namespace Legion {
           break;
         }
       if (has_output_region)
-        output_size_collective =
-          new OutputSizeExchange(ctx, COLLECTIVE_LOC_29, all_output_sizes);
+        output_size_collective = new OutputExtentExchange(ctx, this, 
+            COLLECTIVE_LOC_29, output_region_extents);
       if (!runtime->unsafe_mapper)
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_29);
       if (concurrent_task)
@@ -1698,9 +1682,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::finalize_output_regions(void)
+    void ReplIndexTask::finalize_output_regions(bool first_invocation)
     //--------------------------------------------------------------------------
     {
+      // Check to see if we have an exchange to perform
+      if (first_invocation && (output_size_collective != NULL))
+      {
+        local_output_extents = output_region_extents;
+        // We need to gather output region sizes from all the other shards
+        // to determine the sizes of globally indexed output regions
+        output_size_collective->perform_collective_async();
+        // The collective will call us when it is ready
+        return;
+      }
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -1718,7 +1712,8 @@ namespace Legion {
         IndexSpaceNode *parent = forest->get_node(
             output_regions[idx].parent.get_index_space());
 #ifdef DEBUG_LEGION
-        validate_output_sizes(idx, output_regions[idx], all_output_sizes[idx]);
+        validate_output_extents(idx, output_regions[idx],
+                                output_region_extents[idx]);
 #endif
         if (options.global_indexing())
         {
@@ -1727,8 +1722,8 @@ namespace Legion {
           // and compute the ranges of subregions via prefix sum.
           IndexPartNode *part = runtime->forest->get_node(
             output_regions[idx].partition.get_index_partition());
-          Domain root_domain = compute_global_output_ranges(
-            parent, part, all_output_sizes[idx], local_output_sizes[idx]);
+          Domain root_domain = compute_global_output_ranges(parent, part,
+              output_region_extents[idx], local_output_extents[idx]);
 
           log_index.debug()
             << "[Task " << get_task_name() << "(UID: " << get_unique_op_id()
@@ -1741,7 +1736,7 @@ namespace Legion {
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(all_output_sizes[idx]))
+        else if (parent->set_output_union(output_region_extents[idx]))
           delete parent;
       }
     }
@@ -15690,56 +15685,39 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // OutputSizeExchange
+    // OutputExtentExchange
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OutputSizeExchange::OutputSizeExchange(ReplicateContext *ctx,
-                                           CollectiveIndexLocation loc,
-                                          std::map<unsigned,SizeMap> &all_sizes)
-      : AllGatherCollective<false>(loc, ctx), all_output_sizes(all_sizes)
+    OutputExtentExchange::OutputExtentExchange(ReplicateContext *ctx,
+                                ReplIndexTask *own, CollectiveIndexLocation loc,
+                                std::vector<OutputExtentMap> &all_extents)
+      : AllGatherCollective<false>(loc, ctx),
+        owner(own), all_output_extents(all_extents)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    OutputSizeExchange::OutputSizeExchange(const OutputSizeExchange &rhs)
-      : AllGatherCollective<false>(rhs), all_output_sizes(rhs.all_output_sizes)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    OutputSizeExchange::~OutputSizeExchange(void)
+    OutputExtentExchange::~OutputExtentExchange(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    OutputSizeExchange& OutputSizeExchange::operator=(
-                                                  const OutputSizeExchange &rhs)
+    void OutputExtentExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void OutputSizeExchange::pack_collective_stage(ShardID target,
-                                                   Serializer &rez, int stage)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(all_output_sizes.size());
-      for (std::map<unsigned,SizeMap>::iterator it = all_output_sizes.begin();
-           it != all_output_sizes.end(); ++it)
+#ifdef DEBUG_LEGION
+      rez.serialize(all_output_extents.size());
+#endif
+      for (std::vector<OutputExtentMap>::const_iterator it = 
+            all_output_extents.begin(); it != all_output_extents.end(); ++it)
       {
-        rez.serialize(it->first);
-        rez.serialize(it->second.size());
-        for (SizeMap::iterator sit = it->second.begin();
-             sit != it->second.end(); ++sit)
+        rez.serialize(it->size());
+        for (OutputExtentMap::const_iterator sit = 
+              it->begin(); sit != it->end(); ++sit)
         {
           rez.serialize(sit->first);
           rez.serialize(sit->second);
@@ -15748,19 +15726,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputSizeExchange::unpack_collective_stage(
+    void OutputExtentExchange::unpack_collective_stage(
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
       size_t num_sizes;
       derez.deserialize(num_sizes);
-      if (num_sizes == 0) return;
-      for (unsigned idx = 0; idx < num_sizes; ++idx)
+      assert(all_output_extents.size() == num_sizes);
+#endif
+      for (unsigned idx = 0; idx < all_output_extents.size(); idx++)
       {
-        unsigned out_idx;
-        derez.deserialize(out_idx);
-        SizeMap &sizes = all_output_sizes[out_idx];
-
+        OutputExtentMap &extents = all_output_extents[idx];
         size_t num_entries;
         derez.deserialize(num_entries);
         for (unsigned eidx = 0; eidx < num_entries; eidx++)
@@ -15770,22 +15747,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           DomainPoint size;
           derez.deserialize(size);
-          assert(sizes.find(point) == sizes.end() ||
-                 sizes.find(point)->second == size);
-          sizes[point] = size;
+          assert((extents.find(point) == extents.end()) ||
+                 (extents.find(point)->second == size));
+          extents[point] = size;
 #else
-          derez.deserialize(sizes[point]);
+          derez.deserialize(extents[point]);
 #endif
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent OutputSizeExchange::exchange_output_sizes(void)
+    RtEvent OutputExtentExchange::post_complete_exchange(void)
     //--------------------------------------------------------------------------
     {
-      perform_collective_async();
-      return perform_collective_wait(false/*block*/);
+      owner->finalize_output_regions(false/*first invocation*/);
+      return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////

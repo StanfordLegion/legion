@@ -294,9 +294,6 @@ namespace Legion {
                                     IndexSpace initial,
                                     const std::vector<IndexSpace> &handles);
     public:
-      void set_pending_space_domain(IndexSpace target,
-                                    Domain domain);
-    public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,
                               const void *realm_color, TypeTag type_tag);
@@ -449,7 +446,8 @@ namespace Legion {
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events);
+                                       std::set<RtEvent> &ready_events,
+                                       RtEvent *output_region_ready = NULL);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       RegionNode *top_node);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -4518,7 +4516,8 @@ namespace Legion {
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
                                        UniqueID opid, unsigned parent_req_index,
-                                       std::set<RtEvent> &ready_events);
+                                       std::set<RtEvent> &ready_events,
+                                       RtEvent *output_region_ready = NULL);
 #if 0
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,

@@ -807,6 +807,7 @@ namespace Legion {
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
+      SLICE_REMOTE_OUTPUT_EXTENTS,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_DOWNGRADE_REQUEST,
       DISTRIBUTED_DOWNGRADE_RESPONSE,
@@ -1077,6 +1078,7 @@ namespace Legion {
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
+        "Slice Remote Output Extents",                                \
         "Distributed Remote Registration",                            \
         "Distributed Downgrade Request",                              \
         "Distributed Downgrade Response",                             \

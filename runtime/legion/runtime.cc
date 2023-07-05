@@ -5780,70 +5780,63 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OutputRegionImpl::OutputRegionImpl(unsigned i,
+    OutputRegionImpl::OutputRegionImpl(unsigned idx,
                                        const OutputRequirement &r,
-                                       InstanceSet is,
-                                       TaskContext *ctx,
-                                       Runtime *rt, const bool global,
+                                       const InstanceSet &instances,
+                                       TaskContext *ctx, Runtime *rt,
+                                       const bool global,
                                        const bool valid)
-      : Collectable(), runtime(rt), context(ctx),
-        req(r), instance_set(is), extents(), index(i), 
+      : Collectable(), runtime(rt), context(ctx), req(r), 
+        region(runtime->forest->get_node(req.region)), index(idx),
         created_region(
           (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
         global_indexing(global)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *fspace_node =
-        runtime->forest->get_node(req.region.get_field_space());
-      for (FieldID field_id : req.instance_fields)
+      region->add_base_gc_ref(OUTPUT_REGION_REF);
+      context->add_base_gc_ref(OUTPUT_REGION_REF);
+      
+      managers.resize(req.instance_fields.size(), NULL);
+      for (unsigned idx = 0; idx < instances.size(); idx++)
       {
-        field_sizes[field_id] = fspace_node->get_field_size(field_id);
-
-        std::set<FieldID> fields; fields.insert(field_id);
-        FieldMask mask = fspace_node->get_field_mask(fields);
-
-        PhysicalManager* &manager = managers[field_id];
-        manager = NULL;
-        for (unsigned idx = 0; idx < is.size(); ++idx)
+        const InstanceRef &ref = instances[idx];
+        std::vector<FieldID> fields;
+        region->column_source->get_field_set(ref.get_valid_fields(),
+                                             context, fields);
+        PhysicalManager *manager = ref.get_physical_manager();
+        for (std::vector<FieldID>::const_iterator it =
+              fields.begin(); it != fields.end(); it++)
         {
-          const InstanceRef &instance = is[idx];
-          if (!!(instance.get_valid_fields() & mask))
-          {
-            manager = instance.get_physical_manager();
-            break;
-          }
-        }
+          std::vector<FieldID>::const_iterator finder =
+            std::find(req.instance_fields.begin(), 
+                      req.instance_fields.end(), *it);
 #ifdef DEBUG_LEGION
-        assert(manager != NULL);
+          assert(finder != req.instance_fields.end());
 #endif
+          const unsigned offset = 
+            std::distance(req.instance_fields.begin(), finder);
+#ifdef DEBUG_LEGION
+          assert(offset < managers.size());
+          assert(managers[offset] == NULL);
+#endif
+          managers[offset] = manager;
+          manager->add_base_gc_ref(OUTPUT_REGION_REF);
+        }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
-      : Collectable(), runtime(NULL), context(NULL),
-        req(), instance_set(), extents(), index(-1U), 
-        created_region(false), global_indexing(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     OutputRegionImpl::~OutputRegionImpl(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    OutputRegionImpl& OutputRegionImpl::operator=(
-                                                  const OutputRegionImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
+      if (region->remove_base_gc_ref(OUTPUT_REGION_REF))
+        delete region;
+      if (context->remove_base_gc_ref(OUTPUT_REGION_REF))
+        delete context;
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            managers.begin(); it != managers.end(); it++)
+        if ((*it)->remove_base_gc_ref(OUTPUT_REGION_REF))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -5851,10 +5844,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(instance_set.size() > 0);
+      assert(!managers.empty());
 #endif
-      InstanceRef ref = instance_set[0];
-      return ref.get_physical_manager()->get_memory();
+      return managers.front()->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -5865,7 +5857,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_LOGICAL_REGION_FROM_INVALID_OUTPUT_REGION,
           "Logical region cannot be retrieved from output region %u of task %s "
           "(UID: %lld) whose index space is yet to be determined.",
-          index, context->owner_task->get_task_name(),
+          index, context->owner_task->get_task_name(), 
           context->owner_task->get_unique_op_id());
 
       return req.region;
@@ -5888,7 +5880,7 @@ namespace Legion {
         "The deferred buffer passed to output region %u of task %s (UID: %lld) "
         "is incompatible with the output region. Make sure the deferred buffer "
         "has the right dimension and the coordinate type.",
-        index, context->owner_task->get_task_name(),
+        index, context->owner_task->get_task_name(), 
         context->owner_task->get_unique_op_id());
     }
 
@@ -5953,10 +5945,9 @@ namespace Legion {
     size_t OutputRegionImpl::get_field_size(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
-      std::map<FieldID,size_t>::const_iterator finder =
-        field_sizes.find(field_id);
-#ifdef DEBUG_LEGION
-      if (finder == field_sizes.end())
+      std::vector<FieldID>::const_iterator finder = std::find(
+          req.instance_fields.begin(), req.instance_fields.end(), field_id);
+      if (finder == req.instance_fields.end())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_FIELD,
           "Field %u does not exist in output region %u of task %s "
@@ -5964,8 +5955,7 @@ namespace Legion {
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id());
       }
-#endif
-      return finder->second;
+      return region->column_source->get_field_size(field_id);
     }
 
     //--------------------------------------------------------------------------
@@ -5975,6 +5965,13 @@ namespace Legion {
                                        size_t alignment)
     //--------------------------------------------------------------------------
     {
+      if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
+      {
+          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_FIELD,
+            "Output region %u of task %s (UID: %lld) does not have privilege "
+            "on field %u.", index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id(), field_id);
+      }
       std::map<FieldID,ReturnedInstanceInfo>::iterator finder =
         returned_instances.find(field_id);
       if (finder != returned_instances.end())
@@ -5987,7 +5984,49 @@ namespace Legion {
           context->owner_task->get_unique_op_id());
       }
 
-      if (extents.dim != 0 && new_extents != extents)
+      if (extents.dim == 0)
+      {
+        extents = new_extents;
+        if (created_region)
+        {
+          // We now know the extent so we can report it back
+          // Set the result if we're not doing global indexing with a parent
+          if (region->parent == NULL)
+          {
+            DomainPoint lo; lo.dim = extents.dim;
+            Domain domain(lo, extents - 1);
+            if (region->row_source->set_domain(domain, true/*broadcast*/))
+              assert(false); // should never end up deleting this
+          }
+          else
+          {
+            DomainPoint color = region->row_source->get_domain_point_color();
+            if (!global_indexing)
+            {
+              Domain domain;
+              domain.dim = color.dim + extents.dim;
+#ifdef DEBUG_LEGION
+              assert(domain.dim <= LEGION_MAX_DIM);
+#endif
+              for (int idx = 0; idx < color.dim; ++idx)
+              {
+                domain.rect_data[idx] = color[idx];
+                domain.rect_data[idx + domain.dim] = color[idx];
+              }
+              for (int idx = 0; idx < extents.dim; ++idx)
+              {
+                int off = color.dim + idx;
+                domain.rect_data[off] = 0;
+                domain.rect_data[domain.dim + off] = extents[idx] - 1;
+              }
+              if (region->row_source->set_domain(domain, true/*broadcast*/))
+                assert(false); // should never end up deleting this
+            }
+            context->owner_task->record_output_extent(index, color, extents);
+          }
+        }
+      }
+      else if (new_extents != extents)
       {
         std::stringstream ss;
         ss << "Output region " << index << " of task "
@@ -5997,16 +6036,6 @@ namespace Legion {
            << "has extents " << new_extents << ". You must return data having "
            << "the same extents to all the fields in the same output region.";
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, "%s", ss.str().c_str());
-      }
-      else
-        extents = new_extents;
-
-      if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
-      {
-          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_FIELD,
-            "Output region %u of task %s (UID: %lld) does not have privilege "
-            "on field %u.", index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id(), field_id);
       }
 
       // Here we simply queue up the output data, rather than eagerly
@@ -6116,75 +6145,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::finalize(bool defer /*= true*/)
+    RtEvent OutputRegionImpl::finalize(void)
     //--------------------------------------------------------------------------
     {
-      Domain domain;
-      IndexSpaceNode *node =
-        runtime->forest->get_node(req.region.get_index_space());
-      if (created_region)
-      {
-        // Subregions of a globally indexed output region cannot be finalized 
-        // in the first round because their sizes are yet to be determined.
-        if (defer && req.partition.exists() && global_indexing)
-        {
-          RtEvent ready_event = node->get_ready_event();
-          if (ready_event.exists())
-          {
-            add_reference();
-            FinalizeOutputArgs args(this);
-            runtime->issue_runtime_meta_task(
-                args, LG_THROUGHPUT_DEFERRED_PRIORITY, ready_event);
-            return;
-          }
-        }
-
-        // Initialize the index space domain
-        if (req.partition.exists())
-        {
-          if (!global_indexing)
-          {
-            DomainPoint color_point = node->get_domain_point_color();
-            domain.dim = color_point.dim + extents.dim;
-#ifdef DEBUG_LEGION
-            assert(domain.dim <= LEGION_MAX_DIM);
-#endif
-            for (int idx = 0; idx < color_point.dim; ++idx)
-            {
-              domain.rect_data[idx] = color_point[idx];
-              domain.rect_data[idx + domain.dim] = color_point[idx];
-            }
-            for (int idx = 0; idx < extents.dim; ++idx)
-            {
-              int off = color_point.dim + idx;
-              domain.rect_data[off] = 0;
-              domain.rect_data[domain.dim + off] = extents[idx] - 1;
-            }
-
-            runtime->forest->set_pending_space_domain(node->handle, domain);
-          }
-          else
-          {
-            // For a globally indexed output region, the domain has
-            // already been initialized once we reach here, so
-            // we just retrieve it.
-            ApEvent ready = ApEvent::NO_AP_EVENT;
-            domain = node->get_domain(ready, true);
-            if (ready.exists())
-              ready.wait();
-          }
-        }
-        else
-        {
-          DomainPoint lo; lo.dim = extents.dim;
-          domain = Domain(lo, extents - 1);
-          if (node->set_domain(domain, true/*broadcast*/))
-            delete node;
-        }
-      }
-      else
-        node->get_launch_space_domain(domain);
-
+      ApEvent ignore; // can ignore this event when tight
+      Domain domain = region->row_source->get_domain(ignore, true/*tight*/);
       // Create a Realm instance and update the physical manager
       // for each output field
       for (std::map<FieldID,ReturnedInstanceInfo>::iterator it =
@@ -6280,6 +6245,7 @@ namespace Legion {
       for (std::vector<PhysicalInstance>::const_iterator it =
             escaped_instances.begin(); it != escaped_instances.end(); it++)
         it->destroy();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6288,7 +6254,7 @@ namespace Legion {
     {
       const FinalizeOutputArgs *finalize_args = (const FinalizeOutputArgs*)args;
       OutputRegionImpl *region = finalize_args->region;
-      region->finalize(false);
+      region->finalize();
       if (region->remove_reference())
         delete region;
     }
@@ -6314,10 +6280,9 @@ namespace Legion {
     PhysicalManager *OutputRegionImpl::get_manager(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
-      std::map<FieldID,PhysicalManager*>::const_iterator finder =
-        managers.find(field_id);
-#ifdef DEBUG_LEGION
-      if (finder == managers.end())
+      std::vector<FieldID>::const_iterator finder = std::find(
+          req.instance_fields.begin(), req.instance_fields.end(), field_id);
+      if (finder == req.instance_fields.end())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_FIELD,
           "Field %u does not exist in output region %u of task %s "
@@ -6325,8 +6290,7 @@ namespace Legion {
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id());
       }
-#endif
-      return finder->second;
+      return managers[std::distance(req.instance_fields.begin(), finder)];
     }
 
     /////////////////////////////////////////////////////////////
@@ -12352,6 +12316,11 @@ namespace Legion {
             {
               runtime->handle_slice_remote_collective_rendezvous(derez,
                                                   remote_address_space);
+              break;
+            }
+          case SLICE_REMOTE_OUTPUT_EXTENTS:
+            {
+              runtime->handle_slice_remote_output_extents(derez);
               break;
             }
           case DISTRIBUTED_REMOTE_REGISTRATION:
@@ -22066,6 +22035,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_output_extents(Processor target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SLICE_REMOTE_OUTPUT_EXTENTS>(rez, 
+          true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_remote_registration(AddressSpaceID target, 
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24505,6 +24482,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SliceTask::handle_collective_rendezvous(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_remote_output_extents(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_remote_output_extents(derez);
     }
 
     //--------------------------------------------------------------------------

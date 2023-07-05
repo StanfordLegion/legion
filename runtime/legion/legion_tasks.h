@@ -119,6 +119,14 @@ namespace Legion {
         std::vector<unsigned> *const performed_regions;
         std::vector<ApEvent> *const effects;
       };
+    struct FinalizeOutputEqKDTreeArgs : 
+      public LgTaskArgs<FinalizeOutputEqKDTreeArgs> {
+    public:
+      static const LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_TREE_TASK_ID;
+    public:
+      
+
+    };
     public:
       TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
@@ -199,7 +207,7 @@ namespace Legion {
       virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
-      virtual bool is_output_valid(unsigned idx) const { return false; }
+      virtual bool is_output_valid(unsigned idx) const { return false; } 
     public:
       virtual TaskKind get_task_kind(void) const = 0;
     public:
@@ -459,6 +467,12 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events) = 0;
+      virtual void record_output_extent(unsigned idx,
+          const DomainPoint &color, const DomainPoint &extents) 
+        { assert(false); }
+      virtual void record_output_registered(RtEvent registered,
+                                std::set<RtEvent> &ready_events)
+        { assert(false); }
       virtual void trigger_replay(void);
       // For tasks that are sharded off by control replication
       virtual void shard_off(RtEvent mapped_precondition);
@@ -544,7 +558,7 @@ namespace Legion {
       // 3. all copy-out operations of child ops
       // 4. all copy-out operations of the task itself
       // Note that this definition is recursive
-      std::set<ApEvent>                     task_completion_effects;
+      std::set<ApEvent>                     task_completion_effects; 
     protected:
       TaskContext*                          execution_context;
       RemoteTraceRecorder*                  remote_trace_recorder;
@@ -583,6 +597,7 @@ namespace Legion {
      */
     class MultiTask : public CollectiveViewCreator<TaskOp> {
     public:
+      typedef std::map<DomainPoint,DomainPoint> OutputExtentMap;
       class OutputOptions {
       public:
         OutputOptions(void) : store(0) { }
@@ -679,6 +694,7 @@ namespace Legion {
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
       std::vector<OutputOptions> output_region_options;
+      std::vector<OutputExtentMap> output_region_extents;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       FutureInstance *reduction_instance;
@@ -767,6 +783,8 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
+      virtual void record_output_registered(RtEvent registered,
+                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
@@ -820,6 +838,8 @@ namespace Legion {
       std::vector<RegionTreePath> privilege_paths;
     protected:
       std::vector<bool> valid_output_regions;
+      // Event for when the output regions are registered with the context
+      RtEvent output_regions_registered;
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
@@ -884,6 +904,10 @@ namespace Legion {
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual bool is_output_global(unsigned idx) const; 
       virtual bool is_output_valid(unsigned idx) const;
+      virtual void record_output_extent(unsigned idx,
+          const DomainPoint &color, const DomainPoint &extents);
+      virtual void record_output_registered(RtEvent registered,
+                                std::set<RtEvent> &ready_events);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1126,15 +1150,18 @@ namespace Legion {
     public:
       virtual void prepare_map_must_epoch(void);
     protected:
-      typedef std::map<DomainPoint,DomainPoint> SizeMap;
+      void record_output_extents(
+          std::vector<OutputExtentMap> &output_extents);
+      virtual void record_output_registered(RtEvent registered);
       Domain compute_global_output_ranges(IndexSpaceNode *parent,
                                           IndexPartNode *part,
-                                          const SizeMap& output_sizes,
-                                          const SizeMap& local_sizes);
-      void validate_output_sizes(unsigned index,
-                                 const OutputRequirement& output_requirement,
-                                 const SizeMap& output_sizes) const;
-      virtual void finalize_output_regions(void);
+                                          const OutputExtentMap& output_sizes,
+                                          const OutputExtentMap& local_sizes);
+      void validate_output_extents(unsigned index,
+                                   const OutputRequirement& output_requirement,
+                                   const OutputExtentMap& output_sizes) const;
+    public:
+      virtual void finalize_output_regions(bool first_invocation = true);
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -1205,12 +1232,10 @@ namespace Legion {
       // Callback for control replication to perform reduction for sizes
       // and provide an event for when the result is ready
       virtual void finish_index_task_reduction(void);
-      virtual RtEvent finish_index_task_complete(void);
     public:
       void return_slice_mapped(unsigned points, RtEvent applied_condition,
                                ApEvent slice_complete);
       void return_slice_complete(unsigned points, RtEvent applied_condition,
-                             const std::map<unsigned,SizeMap> &output_sizes,
                              void *metadata = NULL, size_t metasize = 0);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
@@ -1274,9 +1299,6 @@ namespace Legion {
       void check_point_requirements(
           const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);
 #endif
-    protected:
-      // Sizes of subspaces for globally indexed output regions
-      std::map<unsigned, SizeMap> all_output_sizes;
     };
 
     /**
@@ -1364,8 +1386,10 @@ namespace Legion {
     public:
       void handle_future_size(size_t future_size, const DomainPoint &p,
                               std::set<RtEvent> &applied_conditions);
-      void record_output_sizes(const DomainPoint &point,
-                               const std::vector<OutputRegion> &output_regions);
+      void record_output_extent(unsigned index,
+          const DomainPoint &color, const DomainPoint &extent);
+      void record_output_registered(RtEvent registered,
+          std::set<RtEvent> &ready_events);
       RtEvent verify_concurrent_execution(const DomainPoint &point,
                                           Processor target);
     protected:
@@ -1422,6 +1446,7 @@ namespace Legion {
       static void handle_collective_rendezvous(Deserializer &derez,
                                        Runtime *runtime, AddressSpaceID source);
       static void handle_verify_concurrent_execution(Deserializer &derez);
+      static void handle_remote_output_extents(Deserializer &derez);
     protected:
       friend class IndexTask;
       friend class PointTask;
@@ -1446,9 +1471,6 @@ namespace Legion {
       std::set<RtEvent> commit_preconditions;
     protected:
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
-    protected:
-      // Sizes of subspaces for globally indexed output regions
-      std::map<unsigned,std::map<DomainPoint,DomainPoint> > all_output_sizes;
     };
 
   }; // namespace Internal
