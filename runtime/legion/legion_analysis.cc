@@ -9416,11 +9416,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
-               Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs,
-               const bool invalidate)
+               Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
       : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/, false/*immutable*/,
-                         true/*exclusive*/),
-        sources(std::move(srcs)), invalidate_first(invalidate)
+                         true/*exclusive*/), sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
     }
@@ -9429,10 +9427,9 @@ namespace Legion {
     CloneAnalysis::CloneAnalysis(Runtime *rt, AddressSpaceID src,
                                  AddressSpaceID prev,IndexSpaceExpression *expr,
                                  Operation *op, unsigned idx,
-                                 FieldMaskSet<EquivalenceSet> &&srcs,
-                                 const bool invalidate)
+                                 FieldMaskSet<EquivalenceSet> &&srcs)
       : PhysicalAnalysis(rt, src, prev, op, idx, expr, true/*on heap*/),
-        sources(std::move(srcs)), invalidate_first(invalidate)
+        sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
     }
@@ -9454,7 +9451,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       set->clone_set(*this, expr, expr_covers, mask, deferral_events,
-                     applied_events, already_deferred, invalidate_first);
+                     applied_events, already_deferred);
       // No check for migration after this
       return false;
     }
@@ -9502,7 +9499,6 @@ namespace Legion {
             rez.serialize(it->second);
           }
           rez.serialize(applied);
-          rez.serialize<bool>(invalidate_first);
         }
         runtime->send_equivalence_set_remote_clones(target, rez);
         applied_events.insert(applied);
@@ -9557,12 +9553,10 @@ namespace Legion {
       }
       RtUserEvent applied;
       derez.deserialize(applied);
-      bool invalidate_first;
-      derez.deserialize<bool>(invalidate_first);
 
       // This takes ownership of the operation
       CloneAnalysis *analysis = new CloneAnalysis(runtime, original_source,
-          previous, expr, op, index, std::move(sources), invalidate_first);
+          previous, expr, op, index, std::move(sources));
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -17060,12 +17054,11 @@ namespace Legion {
                                    const FieldMask &clone_mask, 
                                    std::set<RtEvent> &deferral_events,
                                    std::set<RtEvent> &applied_events,
-                                   const bool invalidate_first,
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      if (invalidate_first)
-        invalidate_state(expr, expr_covers, clone_mask);
+      // Always invalidate first before cloning into this set
+      invalidate_state(expr, expr_covers, clone_mask);
       // Already holding the eq_lock from EquivalenceSet::analyze method
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)

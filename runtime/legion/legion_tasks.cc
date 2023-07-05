@@ -4563,7 +4563,7 @@ namespace Legion {
 
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
-            version_infos, unmap_events, false_guard.exists());
+                                                  version_infos, unmap_events);
         // Update the physical regions with any padding they might have
         if (variant->needs_padding)
           execution_context->record_padded_fields(variant);

@@ -140,7 +140,6 @@ namespace Legion {
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicated(void) const { return replicate; }
-      inline bool is_predicated(void) const { return false_guard.exists(); }
       int get_depth(void) const;
     public:
       void set_current_proc(Processor current);

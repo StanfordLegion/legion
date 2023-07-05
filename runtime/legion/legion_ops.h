@@ -2178,8 +2178,7 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx, unsigned index,
                       const RegionRequirement &req,
-                      const VersionInfo *targets,
-                      const bool predicated);
+                      const VersionInfo *targets);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2195,7 +2194,6 @@ namespace Legion {
       const VersionInfo *target_version_info;
       std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
-      bool predicated;
     };
 
     /**
