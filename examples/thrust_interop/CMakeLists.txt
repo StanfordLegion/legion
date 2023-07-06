@@ -26,8 +26,14 @@ if(NOT Legion_USE_CUDA)
     "The thrust_interop example requires Legion to be built with CUDA")
 endif()
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 set(CPU_SOURCES thrust_interop.cc)
 set(GPU_SOURCES thrust_shim.h thrust_shim.cu)
-cuda_add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
+add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
+set_target_cuda_architectures(TARGET thrust_interop ARCHS ${Legion_CUDA_ARCH})
+# starting with nvcc 10.2, we can error out on all warnings
+if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+  target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+endif()
+target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
+
 target_link_libraries(thrust_interop Legion::Legion)

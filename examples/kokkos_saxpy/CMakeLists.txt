@@ -43,7 +43,7 @@ if(Kokkos_ENABLE_CUDA)
   # have to use Kokkos' choice of compiler for cuda-related options to work
   set(CMAKE_CXX_COMPILER ${KOKKOS_CXX_COMPILER})
   if(KOKKOS_CXX_COMPILER MATCHES ".*clang.*")
-    target_compile_options(kokkos_saxpy PRIVATE --cuda-path=${CUDA_TOOLKIT_ROOT_DIR})
+    target_compile_options(kokkos_saxpy PRIVATE --cuda-path=${CUDAToolkit_LIBRARY_ROOT})
   endif()
 endif()
 

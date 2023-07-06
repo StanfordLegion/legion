@@ -865,7 +865,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append(root_dir)
 
     cmd(cmdline, env=env, cwd=build_dir)
-    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=env)
+    verbose_env=env.copy()
+    verbose_env['VERBOSE'] = '1'
+    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=verbose_env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
 
@@ -1091,7 +1093,7 @@ def run_tests(test_modules=None,
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
     if use_cmake == False:
         if cxx_standard != '':
-            if 'CXX_STANDARD' in os.environ:                
+            if 'CXX_STANDARD' in os.environ:
                 os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
             else:
                 os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']

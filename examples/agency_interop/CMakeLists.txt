@@ -22,8 +22,18 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 set(CPU_SOURCES agency_interop.cc)
-#set(GPU_SOURCES thrust_shim.h thrust_shim.cu)
-cuda_add_executable(agency_interop ${CPU_SOURCES} ${GPU_SOURCES})
+set(GPU_SOURCES )
+add_executable(agency_interop ${CPU_SOURCES} ${GPU_SOURCES})
 target_link_libraries(agency_interop Legion::Legion)
+
+set_source_files_properties(${CPU_SOURCES} PROPERTIES LANGUAGE CUDA)
+
+set_target_cuda_architectures(TARGET agency_interop ARCHS ${Legion_CUDA_ARCH})
+
+# starting with nvcc 10.2, we can error out on all warnings
+if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+  target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+endif()
+
+target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)

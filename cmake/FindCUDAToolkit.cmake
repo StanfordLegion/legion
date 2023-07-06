@@ -14,10 +14,9 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-# Replace CMake's FindCUDA with a newer upstream version that supports
-# generator expressions
-if(CMAKE_VERSION VERSION_LESS "3.6")
-  include(${CMAKE_CURRENT_LIST_DIR}/newcmake/FindCUDA.cmake)
+# Use at least CMake v3.26's version of FindCUDAToolit.cmake
+if(CMAKE_VERSION VERSION_LESS "3.26")
+  include(${CMAKE_CURRENT_LIST_DIR}/newcmake/FindCUDAToolkit.cmake)
 else()
-  include(${CMAKE_ROOT}/Modules/FindCUDA.cmake)
+  include(${CMAKE_ROOT}/Modules/FindCUDAToolkit.cmake)
 endif()

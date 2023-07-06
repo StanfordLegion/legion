@@ -54,7 +54,6 @@ list(APPEND REALM_TESTS
   )
 
 if(Legion_USE_CUDA)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
@@ -69,10 +68,6 @@ if(Legion_USE_CUDA)
 endif()
 
 if(Legion_USE_HIP)
-  if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
-  endif()
-
   # some tests have HIP source files too
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
@@ -89,7 +84,13 @@ endif()
 
 foreach(test IN LISTS REALM_TESTS)
   if(CUDASRC_${test})
-    cuda_add_executable(${test} ${test}.cc ${CUDASRC_${test}})
+    add_executable(${test} ${test}.cc ${CUDASRC_${test}})
+    set_target_cuda_architectures(TARGET ${test} ARCHS ${Legion_CUDA_ARCH})
+    # starting with nvcc 10.2, we can error out on all warnings
+    if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+      target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+    endif()
+    target_compile_options(${test} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
   elseif(HIPSRC_${test})
     hip_add_executable(${test} ${test}.cc ${HIPSRC_${test}})
   else()
@@ -101,6 +102,7 @@ foreach(test IN LISTS REALM_TESTS)
     target_include_directories(${test} PRIVATE ${HIP_INCLUDE_DIRS})
     if(Legion_HIP_TARGET STREQUAL "CUDA")
       target_compile_definitions(${test} PRIVATE __HIP_PLATFORM_NVIDIA__)
+      target_include_directories(${test} PRIVATE ${HIP_ROOT_DIR}/include)
     elseif (Legion_HIP_TARGET STREQUAL "ROCM")
       target_compile_definitions(${test} PRIVATE __HIP_PLATFORM_AMD__)
     endif()
