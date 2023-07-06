@@ -26,7 +26,13 @@ if(NOT Legion_USE_CUDA)
     "The future_instance example requires Legion to be built with CUDA")
 endif()
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 set(GPU_SOURCES future_instance.cu)
-cuda_add_executable(future_instance ${GPU_SOURCES})
+add_executable(future_instance ${GPU_SOURCES})
+set_target_cuda_architectures(TARGET future_instance ARCHS ${Legion_CUDA_ARCH})
+# starting with nvcc 10.2, we can error out on all warnings
+if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+  target_compile_options(future_instance PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
+endif()
+target_compile_options(future_instance PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
+
 target_link_libraries(future_instance Legion::Legion)
