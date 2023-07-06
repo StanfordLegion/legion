@@ -1,4 +1,8 @@
-# Realm Barrier
+---
+layout: page
+permalink: /tutorial/realm/barrier.html
+title: Realm Barrier
+---
 
 ## Introduction
 
@@ -31,6 +35,7 @@ In this example, we need to create two barriers, a `writer_barrier` and `reader_
 to synchronize writer and reader tasks, respectively. 
 To create a barrier, we need to pass the number of concurrent barrier tasks into the `create_barrier` function.
 The following code demonstrates creating a `reader_barrier`, where we need to pass the number of participants:
+
 ```c++
 Barrier reader_barrier = Barrier::create_barrier(TestConfig::num_readers);
 ```
@@ -43,6 +48,7 @@ which is declared as `ReductionOpIntAdd`. A reduction operator requires two func
 combines two right-hand side types into a new right-hand side type, as well as an `identity`, a unique integer
 for Realm to recognize the reduction. The reduction operator needs to be registered by calling `register_reduction`
 before launching the main task, shown as follows:
+
 ```c++
 rt.register_reduction<ReductionOpIntAdd>(REDOP_ADD);
 ```
@@ -54,6 +60,7 @@ the barrier. When reaching the synchronization point, the reduction value of all
 hold the barrier. 
 To perform reduction with a barrier, we can attach a reduction operator to the `create_barrier` function.
 The `init_value` tells the initial value of the parameter that the reduction operation is performed on. 
+
 ```c++
 Barrier writer_barrier = Barrier::create_barrier(TestConfig::num_writers, REDOP_ADD,
                                                  &init_value, sizeof(init_value));
@@ -83,6 +90,7 @@ writer_b.arrive(1, Event::NO_EVENT, &reduce_val, sizeof(reduce_val));
 On the other side, a reader task calls `wait` to wait until all writer tasks finish calling `arrive`.
 The `wait` is blocked until the `arrive` is called N times, where the N matches the number used for `create_barrier`.
 The same mechanism is used by writer tasks to continue working after all reader tasks finish reading. 
+
 ```c++
 writer_b.wait();
 ```
@@ -102,7 +110,8 @@ task-level parallelism, it is preferred to launch concurrent tasks onto differen
 In this example, we reverse the first 4 CPU Processors for the main task and the three reader tasks, and then
 we vary the number of writer tasks and `-ll:cpu` to show how the processor assignment affects the overall performance. 
 
-1. Run with 4 writer tasks on the same processor. 
+a. Run with 4 writer tasks on the same processor. 
+
 ```
 $ ./barrier -ll:cpu 5 -nw 4 -ll:force_kthreads
 [0 - 7fa670922800]    0.069117 {3}{app}: start top task on Processor 1d00000000000001, tid 3638294
@@ -120,6 +129,7 @@ The `-ll:force_kthreads` force Realm always to use kernel threads (pthread in Li
 dispatched onto different threads; since they belong to the same processor, Realm does not execute them concurrently. 
 
 The following is the result without forcing to use kernel threads. 
+
 ```
 $ ./barrier -ll:cpu 5 -nw 4
 [0 - 7f27a0afc800]    0.069120 {3}{app}: start top task on Processor 1d00000000000001, tid 3638275
@@ -133,11 +143,13 @@ $ ./barrier -ll:cpu 5 -nw 4
 ...
 [0 - 7fd3d6fa27c0]   16.052200 {3}{app}: Total time 0.165527(s)
 ```
+
 It is noted that all the writer tasks are running on the same kernel thread, even though Realm create green threads
 to minimize the creation and context switch overhead of kernel threads; since all task are launched onto the 
 same processor, they can not be parallelized.
 
-2. Run with 4 writer tasks on different processors. 
+b. Run with 4 writer tasks on different processors. 
+
 ```
 $ ./barrier -ll:cpu 8 -nw 4
 [0 - 7f4dc9f44800]    0.069260 {3}{app}: start top task on Processor 1d00000000000001, tid 3638318
@@ -151,6 +163,7 @@ $ ./barrier -ll:cpu 8 -nw 4
 ...
 [0 - 7faf67fe97c0]    4.065398 {3}{app}: Total time 0.042038(s)
 ```
+
 All writer tasks occupy different processors, so we achieve 4x speedup over the previous configuration. 
 
 ## Limitations

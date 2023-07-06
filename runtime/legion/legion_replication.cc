@@ -1178,13 +1178,6 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled)
-        {
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-          runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
-        }
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
@@ -4501,9 +4494,9 @@ namespace Legion {
       ApEvent ready_event;
       // One the first shard will perform the pending partition computations
       if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
-        ready_event = thunk->perform(this, runtime->forest);
+        ready_event = thunk->perform(this, runtime->forest, sources);
       else if (thunk->is_cross_product())
-        ready_event = thunk->perform(this, runtime->forest);
+        ready_event = thunk->perform(this, runtime->forest, sources);
       if (ready_event.exists())
         record_completion_effect(ready_event);
       complete_execution();
@@ -4763,7 +4756,7 @@ namespace Legion {
             // Perform the exchange of the instance data and then 
             // trigger execution when it is ready
             exchange->perform_collective_async();
-            ready = exchange->perform_collective_wait(false/*block*/);
+            ready = exchange->get_done_event();
           }
           else
           {
@@ -4788,8 +4781,11 @@ namespace Legion {
               return;
             }
             else
-              ready = gather->perform_collective_wait(false/*block*/);
+              ready = gather->get_done_event();
           }
+#ifdef DEBUG_LEGION
+          assert(ready.exists());
+#endif
           parent_ctx->add_to_trigger_execution_queue(this, ready); 
         }
         else // If we have valid points then we do the base call

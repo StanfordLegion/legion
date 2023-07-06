@@ -12,6 +12,8 @@ use legion_prof_viewer::{
 #[cfg(feature = "client")]
 use url::Url;
 
+#[cfg(feature = "archiver")]
+use legion_prof::backend::archiver;
 #[cfg(feature = "server")]
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
@@ -35,44 +37,8 @@ struct Cli {
     )]
     output: OsString,
 
-    #[arg(
-        long = "start-trim",
-        help = "start time in microseconds to trim the profile"
-    )]
-    start_trim: Option<u64>,
-
-    #[arg(
-        long = "stop-trim",
-        help = "stop time in microseconds to trim the profile"
-    )]
-    stop_trim: Option<u64>,
-
-    #[arg(
-        long = "message-threshold",
-        default_value_t = 1000.0,
-        help = "threshold for warning about message latencies in microseconds"
-    )]
-    message_threshold: f64,
-
-    #[arg(
-        long = "message-percentage",
-        default_value_t = 5.0,
-        help = "perentage of messages that must be over the threshold to trigger a warning"
-    )]
-    message_percentage: f64,
-
-    #[arg(long, help = "a list of nodes that will be visualized")]
-    nodes: Option<String>,
-
-    #[arg(
-        long = "no-filter-input",
-        hide = true,
-        help = "parse all log files, even when a subset of nodes are being shown (uses more memory)"
-    )]
-    no_filter_input: bool,
-
-    #[arg(short, long, help = "overwrite output directory if it exists")]
-    force: bool,
+    #[arg(long, help = "dump an archive of the profile for sharing")]
+    archive: bool,
 
     #[arg(long, help = "connect viewer to the specified HTTP profile server")]
     attach: bool,
@@ -83,11 +49,44 @@ struct Cli {
     #[arg(long, help = "start interactive profile viewer")]
     view: bool,
 
-    #[arg(short, long, help = "print statistics")]
+    #[arg(long, hide = true, help = "print statistics")]
     statistics: bool,
 
-    #[arg(short, long, help = "emit JSON for Google Trace Viewer")]
+    #[arg(long, hide = true, help = "emit JSON for Google Trace Viewer")]
     trace: bool,
+
+    #[arg(long, help = "start time in microseconds to trim the profile")]
+    start_trim: Option<u64>,
+
+    #[arg(long, help = "stop time in microseconds to trim the profile")]
+    stop_trim: Option<u64>,
+
+    #[arg(
+        long,
+        default_value_t = 1000.0,
+        help = "threshold for warning about message latencies in microseconds"
+    )]
+    message_threshold: f64,
+
+    #[arg(
+        long,
+        default_value_t = 5.0,
+        help = "perentage of messages that must be over the threshold to trigger a warning"
+    )]
+    message_percentage: f64,
+
+    #[arg(long, help = "a list of nodes that will be visualized")]
+    nodes: Option<String>,
+
+    #[arg(
+        long,
+        hide = true,
+        help = "parse all log files, even when a subset of nodes are being shown (uses more memory)"
+    )]
+    no_filter_input: bool,
+
+    #[arg(short, long, help = "overwrite output directory if it exists")]
+    force: bool,
 
     #[arg(short, long, help = "print verbose profiling information")]
     verbose: bool,
@@ -101,9 +100,24 @@ struct Cli {
 
     #[arg(long, default_value_t = 8080, help = "port to bind for HTTP server")]
     port: u16,
+
+    #[arg(long, default_value_t = 4, help = "number of zoom levels to archive")]
+    levels: u32,
+
+    #[arg(long, default_value_t = 4, help = "branch factor for archive")]
+    branch_factor: u64,
+
+    #[arg(
+        long,
+        default_value_t = 10,
+        help = "zstd compression factor for archive"
+    )]
+    zstd_compression: i32,
 }
 
 fn main() -> io::Result<()> {
+    env_logger::init();
+
     let cli = Cli::parse();
 
     let start_trim = cli.start_trim.map(Timestamp::from_us);
@@ -116,9 +130,27 @@ fn main() -> io::Result<()> {
     if let Some(nodes_str) = cli.nodes {
         node_list = nodes_str
             .split(",")
-            .map(|x| NodeID(x.parse::<u64>().unwrap()))
+            .flat_map(|x| {
+                let splits: Vec<_> = x
+                    .splitn(2, "-")
+                    .map(|x| x.parse::<u64>().unwrap())
+                    .collect();
+                if splits.len() == 2 {
+                    (splits[0]..=splits[1]).into_iter().map(NodeID)
+                } else {
+                    (splits[0]..=splits[0]).into_iter().map(NodeID)
+                }
+            })
             .collect();
         filter_input = !cli.no_filter_input;
+    }
+
+    #[cfg(not(feature = "archiver"))]
+    if cli.archive {
+        panic!(
+            "Legion Prof was not build with the \"archiver\" feature. \
+                Rebuild with --features=archiver to enable."
+        );
     }
 
     #[cfg(not(feature = "client"))]
@@ -145,10 +177,17 @@ fn main() -> io::Result<()> {
         );
     }
 
-    if [cli.attach, cli.serve, cli.view, cli.statistics, cli.trace]
-        .iter()
-        .filter(|x| **x)
-        .count()
+    if [
+        cli.archive,
+        cli.attach,
+        cli.serve,
+        cli.view,
+        cli.statistics,
+        cli.trace,
+    ]
+    .iter()
+    .filter(|x| **x)
+    .count()
         > 1
     {
         panic!(
@@ -241,6 +280,19 @@ fn main() -> io::Result<()> {
         analyze::print_statistics(&state);
     } else if cli.trace {
         trace_viewer::emit_trace(&state, cli.output, cli.force)?;
+    } else if cli.archive {
+        #[cfg(feature = "archiver")]
+        {
+            state.assign_colors();
+            archiver::write(
+                state,
+                cli.levels,
+                cli.branch_factor,
+                cli.output,
+                cli.force,
+                cli.zstd_compression,
+            )?;
+        }
     } else if cli.serve {
         #[cfg(feature = "server")]
         {

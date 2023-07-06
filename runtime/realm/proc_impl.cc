@@ -134,12 +134,6 @@ namespace Realm {
 				   const void *user_data /*= 0*/,
 				   size_t user_data_len /*= 0*/) const
     {
-      // some sanity checks first
-      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
-	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
-	assert(0);
-      }
-
       // TODO: special case - registration on a local processor with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
@@ -246,12 +240,6 @@ namespace Realm {
 						      const void *user_data /*= 0*/,
 						      size_t user_data_len /*= 0*/)
     {
-      // some sanity checks first
-      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
-	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
-	assert(0);
-      }
-
       // TODO: special case - registration on local processord with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
@@ -1074,6 +1062,12 @@ namespace Realm {
 					 CodeDescriptor& codedesc,
 					 const ByteArrayRef& user_data)
   {
+    // make sure we have a function of the right type
+    if(codedesc.type() != TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+      log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+      assert(0);
+    }
+
     // see if we have a function pointer to register
     Processor::TaskFuncPtr fnptr;
     const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();

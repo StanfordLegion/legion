@@ -3321,6 +3321,12 @@ namespace Legion {
                                             pending_region_trees;
       std::deque<std::pair<ValueBroadcast<DIDBroadcast>*,bool> >
                                             pending_distributed_ids;
+      unsigned pending_index_space_check;
+      unsigned pending_index_partition_check;
+      unsigned pending_field_space_check;
+      unsigned pending_field_check;
+      unsigned pending_region_tree_check;
+      unsigned pending_distributed_id_check;
     protected:
       std::map<size_t,ShardedPhysicalTemplate*> physical_templates;
       struct PendingTemplateUpdate {

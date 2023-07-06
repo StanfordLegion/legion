@@ -48,7 +48,8 @@ do
 
   local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
+  local ffi = require("ffi")
+  if ffi.os == "OSX" then
     cxx_flags =
       (cxx_flags ..
          " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")

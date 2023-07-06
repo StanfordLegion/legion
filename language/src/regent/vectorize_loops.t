@@ -39,7 +39,8 @@ then
   VEC_ARCH = "power"
 end
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   if os.execute("sysctl -a | grep machdep.cpu.features | grep AVX > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
   elseif os.execute("sysctl -a | grep machdep.cpu.features | grep SSE > /dev/null") == 0 then

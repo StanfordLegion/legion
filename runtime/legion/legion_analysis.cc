@@ -13999,8 +13999,7 @@ namespace Legion {
     CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
                Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
       : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/, false/*immutable*/,
-                         true/*exclusive*/),
-        sources(std::move(srcs))
+                         true/*exclusive*/), sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
     }
@@ -21685,6 +21684,8 @@ namespace Legion {
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
+      // Always invalidate first before cloning into this set
+      invalidate_state(expr, expr_covers, clone_mask);
       // Already holding the eq_lock from EquivalenceSet::analyze method
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)

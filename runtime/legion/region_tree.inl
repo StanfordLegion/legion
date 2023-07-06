@@ -215,8 +215,7 @@ namespace Legion {
       // are marked exclusive or we have some reservations
       for (std::vector<CopySrcDstField>::const_iterator it =
             dst_fields.begin(); it != dst_fields.end(); it++)
-        assert((it->redop_id == 0) ||
-                it->red_exclusive || !reservations.empty());
+        assert((it->redop_id == 0) || !reservations.empty());
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
@@ -3724,7 +3723,8 @@ namespace Legion {
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain(Operation *op,
                                                     IndexPartNode *partition,
-                                                    FutureMapImpl *future_map,
+                            const std::map<DomainPoint,FutureImpl*> &futures,
+                                              const Domain &future_map_domain,
                                                     bool perform_intersections)
     //--------------------------------------------------------------------------
     {
@@ -3732,8 +3732,8 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       // Demux the color space type to do the actual operations 
-      CreateByDomainHelper creator(this, partition, op, future_map, 
-                                   perform_intersections);
+      CreateByDomainHelper creator(this, partition, op, futures, 
+                                   future_map_domain, perform_intersections);
       NT_TemplateHelper::demux<CreateByDomainHelper>(
                    partition->color_space->handle.get_type_tag(), &creator);
       return creator.result;
@@ -3743,7 +3743,7 @@ namespace Legion {
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_weights(Operation *op,
                                                     IndexPartNode *partition,
-                                                    FutureMapImpl *future_map,
+                              const std::map<DomainPoint,FutureImpl*> &weights,
                                                     size_t granularity)
     //--------------------------------------------------------------------------
     {
@@ -3751,7 +3751,7 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       // Demux the color space type to do the actual operations 
-      CreateByWeightHelper creator(this, partition, op, future_map,granularity);
+      CreateByWeightHelper creator(this, partition, op, weights, granularity);
       NT_TemplateHelper::demux<CreateByWeightHelper>(
                    partition->color_space->handle.get_type_tag(), &creator);
       return creator.result;
@@ -3782,7 +3782,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain_helper(Operation *op,
-                          IndexPartNode *partition, FutureMapImpl *future_map,
+                          IndexPartNode *partition, 
+                          const std::map<DomainPoint,FutureImpl*> &futures,
+                          const Domain &future_map_domain,
                           bool perform_intersections) 
     //--------------------------------------------------------------------------
     {
@@ -3801,7 +3803,6 @@ namespace Legion {
             parent_ready = op->get_execution_fence_event();
         }
       }
-      const Domain future_map_domain = future_map->get_domain();
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
         const DomainPoint color = 
@@ -3809,10 +3810,12 @@ namespace Legion {
         Realm::IndexSpace<DIM,T> child_space;
         if (future_map_domain.contains(color))
         {
-          FutureImpl *future = future_map->find_local_future(color);
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder =
+            futures.find(color);
 #ifdef DEBUG_LEGION
-          assert(future != NULL);
+          assert(finder != futures.end());
 #endif
+          FutureImpl *future = finder->second;
           size_t future_size = 0;
           const Domain *domain = static_cast<const Domain*>(
               future->find_internal_buffer(op->get_context(), future_size));
@@ -3852,7 +3855,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_weight_helper(Operation *op,
-        IndexPartNode *partition, FutureMapImpl *future_map, size_t granularity)
+        IndexPartNode *partition, 
+        const std::map<DomainPoint,FutureImpl*> &futures, size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
@@ -3866,8 +3870,6 @@ namespace Legion {
       std::vector<size_t> long_weights;
       std::vector<LegionColor> child_colors(count);
       unsigned color_index = 0;
-      std::map<DomainPoint,FutureImpl*> futures;
-      future_map->get_all_futures(futures);
       // Make all the entries for the color space
       for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
             rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())

@@ -1,4 +1,8 @@
-# Region Instances
+---
+layout: page
+permalink: /tutorial/realm/region_instances.html
+title: Realm Region Instances
+---
 
 ## Introduction
 This tutorial will cover how to manage application data in
@@ -9,7 +13,7 @@ Here is a list of covered topics:
 
 * [Data Layouts](#data-layouts)
 * [Creating Instances](#creating-instances)
-* [Accessing Instances](#accessing-intances)
+* [Accessing Instances](#accessing-instances)
 * [Best Practices](#best-practices)
 * [References](#references)
 

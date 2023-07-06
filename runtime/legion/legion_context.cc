@@ -14062,7 +14062,10 @@ namespace Legion {
     {
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -14100,25 +14103,29 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_index_space(handle, domain, value.did,
             provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -14199,7 +14206,10 @@ namespace Legion {
       }
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -14242,10 +14252,10 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
                                 provenance, &collective_mapping, value.expr_id,
                                 ready, creation_bar);
@@ -14256,15 +14266,19 @@ namespace Legion {
           shard_manager->is_first_local_shard(owner_shard), 
           &(shard_manager->get_collective_mapping()));
       add_to_dependence_queue(creator_op);
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -14383,7 +14397,10 @@ namespace Legion {
         return IndexSpace::NO_SPACE;
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -14421,24 +14438,28 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_union_space(handle, value.did, provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -14478,7 +14499,10 @@ namespace Legion {
         return IndexSpace::NO_SPACE;
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -14516,24 +14540,28 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -14563,7 +14591,10 @@ namespace Legion {
                         get_task_name(), get_unique_id())
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -14601,24 +14632,28 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_difference_space(handle, value.did, provenance,
             left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -14929,7 +14964,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (pending_index_partitions.empty())
+      {
         increase_pending_partitions(1/*count*/, false/*double*/);
+        pending_index_partition_check = 0;
+      }
       bool double_next = false;
       bool double_buffer = false;
       std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
@@ -14996,14 +15034,18 @@ namespace Legion {
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       }
-      // Clean up the collective
-      delete collective.first;
-      pending_index_partitions.pop_front();
+      if (++pending_index_partition_check == pending_index_partitions.size()) 
+        pending_index_partition_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_partitions(double_buffer ? 
-        pending_index_partitions.size() + 1 : 1, double_next && !double_buffer);
+        pending_index_partitions.size() + 1 : 1, double_next);
+      // Clean up the collective
+      delete collective.first;
+      pending_index_partitions.pop_front();
       return is_owner;
     }
 
@@ -16655,7 +16697,10 @@ namespace Legion {
     {
       // Seed this with the first field space broadcast
       if (pending_field_spaces.empty())
+      {
         increase_pending_field_spaces(1/*count*/, false/*double*/);
+        pending_field_space_check = 0;
+      }
       FieldSpace space;
       bool double_next = false;
       bool double_buffer = false;
@@ -16705,15 +16750,19 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_field_spaces.pop_front();
+      if (++pending_field_space_check == pending_field_spaces.size())
+        pending_field_space_check = 0;
+      else
+        double_buffer = false;
       // Record this in our context
       register_field_space_creation(space);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_field_spaces(double_buffer ? 
-          pending_field_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_field_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_field_spaces.pop_front();
       return space;
     }
 
@@ -16752,7 +16801,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16775,10 +16827,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -16850,7 +16906,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16873,10 +16932,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -17111,7 +17174,10 @@ namespace Legion {
       if (fid == LEGION_AUTO_GENERATE_ID)
       {
         if (pending_fields.empty())
+        {
           increase_pending_fields(1/*count*/, false/*double*/);
+          pending_field_check = 0;
+        }
         bool double_next = false;
         bool double_buffer = false;
         std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -17134,10 +17200,14 @@ namespace Legion {
           fid = value.field_id;
           double_buffer = value.double_buffer;
         }
+        if (++pending_field_check == pending_fields.size())
+          pending_field_check = 0;
+        else
+          double_buffer = false;
+        increase_pending_fields(
+            double_buffer ? pending_fields.size() + 1 : 1, double_next);
         delete collective.first;
         pending_fields.pop_front();
-        increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                double_next && !double_buffer);
       }
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
         REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -17238,7 +17308,10 @@ namespace Legion {
       if (fid == LEGION_AUTO_GENERATE_ID)
       {
         if (pending_fields.empty())
+        {
           increase_pending_fields(1/*count*/, false/*double*/);
+          pending_field_check = 0;
+        }
         bool double_next = false;
         bool double_buffer = false;
         std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -17261,10 +17334,14 @@ namespace Legion {
           fid = value.field_id;
           double_buffer = value.double_buffer;
         }
+        if (++pending_field_check == pending_fields.size())
+          pending_field_check = 0;
+        else
+          double_buffer = false;
+        increase_pending_fields(
+            double_buffer ? pending_fields.size() + 1 : 1, double_next);
         delete collective.first;
         pending_fields.pop_front();
-        increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                double_next && !double_buffer);
       }
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
         REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -17404,7 +17481,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -17427,10 +17507,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -17504,7 +17588,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -17527,10 +17614,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -17671,7 +17762,10 @@ namespace Legion {
       }
       // Seed this with the first field space broadcast
       if (pending_region_trees.empty())
+      {
         increase_pending_region_trees(1/*count*/, false/*double*/);
+        pending_region_tree_check = 0;
+      }
       LogicalRegion handle(0/*temp*/, index_space, field_space);
       bool double_next = false;
       bool double_buffer = false;
@@ -17721,8 +17815,6 @@ namespace Legion {
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_region_trees.pop_front();
       // Register the creation of a top-level region with the context
       const unsigned created_index =
         register_region_creation(handle, task_local, output_region);
@@ -17742,11 +17834,17 @@ namespace Legion {
         pending_equivalence_set_trees[created_index] = 
           RtUserEvent::NO_RT_USER_EVENT;
       }
+      if (++pending_region_tree_check == pending_region_trees.size())
+        pending_region_tree_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
-      increase_pending_region_trees(double_buffer ? 
-          pending_region_trees.size() + 1 : 1, double_next && !double_buffer);
+      increase_pending_region_trees(
+          double_buffer ? pending_region_trees.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_region_trees.pop_front();
       return handle;
     }
 
@@ -18520,9 +18618,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (pending_distributed_ids.empty())
+      {
         increase_pending_distributed_ids(1/*count*/, false/*double*/);
+        pending_distributed_id_check = 0;
+      }
       bool double_next = false;
-      bool double_buffer = false;
       std::pair<ValueBroadcast<DIDBroadcast>*,bool> &pending_did =
         pending_distributed_ids.front();
       if (!pending_did.second)
@@ -18535,15 +18635,19 @@ namespace Legion {
         }
       }
       const DIDBroadcast value = pending_did.first->get_value(false);
-      if (pending_did.second)
+      bool double_buffer = false;
+      if (++pending_distributed_id_check == pending_distributed_ids.size())
+      {
         double_buffer = value.double_buffer;
-      delete pending_did.first;
-      pending_distributed_ids.pop_front();
+        pending_distributed_id_check = 0;
+      }
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_distributed_ids(double_buffer ? 
-       pending_distributed_ids.size() + 1 : 1, double_next && !double_buffer);
+       pending_distributed_ids.size() + 1 : 1, double_next);
+      delete pending_did.first;
+      pending_distributed_ids.pop_front();
       return value.did;
     }
 

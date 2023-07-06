@@ -23,7 +23,8 @@ local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR",
 if os.getenv("USE_CMAKE") == "1" then
   expect_vars:insert("CMAKE_BUILD_DIR")
 end
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   expect_vars:insert("DYLD_LIBRARY_PATH")
 else
   expect_vars:insert("LD_LIBRARY_PATH")

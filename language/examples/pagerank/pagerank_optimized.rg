@@ -102,8 +102,8 @@ do
   local cxx = os.getenv('NVCC') or 'nvcc'
 
   local cxx_flags = os.getenv('CXXFLAGS') or ''
-  -- cxx_flags = cxx_flags
-  if os.execute('test "$(uname)" = Darwin') == 0 then
+  local ffi = require("ffi")
+  if ffi.os == "OSX" then
     cxx_flags =
       (cxx_flags ..
          " -dynamiclib -single_module -undefined dynamic_lookup -std=c++11 -Xcompiler -fPIC")

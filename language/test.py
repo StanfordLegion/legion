@@ -165,6 +165,20 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
     return result_dir
 
+def run_prof_rs_archive(out_dir, logfiles, verbose, legion_prof_rs):
+    result_dir = os.path.join(out_dir, 'legion_prof_rs_archive')
+    cmd = [legion_prof_rs, '--archive', '--levels', '3', '--zstd-compression', '1', '-o', result_dir,] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
 def run_prof_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path):
     result_dir = os.path.join(out_dir, 'legion_prof_filter_input')
     cmd = [
@@ -326,6 +340,7 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_pr
             result_py = run_prof(prof_dir, prof_logs, verbose, py_exe_path)
             result_rs = run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
             compare_prof_results(verbose, py_exe_path, [result_py, result_rs])
+            run_prof_rs_archive(prof_dir, prof_logs, verbose, legion_prof_rs)
             # we only test subnodes when running on multi-node
             if os.environ.get('LAUNCHER'):
                 result_subnodes_py = run_prof_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path)

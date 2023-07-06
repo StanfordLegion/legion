@@ -9,5 +9,5 @@ pub fn start(state: State, host: &str, port: u16) {
         port,
         Box::new(StateDataSource::new(state)),
     );
-    server.create_server().expect("failed to start server");
+    server.run().expect("failed to start server");
 }
