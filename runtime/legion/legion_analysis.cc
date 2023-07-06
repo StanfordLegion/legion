@@ -24123,18 +24123,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(tracker_lock);
-      record_subscriptions(source, new_subscriptions);
+      FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
+      if (subscriptions.empty())
+      {
+        subscriptions.swap(new_subscriptions);
+        add_subscription_reference(subscriptions.size());
+      }
+      else
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((subscriptions.find(it->first) == subscriptions.end()) ||
+              (subscriptions.find(it->first)->second * it->second));
+#endif
+          if (subscriptions.insert(it->first, it->second))
+            add_subscription_reference();
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
     void EqSetTracker::record_subscriptions(AddressSpaceID source,
-                                      FieldMaskSet<EqKDTree> &new_subscriptions)
+                                const FieldMaskSet<EqKDTree> &new_subscriptions)
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
       if (subscriptions.empty())
       {
-        subscriptions.swap(new_subscriptions);
+        subscriptions = new_subscriptions;
         add_subscription_reference(subscriptions.size());
       }
       else

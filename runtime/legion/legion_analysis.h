@@ -3606,7 +3606,7 @@ namespace Legion {
                                                  Runtime *runtime);
     protected:
       void record_subscriptions(AddressSpaceID source,
-                FieldMaskSet<EqKDTree> &new_subs);
+                const FieldMaskSet<EqKDTree> &new_subs);
       void record_creation_sets(FieldMaskSet<EqKDTree> &to_create,
          std::map<EqKDTree*,Domain> &creation_rects, AddressSpaceID source,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
