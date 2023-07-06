@@ -65,6 +65,11 @@
 #define REALM_USE_OPERATION_TABLE
 #endif
 
+// maximum size in bytes of Realm error messages
+#ifndef REALM_ERROR_BUFFER_SIZE
+#define REALM_ERROR_BUFFER_SIZE 1024
+#endif
+
 #ifdef __cplusplus
 // runtime configuration settings
 namespace Realm {

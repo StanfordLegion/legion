@@ -35,6 +35,9 @@
 
 #include <unistd.h> // sleep for warnings
 
+#ifdef LEGION_TRACE_ALLOCATION
+#include <sys/resource.h>
+#endif
 #ifdef LEGION_MALLOC_INSTANCES
 #include <sys/mman.h>
 #ifdef LEGION_USE_CUDA
@@ -21501,6 +21504,9 @@ namespace Legion {
         it->second.diff_allocations = 0;
         it->second.diff_bytes = 0;
       }
+      struct rusage usage;
+      getrusage(RUSAGE_SELF, &usage);
+      log_allocation.info("RSS: %ld", usage.ru_maxrss);
       log_allocation.info(" ");
     }
 
@@ -21539,7 +21545,7 @@ namespace Legion {
         case TASK_ARGS_ALLOC:
           return "Task Arguments";
         case REDUCTION_ALLOC:
-          return "Reduction Result"; 
+          return "Reduction Result";
         case PREDICATE_ALLOC:
           return "Default Predicate";
         case FUTURE_RESULT_ALLOC:
@@ -21606,6 +21612,12 @@ namespace Legion {
           return "Trace Capture Op";
         case TRACE_COMPLETE_OP_ALLOC:
           return "Trace Complete Op";
+        case TRACE_REPLAY_OP_ALLOC:
+          return "Trace Replay";
+        case TRACE_BEGIN_OP_ALLOC:
+          return "Trace Begin";
+        case TRACE_SUMMARY_OP_ALLOC:
+          return "Trace Summary";
         case MUST_EPOCH_OP_ALLOC:
           return "Must Epoch Op";
         case PENDING_PARTITION_OP_ALLOC:

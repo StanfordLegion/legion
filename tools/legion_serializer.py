@@ -17,6 +17,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import annotations
 
 import inspect
 import re
@@ -29,7 +30,10 @@ from typing import Union, Dict, List, Tuple, Callable, Type, ItemsView, Any, Opt
 
 import legion_spy
 from legion_util import typeassert, typecheck
-from legion_prof import State
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from legion_prof import State
 
 binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
@@ -72,7 +76,7 @@ class LegionDeserializer(ABC):
         @param[state]:     The state object for our callbacks
         @param[callbacks]: A dictionary containing the callbacks we should use
                            after deserializing each item. You must pass a callback
-                           for 
+                           for
         """
         self.state = state
         self.callbacks: Dict[Any, Callable] = callbacks # type: ignore # Any is str or int
@@ -212,7 +216,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_id": lambda x: int(x, 16),
         "inst_uid": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
-        "indirect": int, 
+        "indirect": int,
         "create": int,
         "destroy": int,
         "start": int,
@@ -416,13 +420,13 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             _id = int(m.group('id'))
             params = m.group('params')
             param_data = []
-            
+
             for param_m in LegionProfBinaryDeserializer.params_regex.finditer(params):
                 param_name = param_m.group('param_name')
                 param_type = param_m.group('param_type')
                 param_bytes = int(param_m.group('param_bytes'))
 
-                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type) 
+                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type)
 
                 param_data.append((param_name, reader))
 
@@ -432,7 +436,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
         # change the callbacks to be by id
         if not self.callbacks_translated:
-            new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
+            new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback
                                for name, callback in self.callbacks.items()
                                if name in LegionProfBinaryDeserializer.name_to_id}
             self.callbacks = new_callbacks
@@ -480,7 +484,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         try:
             # Try it as a gzip file first
             with getFileObj(filename,compressed=True) as log:
-                return parse_file(log)    
+                return parse_file(log)
         except IOError:
             # If its not a gzip file try a normal file
             with getFileObj(filename,compressed=False) as log:
