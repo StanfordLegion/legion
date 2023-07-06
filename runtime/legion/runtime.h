@@ -3213,7 +3213,9 @@ namespace Legion {
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
-      void send_slice_output_extents(Processor target, Serializer &rez);
+      void send_slice_remote_output_extents(Processor target, Serializer &rez);
+      void send_slice_remote_output_registration(Processor target, 
+                                                 Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_request(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
@@ -3334,6 +3336,8 @@ namespace Legion {
                                            Serializer &rez);
       void send_control_replicate_compute_equivalence_sets(
                                         AddressSpaceID target, Serializer &rez);
+      void send_control_replicate_output_equivalence_set(
+                                        AddressSpaceID target, Serializer &rez);
       void send_control_replicate_refine_equivalence_sets(
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_equivalence_set_notification(
@@ -3408,6 +3412,10 @@ namespace Legion {
                                                   Serializer &rez);
       void send_compute_equivalence_sets_pending(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_output_equivalence_set_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_output_equivalence_set_response(AddressSpaceID target,
+                                                Serializer &rez);
       void send_cancel_equivalence_sets_subscription(AddressSpaceID target,
                                                      Serializer &rez);
       void send_invalidate_equivalence_sets_subscription(AddressSpaceID target,
@@ -3606,6 +3614,7 @@ namespace Legion {
       void handle_field_space_destruction(Deserializer &derez);
       void handle_logical_region_destruction(Deserializer &derez);
       void handle_individual_remote_future_size(Deserializer &derez);
+      void handle_individual_remote_output_registration(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
@@ -3618,6 +3627,7 @@ namespace Legion {
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_remote_output_extents(Deserializer &derez);
+      void handle_slice_remote_output_registration(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_downgrade_request(Deserializer &derez,
@@ -3761,6 +3771,9 @@ namespace Legion {
       void handle_compute_equivalence_sets_response(Deserializer &derez,
                                                     AddressSpaceID source);
       void handle_compute_equivalence_sets_pending(Deserializer &derez);
+      void handle_output_equivalence_set_request(Deserializer &derez);
+      void handle_output_equivalence_set_response(Deserializer &derez,
+                                                  AddressSpaceID source);
       void handle_cancel_equivalence_sets_subscription(Deserializer &derez,
                                                        AddressSpaceID source);
       void handle_invalidate_equivalence_sets_subscription(Deserializer &derez,
@@ -3843,6 +3856,7 @@ namespace Legion {
       void handle_control_replicate_rendezvous_message(Deserializer &derez);
       void handle_control_replicate_compute_equivalence_sets(
                                                            Deserializer &derez);
+      void handle_control_replicate_output_equivalence_set(Deserializer &derez);
       void handle_control_replicate_refine_equivalence_sets(
                                                            Deserializer &derez);
       void handle_control_replicate_equivalence_set_notification(
@@ -5874,6 +5888,8 @@ namespace Legion {
           return REFERENCE_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_FUTURE_SIZE:
           return TASK_VIRTUAL_CHANNEL;
+        case INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION:
+          return TASK_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_COMPLETE:
           return TASK_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_COMMIT:
@@ -5894,6 +5910,8 @@ namespace Legion {
           break;
         case SLICE_REMOTE_OUTPUT_EXTENTS:
           break;
+        case SLICE_REMOTE_OUTPUT_REGISTRATION:
+          return TASK_VIRTUAL_CHANNEL;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           break;
         // Low priority so reference counting doesn't starve
@@ -6055,6 +6073,8 @@ namespace Legion {
           break;
         case SEND_REPL_COMPUTE_EQUIVALENCE_SETS:
           break;
+        case SEND_REPL_OUTPUT_EQUIVALENCE_SET:
+          break;
         case SEND_REPL_REFINE_EQUIVALENCE_SETS:
           break;
         case SEND_REPL_EQUIVALENCE_SET_NOTIFICATION:
@@ -6133,6 +6153,10 @@ namespace Legion {
         case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_PENDING:
+          break;
+        case SEND_OUTPUT_EQUIVALENCE_SET_REQUEST:
+          break;
+        case SEND_OUTPUT_EQUIVALENCE_SET_RESPONSE:
           break;
         case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
           break;

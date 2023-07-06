@@ -1407,6 +1407,12 @@ namespace Legion {
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0) = 0;
+      virtual void record_output_equivalence_set(EqKDTree *tree,
+          EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1717,6 +1723,12 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual void record_output_equivalence_set(EqKDTree *tree,
+          EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
     public:
@@ -2652,6 +2664,12 @@ namespace Legion {
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
+      virtual void record_output_equivalence_set(EqKDTree *tree,
+          EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
       virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
                                         const FieldMask &mask,
                                         std::vector<RtEvent> &invalidated,
@@ -3051,6 +3069,10 @@ namespace Legion {
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           ShardID local_shard) = 0;
+      virtual void record_shard_output_equivalence_set(
+          EquivalenceSet *set, const Domain &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &new_subscriptions, ShardID local_shard) = 0;
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
@@ -3112,9 +3134,19 @@ namespace Legion {
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0) = 0;
+      virtual void record_shard_output_equivalence_set(
+          EquivalenceSet *set, const Domain &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &new_subscriptions, ShardID local_shard);
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+      virtual void record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
       virtual void extract_shard_equivalence_sets(
           std::map<ShardID,LegionMap<RegionNode*,
                    FieldMaskSet<EquivalenceSet> > > &eq_sets,
@@ -3176,6 +3208,12 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
           EqSetTracker *tracker, AddressSpaceID tracker_space);
+      virtual void record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
       virtual void extract_equivalence_sets(
           FieldMaskSet<EquivalenceSet> &eq_sets,
           ShardID local_shard, size_t total_shards) const; 
@@ -3267,6 +3305,12 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
           EqSetTracker *tracker, AddressSpaceID tracker_space);
+      virtual void record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
       virtual void extract_equivalence_sets(
           FieldMaskSet<EquivalenceSet> &eq_sets,
           ShardID local_shard, size_t total_shards) const;

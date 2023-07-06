@@ -21684,8 +21684,6 @@ namespace Legion {
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Always invalidate first before cloning into this set
-      invalidate_state(expr, expr_covers, clone_mask);
       // Already holding the eq_lock from EquivalenceSet::analyze method
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)
@@ -24120,20 +24118,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EqSetTracker::record_output_subscriptions(AddressSpaceID source,
+                                      FieldMaskSet<EqKDTree> &new_subscriptions)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(tracker_lock);
+      record_subscriptions(source, new_subscriptions);
+    }
+
+    //--------------------------------------------------------------------------
     void EqSetTracker::record_subscriptions(AddressSpaceID source,
-                                const FieldMaskSet<EqKDTree> &new_subscriptions)
+                                      FieldMaskSet<EqKDTree> &new_subscriptions)
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
-      for (FieldMaskSet<EqKDTree>::const_iterator it =
-            new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+      if (subscriptions.empty())
       {
+        subscriptions.swap(new_subscriptions);
+        add_subscription_reference(subscriptions.size());
+      }
+      else
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert((subscriptions.find(it->first) == subscriptions.end()) ||
-            (subscriptions.find(it->first)->second * it->second));
+          assert((subscriptions.find(it->first) == subscriptions.end()) ||
+              (subscriptions.find(it->first)->second * it->second));
 #endif
-        if (subscriptions.insert(it->first, it->second))
-          add_subscription_reference();
+          if (subscriptions.insert(it->first, it->second))
+            add_subscription_reference();
+        }
       }
     }
 
@@ -25610,10 +25625,12 @@ namespace Legion {
         version_info->record_equivalence_set(set, version_mask);
         // Launch a meta-task to register this equivalence set with
         // EqKDTree once the index space domain is ready
-        FinalizeOutputEquivalenceSetArgs args(this,
-            parent_req_index, region_node, set);
-        *output_region_ready = runtime->issue_runtime_meta_task(args,
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        FinalizeOutputEquivalenceSetArgs args(this, opid, context,
+                                parent_req_index, set, done_event);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
             region_node->row_source->get_ready_event());
+        *output_region_ready = done_event;
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
         assert(version_mask * equivalence_sets.get_valid_mask());
@@ -25730,6 +25747,26 @@ namespace Legion {
           finalize_equivalence_sets(compute_event);
       }
     } 
+
+    //--------------------------------------------------------------------------
+    RtEvent VersionManager::finalize_output_equivalence_set(EquivalenceSet *set,
+                                                      InnerContext *context,
+                                                      unsigned parent_req_index)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask set_mask;
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        FieldMaskSet<EquivalenceSet>::const_iterator finder =
+          equivalence_sets.find(set);
+#ifdef DEBUG_LEGION
+        assert(finder != equivalence_sets.end());
+#endif
+        set_mask = finder->second;
+      }
+      return context->record_output_equivalence_set(this,
+          runtime->address_space, parent_req_index, set, set_mask); 
+    }
 
     //--------------------------------------------------------------------------
     void VersionManager::record_equivalence_sets(VersionInfo *version_info,
@@ -27517,6 +27554,20 @@ namespace Legion {
     {
       const LgFinalizeEqSetsArgs *fargs = (const LgFinalizeEqSetsArgs*)args;
       fargs->manager->finalize_equivalence_sets(fargs->compute);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionManager::handle_finalize_output_eq_set(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FinalizeOutputEquivalenceSetArgs *fargs =
+        (const FinalizeOutputEquivalenceSetArgs*)args;
+      RtEvent done = fargs->proxy_this->finalize_output_equivalence_set(
+          fargs->set, fargs->context, fargs->parent_req_index);
+      Runtime::trigger_event(fargs->done_event, done);
+      if (fargs->set->remove_base_gc_ref(META_TASK_REF))
+        delete fargs->set;
     }
 
     /////////////////////////////////////////////////////////////

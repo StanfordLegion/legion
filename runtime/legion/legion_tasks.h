@@ -124,8 +124,11 @@ namespace Legion {
     public:
       static const LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_TREE_TASK_ID;
     public:
-      
-
+      FinalizeOutputEqKDTreeArgs(TaskOp *owner)
+        : LgTaskArgs<FinalizeOutputEqKDTreeArgs>(owner->get_unique_op_id()),
+          proxy_this(owner) { }
+    public:
+      TaskOp *const proxy_this;
     };
     public:
       TaskOp(Runtime *rt);
@@ -241,6 +244,7 @@ namespace Legion {
       void compute_point_region_requirements(void);
       void complete_point_projection(void);
       bool prepare_steal(void);
+      void finalize_output_regions(void);
     public:
       void compute_parent_indexes(TaskContext *alt_context = NULL);
       void perform_intra_task_alias_analysis(void);
@@ -470,8 +474,7 @@ namespace Legion {
       virtual void record_output_extent(unsigned idx,
           const DomainPoint &color, const DomainPoint &extents) 
         { assert(false); }
-      virtual void record_output_registered(RtEvent registered,
-                                std::set<RtEvent> &ready_events)
+      virtual void record_output_registered(RtEvent registered)
         { assert(false); }
       virtual void trigger_replay(void);
       // For tasks that are sharded off by control replication
@@ -783,8 +786,7 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
-      virtual void record_output_registered(RtEvent registered,
-                                std::set<RtEvent> &ready_events);
+      virtual void record_output_registered(RtEvent registered);
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
@@ -833,6 +835,7 @@ namespace Legion {
       static void process_unpack_remote_future_size(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
+      static void handle_remote_output_registration(Deserializer &derez);
     protected: 
       Future result; 
       std::vector<RegionTreePath> privilege_paths;
@@ -906,8 +909,7 @@ namespace Legion {
       virtual bool is_output_valid(unsigned idx) const;
       virtual void record_output_extent(unsigned idx,
           const DomainPoint &color, const DomainPoint &extents);
-      virtual void record_output_registered(RtEvent registered,
-                                std::set<RtEvent> &ready_events);
+      virtual void record_output_registered(RtEvent registered);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1055,6 +1057,7 @@ namespace Legion {
       void handle_collective_message(Deserializer &derez);
       void handle_rendezvous_message(Deserializer &derez);
       void handle_compute_equivalence_sets(Deserializer &derez);
+      void handle_output_equivalence_set(Deserializer &derez);
       void handle_refine_equivalence_sets(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
@@ -1269,6 +1272,7 @@ namespace Legion {
       std::vector<Memory> serdez_redop_targets;
     protected:
       std::set<RtEvent> map_applied_conditions;
+      std::vector<RtEvent> output_preconditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
@@ -1388,8 +1392,7 @@ namespace Legion {
                               std::set<RtEvent> &applied_conditions);
       void record_output_extent(unsigned index,
           const DomainPoint &color, const DomainPoint &extent);
-      void record_output_registered(RtEvent registered,
-          std::set<RtEvent> &ready_events);
+      void record_output_registered(RtEvent registered);
       RtEvent verify_concurrent_execution(const DomainPoint &point,
                                           Processor target);
     protected:
@@ -1447,6 +1450,7 @@ namespace Legion {
                                        Runtime *runtime, AddressSpaceID source);
       static void handle_verify_concurrent_execution(Deserializer &derez);
       static void handle_remote_output_extents(Deserializer &derez);
+      static void handle_remote_output_registration(Deserializer &derez);
     protected:
       friend class IndexTask;
       friend class PointTask;

@@ -388,6 +388,7 @@ namespace Legion {
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
+      LG_FINALIZE_OUTPUT_TREE_TASK_ID,
       LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
@@ -407,6 +408,7 @@ namespace Legion {
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
+      LG_FINALIZE_OUTPUT_EQ_SET_TASK_ID,
       LG_DEFERRED_COPY_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OP_DELETION_TASK_ID,
       LG_DEFER_REMOTE_INSTANCE_TASK_ID,
@@ -503,6 +505,7 @@ namespace Legion {
         "Remote View Creation",                                   \
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
+        "Finalize Output Regions Eq KD Tree",                     \
         "Deferred Task Launch",                                   \
         "Handle Mapping Misspeculation",                          \
         "Defer Trigger Task Complete",                            \
@@ -522,6 +525,7 @@ namespace Legion {
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
+        "Finalize Output Equivalence Set",                        \
         "Deferred Copy Across",                                   \
         "Defer Remote Op Deletion",                               \
         "Defer Remote Instance Request",                          \
@@ -798,6 +802,7 @@ namespace Legion {
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_FUTURE_SIZE,
+      INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -808,6 +813,7 @@ namespace Legion {
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
       SLICE_REMOTE_OUTPUT_EXTENTS,
+      SLICE_REMOTE_OUTPUT_REGISTRATION,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_DOWNGRADE_REQUEST,
       DISTRIBUTED_DOWNGRADE_RESPONSE,
@@ -880,6 +886,7 @@ namespace Legion {
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
       SEND_REPL_COMPUTE_EQUIVALENCE_SETS,
+      SEND_REPL_OUTPUT_EQUIVALENCE_SET,
       SEND_REPL_REFINE_EQUIVALENCE_SETS,
       SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
       SEND_REPL_INTRA_SPACE_DEP,
@@ -918,6 +925,8 @@ namespace Legion {
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
+      SEND_OUTPUT_EQUIVALENCE_SET_REQUEST,
+      SEND_OUTPUT_EQUIVALENCE_SET_RESPONSE,
       SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_INVALIDATE_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_EQUIVALENCE_SET_CREATION,
@@ -1069,6 +1078,7 @@ namespace Legion {
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Individual Remote Future Size",                              \
+        "Individual Remote Output Region Registration",               \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \
@@ -1078,7 +1088,8 @@ namespace Legion {
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
-        "Slice Remote Output Extents",                                \
+        "Slice Remote Output Region Extents",                         \
+        "Slice Remote Output Region Registration",                    \
         "Distributed Remote Registration",                            \
         "Distributed Downgrade Request",                              \
         "Distributed Downgrade Response",                             \
@@ -1151,6 +1162,7 @@ namespace Legion {
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
         "Send Replicate Compute Equivalence Sets",                    \
+        "Send Replicate Register Output Equivalence Set",             \
         "Send Replicate Refine Equivalence Sets",                     \
         "Send Replicate Equivalence Set Notification",                \
         "Send Replicate Intra Space Dependence",                      \
@@ -1189,6 +1201,8 @@ namespace Legion {
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Compute Equivalence Sets Pending",                      \
+        "Send Register Output Equivalence Set Request",               \
+        "Send Register Output Equivalence Set Response",              \
         "Send Cancel Equivalence Sets Subscription",                  \
         "Send Invalidate Equivalence Sets Subscription",              \
         "Send Equivalence Set Creation",                              \

@@ -12275,6 +12275,11 @@ namespace Legion {
               runtime->handle_individual_remote_future_size(derez);
               break;
             }
+          case INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION:
+            {
+              runtime->handle_individual_remote_output_registration(derez);
+              break;
+            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -12324,6 +12329,11 @@ namespace Legion {
           case SLICE_REMOTE_OUTPUT_EXTENTS:
             {
               runtime->handle_slice_remote_output_extents(derez);
+              break;
+            }
+          case SLICE_REMOTE_OUTPUT_REGISTRATION:
+            {
+              runtime->handle_slice_remote_output_registration(derez);
               break;
             }
           case DISTRIBUTED_REMOTE_REGISTRATION:
@@ -12710,6 +12720,11 @@ namespace Legion {
                                                                     derez);
               break;
             }
+          case SEND_REPL_OUTPUT_EQUIVALENCE_SET:
+            {
+              runtime->handle_control_replicate_output_equivalence_set(derez);
+              break;
+            }
           case SEND_REPL_REFINE_EQUIVALENCE_SETS:
             {
               runtime->handle_control_replicate_refine_equivalence_sets(
@@ -12922,6 +12937,17 @@ namespace Legion {
           case SEND_COMPUTE_EQUIVALENCE_SETS_PENDING:
             {
               runtime->handle_compute_equivalence_sets_pending(derez);
+              break;
+            }
+          case SEND_OUTPUT_EQUIVALENCE_SET_REQUEST:
+            {
+              runtime->handle_output_equivalence_set_request(derez);
+              break;
+            }
+          case SEND_OUTPUT_EQUIVALENCE_SET_RESPONSE:
+            {
+              runtime->handle_output_equivalence_set_response(derez,
+                                                remote_address_space);
               break;
             }
           case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
@@ -21961,6 +21987,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_individual_remote_output_registration(Processor target,
+                                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22038,11 +22074,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_slice_output_extents(Processor target, Serializer &rez)
+    void Runtime::send_slice_remote_output_extents(Processor target, 
+                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SLICE_REMOTE_OUTPUT_EXTENTS>(rez, 
           true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_remote_output_registration(Processor target, 
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SLICE_REMOTE_OUTPUT_REGISTRATION>(
+          rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -22683,6 +22729,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_output_equivalence_set(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_REPL_OUTPUT_EQUIVALENCE_SET>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_refine_equivalence_sets(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23015,6 +23070,25 @@ namespace Legion {
     {
       find_messenger(target)->send_message<
         SEND_COMPUTE_EQUIVALENCE_SETS_PENDING>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_output_equivalence_set_request(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_OUTPUT_EQUIVALENCE_SET_REQUEST>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_output_equivalence_set_response(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_OUTPUT_EQUIVALENCE_SET_RESPONSE>(
             rez, true/*flush*/, true/*response*/);
     }
 
@@ -24423,6 +24497,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_individual_remote_output_registration(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::handle_remote_output_registration(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_individual_remote_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -24492,6 +24574,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SliceTask::handle_remote_output_extents(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_remote_output_registration(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_remote_output_registration(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24995,6 +25084,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_output_equivalence_set(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_output_equivalence_set(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_refine_equivalence_sets(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -25358,6 +25455,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EqSetTracker::handle_pending_equivalence_set(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_output_equivalence_set_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::handle_output_equivalence_set_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_output_equivalence_set_response(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::handle_output_equivalence_set_response(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -32548,6 +32660,13 @@ namespace Legion {
               Runtime::trigger_event(margs->done_event);
             break;
           }
+        case LG_FINALIZE_OUTPUT_TREE_TASK_ID:
+          {
+            const TaskOp::FinalizeOutputEqKDTreeArgs *fargs =
+              (const TaskOp::FinalizeOutputEqKDTreeArgs*)args;
+            fargs->proxy_this->finalize_output_regions();
+            break;
+          }
         case LG_DEFERRED_LAUNCH_TASK_ID:
           {
             InnerContext::handle_launch_task_queue(args);
@@ -32638,6 +32757,11 @@ namespace Legion {
         case LG_FINALIZE_EQ_SETS_TASK_ID:
           {
             VersionManager::handle_finalize_eq_sets(args);
+            break;
+          }
+        case LG_FINALIZE_OUTPUT_EQ_SET_TASK_ID:
+          {
+            VersionManager::handle_finalize_output_eq_set(args);
             break;
           }
         case LG_DEFERRED_COPY_ACROSS_TASK_ID:

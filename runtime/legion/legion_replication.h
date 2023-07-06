@@ -1785,6 +1785,7 @@ namespace Legion {
       FutureBroadcastCollective *broadcast_collective;
       OutputExtentExchange *output_size_collective;
       CollectiveID collective_check_id;
+      RtBarrier output_bar;
     protected:
       // Map of output sizes collected by this shard
       std::vector<OutputExtentMap> local_output_extents;
@@ -3017,6 +3018,9 @@ namespace Legion {
       void handle_compute_equivalence_sets(Deserializer &derez);
       void handle_equivalence_set_notification(Deserializer &derez);
     public:
+      void send_output_equivalence_set(ShardID target, Serializer &rez);
+      void handle_output_equivalence_set(Deserializer &derez);
+    public:
       void send_refine_equivalence_sets(ShardID target, Serializer &rez);
       void handle_refine_equivalence_sets(Deserializer &derez);
     public:
@@ -3073,6 +3077,8 @@ namespace Legion {
       static void handle_rendezvous_message(Deserializer &derez, Runtime *rt);
       static void handle_compute_equivalence_sets(Deserializer &derez,
                                                   Runtime *runtime);
+      static void handle_output_equivalence_set(Deserializer &derez,
+                                                Runtime *runtime);
       static void handle_refine_equivalence_sets(Deserializer &derez,
                                                  Runtime *runtime);
       static void handle_equivalence_set_notification(Deserializer &derez, 

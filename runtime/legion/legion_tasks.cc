@@ -1514,6 +1514,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!output_regions.empty());
+#endif
+      const size_t offset = regions.size();
+      for (unsigned idx = 0; idx < output_regions.size(); idx++)
+        if (!is_output_valid(idx))
+          parent_ctx->finalize_output_eqkd_tree(find_parent_index(offset + idx),
+                output_regions[idx].parent.get_index_space());
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::perform_intra_task_alias_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -2633,8 +2647,7 @@ namespace Legion {
               logical_regions[idx], version_info, ready_events); 
       }
       if (!output_events.empty())
-        record_output_registered(
-            Runtime::merge_events(output_events), ready_events);
+        record_output_registered(Runtime::merge_events(output_events));
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
       return RtEvent::NO_RT_EVENT;
@@ -6231,8 +6244,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_output_registered(RtEvent registered,
-                                                std::set<RtEvent> &ready_events)
+    void IndividualTask::record_output_registered(RtEvent registered)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6242,17 +6254,13 @@ namespace Legion {
       {
         // Send the message on to the origin node to tell it
         // to launch the meta task to perform the registration
-        const RtUserEvent ready = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize<bool>(true); // inidivudal
           rez.serialize(orig_task);
           rez.serialize(registered);
-          rez.serialize(ready);
         }
         runtime->send_individual_remote_output_registration(orig_proc, rez);
-        ready_events.insert(ready);
       }
       else
       {
@@ -6260,8 +6268,22 @@ namespace Legion {
         // Make sure we don't complete the task until this is done
         FinalizeOutputEqKDTreeArgs args(this);
         output_regions_registered = 
-          runtime->issue_runtime_meta_task(args, registered);
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, registered);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualTask::handle_remote_output_registration(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndividualTask *task;
+      derez.deserialize(task);
+      RtEvent registered;
+      derez.deserialize(registered);
+      task->record_output_registered(registered);
     }
 
     //--------------------------------------------------------------------------
@@ -7240,11 +7262,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::record_output_registered(RtEvent registered,
-                                             std::set<RtEvent> &ready_events)
+    void PointTask::record_output_registered(RtEvent registered)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_output_registered(registered, ready_events);
+      slice_owner->record_output_registered(registered);
     }
 
     //--------------------------------------------------------------------------
@@ -8175,6 +8196,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::handle_output_equivalence_set(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->handle_output_equivalence_set(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardTask::handle_refine_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -8490,6 +8527,7 @@ namespace Legion {
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
+      output_preconditions.clear();
       complete_preconditions.clear();
       commit_preconditions.clear();
       version_infos.clear();
@@ -8593,9 +8631,26 @@ namespace Legion {
     void IndexTask::record_output_registered(RtEvent registered)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(registered.exists());
+      assert(!output_regions.empty());
+#endif
       // Record it in the set of output events and if we've seen all of them
       // then we can launch the meta-task to do the final regisration
-
+      AutoLock o_lock(op_lock);
+      output_preconditions.push_back(registered);
+#ifdef DEBUG_LEGION
+      assert(output_preconditions.size() <= total_points);
+#endif
+      if (output_preconditions.size() == total_points)
+      {
+        // Can only mark the EqKDTree ready once all the points are registered
+        FinalizeOutputEqKDTreeArgs args(this);
+        registered = runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY,
+            Runtime::merge_events(output_preconditions));
+        complete_preconditions.insert(registered);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11956,7 +12011,7 @@ namespace Legion {
             }
           }
         }
-        runtime->send_slice_output_extents(orig_proc, rez);
+        runtime->send_slice_remote_output_extents(orig_proc, rez);
       }
       else
         index_owner->record_output_extents(output_region_extents);
@@ -11988,19 +12043,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_output_registered(RtEvent registered,
-                                             std::set<RtEvent> &ready_events)
+    void SliceTask::record_output_registered(RtEvent registered)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(registered.exists());
+#endif
       if (is_remote())
       {
         // Send a message back to the index owner about the equivalence
         // sets for the output regions being registered
-
-
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(registered);
+        }
+        runtime->send_slice_remote_output_registration(orig_proc, rez);
       }
       else
         index_owner->record_output_registered(registered);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_remote_output_registration(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *index_owner;
+      derez.deserialize(index_owner);
+      RtEvent registered;
+      derez.deserialize(registered);
+      index_owner->record_output_registered(registered);
     }
 
     //--------------------------------------------------------------------------

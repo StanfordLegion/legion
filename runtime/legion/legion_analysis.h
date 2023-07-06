@@ -3566,6 +3566,8 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &subscriptions,
           AddressSpaceID source, unsigned expected_responses,
           std::vector<RtEvent> &ready_events);
+      void record_output_subscriptions(AddressSpaceID source,
+          FieldMaskSet<EqKDTree> &new_subscriptions);
     public:
       virtual void add_subscription_reference(unsigned count = 1) = 0;
       virtual bool remove_subscription_reference(unsigned count = 1) = 0;
@@ -3604,7 +3606,7 @@ namespace Legion {
                                                  Runtime *runtime);
     protected:
       void record_subscriptions(AddressSpaceID source,
-                const FieldMaskSet<EqKDTree> &new_subs);
+                FieldMaskSet<EqKDTree> &new_subs);
       void record_creation_sets(FieldMaskSet<EqKDTree> &to_create,
          std::map<EqKDTree*,Domain> &creation_rects, AddressSpaceID source,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
@@ -4171,8 +4173,8 @@ namespace Legion {
       FieldMask                                         partial_valid_fields;
       // Expressions and fields that have valid data
       FieldMaskSet<IndexSpaceExpression>                initialized_data;
-      // Expressions for fields that have been invalidated and no long 
-      // contain valid meta-data, even though the set_expr is encompasses
+      // Expressions for fields that have been invalidated and no longer
+      // contain valid meta-data, even though the set_expr encompasses
       // them. This occurs when we have partial invalidations of an equivalence
       // set and therefore we need to record this information
       FieldMaskSet<IndexSpaceExpression>                partial_invalidations;
@@ -4306,6 +4308,25 @@ namespace Legion {
         VersionManager *const manager;
         const RtUserEvent compute;
       };
+      struct FinalizeOutputEquivalenceSetArgs :
+        public LgTaskArgs<FinalizeOutputEquivalenceSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_EQ_SET_TASK_ID;
+      public:
+        FinalizeOutputEquivalenceSetArgs(VersionManager *proxy,
+            UniqueID opid, InnerContext *ctx, unsigned req_index, 
+            EquivalenceSet *s, RtUserEvent done)
+          : LgTaskArgs<FinalizeOutputEquivalenceSetArgs>(opid),
+            proxy_this(proxy), context(ctx), parent_req_index(req_index),
+            set(s), done_event(done) 
+          { set->add_base_gc_ref(META_TASK_REF); }
+      public:
+        VersionManager *const proxy_this;
+        InnerContext *const context;
+        const unsigned parent_req_index;
+        EquivalenceSet *const set;
+        const RtUserEvent done_event;
+      };
     public:
       struct WaitingVersionInfo {
       public:
@@ -4340,6 +4361,9 @@ namespace Legion {
                                        UniqueID opid, unsigned parent_req_index,
                                        std::set<RtEvent> &ready,
                                        RtEvent *output_region_ready);
+      RtEvent finalize_output_equivalence_set(EquivalenceSet *set,
+                                       InnerContext *context,
+                                       unsigned parent_req_index);
     protected:
 #if 0
       void add_node_disjoint_complete_ref(void) const;
@@ -4430,6 +4454,7 @@ namespace Legion {
 #endif
     public:
       static void handle_finalize_eq_sets(const void *args);
+      static void handle_finalize_output_eq_set(const void *args);
     public:
       const ContextID ctx;
       RegionTreeNode *const node;

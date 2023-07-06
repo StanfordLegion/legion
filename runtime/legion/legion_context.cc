@@ -4018,6 +4018,123 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent InnerContext::record_output_equivalence_set(EqSetTracker *source,
+                              AddressSpaceID source_space, unsigned req_index,
+                              EquivalenceSet *set, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      // Be very careful, you can't use find_equivalence_set_kd_tree here
+      // because the tree will not be marked ready until after all the 
+      // output equivalence sets have registered themselves, so it's up
+      // to us to make an equivalence set tree if one doesn't already
+      // exist and then register ourselves with it
+      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index); 
+      FieldMaskSet<EqKDTree> new_subscriptions;
+      std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
+      set->set_expr->record_output_equivalence_set(tree, set, mask, source,
+          source_space, new_subscriptions, remote_shard_rects);
+#ifdef DEBUG_LEGION
+      assert(remote_shard_rects.empty());
+#endif
+      return report_output_registrations(source,source_space,new_subscriptions);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_output_equivalence_set_request(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID ctx_did;
+      derez.deserialize(ctx_did);
+      RtEvent ctx_ready;
+      InnerContext *context = 
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      EqSetTracker *source;
+      derez.deserialize(source);
+      AddressSpaceID source_space;
+      derez.deserialize(source_space);
+      unsigned req_index;
+      derez.deserialize(req_index);
+      DistributedID set_did;
+      derez.deserialize(set_did);
+      RtEvent set_ready;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(set_did, set_ready);
+      FieldMask mask;
+      derez.deserialize(mask);
+      RtUserEvent recorded;
+      derez.deserialize(recorded);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
+      if (set_ready.exists() && !set_ready.has_triggered())
+        set_ready.wait();
+      Runtime::trigger_event(recorded,
+          context->record_output_equivalence_set(source, source_space,
+            req_index, set, mask));
+      set->unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InnerContext::report_output_registrations(EqSetTracker *target,
+        AddressSpaceID target_space, FieldMaskSet<EqKDTree> &new_subscriptions)
+    //--------------------------------------------------------------------------
+    {
+      if (new_subscriptions.empty())
+        return RtEvent::NO_RT_EVENT;
+      if (target_space != runtime->address_space)
+      {
+        const RtUserEvent reported = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(new_subscriptions.size());
+          for (FieldMaskSet<EqKDTree>::const_iterator it =
+                new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          rez.serialize(reported);
+        }
+        runtime->send_output_equivalence_set_response(target_space, rez);
+        return reported;
+      }
+      else
+      {
+        target->record_output_subscriptions(runtime->address_space,
+                                            new_subscriptions);
+        return RtEvent::NO_RT_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_output_equivalence_set_response(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source) 
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      EqSetTracker *tracker;
+      derez.deserialize(tracker);
+      size_t num_subscriptions;
+      derez.deserialize(num_subscriptions);
+      FieldMaskSet<EqKDTree> new_subscriptions;
+      for (unsigned idx = 0; idx < num_subscriptions; idx++)
+      {
+        EqKDTree *tree;
+        derez.deserialize(tree);
+        FieldMask mask;
+        derez.deserialize(mask);
+        new_subscriptions.insert(tree, mask);
+      }
+      tracker->record_output_subscriptions(source, new_subscriptions);
+      RtUserEvent reported;
+      derez.deserialize(reported);
+      Runtime::trigger_event(reported);
+    }
+
+    //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_equivalence_set_kd_tree(unsigned req_index,
                                                bool return_null_if_doesnt_exist)
     //--------------------------------------------------------------------------
@@ -4027,7 +4144,12 @@ namespace Legion {
       RtEvent wait_on;
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        if (req_index < equivalence_set_trees.size())
+        // If there is a guard we always need to wait on it
+        std::map<unsigned,RtUserEvent>::const_iterator finder =
+          pending_equivalence_set_trees.find(req_index);
+        if (finder != pending_equivalence_set_trees.end())
+          wait_on = finder->second;
+        else if (req_index < equivalence_set_trees.size())
         {
           EqKDTree *tree = equivalence_set_trees[req_index];
           if (tree != NULL)
@@ -4035,26 +4157,15 @@ namespace Legion {
           else if (return_null_if_doesnt_exist)
             return NULL;
         }
-        std::map<unsigned,RtUserEvent>::const_iterator finder =
-          pending_equivalence_set_trees.find(req_index);
-        if (finder != pending_equivalence_set_trees.end())
-          wait_on = finder->second;
       }
       IndexSpace handle = IndexSpace::NO_SPACE;
       if (!wait_on.exists())
       {
         // Make sure we didn't lose the race
         AutoLock priv_lock(privilege_lock);
-        if (req_index < equivalence_set_trees.size())
-        {
-          EqKDTree *tree = equivalence_set_trees[req_index];
-          if (tree != NULL)
-            return tree;
-        }
-        else
-          equivalence_set_trees.resize(req_index + 1, NULL);
         std::map<unsigned,RtUserEvent>::iterator finder =
           pending_equivalence_set_trees.find(req_index);
+        // If there's a guard always make sure we wait on it
         if (finder != pending_equivalence_set_trees.end())
         {
           // There's already a guard so someone else is making it
@@ -4062,8 +4173,16 @@ namespace Legion {
             finder->second = Runtime::create_rt_user_event();
           wait_on = finder->second;
         }
-        else
+        else 
         {
+          if (req_index < equivalence_set_trees.size())
+          {
+            EqKDTree *tree = equivalence_set_trees[req_index];
+            if (tree != NULL)
+              return tree;
+          }
+          else
+            equivalence_set_trees.resize(req_index + 1, NULL);
           // save a guard that we're making this
           pending_equivalence_set_trees[req_index] = 
             RtUserEvent::NO_RT_USER_EVENT;
@@ -4113,6 +4232,96 @@ namespace Legion {
 #endif
         return equivalence_set_trees[req_index];
       }
+    }
+
+    //--------------------------------------------------------------------------
+    EqKDTree* InnerContext::find_or_create_output_set_kd_tree(
+                                                             unsigned req_index)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace handle = IndexSpace::NO_SPACE;
+      {
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        // Should always have a guard here
+        assert(pending_equivalence_set_trees.find(req_index) !=
+            pending_equivalence_set_trees.end());
+#endif
+        if (req_index < equivalence_set_trees.size())
+        {
+          EqKDTree *tree = equivalence_set_trees[req_index];
+          if (tree != NULL)
+            return tree;
+        }
+        std::map<unsigned,RegionRequirement>::const_iterator finder =
+          created_requirements.find(req_index);
+#ifdef DEBUG_LEGION
+        assert(finder != created_requirements.end());
+#endif
+        handle = finder->second.region.get_index_space();
+      }
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      EqKDTree *tree = create_equivalence_set_kd_tree(node);
+      AutoLock priv_lock(privilege_lock);
+      if (equivalence_set_trees.size() <= req_index)
+        equivalence_set_trees.resize(req_index+1, NULL);
+      if (equivalence_set_trees[req_index] == NULL)
+      {
+        tree->add_reference();
+        equivalence_set_trees[req_index] = tree;
+      }
+      else
+      {
+        delete tree;
+        tree = equivalence_set_trees[req_index];
+      }
+      return tree;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::finalize_output_eqkd_tree(unsigned req_index,
+                                                 IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock priv_lock(privilege_lock);
+        if (equivalence_set_trees.size() <= req_index)
+          equivalence_set_trees.resize(req_index + 1, NULL);
+        std::map<unsigned,RtUserEvent>::iterator finder =
+            pending_equivalence_set_trees.find(req_index);
+#ifdef DEBUG_LEGION
+        // Should always find an existing guard for outputs
+        assert(finder != pending_equivalence_set_trees.end());
+#endif
+        // If there are no waiters or the equivalence set tree has
+        // already been made then we are just done
+        if (!finder->second.exists() || 
+            (equivalence_set_trees[req_index] != NULL))
+        {
+          if (finder->second.exists())
+            Runtime::trigger_event(finder->second);
+          pending_equivalence_set_trees.erase(finder);
+          return;
+        }
+        // If we get here there is someone waiting for us to make
+        // the tree and it hasn't been made yet, so do that now
+      }
+      // If we get here then we need to make the new tree
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      // Normal contexts and control replication contexts will do 
+      // different things here while creating the equivalence set tree
+      EqKDTree *tree = create_equivalence_set_kd_tree(node);
+      tree->add_reference();
+      AutoLock priv_lock(privilege_lock);
+      equivalence_set_trees[req_index] = tree;
+      std::map<unsigned,RtUserEvent>::iterator finder = 
+        pending_equivalence_set_trees.find(req_index);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_equivalence_set_trees.end());
+      assert(finder->second.exists());
+#endif
+      Runtime::trigger_event(finder->second);
+      pending_equivalence_set_trees.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -12668,6 +12877,16 @@ namespace Legion {
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
                        AddressSpaceID target_space, unsigned req_index,
                        IndexSpaceExpression *expr, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent TopLevelContext::record_output_equivalence_set(EqSetTracker *source,
+                       AddressSpaceID source_space, unsigned req_index,
+                       EquivalenceSet *expr, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -22291,6 +22510,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent ReplicateContext::record_output_equivalence_set(
+        EqSetTracker *source, AddressSpaceID source_space, unsigned req_index,
+                              EquivalenceSet *set, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index); 
+      FieldMaskSet<EqKDTree> new_subscriptions;
+      std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
+      set->set_expr->record_output_equivalence_set(tree, set, mask, source,
+          source_space, new_subscriptions, remote_shard_rects,
+          owner_shard->shard_id);
+      std::vector<RtEvent> recorded_events;
+      // Send out messages to any shards we need to do the recording on
+      for (std::map<ShardID,LegionMap<Domain,FieldMask> >::const_iterator sit =
+            remote_shard_rects.begin(); sit != remote_shard_rects.end(); sit++)
+      {
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        rez.serialize(shard_manager->did);
+        rez.serialize(sit->first);
+        rez.serialize(source);
+        rez.serialize(source_space);
+        rez.serialize(req_index);
+        rez.serialize(set->did);
+        set->pack_global_ref();
+        rez.serialize<size_t>(sit->second.size());
+        for (LegionMap<Domain,FieldMask>::const_iterator it =
+              sit->second.begin(); it != sit->second.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize(ready);
+        shard_manager->send_output_equivalence_set(sit->first, rez);
+        recorded_events.push_back(ready);
+      }
+      if (!new_subscriptions.empty())
+      {
+        RtEvent recorded = report_output_registrations(source, source_space,
+                                                       new_subscriptions);
+        if (recorded.exists())
+          recorded_events.push_back(recorded);
+      }
+      return Runtime::merge_events(recorded_events);
+    }
+
+    //--------------------------------------------------------------------------
     EqKDTree* ReplicateContext::create_equivalence_set_kd_tree(
                                                            IndexSpaceNode *node)
     //--------------------------------------------------------------------------
@@ -22493,6 +22759,45 @@ namespace Legion {
                           eq_sets, new_subscriptions, to_create, creation_rects,
                           creation_srcs, expected_responses, pending_sets);
       Runtime::trigger_event(ready_event, ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_output_equivalence_set(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker *source;
+      derez.deserialize(source);
+      AddressSpaceID source_space;
+      derez.deserialize(source_space);
+      unsigned req_index;
+      derez.deserialize(req_index);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent set_ready;
+      EquivalenceSet *set =
+        runtime->find_or_request_equivalence_set(did, set_ready);
+      size_t num_rects;
+      derez.deserialize(num_rects);
+      LegionMap<Domain,FieldMask> shard_rects;
+      for (unsigned idx = 0; idx < num_rects; idx++)
+      {
+        Domain domain;
+        derez.deserialize(domain);
+        derez.deserialize(shard_rects[domain]);
+      }
+      RtUserEvent recorded_event;
+      derez.deserialize(recorded_event);
+      FieldMaskSet<EqKDTree> new_subscriptions;
+      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index);
+      if (set_ready.exists() && !set_ready.has_triggered())
+        set_ready.wait();
+      for (LegionMap<Domain,FieldMask>::const_iterator it =
+            shard_rects.begin(); it != shard_rects.end(); it++)
+        tree->record_shard_output_equivalence_set(set, it->first, it->second,
+            source, source_space, new_subscriptions, owner_shard->shard_id);
+      Runtime::trigger_event(recorded_event,
+          report_output_registrations(source, source_space, new_subscriptions));
+      set->unpack_global_ref();
     }
 
 #if 0
@@ -23383,6 +23688,29 @@ namespace Legion {
       // Send it to the owner space 
       runtime->send_compute_equivalence_sets_request(owner_space, rez);
       return ready_event;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent RemoteContext::record_output_equivalence_set(EqSetTracker *source,
+                              AddressSpaceID source_space, unsigned req_index,
+                              EquivalenceSet *set, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      const RtUserEvent recorded = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(source);
+        rez.serialize(source_space);
+        rez.serialize(req_index);
+        rez.serialize(set->did);
+        set->pack_global_ref();
+        rez.serialize(mask);
+        rez.serialize(recorded);
+      }
+      runtime->send_output_equivalence_set_request(owner_space, rez);
+      return recorded;
     }
 
     //--------------------------------------------------------------------------

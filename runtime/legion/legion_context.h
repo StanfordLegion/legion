@@ -1163,8 +1163,13 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
+      virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
+                      AddressSpaceID source_space, unsigned req_index,
+                      EquivalenceSet *set, const FieldMask &mask);
       EqKDTree* find_equivalence_set_kd_tree(unsigned req_index,
                                bool return_null_if_doesnt_exist = false);
+      EqKDTree* find_or_create_output_set_kd_tree(unsigned req_index);
+      void finalize_output_eqkd_tree(unsigned req_index, IndexSpace handle);
       RtEvent report_equivalence_sets(EqSetTracker *target, 
           AddressSpaceID target_space, const FieldMask &mask,
           FieldMaskSet<EquivalenceSet> &eq_sets,
@@ -1173,6 +1178,9 @@ namespace Legion {
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           size_t expected_responses, std::vector<RtEvent> &ready_events);
+      RtEvent report_output_registrations(EqSetTracker *target,
+          AddressSpaceID target_space,
+          FieldMaskSet<EqKDTree> &new_subscriptions);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
 #if 0
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
@@ -1799,6 +1807,10 @@ namespace Legion {
                                      Runtime *runtime, AddressSpaceID source);
       static void handle_compute_equivalence_sets_response(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
+      static void handle_output_equivalence_set_request(Deserializer &derez,
+                                     Runtime *runtime);
+      static void handle_output_equivalence_set_response(Deserializer &derez,
+                                     Runtime *runtime, AddressSpaceID source);
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
@@ -2111,6 +2123,9 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
+      virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
+                      AddressSpaceID source_space, unsigned req_index,
+                      EquivalenceSet *set, const FieldMask &mask);
     public:
       const UniqueID root_uid;
     protected:
@@ -3009,6 +3024,9 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
+      virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
+                      AddressSpaceID source_space, unsigned req_index,
+                      EquivalenceSet *set, const FieldMask &mask);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
 #if 0
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
@@ -3018,6 +3036,7 @@ namespace Legion {
           std::set<RtEvent> &applied_events);
 #endif
       void handle_compute_equivalence_sets(Deserializer &derez);
+      void handle_output_equivalence_set(Deserializer &derez);
       void handle_refine_equivalence_sets(Deserializer &derez);
 #if 0
       virtual void compute_shard_equivalence_sets(EqSetTracker *target,
@@ -3070,6 +3089,8 @@ namespace Legion {
         { return concurrent_precondition_barrier.next(this); }
       inline RtBarrier get_next_concurrent_postcondition_barrier(void)
         { return concurrent_postcondition_barrier.next(this); }
+      inline RtBarrier get_next_output_regions_barrier(void)
+        { return output_regions_barrier.next(this); }
       inline RtBarrier get_next_close_mapped_barrier(void)
         {
           const RtBarrier result =
@@ -3271,6 +3292,7 @@ namespace Legion {
       ApReplBar inorder_barrier;
       RtReplSingleBar concurrent_precondition_barrier;
       RtReplBar concurrent_postcondition_barrier;
+      RtReplBar output_regions_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtReplBar collective_check_barrier;
@@ -3458,6 +3480,9 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
+      virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
+                      AddressSpaceID source_space, unsigned req_index,
+                      EquivalenceSet *set, const FieldMask &mask);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void pack_task_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(

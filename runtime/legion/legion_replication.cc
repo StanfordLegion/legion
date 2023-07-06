@@ -878,6 +878,7 @@ namespace Legion {
       output_size_collective = NULL;
       collective_check_id = 0;
       slice_sharding_output = false;
+      output_bar = RtBarrier::NO_RT_BARRIER;
       concurrent_prebar = RtBarrier::NO_RT_BARRIER;
       concurrent_postbar = RtBarrier::NO_RT_BARRIER;
       concurrent_validator = NULL;
@@ -1102,6 +1103,8 @@ namespace Legion {
         // Still need to participate in any collective view rendezvous
         if (!collective_view_rendezvous.empty())
           shard_off_collective_view_rendezvous(complete_preconditions);
+        if (output_bar.exists())
+          Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
         LegionSpy::log_operation_events(unique_op_id, 
@@ -1460,16 +1463,22 @@ namespace Legion {
         else
           serdez_redop_collective = new BufferExchange(ctx, COLLECTIVE_LOC_53);
       }
-      bool has_output_region = false;
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-        if (!output_region_options[idx].valid_requirement())
+      if (!output_regions.empty())
+      {
+        bool has_output_region = false;
+        for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+          if (!output_region_options[idx].valid_requirement())
+          {
+            has_output_region = true;
+            break;
+          }
+        if (has_output_region)
         {
-          has_output_region = true;
-          break;
+          output_size_collective = new OutputExtentExchange(ctx, this, 
+              COLLECTIVE_LOC_29, output_region_extents);
+          output_bar = ctx->get_next_output_regions_barrier();
         }
-      if (has_output_region)
-        output_size_collective = new OutputExtentExchange(ctx, this, 
-            COLLECTIVE_LOC_29, output_region_extents);
+      }
       if (!runtime->unsafe_mapper)
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_29);
       if (concurrent_task)
@@ -1672,6 +1681,35 @@ namespace Legion {
       }
       else // The next shard is ourself, so we can do the normal thing
         IndexTask::record_intra_space_dependence(point, next, point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::record_output_registered(RtEvent registered)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(output_bar.exists());
+      assert(registered.exists());
+      assert(!output_regions.empty());
+#endif
+      // Record it in the set of output events and if we've seen all of them
+      // then we can launch the meta-task to do the final regisration
+      AutoLock o_lock(op_lock);
+      output_preconditions.push_back(registered);
+#ifdef DEBUG_LEGION
+      assert(output_preconditions.size() <= total_points);
+#endif
+      if (output_preconditions.size() == total_points)
+      {
+        // Can only do the registration once all registrations are done
+        Runtime::phase_barrier_arrive(output_bar, 1/*count*/,
+            Runtime::merge_events(output_preconditions));
+        // Can only mark the EqKDTree ready once all the points are registered
+        FinalizeOutputEqKDTreeArgs args(this);
+        registered = runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, output_bar);
+        complete_preconditions.insert(registered);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10751,6 +10789,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_output_equivalence_set(ShardID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        DistributedID local_repl;
+        derez.deserialize(local_repl);
+        handle_output_equivalence_set(derez);
+      }
+      else
+        runtime->send_control_replicate_output_equivalence_set(target_space,
+                                                               rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_output_equivalence_set(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_output_equivalence_set(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::send_refine_equivalence_sets(ShardID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11669,6 +11750,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_compute_equivalence_sets(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_output_equivalence_set(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_output_equivalence_set(derez);
     }
 
     //--------------------------------------------------------------------------
