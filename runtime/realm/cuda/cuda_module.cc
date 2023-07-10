@@ -4146,89 +4146,91 @@ namespace Realm {
         }
 
         size_t nvswitch_bandwidth = 0;
-        for(std::vector<GPUInfo *>::iterator it = infos.begin(); it != infos.end();
-            ++it) {
-          GPUInfo *info = *it;
-          // NVLINK link rates (in MB/s) based off
-          // https://en.wikipedia.org/wiki/NVLink
-          static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
-                                                          23610};
-          // Iterate each of the links for this GPU and find what's on the other end
-          // of the link, adding this link's bandwidth to the accumulated peer pair
-          // bandwidth.
-          for(size_t i = 0; i < NVML_NVLINK_MAX_LINKS; i++) {
-            nvmlIntNvLinkDeviceType_t dev_type;
-            nvmlEnableState_t link_state;
-            nvmlPciInfo_t pci_info;
-            unsigned int nvlink_version;
-            nvmlReturn_t status =
-                NVML_FNPTR(nvmlDeviceGetNvLinkState)(info->nvml_dev, i, &link_state);
-            if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
-              continue;
-            }
+        if (nvml_initialized) {
+          for (std::vector<GPUInfo *>::iterator it = infos.begin();
+              it != infos.end(); ++it) {
+            GPUInfo *info = *it;
+            // NVLINK link rates (in MB/s) based off
+            // https://en.wikipedia.org/wiki/NVLink
+            static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
+                                                            23610};
+            // Iterate each of the links for this GPU and find what's on the other end
+            // of the link, adding this link's bandwidth to the accumulated peer pair
+            // bandwidth.
+            for(size_t i = 0; i < NVML_NVLINK_MAX_LINKS; i++) {
+              nvmlIntNvLinkDeviceType_t dev_type;
+              nvmlEnableState_t link_state;
+              nvmlPciInfo_t pci_info;
+              unsigned int nvlink_version;
+              nvmlReturn_t status =
+                  NVML_FNPTR(nvmlDeviceGetNvLinkState)(info->nvml_dev, i, &link_state);
+              if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
+                continue;
+              }
 
-            CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
-                                                              &nvlink_version));
-            if(nvlink_version >
-               sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0])) {
-              // Found an unknown nvlink version, so assume the newest version we know
-              nvlink_version =
-                  sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
-            }
+              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
+                                                                &nvlink_version));
+              if(nvlink_version >
+                sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0])) {
+                // Found an unknown nvlink version, so assume the newest version we know
+                nvlink_version =
+                    sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
+              }
 
-            if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
-              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType)(info->nvml_dev,
-                                                                         i, &dev_type));
-            } else {
-              // GetNvLinkRemoteDeviceType not found, probably an older nvml driver, so
-              // assume GPU
-              dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
-            }
+              if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
+                CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType)(info->nvml_dev,
+                                                                          i, &dev_type));
+              } else {
+                // GetNvLinkRemoteDeviceType not found, probably an older nvml driver, so
+                // assume GPU
+                dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
+              }
 
-            unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
-            if ((info->major == 8) && (info->minor > 2)) {
-              // NVML has no way of querying the minor version of nvlink, but
-              // nvlink 3.1 used with non-GA100 ampere systems has significantly
-              // less bandwidth per lane
-              nvlink_bandwidth = 14063;
-            }
+              unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
+              if ((info->major == 8) && (info->minor > 2)) {
+                // NVML has no way of querying the minor version of nvlink, but
+                // nvlink 3.1 used with non-GA100 ampere systems has significantly
+                // less bandwidth per lane
+                nvlink_bandwidth = 14063;
+              }
 
-            if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
-              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemotePciInfo)(info->nvml_dev, i,
-                                                                      &pci_info));
-              // Unfortunately NVML doesn't give a way to return a GPU handle for a remote
-              // end point, so we have to search for the remote GPU using the PCIe
-              // information...
-              int peer_gpu_idx = 0;
-              for(peer_gpu_idx = 0; peer_gpu_idx < num_devices; peer_gpu_idx++) {
-                if(infos[peer_gpu_idx]->pci_busid == static_cast<int>(pci_info.bus) &&
-                   infos[peer_gpu_idx]->pci_deviceid == static_cast<int>(pci_info.device) &&
-                   infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
-                  // Found the peer device on the other end of the link!  Add this link's
-                  // bandwidth to the logical peer link
-                  info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
-                  info->logical_peer_latency[peer_gpu_idx] = 100;
-                  break;
+              if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
+                CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemotePciInfo)(info->nvml_dev, i,
+                                                                        &pci_info));
+                // Unfortunately NVML doesn't give a way to return a GPU handle for a remote
+                // end point, so we have to search for the remote GPU using the PCIe
+                // information...
+                int peer_gpu_idx = 0;
+                for(peer_gpu_idx = 0; peer_gpu_idx < num_devices; peer_gpu_idx++) {
+                  if(infos[peer_gpu_idx]->pci_busid == static_cast<int>(pci_info.bus) &&
+                    infos[peer_gpu_idx]->pci_deviceid == static_cast<int>(pci_info.device) &&
+                    infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
+                    // Found the peer device on the other end of the link!  Add this link's
+                    // bandwidth to the logical peer link
+                    info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
+                    info->logical_peer_latency[peer_gpu_idx] = 100;
+                    break;
+                  }
                 }
-              }
 
-              if(peer_gpu_idx == num_devices) {
-                // We can't make any assumptions about this link, since we don't know
-                // what's on the other side.  This could be a GPU that was removed via
-                // CUDA_VISIBLE_DEVICES, or NVSWITCH / P9 NPU on a system with an slightly
-                // older driver that doesn't support "GetNvlinkRemotePciInfo"
-                log_gpu.info() << "GPU " << info->index
-                               << " has active NVLINK to unknown device "
-                               << pci_info.busId << "(" << std::hex
-                               << pci_info.pciDeviceId << "), ignoring...";
+                if(peer_gpu_idx == num_devices) {
+                  // We can't make any assumptions about this link, since we don't know
+                  // what's on the other side.  This could be a GPU that was removed via
+                  // CUDA_VISIBLE_DEVICES, or NVSWITCH / P9 NPU on a system with an slightly
+                  // older driver that doesn't support "GetNvlinkRemotePciInfo"
+                  log_gpu.info() << "GPU " << info->index
+                                << " has active NVLINK to unknown device "
+                                << pci_info.busId << "(" << std::hex
+                                << pci_info.pciDeviceId << "), ignoring...";
+                }
+              } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
+                // Accumulate the link bandwidth for one gpu and assume symmetry
+                // across all GPUs, and all GPus have access to the NVSWITCH fabric
+                nvswitch_bandwidth += nvlink_bandwidth;
+              } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
+                // TODO: use the npu_bandwidth for sysmem affinities
+                // npu_bandwidth += nvlink_bandwidth;
               }
-            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
-              // Accumulate the link bandwidth for one gpu and assume symmetry
-              // across all GPUs, and all GPus have access to the NVSWITCH fabric
-              nvswitch_bandwidth += nvlink_bandwidth;
-            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
-              // TODO: use the npu_bandwidth for sysmem affinities
-              // npu_bandwidth += nvlink_bandwidth;
             }
           }
         }
