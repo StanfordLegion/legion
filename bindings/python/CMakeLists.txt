@@ -62,7 +62,7 @@ if (NOT DEFINED Legion_PYTHON_EXTRA_INSTALL_ARGS)
   set(Legion_PYTHON_EXTRA_INSTALL_ARGS "")
 endif()
 # Use setup.py script to install the Python bindings library
-install(CODE "execute_process(COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/setup.py install --cmake-build-dir ${Legion_BINARY_DIR}/runtime --prefix \"\${CMAKE_INSTALL_PREFIX}\" ${Legion_PYTHON_EXTRA_INSTALL_ARGS} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})")
+install(CODE "execute_process(COMMAND ${PYTHON_EXECUTABLE} -m pip install --global-option=--cmake-build-dir \"--global-option=${Legion_BINARY_DIR}/runtime\" --global-option=--prefix \"--global-option=\${CMAKE_INSTALL_PREFIX}\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT)")
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/examples
