@@ -6230,6 +6230,8 @@ namespace Legion {
                    bool has_return_type_size, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      if (elide_future_return)
+        return;
       if (is_remote())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -7207,6 +7209,8 @@ namespace Legion {
                    bool has_return_type_size, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      if (elide_future_return)
+        return;
       if (has_return_type_size)
         slice_owner->handle_future_size(return_type_size,
                                         index_point, applied_events);
@@ -11781,6 +11785,7 @@ namespace Legion {
       if (redop > 0)
         return;
 #ifdef DEBUG_LEGION
+      assert(!elide_future_return);
       assert(future_handles != NULL);
 #endif
       const std::map<DomainPoint,DistributedID> &handles = 
