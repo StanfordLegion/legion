@@ -510,95 +510,123 @@ namespace Realm {
 
     // helper function for spawn implementations
     void ProcessorImpl::enqueue_or_defer_task(Task *task, Event start_event,
-					      DeferredSpawnCache *cache)
-    {
+                                              DeferredSpawnCache *cache) {
       // case 1: no precondition
-      if(!start_event.exists()) {
-	enqueue_task(task);
-	return;
+      if (!start_event.exists()) {
+        enqueue_task(task);
+        return;
       }
 
       // case 2: precondition is triggered or poisoned
       EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
       EventImpl::gen_t start_gen = ID(start_event).event_generation();
       bool poisoned = false;
-      if(!start_impl->has_triggered(start_gen, poisoned)) {
-	// we'll create a new deferral unless we can tack it on to an existing
-	//  one
-	bool new_deferral = true;
+      if (!start_impl->has_triggered(start_gen, poisoned)) {
+        // we'll create a new deferral unless we can tack it on to an existing
+        //  one
+        bool new_deferral = true;
         // we might hit in the cache below, but set up the deferral before to
         //  avoid race conditions with other tasks being added
-	task->deferred_spawn.setup(this, task, start_event);
+        task->deferred_spawn.setup(this, task, start_event);
 
-	if(cache) {
-	  Task *leader = 0;
-	  Task *evicted = 0;
-	  {
-	    AutoLock<> al(cache->mutex);
-	    size_t i = 0;
-	    while((i < DeferredSpawnCache::MAX_ENTRIES) &&
-		  (cache->events[i] != start_event)) i++;
-	    if(i < DeferredSpawnCache::MAX_ENTRIES) {
-	      // cache hit
-	      cache->counts[i]++;
-	      leader = cache->tasks[i];
-	      leader->add_reference();  // keep it alive until we use it below
-	    } else {
-	      // miss - see if any counts are at 0
-	      i = 0;
-	      while((i < DeferredSpawnCache::MAX_ENTRIES) &&
-		    (cache->counts[i] > 0)) i++;
-	      // no? decrement them all and see if one goes to 0 now
-	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
-		i = 0;
-		while((i < DeferredSpawnCache::MAX_ENTRIES) &&
-		      (--cache->counts[i] > 0)) i++;
-		// decrement the rest too
-		for(size_t j = i+1; j < DeferredSpawnCache::MAX_ENTRIES; j++)
-		  cache->counts[j]--;
-	      }
+        if (cache) {
+          Task *leader = nullptr;
+          Task *evicted = nullptr;
 
-	      // if we've got a candidate now, do a replacement
-	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
-		evicted = cache->tasks[i];
-		cache->events[i] = start_event;
-		cache->tasks[i] = task;
-		cache->counts[i] = 1;
-		task->add_reference(); // cache holds a reference now too
-	      }
-	    }
-	  }
-	  // decrement the refcount on a task we evicted (if any)
-	  if(evicted)
-	    evicted->remove_reference();
+          {
+            AutoLock<> al(cache->mutex);
+            size_t idx = 0;
+            // Case 1: find an entry with the same event impl
+            for (idx = 0; idx < DeferredSpawnCache::MAX_ENTRIES; idx++) {
+              if (cache->events[idx] == start_impl) {
+                break;
+              }
+            }
+            if (idx < DeferredSpawnCache::MAX_ENTRIES) {
+              cache->ages[idx] = cache->current_age;
+              cache->counts[idx]++;
+              if (cache->generations[idx] == start_gen) {
+                // Same genration, grab the cached task, we'll add to it's list
+                leader = cache->tasks[idx];
+                leader->add_reference();
+              } else {
+                // Different generation, this entry is stale, replace it!
+                evicted = cache->tasks[idx];
+                cache->generations[idx] = start_gen;
+                cache->tasks[idx] = task;
+                task->add_reference();
+              }
+            } else {
+              // Case 2: find a stale or empty entry (an entry who's event has
+              // already triggered)
+              // TODO: remove the poisoned lookup, since we don't care
+              task->add_reference();
+              for (idx = 0; idx < DeferredSpawnCache::MAX_ENTRIES; idx++) {
+                bool tmp_poisoned = false;
+                if ((cache->events[idx] == nullptr) ||
+                    cache->events[idx]->has_triggered(cache->generations[idx],
+                                                      tmp_poisoned)) {
+                  break;
+                }
+              }
+              if (idx < DeferredSpawnCache::MAX_ENTRIES) {
+                evicted = cache->tasks[idx];
+                cache->ages[idx] = cache->current_age;
+                cache->counts[idx] = 1;
+                cache->events[idx] = start_impl;
+                cache->generations[idx] = start_gen;
+                cache->tasks[idx] = task;
+              } else {
+                size_t min_key = cache->counts[0] + cache->ages[0];
+                size_t min_idx = 0;
+                // Case 3: find the LRU entry, accounting for the age, and evict it
+                for (idx = 1; idx < DeferredSpawnCache::MAX_ENTRIES; idx++) {
+                  size_t test_key = cache->counts[idx] + cache->ages[idx];
+                  if (min_key > test_key) {
+                    min_idx = idx;
+                    min_key = test_key;
+                  }
+                }
+                evicted = cache->tasks[min_idx];
+                // Update the current age -- all newly referenced entries will get this new age
+                cache->current_age = cache->ages[min_idx] + cache->counts[min_idx];
+                cache->events[min_idx] = start_impl;
+                cache->generations[min_idx] = start_gen;
+                cache->tasks[min_idx] = task;
+                cache->ages[min_idx] = cache->current_age;
+                cache->counts[min_idx] = 1;
+              }
+            }
+          }
 
-	  // if we found a leader, try to add ourselves to their list
-	  if(leader) {
-	    bool added = leader->deferred_spawn.add_task(task, poisoned);
-            leader->remove_reference();  // safe to let go of this now
-            if(added) {
-	      // success - nothing more needs to be done here
-	      return;
-	    } else {
-	      // failure, so no deferral is needed - fall through to
-	      //  enqueue-or-cancel code below
-	      new_deferral = false;
-	    }
-	  }
-	}
+          if (evicted != nullptr) {
+            evicted->remove_reference();
+          }
+          if (leader != nullptr) {
+            assert(leader != task);
+            bool added = leader->deferred_spawn.add_task(task, poisoned);
+            leader->remove_reference();
+            if (added) {
+              return;
+            } else {
+              new_deferral = false;
+            }
+          }
+        }
 
-	if(new_deferral) {
-	  task->deferred_spawn.defer(start_impl, start_gen);
-	  return;
-	}
+        if (new_deferral) {
+          task->deferred_spawn.defer(start_impl, start_gen);
+          return;
+        }
       }
 
       // precondition is either triggered or poisoned
-      if(poisoned) {
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(start_event);
+      if (poisoned) {
+        log_poison.info() << "cancelling poisoned task - task=" << task
+                          << " after=" << task->get_finish_event();
+        task->handle_poisoned_precondition(start_event);
       } else {
-	enqueue_task(task);
+        enqueue_task(task);
       }
     }
 

@@ -92,26 +92,32 @@ namespace Realm {
 				const ByteArrayRef& task_args);
 
       struct DeferredSpawnCache {
-	static const size_t MAX_ENTRIES = 4;
-	Mutex mutex;
-	Event events[MAX_ENTRIES];
-	Task *tasks[MAX_ENTRIES];
-	int counts[MAX_ENTRIES];
+        static const size_t MAX_ENTRIES = 4;
+        Mutex mutex;
+        EventImpl *events[MAX_ENTRIES];
+        EventImpl::gen_t generations[MAX_ENTRIES];
+        Task *tasks[MAX_ENTRIES];
+        size_t counts[MAX_ENTRIES];
+        size_t ages[MAX_ENTRIES];
+        size_t current_age;
 
-	void clear()
-	{
-	  for(size_t i = 0; i < MAX_ENTRIES; i++) events[i] = Event::NO_EVENT;
-	  for(size_t i = 0; i < MAX_ENTRIES; i++) tasks[i] = 0;
-	  for(size_t i = 0; i < MAX_ENTRIES; i++) counts[i] = 0;
-	}
+        void clear() {
+          current_age = 0;
+          memset(events, 0, sizeof(events));
+          memset(tasks, 0, sizeof(tasks));
+          memset(counts, 0, sizeof(counts));
+          memset(ages, 0, sizeof(ages));
+          memset(generations, 0, sizeof(generations));
+        }
 
-	void flush()
-	{
-	  for(size_t i = 0; i < MAX_ENTRIES; i++)
-	    if(tasks[i])
-	      tasks[i]->remove_reference();
-	  clear();
-	}
+        void flush() {
+          for (size_t i = 0; i < MAX_ENTRIES; i++) {
+            if (tasks[i] != nullptr) {
+              tasks[i]->remove_reference();
+            }
+          }
+          clear();
+        }
       };
 
       // helper function for spawn implementations
