@@ -5927,8 +5927,11 @@ namespace Legion {
       assert(must_epoch != NULL);
 #endif
       set_origin_mapped(true);
-      FutureMap map = must_epoch->get_future_map();
-      result = map.impl->get_future(index_point, true/*internal only*/);
+      if (!elide_future_return)
+      {
+        FutureMap map = must_epoch->get_future_map();
+        result = map.impl->get_future(index_point, true/*internal only*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8943,9 +8946,11 @@ namespace Legion {
       assert(must_epoch != NULL);
 #endif
       set_origin_mapped(true);
-      future_map = must_epoch->get_future_map(); 
       if (!elide_future_return)
+      {
+        future_map = must_epoch->get_future_map(); 
         enumerate_futures(index_domain);
+      }
     }
 
     //--------------------------------------------------------------------------
