@@ -780,11 +780,14 @@ namespace Legion {
       Domain shard_domain = index_domain;
       if (sharding_space.exists())
         runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
-      ShardID owner = sharding_function->find_owner(index_point, shard_domain);
-      if (owner == repl_ctx->owner_shard->shard_id)
+      if (!elide_future_return)
       {
-        FutureMap map = must_epoch->get_future_map();
-        result = map.impl->get_future(index_point, true/*internal only*/);
+        ShardID owner = sharding_function->find_owner(index_point,shard_domain);
+        if (owner == repl_ctx->owner_shard->shard_id)
+        {
+          FutureMap map = must_epoch->get_future_map();
+          result = map.impl->get_future(index_point, true/*internal only*/);
+        }
       }
     }
 
@@ -928,18 +931,21 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       set_origin_mapped(true);
-      future_map = must_epoch->get_future_map();
-      const IndexSpace local_space = sharding_space.exists() ?
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-              launch_space, sharding_space, get_provenance()) :
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-              launch_space, launch_space->handle, get_provenance());
-      // Figure out which points to enumerate
-      if (local_space.exists())
+      if (!elide_future_return)
       {
-        Domain local_domain;
-        runtime->forest->find_launch_space_domain(local_space, local_domain);
-        enumerate_futures(local_domain);
+        future_map = must_epoch->get_future_map();
+        const IndexSpace local_space = sharding_space.exists() ?
+            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                launch_space, sharding_space, get_provenance()) :
+            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                launch_space, launch_space->handle, get_provenance());
+        // Figure out which points to enumerate
+        if (local_space.exists())
+        {
+          Domain local_domain;
+          runtime->forest->find_launch_space_domain(local_space, local_domain);
+          enumerate_futures(local_domain);
+        }
       }
     }
 
@@ -1401,46 +1407,50 @@ namespace Legion {
     {
       // Otherwise, we need to update the internal space so we only set
       // our local points with the predicate false result
-      if (redop == 0)
+      if (!elide_future_return)
       {
+        if (redop == 0)
+        {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
+          ReplicateContext *repl_ctx = 
+            dynamic_cast<ReplicateContext*>(parent_ctx);
+          assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+          ReplicateContext *repl_ctx = 
+            static_cast<ReplicateContext*>(parent_ctx);
 #endif
 #ifdef DEBUG_LEGION
-        assert(sharding_function != NULL);
-        assert(future_map.impl != NULL);
-        ReplFutureMapImpl *impl =
-          dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
-        assert(impl != NULL);
+          assert(sharding_function != NULL);
+          assert(future_map.impl != NULL);
+          ReplFutureMapImpl *impl =
+            dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
+          assert(impl != NULL);
 #else
-        ReplFutureMapImpl *impl =
-          static_cast<ReplFutureMapImpl*>(future_map.impl);
+          ReplFutureMapImpl *impl =
+            static_cast<ReplFutureMapImpl*>(future_map.impl);
 #endif
-        impl->set_sharding_function(sharding_function);
-        // Compute the local index space of points for this shard
-        if (sharding_space.exists())
-          internal_space = 
-            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                launch_space, sharding_space, get_provenance());
-        else
-          internal_space =
-            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+          impl->set_sharding_function(sharding_function);
+          // Compute the local index space of points for this shard
+          if (sharding_space.exists())
+            internal_space = sharding_function->find_shard_space(
+                  repl_ctx->owner_shard->shard_id,
+                  launch_space, sharding_space, get_provenance());
+          else
+            internal_space = sharding_function->find_shard_space(
+                repl_ctx->owner_shard->shard_id,
                 launch_space, launch_space->handle, get_provenance());
-      }
-      else
-      {
-        if (serdez_redop_collective != NULL)
-          serdez_redop_collective->elide_collective();
-        if (all_reduce_collective != NULL)
-          all_reduce_collective->elide_collective();
-        if (reduction_collective != NULL)
-          reduction_collective->elide_collective();
-        if (broadcast_collective != NULL)
-          broadcast_collective->elide_collective();
+        }
+        else
+        {
+          if (serdez_redop_collective != NULL)
+            serdez_redop_collective->elide_collective();
+          if (all_reduce_collective != NULL)
+            all_reduce_collective->elide_collective();
+          if (reduction_collective != NULL)
+            reduction_collective->elide_collective();
+          if (broadcast_collective != NULL)
+            broadcast_collective->elide_collective();
+        }
       }
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
@@ -1460,7 +1470,7 @@ namespace Legion {
       assert(broadcast_collective == NULL);
 #endif
       // If we have a reduction op then we need an exchange
-      if (redop > 0)
+      if (!elide_future_return && (redop > 0))
       {
         if (serdez_redop_fns == NULL)
         {
