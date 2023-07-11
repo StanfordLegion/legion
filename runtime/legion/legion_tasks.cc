@@ -5938,8 +5938,11 @@ namespace Legion {
       assert(must_epoch != NULL);
 #endif
       set_origin_mapped(true);
-      FutureMap map = must_epoch->get_future_map();
-      result = map.impl->get_future(index_point, true/*internal only*/);
+      if (!elide_future_return)
+      {
+        FutureMap map = must_epoch->get_future_map();
+        result = map.impl->get_future(index_point, true/*internal only*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6098,30 +6101,31 @@ namespace Legion {
     void IndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (elide_future_return)
-        return;
-      // Set the future to the false result
-      if (predicate_false_future.impl != NULL)
+      if (!elide_future_return)
       {
-        FutureInstance *canonical = 
-          predicate_false_future.impl->get_canonical_instance();
-        if (canonical != NULL)
+        // Set the future to the false result
+        if (predicate_false_future.impl != NULL)
         {
-          const Memory target = 
-            runtime->find_local_memory(current_proc, canonical->memory.kind());
-          result.impl->set_result(ApEvent::NO_AP_EVENT,
-              parent_ctx->copy_to_future_inst(target, canonical));
+          FutureInstance *canonical = 
+            predicate_false_future.impl->get_canonical_instance();
+          if (canonical != NULL)
+          {
+            const Memory target = 
+              runtime->find_local_memory(current_proc,canonical->memory.kind());
+            result.impl->set_result(ApEvent::NO_AP_EVENT,
+                parent_ctx->copy_to_future_inst(target, canonical));
+          }
+          else
+            result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
         else
-          result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
-      }
-      else
-      {
-        if (predicate_false_size > 0)
-          result.impl->set_local(predicate_false_result,
-                                 predicate_false_size, false/*own*/);
-        else
-          result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
+        {
+          if (predicate_false_size > 0)
+            result.impl->set_local(predicate_false_result,
+                                   predicate_false_size, false/*own*/);
+          else
+            result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
+        }
       }
       // Then clean up this task instance
       complete_mapping();
@@ -6224,6 +6228,8 @@ namespace Legion {
                    bool has_return_type_size, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      if (elide_future_return)
+        return;
       if (is_remote())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -7248,6 +7254,8 @@ namespace Legion {
                    bool has_return_type_size, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      if (elide_future_return)
+        return;
       if (has_return_type_size)
         slice_owner->handle_future_size(return_type_size,
                                         index_point, applied_events);
@@ -9111,8 +9119,11 @@ namespace Legion {
       assert(must_epoch != NULL);
 #endif
       set_origin_mapped(true);
-      future_map = must_epoch->get_future_map(); 
-      enumerate_futures(index_domain);
+      if (!elide_future_return)
+      {
+        future_map = must_epoch->get_future_map(); 
+        enumerate_futures(index_domain);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9511,81 +9522,88 @@ namespace Legion {
     {
       RtEvent execution_condition;
       // Fill in the index task map with the default future value
-      if (redop == 0)
+      if (!elide_future_return)
       {
-        // Only need to do this if the internal domain exists, it
-        // might not in a control replication context
-        if (internal_space.exists())
+        if (redop == 0)
         {
-          // Get the domain that we will have to iterate over
-          Domain local_domain;
-          runtime->forest->find_launch_space_domain(internal_space, 
-                                                    local_domain);
-          // Handling the future map case
+          // Only need to do this if the internal domain exists, it
+          // might not in a control replication context
+          if (internal_space.exists())
+          {
+            // Get the domain that we will have to iterate over
+            Domain local_domain;
+            runtime->forest->find_launch_space_domain(internal_space, 
+                                                      local_domain);
+            // Handling the future map case
+            if (predicate_false_future.impl != NULL)
+            {
+              FutureInstance *canonical = 
+                predicate_false_future.impl->get_canonical_instance();
+              if (canonical != NULL)
+              {
+                const Memory target = runtime->find_local_memory(
+                 parent_ctx->get_executing_processor(), 
+                 canonical->memory.kind());
+                for (Domain::DomainPointIterator itr(local_domain);
+                      itr; itr++)
+                {
+                  Future f = future_map.impl->get_future(itr.p, 
+                                              true/*internal*/);
+                  f.impl->set_result(ApEvent::NO_AP_EVENT,
+                      parent_ctx->copy_to_future_inst(target, canonical));
+                }
+              }
+              else
+              {
+                for (Domain::DomainPointIterator itr(local_domain);
+                      itr; itr++)
+                {
+                  Future f = future_map.impl->get_future(itr.p, 
+                                              true/*internal*/);
+                  f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
+                }
+              }
+            }
+            else
+            {
+              for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+              {
+                Future f = future_map.impl->get_future(itr.p, true/*internal*/);
+                if (predicate_false_size > 0)
+                  f.impl->set_local(predicate_false_result,
+                                    predicate_false_size, false/*own*/);
+                else
+                  f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
+              }
+            }
+          }
+        }
+        else
+        {
+          // Handling a reduction case
           if (predicate_false_future.impl != NULL)
           {
             FutureInstance *canonical = 
               predicate_false_future.impl->get_canonical_instance();
             if (canonical != NULL)
             {
-              const Memory target = runtime->find_local_memory(
-               parent_ctx->get_executing_processor(), canonical->memory.kind());
-              for (Domain::DomainPointIterator itr(local_domain);
-                    itr; itr++)
-              {
-                Future f = future_map.impl->get_future(itr.p, true/*internal*/);
-                f.impl->set_result(ApEvent::NO_AP_EVENT,
-                    parent_ctx->copy_to_future_inst(target, canonical));
-              }
+              const Memory target = 
+                runtime->find_local_memory(current_proc,
+                    canonical->memory.kind());
+              reduction_future.impl->set_result(ApEvent::NO_AP_EVENT,
+                  parent_ctx->copy_to_future_inst(target, canonical));
             }
             else
-            {
-              for (Domain::DomainPointIterator itr(local_domain);
-                    itr; itr++)
-              {
-                Future f = future_map.impl->get_future(itr.p, true/*internal*/);
-                f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
-              }
-            }
+              reduction_future.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
           }
           else
           {
-            for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
-            {
-              Future f = future_map.impl->get_future(itr.p, true/*internal*/);
-              if (predicate_false_size > 0)
-                f.impl->set_local(predicate_false_result,
-                                  predicate_false_size, false/*own*/);
-              else
-                f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
-            }
+            if (predicate_false_size > 0)
+              reduction_future.impl->set_local(predicate_false_result,
+                                    predicate_false_size, false/*own*/);
+            else
+              reduction_future.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
           }
-        }
-      }
-      else
-      {
-        // Handling a reduction case
-        if (predicate_false_future.impl != NULL)
-        {
-          FutureInstance *canonical = 
-            predicate_false_future.impl->get_canonical_instance();
-          if (canonical != NULL)
-          {
-            const Memory target = 
-              runtime->find_local_memory(current_proc,canonical->memory.kind());
-            reduction_future.impl->set_result(ApEvent::NO_AP_EVENT,
-                parent_ctx->copy_to_future_inst(target, canonical));
-          }
-          else
-            reduction_future.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
-        }
-        else
-        {
-          if (predicate_false_size > 0)
-            reduction_future.impl->set_local(predicate_false_result,
-                                  predicate_false_size, false/*own*/);
-          else
-            reduction_future.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
       }
       // Then clean up this task execution
@@ -11927,6 +11945,7 @@ namespace Legion {
       if (redop > 0)
         return;
 #ifdef DEBUG_LEGION
+      assert(!elide_future_return);
       assert(future_handles != NULL);
 #endif
       const std::map<DomainPoint,DistributedID> &handles = 

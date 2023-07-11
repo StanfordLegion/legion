@@ -9436,6 +9436,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       [predicate_symbol], false, [mapper], [tag])
     c.legion_index_launcher_set_provenance([launcher], [get_provenance(node)])
     [task_args_loop_setup]
+    -- Always elide the result of index launches except for reductions
+    c.legion_index_launcher_set_elide_future_return([launcher], [not node.reduce_lhs])
   end
 
   local execute_fn = c.legion_index_launcher_execute

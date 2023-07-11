@@ -510,15 +510,17 @@ _type_ids = {
     108: uint64,
     109: float32,
     110: float64,
+    111: bool_,
 }
 
 _rect_types = []
+_base_id = max(_type_ids)
 for dim in xrange(1, _max_dim + 1):
     itype = Type(
         numpy.dtype([('x', numpy.int64, (dim,))], align=True),
         'legion_point_{}d_t'.format(dim))
     globals()["int{}d".format(dim)] = itype
-    _type_ids[110 + dim] = itype
+    _type_ids[_base_id + dim] = itype
     rtype = Type(
         numpy.dtype([('lo', numpy.int64, (dim,)), ('hi', numpy.int64, (dim,))], align=True),
         'legion_rect_{}d_t'.format(dim))
