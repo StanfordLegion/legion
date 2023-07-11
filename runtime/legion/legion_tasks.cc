@@ -6016,7 +6016,7 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       ProjectionInfo projection_info;
-      LogicalAnalysis logical_analysis(this);
+      LogicalAnalysis logical_analysis(this, regions.size());
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      logical_regions[idx], 
@@ -9194,7 +9194,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this);
+      LogicalAnalysis logical_analysis(this, regions.size());
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
@@ -9216,6 +9216,7 @@ namespace Legion {
 #endif
       Provenance *provenance = get_provenance();
       output_region_options.resize(outputs.size());
+      output_region_extents.resize(outputs.size());
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
@@ -11949,7 +11950,6 @@ namespace Legion {
       assert(index < output_regions.size());
       assert(output_regions.size() == output_region_extents.size());
       assert(output_regions.size() == output_region_options.size());
-      assert(is_output_global(index));
       assert(!is_output_valid(index));
 #endif
       {

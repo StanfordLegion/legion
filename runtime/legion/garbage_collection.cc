@@ -450,7 +450,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_global<false/*need lock*/>());
 #endif
-      gc_references++;
+      gc_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
         detailed_nested_gc_references.find(source);
       if (finder == detailed_nested_gc_references.end())
@@ -493,7 +493,7 @@ namespace Legion {
       assert(is_global<false/*need lock*/>());
       assert(gc_references >= cnt);
 #endif
-      gc_references--;
+      gc_references -= cnt;
       std::map<DistributedID,int>::iterator finder = 
         detailed_nested_gc_references.find(source);
       assert(finder != detailed_nested_gc_references.end());
@@ -516,7 +516,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_REF_STATE);
 #endif
-      resource_references++;
+      resource_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_resource_references.find(source);
       if (finder == detailed_base_resource_references.end())
@@ -534,7 +534,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_REF_STATE);
 #endif
-      resource_references++;
+      resource_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
         detailed_nested_resource_references.find(source);
       if (finder == detailed_nested_resource_references.end())
@@ -553,7 +553,7 @@ namespace Legion {
       assert(current_state != DELETED_REF_STATE);
       assert(resource_references >= cnt);
 #endif
-      resource_references--;
+      resource_references -= cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_resource_references.find(source);
       assert(finder != detailed_base_resource_references.end());

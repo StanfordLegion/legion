@@ -1179,7 +1179,7 @@ namespace Legion {
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           size_t expected_responses, std::vector<RtEvent> &ready_events);
       RtEvent report_output_registrations(EqSetTracker *target,
-          AddressSpaceID target_space,
+          AddressSpaceID target_space, unsigned references,
           FieldMaskSet<EqKDTree> &new_subscriptions);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
 #if 0

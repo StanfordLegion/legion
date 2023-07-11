@@ -8150,8 +8150,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalAnalysis::LogicalAnalysis(Operation *o)
-      : op(o), context(op->get_context())
+    LogicalAnalysis::LogicalAnalysis(Operation *o, unsigned out_off)
+      : op(o), context(op->get_context()), output_region_offset(out_off)
     //--------------------------------------------------------------------------
     {
     }
@@ -8447,6 +8447,9 @@ namespace Legion {
         }
       }
 #endif
+      // Ignore any requests for refinements for output region requirmeents
+      if (output_region_offset <= req_index)
+        return;
       // See if we already have a refinement for handling this node
       for (OrderedRefinements::iterator it =
             pending_refinements.begin(); it != pending_refinements.end(); it++)
@@ -24124,12 +24127,7 @@ namespace Legion {
     {
       AutoLock t_lock(tracker_lock);
       FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
-      if (subscriptions.empty())
-      {
-        subscriptions.swap(new_subscriptions);
-        add_subscription_reference(subscriptions.size());
-      }
-      else
+      if (!subscriptions.empty())
       {
         for (FieldMaskSet<EqKDTree>::const_iterator it =
               new_subscriptions.begin(); it != new_subscriptions.end(); it++)
@@ -24138,10 +24136,11 @@ namespace Legion {
           assert((subscriptions.find(it->first) == subscriptions.end()) ||
               (subscriptions.find(it->first)->second * it->second));
 #endif
-          if (subscriptions.insert(it->first, it->second))
-            add_subscription_reference();
+          subscriptions.insert(it->first, it->second);
         }
       }
+      else
+        subscriptions.swap(new_subscriptions);
     }
 
     //--------------------------------------------------------------------------
@@ -25234,7 +25233,7 @@ namespace Legion {
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             equivalence_sets.erase(*it);
-            if ((*it)->remove_base_resource_ref(source_kind))
+            if ((*it)->remove_base_gc_ref(source_kind))
               delete (*it);
           }
           equivalence_sets.tighten_valid_mask();
@@ -25654,7 +25653,7 @@ namespace Legion {
         assert(version_mask * equivalence_sets.get_valid_mask());
 #endif
         if (equivalence_sets.insert(set, version_mask))
-          set->add_base_resource_ref(VERSION_MANAGER_REF);
+          set->add_base_gc_ref(VERSION_MANAGER_REF);
         return;
       }
       // If we don't have equivalence classes for this region yet we 
@@ -25979,7 +25978,7 @@ namespace Legion {
             if (it->second * finder->second)
               continue;
             if (equivalence_sets.insert(it->first, it->second))
-              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+              it->first->add_base_gc_ref(VERSION_MANAGER_REF);
             to_delete.push_back(it->first);
           }
           if (!to_delete.empty())
@@ -26077,7 +26076,7 @@ namespace Legion {
         //assert((it->first->region_node != node) ||
         //        it->first->region_node->row_source->is_empty());
 #endif
-        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }

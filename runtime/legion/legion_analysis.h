@@ -1869,7 +1869,7 @@ namespace Legion {
         const unsigned req_idx;
       };
     public:
-      LogicalAnalysis(Operation *op);
+      LogicalAnalysis(Operation *op, unsigned output_offset = UINT_MAX);
       LogicalAnalysis(const LogicalAnalysis &rhs) = delete;
       ~LogicalAnalysis(void);
     public:
@@ -1904,6 +1904,9 @@ namespace Legion {
     public:
       Operation *const op;
       InnerContext *const context;
+      // Offset for output region requirements which we will use
+      // to ignore any refinement requests for them
+      const unsigned output_region_offset;
     protected:
 #if 0
       FieldMaskSet<RegionNode> unrefined_nodes;

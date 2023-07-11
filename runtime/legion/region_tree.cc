@@ -1633,8 +1633,8 @@ namespace Legion {
           !op->is_parent_nonexclusive_virtual_mapping(idx);
 #endif
         parent_node->register_logical_user(req.parent, *user, path,
-                     trace_info, proj_info, user_mask, unopened_mask,
-                     refinement_mask, logical_analysis, refinements);
+             trace_info, proj_info, user_mask, unopened_mask,
+             refinement_mask, logical_analysis, refinements, true/*root*/);
 #if 0
 #ifdef DEBUG_LEGION
         // should never flow out here unless we're not checking for versioning
@@ -15985,7 +15985,8 @@ namespace Legion {
                                        FieldMask &unopened_field_mask,
                                        FieldMask &refinement_mask,
                                        LogicalAnalysis &logical_analysis,
-                                       FieldMaskSet<RefinementOp> &refinements)
+                                       FieldMaskSet<RefinementOp> &refinements,
+                                       const bool root_node)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -16065,7 +16066,8 @@ namespace Legion {
           }
           else
             state.update_refinement_arrival(ctx, user.usage, refinement_mask);
-          if (!!refinement_mask)
+          // We can skip performing refinements at the root node
+          if (!!refinement_mask && !root_node)
             logical_analysis.record_pending_refinement(privilege_root,
                 user.idx, user.op->find_parent_index(user.idx),
                 this, refinement_mask, refinements);
@@ -16165,7 +16167,7 @@ namespace Legion {
                                         user.usage, refinement_mask);
         next_child->register_logical_user(privilege_root, user, path,
             trace_info, proj_info, user_mask, unopened_field_mask,
-            refinement_mask, logical_analysis, refinements);
+            refinement_mask, logical_analysis, refinements, false/*root node*/);
 #if 0
             child_disjoint_complete, false/*check unversioned*/);
         if (disjoint_complete_path)

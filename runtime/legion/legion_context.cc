@@ -853,6 +853,8 @@ namespace Legion {
         if (executed.exists())
           executed_events.push_back(executed);
       }
+      // Clear this to remove references in output region data structures
+      output_regions.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -4031,12 +4033,13 @@ namespace Legion {
       EqKDTree *tree = find_or_create_output_set_kd_tree(req_index); 
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
-      set->set_expr->record_output_equivalence_set(tree, set, mask, source,
-          source_space, new_subscriptions, remote_shard_rects);
+      unsigned references = set->set_expr->record_output_equivalence_set(tree,
+        set, mask, source, source_space, new_subscriptions, remote_shard_rects);
 #ifdef DEBUG_LEGION
       assert(remote_shard_rects.empty());
 #endif
-      return report_output_registrations(source,source_space,new_subscriptions);
+      return report_output_registrations(source, source_space, references,
+                                         new_subscriptions);
     }
 
     //--------------------------------------------------------------------------
@@ -4077,11 +4080,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::report_output_registrations(EqSetTracker *target,
-        AddressSpaceID target_space, FieldMaskSet<EqKDTree> &new_subscriptions)
+        AddressSpaceID target_space, unsigned references,
+        FieldMaskSet<EqKDTree> &new_subscriptions)
     //--------------------------------------------------------------------------
     {
       if (new_subscriptions.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(references == 0);
+#endif
         return RtEvent::NO_RT_EVENT;
+      }
       if (target_space != runtime->address_space)
       {
         const RtUserEvent reported = Runtime::create_rt_user_event();
@@ -4089,6 +4098,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(target);
+          rez.serialize(references);
           rez.serialize<size_t>(new_subscriptions.size());
           for (FieldMaskSet<EqKDTree>::const_iterator it =
                 new_subscriptions.begin(); it != new_subscriptions.end(); it++)
@@ -4103,6 +4113,8 @@ namespace Legion {
       }
       else
       {
+        if (references > 0)
+          target->add_subscription_reference(references);
         target->record_output_subscriptions(runtime->address_space,
                                             new_subscriptions);
         return RtEvent::NO_RT_EVENT;
@@ -4116,6 +4128,10 @@ namespace Legion {
     {
       DerezCheck z(derez);
       EqSetTracker *tracker;
+      unsigned references;
+      derez.deserialize(references);
+      if (references > 0)
+        tracker->add_subscription_reference(references);
       derez.deserialize(tracker);
       size_t num_subscriptions;
       derez.deserialize(num_subscriptions);
@@ -22518,9 +22534,9 @@ namespace Legion {
       EqKDTree *tree = find_or_create_output_set_kd_tree(req_index); 
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
-      set->set_expr->record_output_equivalence_set(tree, set, mask, source,
-          source_space, new_subscriptions, remote_shard_rects,
-          owner_shard->shard_id);
+      unsigned references = set->set_expr->record_output_equivalence_set(tree,
+          set, mask, source, source_space, new_subscriptions,
+          remote_shard_rects, owner_shard->shard_id);
       std::vector<RtEvent> recorded_events;
       // Send out messages to any shards we need to do the recording on
       for (std::map<ShardID,LegionMap<Domain,FieldMask> >::const_iterator sit =
@@ -22549,7 +22565,7 @@ namespace Legion {
       if (!new_subscriptions.empty())
       {
         RtEvent recorded = report_output_registrations(source, source_space,
-                                                       new_subscriptions);
+                                             references, new_subscriptions);
         if (recorded.exists())
           recorded_events.push_back(recorded);
       }
@@ -22791,12 +22807,14 @@ namespace Legion {
       EqKDTree *tree = find_or_create_output_set_kd_tree(req_index);
       if (set_ready.exists() && !set_ready.has_triggered())
         set_ready.wait();
+      unsigned references = 0;
       for (LegionMap<Domain,FieldMask>::const_iterator it =
             shard_rects.begin(); it != shard_rects.end(); it++)
-        tree->record_shard_output_equivalence_set(set, it->first, it->second,
-            source, source_space, new_subscriptions, owner_shard->shard_id);
-      Runtime::trigger_event(recorded_event,
-          report_output_registrations(source, source_space, new_subscriptions));
+        references += tree->record_shard_output_equivalence_set(set, it->first,
+            it->second, source, source_space, new_subscriptions,
+            owner_shard->shard_id);
+      Runtime::trigger_event(recorded_event, report_output_registrations(source,
+            source_space, references, new_subscriptions));
       set->unpack_global_ref();
     }
 
