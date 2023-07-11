@@ -392,7 +392,10 @@ namespace Realm {
 				 const void *data, size_t datalen);
     };
 
-
+    namespace ThreadLocal {
+      // Assume zero initialized
+      extern REALM_THREAD_LOCAL Processor current_processor;
+    }
 }; // namespace Realm
 
 #endif // ifndef REALM_PROC_IMPL_H

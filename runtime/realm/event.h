@@ -19,6 +19,7 @@
 #define REALM_EVENT_H
 
 #include "realm/realm_c.h"
+#include "realm/utils.h"
 
 #include <vector>
 #include <set>
@@ -150,11 +151,12 @@ namespace Realm {
        * \return the event that will trigger when all input events
        * have.
        */
-      static Event merge_events(const std::set<Event>& wait_for);
-      static Event merge_events(const std::vector<Event>& wait_for);
+      static Event merge_events(const Event *wait_for, size_t num_events);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
+      static Event merge_events(const std::set<Event>& wait_for);
+      static Event merge_events(const span<const Event>& wait_for);
       ///@}
 
       /**
@@ -164,8 +166,9 @@ namespace Realm {
        * \return the event that will trigger when all input events
        * have.
        */
+      static Event merge_events_ignorefaults(const Event *wait_for, size_t num_events);
+      static Event merge_events_ignorefaults(const span<const Event>& wait_for);
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
-      static Event merge_events_ignorefaults(const std::vector<Event>& wait_for);
       static Event ignorefaults(Event wait_for);
 
       /**
@@ -176,9 +179,14 @@ namespace Realm {
        * \param happens_before the event that must occur before the UserEvent
        * \param happens_after the event that must occur after the UserEvent
        */
-      static void advise_event_ordering(Event happens_before, Event happens_after);
-      static void advise_event_ordering(const std::set<Event>& happens_before,
-					Event happens_after, bool all_must_trigger = true);
+      static void advise_event_ordering(Event happens_before,
+                                        Event happens_after);
+      static void advise_event_ordering(const Event *happens_before,
+                                        size_t num_events, Event happens_after,
+                                        bool all_must_trigger = true);
+      static void advise_event_ordering(const span<Event> &happens_before,
+                                        Event happens_after,
+                                        bool all_must_trigger = true);
     };
 
     /**
