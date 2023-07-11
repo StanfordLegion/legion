@@ -3586,7 +3586,9 @@ static void *bytedup(const void *data, size_t datalen)
       // once we've copied out our events, mark that we've consumed the
       //  entries - this has to happen in the same order as the rd_ptr
       //  bumps though
-      while(consume_ptr.load() != old_rd_ptr) { /*pause?*/ }
+      while(consume_ptr.load() != old_rd_ptr) {
+        REALM_SPIN_YIELD();
+      }
       size_t check = consume_ptr.fetch_add_acqrel(count);
       assert(check == old_rd_ptr);
 
@@ -3661,7 +3663,9 @@ static void *bytedup(const void *data, size_t datalen)
       completed_events[wr_ofs] = event;
 
       // bump commit pointer, but respecting order
-      while(commit_ptr.load() != old_wr_ptr) { /*pause?*/ }
+      while(commit_ptr.load() != old_wr_ptr) {
+        REALM_SPIN_YIELD();
+      }
       size_t check = commit_ptr.fetch_add_acqrel(1);
       assert(check == old_wr_ptr);
 

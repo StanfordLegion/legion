@@ -97,13 +97,6 @@ struct RWLockImpl {
 #include <sys/syscall.h>
 #endif
 
-#ifdef __SSE2__
-// technically pause is an "SSE2" instruction, but it's defined in xmmintrin
-//  (it'd be fine to call it on older CPUs, but since we're doing conditional
-//  compilation, only use it if it does something)
-#include <xmmintrin.h>
-#endif
-
 #ifdef REALM_ON_WINDOWS
 static void sleep(long seconds) { Sleep(seconds * 1000); }
 #endif
@@ -297,12 +290,7 @@ namespace Realm {
       }
 
       if(spin) {
-        // x86 wants you to insert a PAUSE in any spin loop
-        // TODO: see if other processors need something similar
-#ifdef __SSE2__
-        _mm_pause();
-#endif
-
+        REALM_SPIN_YIELD();
         val = dbi->state.load_acquire();
         continue;
       }
