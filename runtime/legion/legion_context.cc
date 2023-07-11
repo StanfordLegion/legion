@@ -4128,11 +4128,11 @@ namespace Legion {
     {
       DerezCheck z(derez);
       EqSetTracker *tracker;
+      derez.deserialize(tracker);
       unsigned references;
       derez.deserialize(references);
       if (references > 0)
         tracker->add_subscription_reference(references);
-      derez.deserialize(tracker);
       size_t num_subscriptions;
       derez.deserialize(num_subscriptions);
       FieldMaskSet<EqKDTree> new_subscriptions;
