@@ -53,23 +53,23 @@ namespace Realm {
       return get_runtime()->get_processor_impl(*this)->kind;
     }
 
-    /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
+    void Processor::get_group_members(Processor *members, size_t& num_members) const
     {
-      return ProcessorGroup::create_group(members);
-    }
-
-    void Processor::get_group_members(std::vector<Processor>& members) const
-    {
-      // if we're a plain old processor, the only member of our "group" is ourself
-      if(ID(*this).is_processor()) {
-	members.push_back(*this);
-	return;
+      if (ID(*this).is_processor()) {
+        num_members = 1;
+        if ((members != nullptr) && (num_members > 0)) {
+          members[0] = *this;
+        }
+        return;
       }
-
-      assert(ID(*this).is_procgroup());
-
       ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
-      grp->get_group_members(members);
+      size_t old_num_members = num_members;
+      num_members = grp->members.size();
+      if (members != nullptr) {
+        for (size_t i = 0; i < std::min(old_num_members, grp->members.size()); i++) {
+          members[i] = grp->members[i]->me;
+        }
+      }
     }
 
     int Processor::get_num_cores(void) const
@@ -364,6 +364,11 @@ namespace Realm {
       return NULL;
     }
 
+  /*static*/ Processor Processor::get_executing_processor(void)
+  { 
+    return ThreadLocal::current_processor;
+  }
+
   /*static*/ void Processor::enable_scheduler_lock(void)
   {
 #ifdef DEBUG_REALM
@@ -389,9 +394,10 @@ namespace Realm {
     /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP =
 			      ID(ID::ID_NULL).convert<ProcessorGroup>();
 
-    /*static*/ ProcessorGroup ProcessorGroup::create_group(const std::vector<Processor>& members)
+    /*static*/ ProcessorGroup ProcessorGroup::create_group(const Processor *_members, size_t num_members)
     {
       NodeID owner_node;
+      span<const Processor> members(_members, num_members);
       if(members.empty()) {
 	// create empty groups locally
 	owner_node = Network::my_node_id;
@@ -695,10 +701,10 @@ namespace Realm {
     {
       assert(members_valid);
 
-      for(std::vector<ProcessorImpl *>::const_iterator it = members.begin();
-	  it != members.end();
-	  it++)
-	member_list.push_back((*it)->me);
+      member_list.resize(members.size());
+
+      for (size_t i = 0; i < members.size(); i++)
+        member_list[i] = members[i]->me;
     }
 
     void ProcessorGroupImpl::destroy(void)
