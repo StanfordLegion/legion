@@ -2447,9 +2447,9 @@ namespace Realm {
     //
     // class GPUFBMemory
 
-    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size)
+    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size, bool isMemmapped /*= false*/)
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
-      , gpu(_gpu), base(_base)
+      , gpu(_gpu), base(_base), isMemmapedMemory(isMemmapped)
     {
       // mark what context we belong to
       add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
@@ -3374,8 +3374,18 @@ namespace Realm {
       delete_container_contents(task_streams);
 
       // free memory
-      if(fbmem_base)
-        CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fbmem_base) );
+      if(fbmem != nullptr) {
+#if CUDA_VERSION >= 11050
+        if (fbmem->isMemmapedMemory) {
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemUnmap)(fbmem->base, fbmem->size) );
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemAddressFree)(fbmem->base, fbmem->size) );
+        }
+        else
+#endif
+        {
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fbmem->base) );
+        }
+      }
 
       if(fb_ibmem_base)
         CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fb_ibmem_base) );
@@ -3463,6 +3473,14 @@ namespace Realm {
           CUresult ret = CUDA_DRIVER_FNPTR(cuCtxEnablePeerAccess)(peer_gpu->context, 0);
           if((ret != CUDA_SUCCESS) && (ret != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED))
             REPORT_CU_ERROR("cuCtxEnablePeerAccess((*it)->context, 0)", ret);
+          if (peer_gpu->fbmem->isMemmapedMemory) {
+            // Enable access to each of this gpu's peer's fbmem.
+            CUmemAccessDesc desc;
+            desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+            desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            desc.location.id = info->index;
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuMemSetAccess)(peer_gpu->fbmem->base, peer_gpu->fbmem->size, &desc, 1));
+          }
         }
         log_gpu.info() << "peer access enabled from GPU " << p << " to FB "
                        << peer_gpu->fbmem->me;
@@ -3512,61 +3530,127 @@ namespace Realm {
       }
     }
 
-    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size)
-    {
+    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size,
+                               size_t ib_size) {
       // need the context so we can get an allocation in the right place
+      bool isMemmapped = false;
       {
-	AutoGPUContext agc(this);
+        AutoGPUContext agc(this);
+        CUresult ret = CUDA_SUCCESS;
+#if CUDA_VERSION >= 11050
+        int mmap_supported = 0, mmap_supports_rdma = 0, rdma_supported = 0;
 
-	CUresult ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fbmem_base, size);
-	if(ret != CUDA_SUCCESS) {
-	  if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
-	    size_t free_bytes, total_bytes;
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)
-                      (&free_bytes, &total_bytes) );
-	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
-			    << ": " << size << " bytes needed (from -ll:fsize), "
-			    << free_bytes << " (out of " << total_bytes << ") available";
-	  } else {
-	    const char *errstring = "error message not available";
-#if CUDA_VERSION >= 6050
-	    CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&mmap_supported,
+         CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED,
+         info->device);
+        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&rdma_supported,
+         CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_SUPPORTED,
+         info->device);
+        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&mmap_supports_rdma,
+         CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
+         info->device);
+
+        // To prevent bit-rot, and because there's no advantage to not using the
+        // cuMemMap APIs, use them by default unless we need a feature they
+        // don't support.
+        if (!module->cfg_use_cuda_ipc && mmap_supported &&
+            !(rdma_supported && !mmap_supports_rdma)) {
+          CUmemGenericAllocationHandle mem_handle;
+          CUmemAllocationProp mem_prop;
+          size_t granularity = 0;
+          memset(&mem_prop, 0, sizeof(mem_prop));
+          mem_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+          // TODO: Replace with shareable handle type
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_NONE;
+          mem_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+          mem_prop.location.id = info->index;
+          mem_prop.win32HandleMetaData = nullptr;
+          mem_prop.allocFlags.compressionType = 0;
+          // TODO: check if fb_mem actually needs to be rdma capable
+          mem_prop.allocFlags.gpuDirectRDMACapable = mmap_supports_rdma;
+          mem_prop.allocFlags.usage = 0;
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetAllocationGranularity)(
+              &granularity, &mem_prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
+          // Round up size to the recommended granularity
+          size = (size + granularity - 1) & ~(granularity - 1);
+          // Create the allocation
+          ret = CUDA_DRIVER_FNPTR(cuMemCreate)(&mem_handle, size, &mem_prop,
+                                               0ULL);
+          if (ret == CUDA_SUCCESS) {
+            ret = CUDA_DRIVER_FNPTR(cuMemAddressReserve)(&fbmem_base, size,
+                                                         0ULL, 0ULL, 0ULL);
+            if (ret == CUDA_SUCCESS) {
+              ret = CUDA_DRIVER_FNPTR(cuMemMap)(fbmem_base, size, 0, mem_handle,
+                                                0ULL);
+              if (ret == CUDA_SUCCESS) {
+                CUmemAccessDesc access_desc;
+                memcpy(&access_desc.location, &mem_prop.location,
+                       sizeof(mem_prop.location));
+                access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                ret = CUDA_DRIVER_FNPTR(cuMemSetAccess)(fbmem_base, size,
+                                                        &access_desc, 1);
+              }
+            }
+            ret = CUDA_DRIVER_FNPTR(cuMemRelease)(mem_handle);
+          }
+          isMemmapped = true;
+        }
+        else
 #endif
-	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
-			    << ": result=" << ret
-			    << " (" << errstring << ")";
-	  }
-	  abort();
-	}
+        {
+          ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fbmem_base, size);
+        }
+
+        if (ret != CUDA_SUCCESS) {
+          if (ret == CUDA_ERROR_OUT_OF_MEMORY) {
+            size_t free_bytes, total_bytes;
+            CHECK_CU(
+                CUDA_DRIVER_FNPTR(cuMemGetInfo)(&free_bytes, &total_bytes));
+            log_gpu.fatal()
+                << "insufficient memory on gpu " << info->index << ": " << size
+                << " bytes needed (from -ll:fsize), " << free_bytes
+                << " (out of " << total_bytes << ") available";
+          } else {
+            const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+            CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+#endif
+            log_gpu.fatal()
+                << "unexpected error from cuMemAlloc on gpu " << info->index
+                << ": result=" << ret << " (" << errstring << ")";
+          }
+          abort();
+        }
       }
 
       Memory m = runtime->next_local_memory_id();
-      fbmem = new GPUFBMemory(m, this, fbmem_base, size);
+      fbmem = new GPUFBMemory(m, this, fbmem_base, size, isMemmapped);
       runtime->add_memory(fbmem);
 
       // FB ibmem is a separate allocation for now (consider merging to make
       //  total number of allocations, network registrations, etc. smaller?)
-      if(ib_size > 0) {
+      if (ib_size > 0) {
         {
           AutoGPUContext agc(this);
 
           CUresult ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fb_ibmem_base, ib_size);
-          if(ret != CUDA_SUCCESS) {
-            if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+          if (ret != CUDA_SUCCESS) {
+            if (ret == CUDA_ERROR_OUT_OF_MEMORY) {
               size_t free_bytes, total_bytes;
-              CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)
-                        (&free_bytes, &total_bytes) );
-              log_gpu.fatal() << "insufficient memory on gpu " << info->index
-                              << ": " << ib_size << " bytes needed (from -ll:ib_fsize), "
-                              << free_bytes << " (out of " << total_bytes << ") available";
-	  } else {
+              CHECK_CU(
+                  CUDA_DRIVER_FNPTR(cuMemGetInfo)(&free_bytes, &total_bytes));
+              log_gpu.fatal()
+                  << "insufficient memory on gpu " << info->index << ": "
+                  << ib_size << " bytes needed (from -ll:ib_fsize), "
+                  << free_bytes << " (out of " << total_bytes << ") available";
+            } else {
               const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
               CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
 #endif
-              log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
-                              << ": result=" << ret
-                              << " (" << errstring << ")";
+              log_gpu.fatal()
+                  << "unexpected error from cuMemAlloc on gpu " << info->index
+                  << ": result=" << ret << " (" << errstring << ")";
             }
             abort();
           }
