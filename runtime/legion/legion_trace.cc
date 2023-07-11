@@ -4414,7 +4414,7 @@ namespace Legion {
       cancel_subscriptions(context->runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             to_remove.begin(); it != to_remove.end(); it++)
-        if (it->first->remove_base_resource_ref(TRACE_REF))
+        if (it->first->remove_base_gc_ref(TRACE_REF))
           delete it->first;
     }
 
@@ -4839,7 +4839,7 @@ namespace Legion {
             pending_equivalence_sets.begin(); it != 
             pending_equivalence_sets.end(); it++)
         if (equivalence_sets.insert(it->first, it->second))
-          it->first->add_base_resource_ref(TRACE_REF);
+          it->first->add_base_gc_ref(TRACE_REF);
       pending_equivalence_sets.clear();
     }
 
