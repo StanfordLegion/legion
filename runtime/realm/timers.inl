@@ -22,19 +22,22 @@
 
 #include <climits>
 
-#ifdef REALM_TIMERS_USE_RDTSC
-  #if defined(__i386__) || defined(__x86_64__)
-    #if defined(REALM_COMPILER_IS_NVCC)
-      // old versions of nvcc have trouble with avx512 intrinsic definitions,
-      //  which we cannot avoid in the include below
-      // Update 1/13/2022: the issue has been observed even with CUDA 11.2.
-      //  as the version check doesn't seem to safely filter out all the buggy
-      //  ones, we remove the check.
-      #define __rdtsc __builtin_ia32_rdtsc
-    #else
-      #include <x86intrin.h>
-    #endif
+#if defined(REALM_ON_WINDOWS)
+#include <intrin.h>
+#pragma intrinsic(__rdtsc)
+#else
+#if defined(__i386__) || defined(__x86_64__)
+  #if defined(REALM_COMPILER_IS_NVCC)
+    // old versions of nvcc have trouble with avx512 intrinsic definitions,
+    //  which we cannot avoid in the include below
+    // Update 1/13/2022: the issue has been observed even with CUDA 11.2.
+    //  as the version check doesn't seem to safely filter out all the buggy
+    //  ones, we remove the check.
+    #define __rdtsc __builtin_ia32_rdtsc
+  #else
+    #include <x86intrin.h>
   #endif
+#endif
 #endif
 
 // we'll use (non-standard) __int128 if available (gcc, clang, icc, at least)
@@ -76,7 +79,7 @@ namespace Realm {
 
   inline /*static*/ uint64_t Clock::native_time()
   {
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
     if(REALM_LIKELY(cpu_tsc_enabled))
       return raw_cpu_tsc();
 #endif
@@ -105,7 +108,7 @@ namespace Realm {
     return native_to_nanoseconds.convert_reverse_delta(d_nanoseconds);
   }
 
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
   inline /*static*/ uint64_t Clock::raw_cpu_tsc()
   {
 #if defined(__i386__) || defined(__x86_64__)
@@ -116,6 +119,16 @@ namespace Realm {
 #else
       return __rdtsc();
 #endif
+#elif defined(__aarch64__) || defined(__arm__)
+      // https://developer.arm.com/documentation/ddi0595/2021-12/AArch64-Registers/CNTVCT-EL0--Counter-timer-Virtual-Count-register
+      uint64_t val;
+      asm volatile("mrs %0, cntvct_el0" : "=r"(val));
+      return val;
+#elif defined(__PPC__) || defined(__PPC64__)
+      // https://man7.org/linux/man-pages/man3/__ppc_get_timebase.3.html
+      uint64_t val;
+      asm volatile("mfspr %0, 268" : "=r"(val));
+      return val;
 #else
 #error Missing cpu tsc reading code!
 #endif

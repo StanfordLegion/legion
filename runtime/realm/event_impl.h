@@ -204,8 +204,6 @@ namespace Realm {
       virtual bool remove_waiter(gen_t needed_gen, EventWaiter *waiter);
 
       // creates an event that won't trigger until all input events have
-      static Event merge_events(const std::set<Event>& wait_for,
-				bool ignore_faults);
       static Event merge_events(span<const Event> wait_for,
 				bool ignore_faults);
       static Event merge_events(Event ev1, Event ev2,

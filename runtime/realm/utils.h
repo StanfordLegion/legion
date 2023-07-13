@@ -30,7 +30,27 @@
 #include <cstdint>
 #include <sstream>
 
+// Define the intrinsic for yielding a core's resources temporarily in order to
+// relieve some pressure on the memory bus and give other threads a chance to
+// make some forward progress to unblock us.  This does *not* yield the thread
+// to the OS.
+#if defined(__SSE__)
+// Same as "pause", but is more compatible for older intel cpus
+#define REALM_SPIN_YIELD() asm volatile ("rep; nop":::)
+#elif defined(__aarch64__) || defined(__arm__)
+#define REALM_SPIN_YIELD() asm volatile ("yield" :::)
+#elif defined(__PPC64__) || defined(__PPC__)
+#define REALM_SPIN_YIELD() asm volatile ("yield" :::)
+#else
+#define REALM_SPIN_YIELD()
+#endif
+
 namespace Realm {
+
+  // TODO: actually use C++20 version if available
+  const size_t dynamic_extent = size_t(-1);
+
+  template <typename T, size_t Extent = dynamic_extent> class span;
     
   // helpers for deleting contents STL containers of pointers-to-things
 
@@ -246,7 +266,8 @@ namespace Realm {
 			  const char *_delim = ", ",
 			  const char *_pfx = "[",
 			  const char *_sfx = "]");
-    explicit PrettyVector(const std::vector<T>& _v,
+    template<typename Container = std::vector<T> >
+    explicit PrettyVector(const Container& _v,
 			  const char *_delim = ", ",
 			  const char *_pfx = "[",
 			  const char *_sfx = "]");
@@ -307,11 +328,6 @@ namespace Realm {
 
   // TODO: get this from <variant> for c++17 and up?
   struct monostate {};
-
-  // TODO: actually use C++20 version if available
-  const size_t dynamic_extent = size_t(-1);
-
-  template <typename T, size_t Extent = dynamic_extent> class span;
 
   template <typename T>
   class span<T, dynamic_extent> {

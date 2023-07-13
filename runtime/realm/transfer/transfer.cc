@@ -3718,12 +3718,12 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   Event IndirectionInfoTyped<N,T,N2,T2>::request_metadata(void)
   {
-    std::set<Event> evs;
+    std::vector<Event> evs;
 
     {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
       Event e = impl->request_metadata();
-      if(!e.has_triggered()) evs.insert(e);
+      if(!e.has_triggered()) evs.push_back(e);
     }
 
     for(std::vector<RegionInstance>::const_iterator it = insts.begin();
@@ -3731,7 +3731,7 @@ namespace Realm {
 	++it) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(*it);
       Event e = impl->request_metadata();
-      if(!e.has_triggered()) evs.insert(e);
+      if(!e.has_triggered()) evs.push_back(e);
     }
 
     return Event::merge_events(evs);

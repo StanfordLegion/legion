@@ -88,14 +88,9 @@ namespace Realm {
   }
 
   // creates an event that won't trigger until all input events have
-  /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
+  /*static*/ Event Event::merge_events(const Event *wait_for, size_t num_events)
   {
-    return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
-  }
-
-  /*static*/ Event Event::merge_events(const std::vector<Event>& wait_for)
-  {
-    return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
+    return GenEventImpl::merge_events(span<const Event>(wait_for, num_events), false /*!ignore faults*/);
   }
 
   /*static*/ Event Event::merge_events(Event ev1, Event ev2,
@@ -105,14 +100,9 @@ namespace Realm {
     return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
   }
 
-  /*static*/ Event Event::merge_events_ignorefaults(const std::set<Event>& wait_for)
+  /*static*/ Event Event::merge_events_ignorefaults(const Event *wait_for, size_t num_events)
   {
-    return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
-  }
-
-  /*static*/ Event Event::merge_events_ignorefaults(const std::vector<Event>& wait_for)
-  {
-    return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
+    return GenEventImpl::merge_events(span<const Event>(wait_for, num_events), true /*ignore faults*/);
   }
 
   /*static*/ Event Event::ignorefaults(Event wait_for)
@@ -1045,62 +1035,6 @@ namespace Realm {
 
 
     // creates an event that won't trigger until all input events have
-    /*static*/ Event GenEventImpl::merge_events(const std::set<Event>& wait_for,
-						bool ignore_faults)
-    {
-      if (wait_for.empty())
-        return Event::NO_EVENT;
-      // scan through events to see how many exist/haven't fired - we're
-      //  interested in counts of 0, 1, or 2+ - also remember the first
-      //  event we saw for the count==1 case
-      int wait_count = 0;
-      Event first_wait;
-      for(std::set<Event>::const_iterator it = wait_for.begin();
-	  (it != wait_for.end()) && (wait_count < 2);
-	  it++) {
-	bool poisoned = false;
-	if((*it).has_triggered_faultaware(poisoned)) {
-          if(poisoned) {
-	    // if we're not ignoring faults, we need to propagate this fault, and can do
-	    //  so by just returning this poisoned event
-	    if(!ignore_faults) {
-	      log_poison.info() << "merging events - " << (*it) << " already poisoned";
-	      return *it;
-	    }
-          }
-	} else {
-	  if(!wait_count) first_wait = *it;
-	  wait_count++;
-	}
-      }
-      log_event.debug() << "merging events - at least " << wait_count << " not triggered";
-
-      // Avoid these optimizations if we are doing event graph tracing
-      // we also cannot return an input event directly in the (wait_count == 1) case
-      //  if we're ignoring faults
-      // counts of 0 or 1 don't require any merging
-      if(wait_count == 0) return Event::NO_EVENT;
-      if((wait_count == 1) && !ignore_faults) return first_wait;
-
-      // counts of 2+ require building a new event and a merger to trigger it
-      GenEventImpl *event_impl = GenEventImpl::create_genevent();
-      Event finish_event = event_impl->current_event();
-
-      EventMerger *m = &(event_impl->merger);
-      m->prepare_merger(finish_event, ignore_faults, wait_for.size());
-
-      for(std::set<Event>::const_iterator it = wait_for.begin();
-	  it != wait_for.end();
-	  it++) {
-	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
-	m->add_precondition(*it);
-      }
-
-      // once they're all added - arm the thing (it might go off immediately)
-      m->arm_merger();
-
-      return finish_event;
-    }
 
     // creates an event that won't trigger until all input events have
     /*static*/ Event GenEventImpl::merge_events(span<const Event> wait_for,
@@ -3586,7 +3520,9 @@ static void *bytedup(const void *data, size_t datalen)
       // once we've copied out our events, mark that we've consumed the
       //  entries - this has to happen in the same order as the rd_ptr
       //  bumps though
-      while(consume_ptr.load() != old_rd_ptr) { /*pause?*/ }
+      while(consume_ptr.load() != old_rd_ptr) {
+        REALM_SPIN_YIELD();
+      }
       size_t check = consume_ptr.fetch_add_acqrel(count);
       assert(check == old_rd_ptr);
 
@@ -3661,7 +3597,9 @@ static void *bytedup(const void *data, size_t datalen)
       completed_events[wr_ofs] = event;
 
       // bump commit pointer, but respecting order
-      while(commit_ptr.load() != old_wr_ptr) { /*pause?*/ }
+      while(commit_ptr.load() != old_wr_ptr) {
+        REALM_SPIN_YIELD();
+      }
       size_t check = commit_ptr.fetch_add_acqrel(1);
       assert(check == old_wr_ptr);
 
