@@ -25,10 +25,6 @@ cache: &global_cache
 .no_ccache: &no_ccache
   USE_CCACHE: "0"
 
-.gcc8: &gcc8
-  CC:  "gcc-8"
-  CXX: "g++-8"
-  F90: "gfortran-8"
 .gcc9: &gcc9
   CC:  "gcc-9"
   CXX: "g++-9"
@@ -46,18 +42,6 @@ cache: &global_cache
   CXX: "g++-12"
   F90: "gfortran-12"
 
-.clang7: &clang7
-  CC:  "clang-7"
-  CXX: "clang++-7"
-  F90: "gfortran-5"
-.clang8: &clang8
-  CC:  "clang-8"
-  CXX: "clang++-8"
-  F90: "gfortran-5"
-.clang9: &clang9 # FIXME (Elliott): this configuration for kokkos_openmp only. do not use for any other test job
-  CC:  "clang-9"
-  CXX: "clang++-9"
-  F90: "gfortran-9"
 .clang10: &clang10
   CC:  "clang-10"
   CXX: "clang++-10"
@@ -219,6 +203,7 @@ cache: &global_cache
 .ucx: &ucx
   REALM_NETWORKS: "ucx"
   UCX_WARN_UNUSED_ENV_VARS: "n"
+  UCX_BRANCH: "v1.14.1"
   # mpi_interop example requires MPI to build correctly
   USE_MPI: "1"
 .cmake: &cmake
@@ -226,10 +211,10 @@ cache: &global_cache
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
-  KOKKOS_BRANCH: "4.0.00"
+  KOKKOS_BRANCH: "4.0.01"
   KOKKOS_CUDA_ARCH: "PASCAL60"
   KKERNELS_REPO: "https://github.com/kokkos/kokkos-kernels.git"
-  KKERNELS_BRANCH: "4.0.00"
+  KKERNELS_BRANCH: "4.0.01"
 
 .prof: &prof
   USE_PROF: "1"
@@ -340,7 +325,7 @@ before_script:
         apt-get install -y autoconf automake m4 libtool
         git clone https://github.com/openucx/ucx ucx-git
         cd ucx-git
-        git checkout 5f26dd4
+        git checkout $UCX_BRANCH
         ./autogen.sh
         if [[ "$CUDA" != "" ]]; then
           ./contrib/configure-release-mt --with-cuda=$CUDA
@@ -522,22 +507,22 @@ before_script:
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
-.p100_cuda102: &p100_cuda102
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-10.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-10.2"
-  USE_NVTX: "1"
-
-.p100_cuda110: &p100_cuda110
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-11.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.0"
-  USE_NVTX: "1"
-
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  USE_NVTX: "1"
+
+.p100_cuda117: &p100_cuda117
+  <<: *p100_base
+  CUDA: "/usr/local/cuda-11.7"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.7"
+  USE_NVTX: "1"
+
+.p100_cuda121: &p100_cuda121
+  <<: *p100_base
+  CUDA: "/usr/local/cuda-12.1"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-12.1"
   USE_NVTX: "1"
 
 ###
@@ -1276,62 +1261,62 @@ clang14_cxx20_debug_regent:
     <<: [*clang14, *terra14, *debug, *cxx20_normal, *regent]
 
 # CUDA tests:
-p100_cuda102_gcc8_cxx11_release_cuda_legion:
+p100_cuda112_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *legion, *cmake, *ctest, *shared]
-p100_cuda102_gcc8_cxx11_debug_checks_cuda_legion:
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
+p100_cuda112_gcc9_cxx14_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *debug, *cxx11_normal, *checks, *p100_cuda102, *legion, *short, *cmake, *ctest, *shared]
-p100_cuda102_gcc8_cxx11_release_cmake_cuda_legion:
+    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda112, *legion, *cmake, *ctest, *shared]
+p100_cuda117_gcc9_cxx17_debug_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *cmake, *legion, *ctest, *shared]
-p100_cuda110_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
+    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda117, *legion, *short, *cmake, *ctest, *shared, *libdw]
+p100_cuda117_gcc9_cxx17_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda110, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared]
-p100_cuda110_gcc9_cxx14_release_cuda_legion:
+    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda117, *cmake, *legion, *ctest, *shared]
+p100_cuda121_gcc9_cxx14_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda110, *legion, *cmake, *ctest, *shared]
-p100_cuda112_gcc9_cxx17_debug_cuda_legion:
+    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda121, *legion, *cmake, *ctest, *shared]
+p100_cuda121_gcc9_cxx14_debug_checks_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda112, *legion, *short, *cmake, *ctest, *shared]
-p100_cuda112_gcc9_cxx17_release_cmake_cuda_legion:
+    <<: [*gcc9, *debug, *cxx14_normal, *checks, *p100_cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
+p100_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda112, *cmake, *legion, *ctest, *shared]
-p100_cuda102_clang7_cxx11_release_cuda_regent:
+    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda121, *cmake, *legion, *ctest, *shared]
+p100_cuda121_clang12_cxx14_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *regent, *cmake, *ctest, *short]
-p100_cuda102_clang7_cxx11_release_cmake_cuda_regent:
+    <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *regent, *cmake, *ctest, *short]
+p100_cuda121_clang12_cxx14_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *cmake, *ctest, *regent, *shared]
+    <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *cmake, *ctest, *regent, *shared]
 
 # CUDA+GASNet tests:
-p100_cuda112_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
+p100_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *gasnetex_mpi, *legion, *ctest, *short]
-p100_cuda112_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
+p100_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda112, *gasnetex_mpi, *regent]
+    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *p100_cuda121, *gasnetex_mpi, *regent]
 
 # CUDA+UCX tests:
-p100_cuda112_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
+p100_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
  <<: [*p100, *tests]
  variables:
-   <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *ucx, *legion, *ctest, *short]
-p100_cuda112_gcc9_cxx14_release_ucx_cuda_regent:
+   <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
+p100_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda112, *ucx, *regent]
+    <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda121, *ucx, *regent]
 
 # Kokkos tests:
 clang12_cxx17_debug_kokkos_legion:
@@ -1350,19 +1335,19 @@ clang10_cxx17_debug_kokkos_openmp_legion:
 p100_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion, *ctest]
-p100_cuda112_clang10_cxx17_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion, *ctest, *libdw]
+p100_cuda121_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
-p100_cuda112_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang12, *debug, *cxx17_normal, *p100_cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+p100_cuda117_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest]
-p100_cuda112_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
+    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda117, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
+p100_cuda121_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
+    <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
 
 # HPCSDK (nvc++) tests:
 # Make all HPC SDK tests use cmake since nvc++ is really slow and can't handle doing compile+link
