@@ -16332,7 +16332,7 @@ namespace Legion {
       else
         current = static_cast<ProjectionRegion*>(finder->second);
       current->add_user(owner_shard);
-      while (true)
+      while (child != root)
       {
         // Do the next partition
         finder = node_map.find(child->parent);
@@ -16358,8 +16358,6 @@ namespace Legion {
         else
           next = static_cast<ProjectionRegion*>(finder->second);
         next->add_child(parent); 
-        if (child->parent->parent == root)
-          break;
         // Now we can walk up the tree
         child = child->parent->parent;
         current = next;

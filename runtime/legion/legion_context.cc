@@ -10933,6 +10933,7 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
+      const ShardID local_shard = get_shard_id();
       const ContextID ctx = tree_context.get_id();
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
@@ -10983,7 +10984,7 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             it->first->set_expr->initialize_equivalence_set_kd_tree(
-                        tree, it->first, it->second, true/*current*/);
+                tree, it->first, it->second, local_shard, true/*current*/);
           // In this case we also tell the region tree that this is
           // already refined so that no read or reduce refinements can
           // be performed in this context
@@ -11044,7 +11045,7 @@ namespace Legion {
           eq_set->initialize_set(usage, user_mask, restricted, sources,
                                  corresponding);
           region_node->row_source->initialize_equivalence_set_kd_tree(tree,
-                                      eq_set, user_mask, false/*current*/);
+              eq_set, user_mask, local_shard, false/*current*/);
           // Each equivalence set here comes with a reference that we
           // need to remove after we've registered it
           if (eq_set->remove_base_gc_ref(CONTEXT_REF))
@@ -11064,7 +11065,7 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             it->first->set_expr->initialize_equivalence_set_kd_tree(
-                tree, it->first, it->second, false/*current*/);
+                tree, it->first, it->second, local_shard, false/*current*/);
         }
       }
     }
@@ -11245,12 +11246,12 @@ namespace Legion {
           // from a sub-task that was control replicated, so we extract
           // the equivalence sets and add them into our tree
           FieldMaskSet<EquivalenceSet> eq_sets;
-          created_trees[idx]->extract_equivalence_sets(eq_sets, 
-              source_shard, (mapping == NULL) ? 1 : mapping->size());
+          created_trees[idx]->find_local_equivalence_sets(eq_sets,source_shard);
+          const ShardID local_shard = get_shard_id();
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             it->first->set_expr->initialize_equivalence_set_kd_tree(
-                current, it->first, it->second, true/*current*/);
+                current, it->first, it->second, local_shard, true/*current*/);
         }
         else
         {
@@ -14033,9 +14034,9 @@ namespace Legion {
           eq_sets;
         for (unsigned idx = 0; idx < created_nodes.size(); idx++)
           if (created_trees[idx] != NULL)
-            created_trees[idx]->extract_shard_equivalence_sets(eq_sets,
-                source_shard, (mapping == NULL) ? 1 : mapping->size(), 
-                total_shards, created_nodes[idx]);
+            created_trees[idx]->find_shard_equivalence_sets(eq_sets,
+                source_shard, 0/*lower shard id*/, 
+                total_shards-1/*upper shard id*/, created_nodes[idx]);
         for (std::map<ShardID,LegionMap<RegionNode*,
                       FieldMaskSet<EquivalenceSet> > >::const_iterator sit =
               eq_sets.begin(); sit != eq_sets.end(); sit++)
@@ -14043,8 +14044,6 @@ namespace Legion {
           Serializer rez;
           rez.serialize(shard_manager->did);
           rez.serialize(sit->first);
-          rez.serialize<size_t>((mapping == NULL) ? 1 : mapping->size());
-          rez.serialize(source_shard);
           rez.serialize<size_t>(sit->second.size());
           for (LegionMap<RegionNode*,
                          FieldMaskSet<EquivalenceSet> >::const_iterator
@@ -14076,8 +14075,6 @@ namespace Legion {
           Serializer rez;
           rez.serialize(shard_manager->did);
           rez.serialize(source_shard);
-          rez.serialize<size_t>(mapping->size());
-          rez.serialize(source_shard);
           rez.serialize<size_t>(created_nodes.size());
           for (unsigned idx = 0; idx < created_nodes.size(); idx++)
           {
@@ -14085,8 +14082,8 @@ namespace Legion {
             rez.serialize(region->handle);
             FieldMaskSet<EquivalenceSet> eq_sets;
             if (created_trees[idx] != NULL)
-              created_trees[idx]->extract_equivalence_sets(eq_sets,
-                  source_shard, mapping->size());
+              created_trees[idx]->find_local_equivalence_sets(eq_sets,
+                                                        source_shard);
             rez.serialize<size_t>(eq_sets.size());
             for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                   eq_sets.begin(); it != eq_sets.end(); it++)
@@ -21432,10 +21429,6 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      size_t source_shards;
-      derez.deserialize(source_shards);
-      ShardID source_shard;
-      derez.deserialize(source_shard);
       size_t num_regions;
       derez.deserialize(num_regions);
       std::vector<RegionNode*> created_nodes(num_regions);
@@ -21468,26 +21461,30 @@ namespace Legion {
           if (wait_on.exists() && !wait_on.has_triggered())
             wait_on.wait();
         }
-        AutoLock priv_lock(privilege_lock);
-        unsigned index = add_created_region(handle,
-            false/*task local*/, false/*output region*/);
-        if (equivalence_set_trees.size() <= index)
-          equivalence_set_trees.resize(index+1, NULL);
-        EqKDTree *current = equivalence_set_trees[index];
-        if (current == NULL)
+        EqKDTree *current = NULL;
         {
-          // If we're the first make the KD-tree here
-          current = 
-            node->row_source->create_equivalence_set_kd_tree(total_shards);
-          current->add_reference();
-          equivalence_set_trees[index] = current;
+          AutoLock priv_lock(privilege_lock);
+          unsigned index = add_created_region(handle,
+              false/*task local*/, false/*output region*/);
+          if (equivalence_set_trees.size() <= index)
+            equivalence_set_trees.resize(index+1, NULL);
+          current = equivalence_set_trees[index];
+          if (current == NULL)
+          {
+            // If we're the first make the KD-tree here
+            current = 
+              node->row_source->create_equivalence_set_kd_tree(total_shards);
+            current->add_reference();
+            equivalence_set_trees[index] = current;
+          }
         }
+        const ShardID local_shard = get_shard_id(); 
         // Put the equivalence sets in the tree but in the previous set
         // of equivalence sets so new accesses will make new sets
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               eq_sets.begin(); it != eq_sets.end(); it++)
           it->first->set_expr->initialize_equivalence_set_kd_tree(
-              current, it->first, it->second, false/*current*/);
+              current, it->first, it->second, local_shard, false/*current*/);
       }
     }
 
@@ -23873,8 +23870,7 @@ namespace Legion {
           RegionNode *region = created_nodes[idx];
           rez.serialize(region->handle);
           FieldMaskSet<EquivalenceSet> eq_sets;
-          created_trees[idx]->extract_equivalence_sets(eq_sets,
-            source_shard, (shard_mapping == NULL) ? 1 : shard_mapping->size());
+          created_trees[idx]->find_local_equivalence_sets(eq_sets,source_shard);
           rez.serialize<size_t>(eq_sets.size());
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
@@ -23939,7 +23935,7 @@ namespace Legion {
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
           set->set_expr->initialize_equivalence_set_kd_tree(
-              tree, set, mask, true/*current*/);
+              tree, set, mask, source_shard, true/*current*/);
           set->unpack_global_ref();
         }
         created_trees[idx1] = tree;

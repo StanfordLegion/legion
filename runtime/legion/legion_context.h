@@ -1064,6 +1064,7 @@ namespace Legion {
         { return context_configuration.max_templates_per_trace; }
       void record_physical_trace_replay(RtEvent ready, bool replay);
       bool is_replaying_physical_trace(void);
+      virtual ShardID get_shard_id(void) const { return 0; }
       virtual DistributedID get_replication_id(void) const { return 0; }
       virtual size_t get_total_shards(void) const { return 1; }
       inline bool is_concurrent_context(void) const
@@ -2417,6 +2418,7 @@ namespace Legion {
         { return shard_collective_participating_shards; }
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; } 
+      virtual ShardID get_shard_id(void) const { return owner_shard->shard_id; }
       virtual DistributedID get_replication_id(void) const;
       virtual size_t get_total_shards(void) const { return total_shards; }
     public: // Privilege tracker methods
@@ -3471,6 +3473,7 @@ namespace Legion {
     public:
       virtual Task* get_task(void);
       virtual UniqueID get_unique_id(void) const;
+      virtual ShardID get_shard_id(void) const { return shard_id; }
       virtual DistributedID get_replication_id(void) const { return repl_id; }
       void unpack_remote_context(Deserializer &derez);
       virtual InnerContext* find_parent_context(void);

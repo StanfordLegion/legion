@@ -1395,6 +1395,7 @@ namespace Legion {
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
                                         EquivalenceSet *set,
                                         const FieldMask &mask,
+                                        ShardID local_shard,
                                         bool current) = 0;
       virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
@@ -1713,6 +1714,7 @@ namespace Legion {
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
                                         EquivalenceSet *set,
                                         const FieldMask &mask,
+                                        ShardID local_shard,
                                         bool current);
       virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
@@ -2652,6 +2654,7 @@ namespace Legion {
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
                                         EquivalenceSet *set,
                                         const FieldMask &mask,
+                                        ShardID local_shard,
                                         bool current);
       virtual unsigned compute_equivalence_sets(
           EqKDTree *tree, const FieldMask &mask, 
@@ -3076,14 +3079,13 @@ namespace Legion {
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
           EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
-      virtual void extract_equivalence_sets(
-          FieldMaskSet<EquivalenceSet> &eq_sets,
-          ShardID local_shard, size_t total_shards) const = 0;
-      virtual void extract_shard_equivalence_sets(
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const = 0;
+      virtual void find_shard_equivalence_sets(
           std::map<ShardID,LegionMap<RegionNode*,
                    FieldMaskSet<EquivalenceSet> > > &eq_sets,
-          ShardID source_shard, size_t total_source_shards,
-          size_t total_target_shards, RegionNode *region) = 0;
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const = 0;
       virtual void invalidate_shard_tree(const Domain &domain,
                                          const FieldMask &mask,
                                          Runtime *runtime,
@@ -3112,6 +3114,7 @@ namespace Legion {
       virtual void initialize_set(EquivalenceSet *set,
                                   const Rect<DIM,T> &rect,
                                   const FieldMask &mask,
+                                  ShardID local_shard,
                                   bool current) = 0;
       virtual unsigned compute_shard_equivalence_sets(
           const Domain &rect, const FieldMask &mask,
@@ -3147,11 +3150,11 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &subscriptions,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0) = 0;
-      virtual void extract_shard_equivalence_sets(
+      virtual void find_shard_equivalence_sets(
           std::map<ShardID,LegionMap<RegionNode*,
                    FieldMaskSet<EquivalenceSet> > > &eq_sets,
-          ShardID source_shard, size_t total_source_shards,
-          size_t total_target_shards, RegionNode *region);
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const = 0;
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
@@ -3193,6 +3196,7 @@ namespace Legion {
       virtual void initialize_set(EquivalenceSet *set,
                                   const Rect<DIM,T> &rect,
                                   const FieldMask &mask,
+                                  ShardID local_shard,
                                   bool current);
       virtual unsigned compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
@@ -3214,9 +3218,13 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &subscriptions,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
-      virtual void extract_equivalence_sets(
-          FieldMaskSet<EquivalenceSet> &eq_sets,
-          ShardID local_shard, size_t total_shards) const; 
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
@@ -3233,6 +3241,13 @@ namespace Legion {
       void find_all_previous_sets(FieldMask mask,
          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
       void invalidate_all_previous_sets(const FieldMask &mask);
+      void find_shard_equivalence_sets(const Rect<DIM,T> &rect,
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
+      void find_rect_equivalence_sets(const Rect<DIM,T> &rect,
+          FieldMaskSet<EquivalenceSet> &eq_sets) const;
     protected:
       void refine_node(const Rect<DIM,T> &rect, const FieldMask &mask);
       bool record_subscription(EqSetTracker *tracker, 
@@ -3290,6 +3305,7 @@ namespace Legion {
       virtual void initialize_set(EquivalenceSet *set,
                                   const Rect<DIM,T> &rect,
                                   const FieldMask &mask,
+                                  ShardID local_shard,
                                   bool current);
       virtual unsigned compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
@@ -3311,9 +3327,13 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &subscriptions,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
-      virtual void extract_equivalence_sets(
-          FieldMaskSet<EquivalenceSet> &eq_sets,
-          ShardID local_shard, size_t total_shards) const;
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
       virtual void invalidate_tree(const Rect<DIM,T> &rect,
                                    const FieldMask &mask, Runtime *runtime,
                                    std::vector<RtEvent> &invalidated_events,
@@ -3328,6 +3348,86 @@ namespace Legion {
                                AddressSpaceID space, const FieldMask &mask);
     protected:
       std::vector<EqKDTreeT<DIM,T>*> children;
+    };
+
+    /**
+     * \class EqKDSharded
+     * For control replicated contexts, this class provides a way of sharding
+     * a dense rectangle down into subspaces handled by different shards.
+     * We split shards by high order bits first down to low order bits in order
+     * to maintain spatial locality between shards
+     */
+    template<int DIM, typename T>
+    class EqKDSharded : public EqKDTreeT<DIM,T> {
+    public:
+      EqKDSharded(const Rect<DIM,T> &bound, ShardID lower, ShardID upper);
+      EqKDSharded(const EqKDSharded &rhs) = delete;
+      virtual ~EqKDSharded(void);
+    public:
+      EqKDSharded& operator=(const EqKDSharded &rhs) = delete;
+    public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  ShardID local_shard,
+                                  bool current);
+      virtual unsigned compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0); 
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
+          EqSetTracker *tracker, AddressSpaceID tracker_space);
+      virtual unsigned record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask, Runtime *runtime,
+                                   std::vector<RtEvent> &invalidated_events,
+                                   bool move_to_previous);
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual bool cancel_subscription(EqSetTracker *tracker,
+                               AddressSpaceID space, const FieldMask &mask);
+    protected:
+      void refine_node(void);
+      EqKDTreeT<DIM,T>* refine_local(void);
+    public:
+      // Lower bound shard (inclusive)
+      const ShardID lower;
+      // Upper bound shard (inclusive)
+      const ShardID upper;
+      // To avoid over-decomposing we specify a minimum split size, as soon
+      // as the size of bounds for this node are less than this value then
+      // we stop splitting and use the smallest shard in the set of shards
+      // to handle the results
+      static constexpr size_t MIN_SPLIT_SIZE = 1;
+    protected:
+      // These are atomic since they are lazily instantiated but once
+      // they are instantiated then they don't change so we don't need
+      // to have a lock in this node of the tree
+      std::atomic<EqKDTreeT<DIM,T>*> left, right;
     };
 
     /**
