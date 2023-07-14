@@ -726,8 +726,7 @@ namespace Legion {
       inline ApEvent get_done_event(void) { return done_event; }
     public:
       std::vector<DeppartResult> &results;
-      mutable ApEvent done_event;
-      mutable bool renamed;
+      const ApUserEvent done_event;
     };
 
     /**
