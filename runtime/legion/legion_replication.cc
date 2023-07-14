@@ -16783,7 +16783,7 @@ namespace Legion {
         rez.serialize(it->first);
         it->second.children.serialize(rez);
         rez.serialize(it->second.users.size());
-        for (unsigned idx = 0; idx < it->second.users.size(); it++)
+        for (unsigned idx = 0; idx < it->second.users.size(); idx++)
           rez.serialize(it->second.users[idx]);
       }
       rez.serialize<size_t>(partition_summaries.size());

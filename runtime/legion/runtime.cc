@@ -16270,6 +16270,7 @@ namespace Legion {
       launch_space->get_launch_space_domain(launch_domain);
       std::map<RegionTreeNode*,ProjectionNode*> node_map;
       node_map[root] = result;
+      Mappable *mappable = is_functional ? NULL : op->get_mappable();
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
@@ -16279,10 +16280,14 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            result = functor->project(region->handle, itr.p, launch_domain);
+            result = is_functional ?
+              functor->project(region->handle, itr.p, launch_domain) :
+              functor->project(mappable, index, region->handle, itr.p);
           }
           else
-            result = functor->project(region->handle, itr.p, launch_domain);
+            result = is_functional ?
+              functor->project(region->handle, itr.p, launch_domain) :
+              functor->project(mappable, index, region->handle, itr.p);
           check_projection_region_result(region->handle, op, index,
                                          result, op->runtime);
           if (!result.exists())
@@ -16299,10 +16304,14 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            result = functor->project(partition->handle, itr.p,launch_domain);
+            result = is_functional ?
+              functor->project(partition->handle, itr.p,launch_domain) :
+              functor->project(mappable, index, partition->handle, itr.p);
           }
           else
-            result = functor->project(partition->handle, itr.p,launch_domain);
+            result = is_functional ?
+              functor->project(partition->handle, itr.p,launch_domain) :
+              functor->project(mappable, index, partition->handle, itr.p);
           check_projection_partition_result(partition->handle, op, index,
                                             result, op->runtime);
           if (!result.exists())

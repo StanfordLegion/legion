@@ -3082,44 +3082,46 @@ namespace Legion {
         // which we don't know about locally so we know the nearest
         // shard which does have some information about it
         std::unordered_map<LegionColor,ShardID> nearest_shards;  
-        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+        std::multimap<LegionColor,ShardID>::const_iterator lower =
+          summary.disjoint_complete_child_shards.begin();
+        while (lower != summary.disjoint_complete_child_shards.end())
         {
-          if (local_children.find(*itr) != local_children.end())
-            continue;
-          std::multimap<LegionColor,ShardID>::const_iterator lower =
-            summary.disjoint_complete_child_shards.lower_bound(*itr);
-#ifdef DEBUG_LEGION
-          assert(lower != summary.disjoint_complete_child_shards.end());
-#endif
-          std::multimap<LegionColor,ShardID>::const_iterator upper =
-            summary.disjoint_complete_child_shards.upper_bound(*itr);
+          std::multimap<LegionColor,ShardID>::const_iterator  upper = lower;
+          while ((upper != summary.disjoint_complete_child_shards.end()) &&
+                  (lower->first == upper->first))
+            upper++;
 #ifdef DEBUG_LEGION
           assert(lower != upper);
 #endif
-          // Find the shard closest to our local shard including wrap around
-          ShardID closest_shard = 0;
-          size_t closest_distance = total_shards;
-          for (std::multimap<LegionColor,ShardID>::const_iterator it =
-                lower; it != upper; it++)
+          // Skip if we already have a local child for it
+          if (local_children.find(lower->first) == local_children.end())
           {
-#ifdef DEBUG_LEGION
-            assert(it->second != local_shard);
-#endif
-            size_t abs_diff = (local_shard < it->second) ? 
-              (it->second - local_shard) : (local_shard - it->second);
-            // closest distance by shard ID with wrap around
-            size_t distance = 
-             (abs_diff < (total_shards/2)) ? abs_diff : total_shards - abs_diff;
-            if (distance < closest_distance)
+            // Find the shard closest to our local shard including wrap around
+            ShardID closest_shard = 0;
+            size_t closest_distance = total_shards;
+            for (std::multimap<LegionColor,ShardID>::const_iterator it =
+                  lower; it != upper; it++)
             {
-              closest_shard = it->second;
-              closest_distance = distance;
-            }
-          }
 #ifdef DEBUG_LEGION
-          assert(closest_distance != total_shards);
+              assert(it->second != local_shard);
 #endif
-          nearest_shards[*itr] = closest_shard;
+              size_t abs_diff = (local_shard < it->second) ? 
+                (it->second - local_shard) : (local_shard - it->second);
+              // closest distance by shard ID with wrap around
+              size_t distance = (abs_diff < (total_shards/2)) ? 
+                abs_diff : total_shards - abs_diff;
+              if (distance < closest_distance)
+              {
+                closest_shard = it->second;
+                closest_distance = distance;
+              }
+            }
+#ifdef DEBUG_LEGION
+            assert(closest_distance != total_shards);
+#endif
+            nearest_shards[lower->first] = closest_shard;
+          }
+          lower = upper;
         }
         // Now we can make our ShardedColorMap and save it
 #ifdef DEBUG_LEGION
