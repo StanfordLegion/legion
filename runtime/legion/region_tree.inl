@@ -8651,7 +8651,7 @@ namespace Legion {
           }
           else
           {
-            remote_shard_rects[lower][this->bounds] |= mask;
+            remote_shard_rects[lower][rect] |= mask;
             return 0;
           }
         }

@@ -16010,7 +16010,7 @@ namespace Legion {
       // and record dependences on prior operations in that tree
       if (!!unopened_field_mask)
         siphon_interfering_children(state, logical_analysis,
-            unopened_field_mask, user, privilege_root, next_child, open_below);
+            user_mask, user, privilege_root, next_child, open_below);
       else if (!arrived)
         // Everything is open-only so make a state and merge it in
         add_open_field_state(state, user, user_mask, next_child);
@@ -19888,6 +19888,17 @@ namespace Legion {
                 }
               case LEGION_TRUE_DEPENDENCE:
                 {
+                  // If we can validate a region record which of our
+                  // predecessors regions we are validating, otherwise
+                  // just register a normal dependence
+                  user.op->register_region_dependence(user.idx, prev.op,
+                                                      prev.gen, prev.idx,
+                                                      dtype, validate, overlap);
+#ifdef LEGION_SPY
+                  LegionSpy::log_mapping_dependence(
+                      user.op->get_context()->get_unique_id(),
+                      prev.uid, prev.idx, user.uid, user.idx, dtype);
+#endif
                   if (prev.shard_proj != NULL)
                   {
                     // If this is a sharding projection operation then check 
@@ -19929,22 +19940,8 @@ namespace Legion {
                     it.filter(overlap);
                     if (!it->second)
                       to_delete.push_back(it->first);
-                    continue;
                   }
-#ifdef LEGION_SPY
-                  LegionSpy::log_mapping_dependence(
-                      user.op->get_context()->get_unique_id(),
-                      prev.uid, prev.idx, user.uid, user.idx, dtype);
-#endif
-                  // Do this after the logging since we might 
-                  // update the iterator.
-                  // If we can validate a region record which of our
-                  // predecessors regions we are validating, otherwise
-                  // just register a normal dependence
-                  user.op->register_region_dependence(user.idx, prev.op,
-                                                      prev.gen, prev.idx,
-                                                      dtype, validate, overlap);
-                  continue;
+                  break;
                 }
               default:
                 assert(false); // should never get here
