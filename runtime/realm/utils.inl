@@ -343,8 +343,8 @@ namespace Realm {
     : data(_data), size(_size), delim(_delim), pfx(_pfx), sfx(_sfx)
   {}
 
-  template <typename T>
-  inline PrettyVector<T>::PrettyVector(const std::vector<T>& _v,
+  template <typename T> template<typename Container>
+  inline PrettyVector<T>::PrettyVector(const Container& _v,
 				       const char *_delim /*= ", "*/,
 				       const char *_pfx /*= "["*/,
 				       const char *_sfx /*= "]"*/)

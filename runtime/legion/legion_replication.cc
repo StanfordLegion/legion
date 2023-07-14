@@ -717,6 +717,8 @@ namespace Legion {
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
+        // Still register this with the trace
+        tpl->register_operation(this);
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -4962,7 +4964,10 @@ namespace Legion {
             }
           }
         }
-        return collective_done;
+        if (thunk->is_image())
+          return collective_done;
+        else
+          return scatter->get_done_event();
       }
       else
       {
@@ -13997,7 +14002,7 @@ namespace Legion {
     DeppartResultScatter::DeppartResultScatter(ReplicateContext *ctx,
                   CollectiveID id, std::vector<DeppartResult> &res)
       : BroadcastCollective(ctx, id, 0/*origin shard*/), results(res),
-        renamed(false)
+        done_event(Runtime::create_ap_user_event(NULL))
     //--------------------------------------------------------------------------
     {
     }
@@ -14019,14 +14024,7 @@ namespace Legion {
         rez.serialize(it->domain);
         rez.serialize(it->color);
       }
-      if (!renamed)
-      {
-        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename, done_event);
-        done_event = rename;
-        renamed = true;
-      }
-      rez.serialize(done_event);
+      rez.serialize<ApEvent>(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -14042,17 +14040,16 @@ namespace Legion {
         derez.deserialize(it->domain);
         derez.deserialize(it->color);
       }
-      derez.deserialize(done_event);
+      ApEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(NULL, done_event, done);
     }
 
     //--------------------------------------------------------------------------
     void DeppartResultScatter::broadcast_results(ApEvent done)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!done_event.exists());
-#endif
-      done_event = done;
+      Runtime::trigger_event(NULL, done_event, done);
       perform_collective_async();
     }
 
