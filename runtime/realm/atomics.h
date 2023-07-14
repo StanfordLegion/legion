@@ -55,6 +55,7 @@ namespace Realm {
     T exchange(T newval);
     bool compare_exchange(T& expected, T newval);
     bool compare_exchange_relaxed(T& expected, T newval);
+    bool compare_exchange_weak(T& expected, T newval);
 
     // these updates use relaxed semantics, guaranteeing atomicity, but
     //  imposing no constraints on other loads and stores - use *_acqrel
