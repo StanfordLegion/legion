@@ -27,7 +27,7 @@
 #if !defined(REALM_TIMERS_USE_RDTSC) && \
     (defined(__i386__) || defined(__x86_64__) || \
     defined(__aarch64__) || defined(__arm__) || \
-    defined(__PPC__) || defined(__PPC64__))
+    (defined(__GLIBC__) && (defined(__PPC__) || defined(__PPC64__))))
 #define REALM_TIMERS_USE_RDTSC 1
 #endif
 
@@ -98,7 +98,11 @@ namespace Realm {
 
   protected:
 #if REALM_TIMERS_USE_RDTSC
-    static uint64_t raw_cpu_tsc();
+    // Raw timestamp counter (in ticks of a given frequency)
+    static uint64_t raw_cpu_tsc(void);
+    // Raw timestamp counter frequency (in Hz) or zero if the frequency needs to
+    // be estimated
+    static uint64_t raw_cpu_tsc_freq(void);
 #endif
 
     // slower function-call version of native_time for platform portability
