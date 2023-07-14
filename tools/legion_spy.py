@@ -7509,7 +7509,8 @@ class Operation(object):
                 self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
                 assert False
-        elif need_fence and (field,tree_id) not in previous_deps[prev_op]:
+        elif need_fence and (previous_deps[prev_op] is None or
+                (field,tree_id) not in previous_deps[prev_op]):
             print("ERROR: Missing internal fence operation on "+str(field)+" of tree "+
                     str(tree_id)+" between region requirement "+str(prev_req.index)+
                     " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
@@ -9691,13 +9692,33 @@ class Future(object):
             self.physical_creators = set()
             if self.logical_creator.kind == INDEX_TASK_KIND:
                 # Deal with predication
-                if self.logical_creator.points:
+                if self.logical_creator.predicate_result:
+                    # Be very careful to handle control replication correctly
+                    # in all of these cases as well
                     if self.point.dim > 0:
-                        self.physical_creators.add(
-                                self.logical_creator.get_point_task(self.point).op)
+                        # Looking for a single point task
+                        if self.logical_creator.context.shard is not None:
+                            # Control-replicated case
+                            for shard in self.logical_creator.context.op.context.replicants.shards.values():
+                                shard_op = shard.operations[self.logical_creator.context_index]
+                                if self.point in shard_op.points:
+                                    self.physical_creators.add(shard_op.get_point_task(self.point).op)
+                                    break
+                        else:
+                            # Non-replicated case
+                            self.physical_creators.add(
+                                    self.logical_creator.get_point_task(self.point).op)
                     else:
-                        for point in itervalues(self.logical_creator.points):
-                            self.physical_creators.add(point.op)
+                        # Accumulating all the points that feed into this future
+                        if self.logical_creator.context.shard is not None:
+                            # Control-replicated case
+                            for shard in self.logical_creator.context.op.context.replicants.shards.values():
+                                for point in shard.operations[self.logical_creator.context_index].points:
+                                    self.physical_creators.add(point.op)
+                        else:
+                            # Non-replicated case
+                            for point in itervalues(self.logical_creator.points):
+                                self.physical_creators.add(point.op)
             else:
                 self.physical_creators.add(self.logical_creator) 
             for creator in self.physical_creators:
@@ -12443,7 +12464,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(REFINEMENT_OP_KIND)
-        op.set_name("Refinement Op "+m.group('uid'))
+        op.set_name("Refinement Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
