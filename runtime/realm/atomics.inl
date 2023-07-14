@@ -180,6 +180,18 @@ namespace Realm {
     }
 #endif
   }
+  template <typename T>
+  inline bool atomic<T>::compare_exchange_weak(T& expected, T newval)
+  {
+#if defined(REALM_USE_STD_ATOMIC) && !defined(TSAN_ENABLED)
+    // TSAN generates a false positive with compare_exchange_weak, so use the strong version instead
+    return value.compare_exchange_weak(expected, newval,
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire);
+#else
+    return compare_exchange(expected, newval);
+#endif
+  }
 
   template <typename T>
   inline T atomic<T>::fetch_add(T to_add)
