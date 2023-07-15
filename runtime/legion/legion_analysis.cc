@@ -25489,7 +25489,7 @@ namespace Legion {
           if (tree->cancel_subscription(owner, source, mask))
             references_to_remove++;
           if (all_subscribers_finished && tree->remove_reference())
-            delete owner;
+            delete tree;
         }
         if (references_to_remove > 0)
         {
@@ -25511,7 +25511,8 @@ namespace Legion {
         }
         RtUserEvent cancelled;
         derez.deserialize(cancelled);
-        Runtime::trigger_event(cancelled);
+        if (cancelled.exists())
+          Runtime::trigger_event(cancelled);
       }
       else
       {
