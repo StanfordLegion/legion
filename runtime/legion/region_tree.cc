@@ -19901,6 +19901,12 @@ namespace Legion {
 #endif
                   if (prev.shard_proj != NULL)
                   {
+                    // Two operations from the same must epoch shouldn't
+                    // be recording close dependences on each other so
+                    // we can skip that part
+                    if ((prev.ctx_index == user.ctx_index) &&
+                        (user.op->get_must_epoch_op() != NULL))
+                      break;
                     // If this is a sharding projection operation then check 
                     // to see if we need to record a fence dependence here to
                     // ensure that we get dependences between interfering 

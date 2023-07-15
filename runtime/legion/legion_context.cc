@@ -21483,8 +21483,11 @@ namespace Legion {
         // of equivalence sets so new accesses will make new sets
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               eq_sets.begin(); it != eq_sets.end(); it++)
+        {
           it->first->set_expr->initialize_equivalence_set_kd_tree(
               current, it->first, it->second, local_shard, false/*current*/);
+          it->first->unpack_global_ref();
+        }
       }
     }
 

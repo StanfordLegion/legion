@@ -2819,11 +2819,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionColor color = child->partition->row_source->color;
-#ifdef DEBUG_LEGION
-      assert(local_children.find(color) == local_children.end());
-#endif
-      local_children[color] = child;
-      child->add_reference();
+      if (local_children.insert(std::make_pair(color, child)).second)
+        child->add_reference();
     }
 
 #if 0
@@ -3200,11 +3197,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionColor color = child->region->row_source->color;
-#ifdef DEBUG_LEGION
-      assert(local_children.find(color) == local_children.end());
-#endif
-      local_children[color] = child;
-      child->add_reference();
+      if (local_children.insert(std::make_pair(color, child)).second)
+        child->add_reference();
     }
 
 #if 0
@@ -24363,7 +24357,10 @@ namespace Legion {
         {
           const FieldMask overlap = mask & it->second;
           if (!overlap)
+          {
+            it++;
             continue;
+          }
           create_now_rectangles[it->first] = overlap;
           it->second -= overlap;
           if (!it->second)
