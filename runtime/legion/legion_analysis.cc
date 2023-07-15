@@ -5097,18 +5097,23 @@ namespace Legion {
       // restart when this pipelining is not possible.
       bool pipeline = true;
       // Perform updates from any sources first
-      if (!sources.empty() && (stage < 0))
+      if (stage < 0)
       {
 #ifdef DEBUG_LEGION
         assert(stage == -1);
 #endif
-        pipeline = perform_updates(sources, trace_info, precondition, 
+        if (!sources.empty())
+        {
+
+          pipeline = perform_updates(sources, trace_info, precondition,
 #ifdef NON_AGGRESSIVE_AGGREGATORS
-            effects,
+              effects,
 #else
-            recorded_events,
+              recorded_events,
 #endif
-            stage++, manage_dst_events, restricted_output, dst_events);
+              stage, manage_dst_events, restricted_output, dst_events);
+        }
+        stage = 0;
       }
       // Then apply any reductions that we might have
       if (!reductions.empty())
