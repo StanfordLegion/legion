@@ -24280,14 +24280,12 @@ namespace Legion {
             finder = creation_sources.find(sit->first);
           if (finder != creation_sources.end())
           {
-            LegionMap<Domain,FieldMask> &target = 
-              creation_sources[sit->first];
             for (LegionMap<Domain,FieldMask>::const_iterator it =
                   sit->second.begin(); it != sit->second.end(); it++)
-              target[it->first] |= it->second;
+              finder->second[it->first] |= it->second;
           }
           else
-            creation_srcs[sit->first].swap(sit->second);
+            creation_sources[sit->first].swap(sit->second);
         }
       }
       else

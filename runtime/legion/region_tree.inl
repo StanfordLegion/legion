@@ -8800,7 +8800,7 @@ namespace Legion {
           }
           else
           {
-            remote_shard_rects[lower][this->bounds] |= mask;
+            remote_shard_rects[lower][rect] |= mask;
             return 0;
           }
         }
@@ -8990,7 +8990,7 @@ namespace Legion {
                   invalidated, remote_shard_rects, local_shard);
           }
           else
-            remote_shard_rects[lower][this->bounds] |= mask;
+            remote_shard_rects[lower][rect] |= mask;
           return;
         }
         else // Create the refinement

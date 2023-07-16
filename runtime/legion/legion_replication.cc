@@ -615,7 +615,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this);
+      LogicalAnalysis logical_analysis(this, regions.size());
       ShardingFunction *analysis_sharding_function = sharding_function;
       if (must_epoch_task)
       {
@@ -1225,7 +1225,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this);
+      LogicalAnalysis logical_analysis(this, regions.size());
       ShardingFunction *analysis_sharding_function = sharding_function;
       if (must_epoch_task)
       {
