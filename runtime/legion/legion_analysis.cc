@@ -24155,16 +24155,8 @@ namespace Legion {
               it++;
               continue;
             }
-            if (it->first > 1)
-            {
-              // Update it lower down the entries
-              LegionMap<unsigned,FieldMask>::iterator finder =
-                remaining_responses.find(it->first-1);
-              if (finder != remaining_responses.end())
-                finder->second |= overlap;
-              else
-                remaining_responses[it->first-1] = overlap;
-            }
+            if (it->first > 1) // Update it lower down the entries
+              remaining_responses[it->first-1] |= overlap;
             else
               // We've seen the last response for these fields
               // so we can now merge things over to be handled
@@ -24183,7 +24175,7 @@ namespace Legion {
               break;
           }
           if (!!remaining)
-            remaining_responses[total_responses-1] = remaining;
+            remaining_responses[total_responses-1] |= remaining;
         }
       }
       // See if we have any equivalence sets for us to create right now
@@ -24197,6 +24189,9 @@ namespace Legion {
                                       FieldMaskSet<EqKDTree> &new_subscriptions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!new_subscriptions.empty());
+#endif
       AutoLock t_lock(tracker_lock);
       FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
       if (!subscriptions.empty())
@@ -24220,6 +24215,9 @@ namespace Legion {
                                 const FieldMaskSet<EqKDTree> &new_subscriptions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!new_subscriptions.empty());
+#endif
       FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
       if (subscriptions.empty())
       {
@@ -25330,13 +25328,14 @@ namespace Legion {
               finder->second.erase(tree);
               if (finder->second.empty())
                 current_subscriptions.erase(finder);
+              else
+                finder->second.tighten_valid_mask();
             }
             else
               finder->second.tighten_valid_mask();
           }
         }
-        // We just invalidated all the equivalence sets for these fields so
-        // also need to 
+        // Now go through and invalidate all the other spaces
         for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator cit =
               current_subscriptions.begin(); cit != 
               current_subscriptions.end(); /*nothing*/)
@@ -25380,7 +25379,10 @@ namespace Legion {
               current_subscriptions.erase(delete_it);
             }
             else
+            {
+              cit->second.tighten_valid_mask();
               cit++;
+            }
           }
         }
       }

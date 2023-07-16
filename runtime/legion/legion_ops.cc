@@ -10740,7 +10740,7 @@ namespace Legion {
         if (tracing)
 #ifdef DEBUG_LEGION_COLLECTIVES
           trace->register_close(this, creator_req_idx,
-              (req.handle_type == LEGION_PROJECTION_SINGULAR) ?
+              (req.handle_type == LEGION_SINGULAR_PROJECTION) ?
               (RegionTreeNode*) runtime->forest->get_node(req.region) :
               (RegionTreeNode*) runtime->forest->get_node(req.partition), req);
 #else

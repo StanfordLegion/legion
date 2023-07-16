@@ -12316,9 +12316,6 @@ namespace Legion {
       rez.serialize(applied_condition);
       // Serialize the privilege state
       pack_resources_return(rez, context_index); 
-#ifdef DEBUG_LEGION
-      assert(point_completions.empty() || (redop > 0));
-#endif
       if (!point_completions.empty())
       {
         const ApEvent completion_effects =
