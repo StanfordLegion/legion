@@ -22,6 +22,7 @@
 
 #include <climits>
 
+#if defined(REALM_TIMERS_USE_RDTSC)
 #if defined(REALM_ON_WINDOWS)
 #include <intrin.h>
 #pragma intrinsic(__rdtsc)
@@ -37,6 +38,10 @@
   #else
     #include <x86intrin.h>
   #endif
+#endif
+#endif
+#if defined(__GLIBC__) && (defined(__PPC__) || defined(__PPC64__))
+#include <sys/platform/ppc.h> // For __ppc_get_timebase
 #endif
 #endif
 
@@ -109,7 +114,7 @@ namespace Realm {
   }
 
 #if REALM_TIMERS_USE_RDTSC
-  inline /*static*/ uint64_t Clock::raw_cpu_tsc()
+  inline /*static*/ uint64_t Clock::raw_cpu_tsc(void)
   {
 #if defined(__i386__) || defined(__x86_64__)
 #ifdef __PGI
@@ -119,18 +124,31 @@ namespace Realm {
 #else
       return __rdtsc();
 #endif
-#elif defined(__aarch64__) || defined(__arm__)
+#elif defined(__aarch64__)
       // https://developer.arm.com/documentation/ddi0595/2021-12/AArch64-Registers/CNTVCT-EL0--Counter-timer-Virtual-Count-register
       uint64_t val;
       asm volatile("mrs %0, cntvct_el0" : "=r"(val));
       return val;
-#elif defined(__PPC__) || defined(__PPC64__)
+#elif defined(__GLIBC__) && (defined(__PPC__) || defined(__PPC64__))
       // https://man7.org/linux/man-pages/man3/__ppc_get_timebase.3.html
-      uint64_t val;
-      asm volatile("mfspr %0, 268" : "=r"(val));
-      return val;
+      return __ppc_get_timebase();
 #else
 #error Missing cpu tsc reading code!
+#endif
+  }
+
+  inline /*static*/ uint64_t Clock::raw_cpu_tsc_freq(void)
+  {
+#if defined(__aarch64__)
+      // https://developer.arm.com/documentation/ddi0595/2021-12/AArch64-Registers/CNTFRQ-EL0--Counter-timer-Frequency-register
+      uint64_t val;
+      asm volatile("mrs %0, cntfrq_el0" : "=r"(val));
+      return val;
+#elif defined(__GLIBC__) && (defined(__PPC__) || defined(__PPC64__))
+      // https://man7.org/linux/man-pages/man3/__ppc_get_timebase.3.html
+      return __ppc_get_timebase_freq();
+#else
+      return 0; // Rely on frequency estimate
 #endif
   }
 #endif

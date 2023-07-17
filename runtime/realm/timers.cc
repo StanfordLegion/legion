@@ -98,6 +98,10 @@ namespace Realm {
   {
 #if REALM_TIMERS_USE_RDTSC
     if(use_cpu_tsc != 0) {  // "yes" or "dont care"
+      if (force_cpu_tsc_freq == 0) {
+        force_cpu_tsc_freq = raw_cpu_tsc_freq();
+      }
+
       // we want to get two time samples spread by an interesting amount of
       //  real time (TARGET_NANOSECONDS), but we don't know the overhead of
       //  the OS time call so we do iterations with progressively more and
