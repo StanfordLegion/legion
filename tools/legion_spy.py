@@ -6410,9 +6410,17 @@ class Operation(object):
         return self.launch_shape
 
     def add_internal_operation(self, internal):
+        assert internal.kind == REFINEMENT_OP_KIND or \
+                internal.kind == INTER_CLOSE_OP_KIND
         if self.internal_ops is None:
             self.internal_ops = list()
-        self.internal_ops.append(internal)
+        # Put internal close ops first and refinement ops last
+        # We do this so we analyze them in the right order for
+        # the logical analysis
+        if internal.kind == REFINEMENT_OP_KIND:
+            self.internal_ops.append(internal)
+        else:
+            self.internal_ops.insert(0, internal)
 
     def set_summary_operation(self, summary):
         self.summary_op = summary
