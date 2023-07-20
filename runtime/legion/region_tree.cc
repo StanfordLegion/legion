@@ -16478,7 +16478,7 @@ namespace Legion {
           // Recording refinement dependences will record dependences on 
           // anything in an interfering sub-tree without changing the
           // state of the region tree states
-          state.record_refinement_dependences(ctx, user, it->second,
+          state.record_refinement_dependences(ctx, refinement_user, it->second,
               no_projection_info, next_child, privilege_root, logical_analysis);
         }
       }

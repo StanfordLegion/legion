@@ -7126,6 +7126,25 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert((lefts == NULL) || (mask * lefts->get_valid_mask()));
       assert((rights == NULL) || (mask * rights->get_valid_mask()));
+      if (pending_set_creations != NULL)
+      {
+        // Invalidations should never be racing with pending set
+        // creations, this should be guaranteed by the logical dependence
+        // analysis which ensures refinements are serialized with respect
+        // to all other operations
+        for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
+              pending_set_creations->begin(); it !=
+              pending_set_creations->end(); it++)
+          assert(mask * it->second);
+      }
+      if (subscriptions != NULL)
+      {
+        // We should never be refining something which has subscribers
+        for (LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::
+              const_iterator it = subscriptions->begin(); it !=
+              subscriptions->end(); it++)
+          assert(mask * it->second.get_valid_mask());
+      }
 #endif
       // Need to create a new refinement for these fields
       // to match the rectangle being requested
@@ -7200,19 +7219,6 @@ namespace Legion {
       Rect<DIM,T> right_bounds = this->bounds;
       left_bounds.hi[dim] = split;
       right_bounds.lo[dim] = split+1;
-#ifdef DEBUG_LEGION
-      if (pending_set_creations != NULL)
-      {
-        // Invalidations should never be racing with pending set
-        // creations, this should be guaranteed by the logical dependence
-        // analysis which ensures refinements are serialized with respect
-        // to all other operations
-        for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
-              pending_set_creations->begin(); it !=
-              pending_set_creations->end(); it++)
-          assert(mask * it->second);
-      }
-#endif
       // See if we can reuse any existing subnodes or whether we
       // need to make new ones
       if (lefts != NULL)
@@ -7398,6 +7404,8 @@ namespace Legion {
                 pending_postconditions->find(it->first);
               if (finder != pending_postconditions->end())
               {
+                if (ready.exists())
+                  finder->second.push_back(ready);
                 Runtime::trigger_event(it->first, 
                     Runtime::merge_events(finder->second));
                 pending_postconditions->erase(finder);
@@ -7408,15 +7416,24 @@ namespace Legion {
                 }
               }
               else
-                Runtime::trigger_event(it->first);
+                Runtime::trigger_event(it->first, ready);
             }
             else
-              Runtime::trigger_event(it->first);
+              Runtime::trigger_event(it->first, ready);
             LegionMap<RtUserEvent,FieldMask>::iterator to_delete = it++;
             pending_set_creations->erase(to_delete);
           }
           else
+          {
+            if (ready.exists() && !ready.has_triggered())
+            {
+              if (pending_postconditions == NULL)
+                pending_postconditions =
+                  new std::map<RtUserEvent,std::vector<RtEvent> >();
+              (*pending_postconditions)[it->first].push_back(ready);
+            }
             it++;
+          }
         }
         if (pending_set_creations->empty())
         {
@@ -8036,151 +8053,230 @@ namespace Legion {
                                           bool move_to_previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(this->bounds.contains(rect));
+#endif
       FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
       typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
       LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
       {
         FieldMask unrefined = mask;
         AutoLock n_lock(node_lock);
-        if (lefts != NULL)
-          unrefined -= lefts->get_valid_mask();
+        if ((lefts != NULL) && !(unrefined * lefts->get_valid_mask()))
+        {
+          FieldMask right_mask;
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                lefts->begin(); it != lefts->end(); it++)
+          {
+            const FieldMask overlap = it->second & unrefined;
+            if (!overlap)
+              continue;
+            if (rect == this->bounds)
+            {
+              to_traverse.insert(it->first, overlap);
+              right_mask |= overlap;
+              // Also track the all-previous below here since we know
+              // that we're invalidating everything below here
+              all_previous_below |= overlap;
+            }
+            else if (rect.overlaps(it->first->bounds))
+            {
+              to_traverse.insert(it->first, overlap);
+              if (!it->first->bounds.contains(rect))
+                right_mask |= overlap;
+            }
+            else
+              right_mask |= overlap;
+            unrefined -= overlap;
+            if (!unrefined)
+              break;
+          }
+          if (!!right_mask)
+          {
+            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                  rights->begin(); it != rights->end(); it++)
+            {
+              const FieldMask overlap = it->second & right_mask;
+              if (!overlap)
+                continue;
+#ifdef DEBUG_LEGION
+              assert(it->first->bounds.overlaps(rect));
+#endif
+              to_traverse.insert(it->first, overlap);
+              right_mask -= overlap;
+              if (!right_mask)
+                break;
+            }
+#ifdef DEBUG_LEGION
+            assert(!right_mask);
+#endif
+          }
+        }
+        // If we still have unrefined fields then these are the
+        // subscribers that we are going to invalidate. Note that
+        // this is not precise, but we can't partially invalidate
+        // this node in the equivalence set KD-tree as subscribers
+        // are either subscribed to it or they aren't
         if (!!unrefined)
         {
-          if (rect == this->bounds)
+          // These are the fields for which we have arrived and therefor
+          // the ones we need to filter here locally
+          // Filter current sets back to the previous sets
+          // We only remove previous sets if there is one to replace it
+          // from the current sets, otherwise they need to stay in the
+          // previous sets
+          if ((previous_sets != NULL) && !move_to_previous)
           {
-            // These are the fields for which we have arrived and therefor
-            // the ones we need to filter here locally
-            // Filter current sets back to the previous sets
-            // We only remove previous sets if there is one to replace it
-            // from the current sets, otherwise they need to stay in the
-            // previous sets
-            if ((previous_sets != NULL) && !move_to_previous)
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it =
+                  previous_sets->begin(); it != previous_sets->end(); it++)
             {
-              std::vector<EquivalenceSet*> to_delete;
-              for (FieldMaskSet<EquivalenceSet>::iterator it =
-                    previous_sets->begin(); it != previous_sets->end(); it++)
-              {
-                const FieldMask overlap = mask & it->second;
-                if (!overlap)
-                  continue;
-                it.filter(overlap);
-                if (!it->second)
-                  to_delete.push_back(it->first);
-              }
-              for (std::vector<EquivalenceSet*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-              {
-                previous_sets->erase(*it);
-                if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-                  delete (*it);
-              }
-              if (previous_sets->empty())
-              {
-                delete previous_sets;
-                previous_sets = NULL;
-              }
-              else
-                previous_sets->tighten_valid_mask();
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
             }
-            if (current_sets != NULL)
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
             {
-              std::vector<EquivalenceSet*> to_delete;
-              for (FieldMaskSet<EquivalenceSet>::iterator it =
-                    current_sets->begin(); it != current_sets->end(); it++)
+              previous_sets->erase(*it);
+              if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+                delete (*it);
+            }
+            if (previous_sets->empty())
+            {
+              delete previous_sets;
+              previous_sets = NULL;
+            }
+            else
+              previous_sets->tighten_valid_mask();
+          }
+          if (current_sets != NULL)
+          {
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it =
+                  current_sets->begin(); it != current_sets->end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              if (move_to_previous)
               {
-                const FieldMask overlap = mask & it->second;
-                if (!overlap)
-                  continue;
-                if (move_to_previous)
+                if (previous_sets != NULL)
                 {
-                  if (previous_sets != NULL)
+                  // Filter any sets for the same fields in previous
+                  std::vector<EquivalenceSet*> to_remove;
+                  for (FieldMaskSet<EquivalenceSet>::iterator it =
+                        previous_sets->begin(); it !=
+                        previous_sets->end(); it++)
                   {
-                    // Filter any sets for the same fields in previous
-                    std::vector<EquivalenceSet*> to_remove;
-                    for (FieldMaskSet<EquivalenceSet>::iterator it =
-                          previous_sets->begin(); it !=
-                          previous_sets->end(); it++)
-                    {
-                      it.filter(overlap);
-                      if (!it->second)
-                        to_remove.push_back(it->first);
-                    }
-                    for (std::vector<EquivalenceSet*>::const_iterator it =
-                          to_remove.begin(); it != to_remove.end(); it++)
-                    {
-                      previous_sets->erase(*it);
-                      if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-                        delete (*it);
-                    }
-                    previous_sets->tighten_valid_mask();
+                    it.filter(overlap);
+                    if (!it->second)
+                      to_remove.push_back(it->first);
                   }
-                  else
-                    previous_sets = new FieldMaskSet<EquivalenceSet>();
-                  if (previous_sets->insert(it->first, overlap))
-                    it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-                }
-                it.filter(overlap);
-                if (!it->second)
-                  to_delete.push_back(it->first);
-              }
-              for (std::vector<EquivalenceSet*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-              {
-                current_sets->erase(*it);
-                if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-                  delete (*it);
-              }
-              if ((current_sets != NULL) && current_sets->empty())
-              {
-                delete current_sets;
-                current_sets = NULL;
-              }
-              else
-                current_sets->tighten_valid_mask();
-            }
-            if (current_set_preconditions != NULL)
-            {
-              // Anything that overlaps should already be triggered
-              for (LegionMap<RtEvent,FieldMask>::iterator it =
-                    current_set_preconditions->begin(); it !=
-                    current_set_preconditions->end(); /*nothing*/)
-              {
-                if (!it->first.has_triggered())
-                {
-#ifdef DEBUG_LEGION
-                  assert(mask * it->second);
-#endif
-                  it++;
+                  for (std::vector<EquivalenceSet*>::const_iterator it =
+                        to_remove.begin(); it != to_remove.end(); it++)
+                  {
+                    previous_sets->erase(*it);
+                    if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+                      delete (*it);
+                  }
+                  previous_sets->tighten_valid_mask();
                 }
                 else
-                {
-                  LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
-                  current_set_preconditions->erase(to_delete);
-                }
+                  previous_sets = new FieldMaskSet<EquivalenceSet>();
+                if (previous_sets->insert(it->first, overlap))
+                  it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
               }
-              if (current_set_preconditions->empty())
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              current_sets->erase(*it);
+              if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+                delete (*it);
+            }
+            if ((current_sets != NULL) && current_sets->empty())
+            {
+              delete current_sets;
+              current_sets = NULL;
+            }
+            else
+              current_sets->tighten_valid_mask();
+          }
+          if (current_set_preconditions != NULL)
+          {
+            // Anything that overlaps should already be triggered
+            for (LegionMap<RtEvent,FieldMask>::iterator it =
+                  current_set_preconditions->begin(); it !=
+                  current_set_preconditions->end(); /*nothing*/)
+            {
+              if (!it->first.has_triggered())
               {
-                delete current_set_preconditions;
-                current_set_preconditions = NULL;
+#ifdef DEBUG_LEGION
+                assert(mask * it->second);
+#endif
+                it++;
+              }
+              else
+              {
+                LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
+                current_set_preconditions->erase(to_delete);
               }
             }
-            if (subscriptions != NULL)
+            if (current_set_preconditions->empty())
             {
-              for (LegionMap<AddressSpaceID,
-                             FieldMaskSet<EqSetTracker> >::iterator
-                    sit = subscriptions->begin(); 
-                    sit != subscriptions->end(); /*nothing*/)
+              delete current_set_preconditions;
+              current_set_preconditions = NULL;
+            }
+          }
+          if (subscriptions != NULL)
+          {
+            for (LegionMap<AddressSpaceID,
+                           FieldMaskSet<EqSetTracker> >::iterator
+                  sit = subscriptions->begin(); 
+                  sit != subscriptions->end(); /*nothing*/)
+            {
+              if (sit->second.get_valid_mask() * mask)
               {
-                if (sit->second.get_valid_mask() * mask)
+                sit++;
+                continue;
+              }
+              TrackerInvalidations &invalidations = to_invalidate[sit->first];
+              if (!(sit->second.get_valid_mask() - mask))
+              {
+                // Going to invalidate all the trackers 
+                invalidations.subscribers.swap(sit->second);
+                invalidations.all_subscribers_finished = true;
+                LegionMap<AddressSpaceID,
+                  FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
+                subscriptions->erase(to_delete);
+              }
+              else
+              {
+                // Selectively filter the trackers
+                std::vector<EqSetTracker*> to_delete;
+                for (FieldMaskSet<EqSetTracker>::iterator it =
+                      sit->second.begin(); it != sit->second.end(); it++)
                 {
-                  sit++;
-                  continue;
+                  const FieldMask overlap = mask & it->second;
+                  if (!overlap)
+                    continue;
+                  invalidations.subscribers.insert(it->first, overlap);
+                  it.filter(overlap);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
                 }
-                TrackerInvalidations &invalidations = to_invalidate[sit->first];
-                if (!(sit->second.get_valid_mask() - mask))
+                for (std::vector<EqSetTracker*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  sit->second.erase(*it);
+                if (sit->second.empty())
                 {
-                  // Going to invalidate all the trackers 
-                  invalidations.subscribers.swap(sit->second);
                   invalidations.all_subscribers_finished = true;
                   LegionMap<AddressSpaceID,
                     FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
@@ -8188,73 +8284,17 @@ namespace Legion {
                 }
                 else
                 {
-                  // Selectively filter the trackers
-                  std::vector<EqSetTracker*> to_delete;
-                  for (FieldMaskSet<EqSetTracker>::iterator it =
-                        sit->second.begin(); it != sit->second.end(); it++)
-                  {
-                    const FieldMask overlap = mask & it->second;
-                    if (!overlap)
-                      continue;
-                    invalidations.subscribers.insert(it->first, overlap);
-                    it.filter(overlap);
-                    if (!it->second)
-                      to_delete.push_back(it->first);
-                  }
-                  for (std::vector<EqSetTracker*>::const_iterator it =
-                        to_delete.begin(); it != to_delete.end(); it++)
-                    sit->second.erase(*it);
-                  if (sit->second.empty())
-                  {
-                    invalidations.all_subscribers_finished = true;
-                    LegionMap<AddressSpaceID,
-                      FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
-                    subscriptions->erase(to_delete);
-                  }
-                  else
-                  {
-                    invalidations.finished.swap(to_delete);
-                    sit->second.tighten_valid_mask();
-                    sit++;
-                  }
+                  invalidations.finished.swap(to_delete);
+                  sit->second.tighten_valid_mask();
+                  sit++;
                 }
               }
-              if (subscriptions->empty())
-              {
-                delete subscriptions;
-                subscriptions = NULL;
-              }
             }
-          }
-          else // Refine for the unrefined fields
-            refine_node(rect, unrefined);
-        }
-        if ((lefts != NULL) && !(mask * lefts->get_valid_mask()))
-        {
-          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                lefts->begin(); it != lefts->end(); it++)
-          {
-            const FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            if (rect.overlaps(it->first->bounds))
+            if (subscriptions->empty())
             {
-              to_traverse.insert(it->first, overlap);
-              if (rect == this->bounds)
-                all_previous_below |= overlap;
+              delete subscriptions;
+              subscriptions = NULL;
             }
-          }
-        }
-        if ((rights != NULL) && !(mask * rights->get_valid_mask()))
-        {
-          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                rights->begin(); it != rights->end(); it++)
-          {
-            const FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            if (rect.overlaps(it->first->bounds))
-              to_traverse.insert(it->first, overlap);
           }
         }
       }
@@ -8282,7 +8322,7 @@ namespace Legion {
           ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      invalidate_tree(rect, mask,runtime,invalidated,false/*move to previous*/);
+      invalidate_tree(rect, mask, runtime,invalidated,true/*move to previous*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8523,7 +8563,7 @@ namespace Legion {
           ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      invalidate_tree(rect, mask,runtime,invalidated,false/*move to previous*/);
+      invalidate_tree(rect, mask, runtime,invalidated,true/*move to previous*/);
     }
 
     //--------------------------------------------------------------------------

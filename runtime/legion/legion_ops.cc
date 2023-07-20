@@ -11534,9 +11534,6 @@ namespace Legion {
       initialize_internal(creator, index);
       refinement_node = refine;
       parent_req_index = parent_index;
-      MustEpochOp *must = creator->get_must_epoch_op();
-      if (must != NULL)
-        set_must_epoch(must, false/*do registration*/);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 

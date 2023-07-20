@@ -8173,9 +8173,17 @@ namespace Legion {
           {
             FieldMask overlap = it->second & finder->second->get_close_mask();
             if (!!overlap)
+            {
+#ifdef LEGION_SPY
+              LegionSpy::log_mapping_dependence(context->get_unique_id(),
+                  finder->second->get_unique_op_id(), 0/*index*/,
+                  it->first->get_unique_op_id(), 0/*index*/,
+                  LEGION_TRUE_DEPENDENCE);
+#endif
               it->first->register_region_dependence(0/*index*/, finder->second,
                   finder->second->get_generation(), 0/*index*/,
                   LEGION_TRUE_DEPENDENCE, false/*validates*/, overlap);
+            }
           }
           path_node = path_node->get_parent();
         }
