@@ -36,7 +36,7 @@ namespace Realm {
     class ProcessorImpl;
   
     // information for a task launch
-    class Task : public Operation {
+    class Task final : public Operation {
     public:
       Task(Processor _proc,
 	   Processor::TaskFuncID _func_id,
@@ -51,6 +51,9 @@ namespace Realm {
       virtual ~Task(void);
 
     public:
+      static void *operator new(size_t size);
+      static void operator delete(void *ptr);
+
       virtual bool mark_ready(void);
       virtual bool mark_started(void);
 

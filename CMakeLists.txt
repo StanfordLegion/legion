@@ -350,7 +350,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
       "https://github.com/StanfordLegion/gasnet.git"
       CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_GITREF
-      "master"
+      "cad9d8bc629293594672233745e2bb5aa20e76ed" # master as of 2023-05-26
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
     set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")

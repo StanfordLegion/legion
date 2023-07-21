@@ -2157,7 +2157,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Use ID to encode the collective copy kind
       info.id = collective;
-      closure->add_reference();
+      closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2329,7 +2329,7 @@ namespace Legion {
       info.op_id = uid;
       // Use ID to encode the collective copy kind
       info.id = collective;
-      closure->add_reference();
+      closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);

@@ -20,6 +20,10 @@
 #include "realm/runtime_impl.h"
 #include "realm/proc_impl.h"
 
+#if defined(REALM_USE_CACHING_ALLOCATOR)
+#include "realm/caching_allocator.h"
+#endif
+
 namespace Realm {
 
   Logger log_task("task");
@@ -71,6 +75,25 @@ namespace Realm {
 
     // if we're still holding a reference to a pending_head, something is wrong
     assert(pending_head.load() == 0);
+  }
+
+  void *Task::operator new(size_t size)
+  {
+    assert(size == sizeof(Task));
+#if REALM_USE_CACHING_ALLOCATOR
+    return CachingAllocator<Task, REALM_TASK_BLOCK_SIZE>::alloc_obj();
+#else
+    return ::operator new(size);
+#endif
+  }
+
+  void Task::operator delete(void *ptr)
+  {
+#if REALM_USE_CACHING_ALLOCATOR
+    CachingAllocator<Task, REALM_TASK_BLOCK_SIZE>::free_obj(ptr);
+#else
+    ::operator delete(ptr);
+#endif
   }
 
   void Task::print(std::ostream& os) const
