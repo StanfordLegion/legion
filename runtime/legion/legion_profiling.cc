@@ -2153,7 +2153,7 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      closure->add_reference();
+      closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2321,7 +2321,7 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = uid;
-      closure->add_reference();
+      closure->add_reference(count);
       info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
