@@ -4290,7 +4290,8 @@ namespace Legion {
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
                         ReductionOpID redop, bool deterministic,
                         MapperID mapper_id, MappingTagID tag,
-                        Provenance *provenance);
+                        Provenance *provenance,
+                        Future initial_value);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -4317,6 +4318,15 @@ namespace Legion {
       virtual void all_reduce_serdez(void);
       virtual RtEvent all_reduce_redop(void);
     protected:
+      ApEvent init_redop_target(FutureInstance *target);
+      void fold_serdez(FutureImpl *impl);
+    private:
+      void prepare_future(std::vector<RtEvent> &preconditions,
+                          FutureImpl *future);
+      void subscribe_to_future(std::vector<RtEvent> &ready_events,
+                               FutureImpl *future);
+      Future pick_initial_value(Future initial_value);
+    protected:
       FutureMap future_map;
       ReductionOpID redop_id;
       const ReductionOp *redop; 
@@ -4330,6 +4340,7 @@ namespace Legion {
       MapperID mapper_id;
       MappingTagID tag;
       bool deterministic;
+      Future initial_value;
     };
 
     /**
