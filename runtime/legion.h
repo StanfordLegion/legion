@@ -7445,7 +7445,8 @@ namespace Legion {
       Future reduce_future_map(Context ctx, const FutureMap &future_map,
                                ReductionOpID redop, bool ordered = true,
                                MapperID map_id = 0, MappingTagID tag = 0,
-                               const char *provenance = NULL);
+                               const char *provenance = NULL,
+                               Future initial_value = Future());
 
       /**
        * Construct a future map from a collection of buffers. The user must
