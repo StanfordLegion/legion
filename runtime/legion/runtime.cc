@@ -22232,7 +22232,7 @@ namespace Legion {
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ std::atomic<Realm::Event::id_t> Runtime::startup_event = {0};
     /*static*/ Realm::Barrier::timestamp_t Runtime::startup_timestamp = 0;
-    /*static*/ std::atomic<int> Runtime::background_waits = {0};
+    /*static*/ std::atomic<bool> Runtime::background_wait = {0};
     /*static*/ int Runtime::return_code = 0;
     /*static*/ int Runtime::mpi_rank = -1;
 
@@ -22351,7 +22351,7 @@ namespace Legion {
         // Make sure all the nodes are done
         startup_barrier.arrive(1/*count*/);
         // Wait for all the nodes to be done with the initialization
-        startup_barrier.external_wait();
+        startup_barrier.wait();
         // Advance the barrier to the next generation
         startup_barrier = startup_barrier.advance_barrier();
       }
@@ -22369,7 +22369,7 @@ namespace Legion {
         // Make sure all the nodes are done
         startup_barrier.arrive(1/*count*/);
         // Wait for all the nodes to be done with the initialization
-        startup_barrier.external_wait();
+        startup_barrier.wait();
       }
       // Launch the top-level task if we have a main set
       if (the_runtime->address_space == 0)
@@ -23096,9 +23096,13 @@ namespace Legion {
         for (Machine::ProcessorQuery::iterator it = 
               all_procs.begin(); it != all_procs.end(); it++,sid++)
         {
+          if (it->address_space() != 0)
+            REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES, 
+                        "Separate runtime instances are not "
+                        "supported when running with multiple nodes ")
           address_spaces.insert(sid);
           proc_spaces[*it] = sid;
-          if (!first_proc.exists() && (it->address_space() == 0))
+          if (!first_proc.exists() && (it->kind() == startup_kind))
             first_proc = *it;
         }
         if (address_spaces.size() > 1)
@@ -23152,7 +23156,8 @@ namespace Legion {
           AddressSpaceID sid = it->address_space();
           address_spaces.insert(sid);
           proc_spaces[*it] = sid;
-          if (!first_proc.exists() && (sid == 0))
+          if (!first_proc.exists() && (sid == 0) && 
+              (it->kind() == startup_kind))
             first_proc = *it;
         }
         if (address_spaces.size() > 1)
@@ -23308,7 +23313,7 @@ namespace Legion {
       // Make sure that we are done registering before we return
       RtEvent ready = Runtime::merge_events(registered_events);
       if (ready.exists())
-        ready.external_wait();
+        ready.wait();
       return first_proc;
     }
 
@@ -23322,7 +23327,7 @@ namespace Legion {
                       "not launched in background mode!");
       // If this is the first time we've called this on this node then 
       // we need to remove our reference to allow shutdown to proceed
-      if (background_waits.fetch_add(1) == 0)
+      if (!background_wait.exchange(true))
         the_runtime->decrement_outstanding_top_level_tasks();
       return RealmRuntime::get_runtime().wait_for_shutdown();
     }

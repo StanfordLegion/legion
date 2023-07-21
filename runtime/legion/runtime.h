@@ -3512,7 +3512,7 @@ namespace Legion {
       static Runtime *the_runtime;
       static std::atomic<Realm::Event::id_t> startup_event;
       static Realm::Barrier::timestamp_t startup_timestamp;
-      static std::atomic<int> background_waits;
+      static std::atomic<bool> background_wait;
       // Shutdown error condition
       static int return_code;
       // Static member variables for MPI interop
