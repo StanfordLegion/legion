@@ -12496,6 +12496,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(startup_barrier.exists());
 #endif
+      // Make sure the representation of the barriers haven't changed
+      static_assert(sizeof(startup_barrier) == 
+          (sizeof(startup_event) + sizeof(startup_timestamp)),
+          "Realm Barrier representation changed");
       // Tree broadcast it out to any downstream nodes
       AddressSpaceID offset = address_space * legion_collective_radix;
       for (int idx = 1; idx <= legion_collective_radix; idx++)
@@ -12508,7 +12512,9 @@ namespace Legion {
           send_startup_barrier(target, rez);
         }
       }
-      // Then set it locally
+      // Write the timestamp first
+      startup_timestamp = startup_barrier.timestamp;
+      // Then set the ID locally
       RtUserEvent to_trigger;
       to_trigger.id = startup_event.exchange(startup_barrier.id);
       if (to_trigger.exists())
@@ -22225,6 +22231,7 @@ namespace Legion {
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ std::atomic<Realm::Event::id_t> Runtime::startup_event = {0};
+    /*static*/ Realm::Barrier::timestamp_t Runtime::startup_timestamp = 0;
     /*static*/ std::atomic<int> Runtime::background_waits = {0};
     /*static*/ int Runtime::return_code = 0;
     /*static*/ int Runtime::mpi_rank = -1;
@@ -24938,7 +24945,10 @@ namespace Legion {
       Realm::Barrier result;
       result.id = startup_event.load();
       if (result.exists())
+      {
+        result.timestamp = startup_timestamp;
         return result;
+      }
       // Barrier isn't ready yet so make an event to wait on and try to
       // swap it into the startup event
       const RtUserEvent ready = Runtime::create_rt_user_event();
@@ -24949,6 +24959,8 @@ namespace Legion {
       }
       else // Was already set
         Runtime::trigger_event(ready);
+      // Get the timestamp
+      result.timestamp = startup_timestamp;
       return result;
     }
 
