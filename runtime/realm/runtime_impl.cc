@@ -2138,7 +2138,7 @@ namespace Realm {
                                         [](Event e) { return !e.exists(); }),
                          all_events.end());
 
-        Event merged_finish = Event::merge_events(events);
+        Event merged_finish = Event::merge_events(all_events);
 
         // step 3: broadcast the merged event back to everyone
         (void)Network::broadcast(0 /*root*/, merged_finish);
