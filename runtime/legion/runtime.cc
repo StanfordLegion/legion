@@ -3539,21 +3539,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::startup_mappers(void)
-    //--------------------------------------------------------------------------
-    {
-      // No one can be modifying the mapper set here so 
-      // there is no to hold the lock
-      std::multimap<Processor,MapperID> stealing_targets;
-      // See what if any stealing we should perform
-      for (std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
-            it = mappers.begin(); it != mappers.end(); it++)
-        it->second.first->perform_stealing(stealing_targets);
-      if (!stealing_targets.empty())
-        runtime->send_steal_request(stealing_targets, local_proc);
-    }
-
-    //--------------------------------------------------------------------------
     void ProcessorManager::add_mapper(MapperID mid, MapperManager *m, 
                                       bool check, bool own, bool skip_replay)
     //--------------------------------------------------------------------------
@@ -11941,11 +11926,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::log_machine(Machine machine) const
+    void Runtime::log_machine(void) const
     //--------------------------------------------------------------------------
     {
-      if (!legion_spy_enabled)
-        return;
       std::set<Processor::Kind> proc_kinds;
       Machine::ProcessorQuery all_procs(machine);
 #define COUNTER(X,Y) +1
@@ -12519,22 +12502,6 @@ namespace Legion {
       to_trigger.id = startup_event.exchange(startup_barrier.id);
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::startup_runtime(void)
-    //--------------------------------------------------------------------------
-    {
-      // If stealing is not disabled then startup our mappers
-      if (!stealing_disabled)
-      {
-        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-              proc_managers.begin(); it != proc_managers.end(); it++)
-          it->second->startup_mappers();
-      }
-      // If we're doing Legion Spy then log the machine on the first node
-      if (legion_spy_enabled && (address_space == 0))
-        log_machine(machine);
     }
 
     //--------------------------------------------------------------------------
@@ -22352,28 +22319,12 @@ namespace Legion {
         startup_barrier.arrive(1/*count*/);
         // Wait for all the nodes to be done with the initialization
         startup_barrier.wait();
-        // Advance the barrier to the next generation
-        startup_barrier = startup_barrier.advance_barrier();
-      }
-      // Now we can perform the start-up
-      if (config.separate_runtime_instances)
-      {
-        for (std::map<Processor,Runtime*>::const_iterator it =
-              processor_mapping.begin(); it != processor_mapping.end(); it++)
-          it->second->startup_runtime();
-      }
-      else
-        the_runtime->startup_runtime();
-      if (startup_barrier.exists())
-      {
-        // Make sure all the nodes are done
-        startup_barrier.arrive(1/*count*/);
-        // Wait for all the nodes to be done with the initialization
-        startup_barrier.wait();
       }
       // Launch the top-level task if we have a main set
       if (the_runtime->address_space == 0)
       {
+        if (config.legion_spy_enabled)
+          the_runtime->log_machine();
         if (legion_main_set)
         {
           TaskLauncher launcher(Runtime::legion_main_id,
@@ -22694,6 +22645,9 @@ namespace Legion {
       top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(target);
+      // Save the current context if there is one and restore it later
+      TaskContext *previous_implicit = implicit_context;
+      implicit_context = top_context;
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Mark that this task is the top-level task
@@ -22708,9 +22662,12 @@ namespace Legion {
       ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
+      
       // Put the task in the ready queue, make sure that the runtime is all
       // set up across the machine before we launch it as well
       top_task->enqueue_ready_task(false/*target*/);
+      // Now we can restore the previous implicit context
+      implicit_context = previous_implicit;
       return result;
     }
 

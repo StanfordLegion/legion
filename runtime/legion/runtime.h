@@ -737,7 +737,6 @@ namespace Legion {
     public:
       void prepare_for_shutdown(void);
     public:
-      void startup_mappers(void);
       void add_mapper(MapperID mid, MapperManager *m, 
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
@@ -1864,7 +1863,7 @@ namespace Legion {
       void register_static_constraints(void);
       void register_static_projections(void);
       void initialize_legion_prof(const LegionConfiguration &config);
-      void log_machine(Machine machine) const;
+      void log_machine(void) const;
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
@@ -1880,7 +1879,6 @@ namespace Legion {
           size_t size, bool withargs, bool global, bool preregistered,
           bool deduplicate, size_t dedup_tag);
       void broadcast_startup_barrier(Realm::Barrier startup_barrier);
-      void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
