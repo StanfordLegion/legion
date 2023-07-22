@@ -9707,9 +9707,10 @@ class Future(object):
                         # Looking for a single point task
                         if self.logical_creator.context.shard is not None:
                             # Control-replicated case
+                            offset = self.logical_creator.context.operations.index(self.logical_creator)
                             for shard in self.logical_creator.context.op.context.replicants.shards.values():
-                                shard_op = shard.operations[self.logical_creator.context_index]
-                                if self.point in shard_op.points:
+                                shard_op = shard.operations[offset]
+                                if shard_op.points and self.point in shard_op.points:
                                     self.physical_creators.add(shard_op.get_point_task(self.point).op)
                                     break
                         else:
@@ -9720,9 +9721,11 @@ class Future(object):
                         # Accumulating all the points that feed into this future
                         if self.logical_creator.context.shard is not None:
                             # Control-replicated case
+                            offset = self.logical_creator.context.operations.index(self.logical_creator)
                             for shard in self.logical_creator.context.op.context.replicants.shards.values():
-                                for point in shard.operations[self.logical_creator.context_index].points:
-                                    self.physical_creators.add(point.op)
+                                if shard.operations[offset].points:
+                                    for point in shard.operations[offset].points.values():
+                                        self.physical_creators.add(point.op)
                         else:
                             # Non-replicated case
                             for point in itervalues(self.logical_creator.points):
