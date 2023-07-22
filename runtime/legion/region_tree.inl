@@ -6795,68 +6795,89 @@ namespace Legion {
       assert(this->bounds.contains(rect));
 #endif
       bool subscribed = false;
-      FieldMaskSet<EqKDNode<DIM,T> > to_traverse, to_get_previous;
+      FieldMaskSet<EqKDNode<DIM,T> > 
+        to_traverse, to_get_previous, to_invalidate_previous;
       {
         FieldMask remaining = mask;
         AutoLock n_lock(node_lock);
-        // If we'd like to make a set at this level and all the refinements
-        // below are previous-only then we can skip traversing them here
-        if (!!all_previous_below && (rect == this->bounds))
-          remaining -= all_previous_below;
-        if ((lefts != NULL) && !(remaining * lefts->get_valid_mask()))
+        // First check to see if we have any current equivalence sets 
+        // here which means we can just record them
+        if ((current_sets != NULL) && 
+            !(remaining * current_sets->get_valid_mask()))
         {
-          FieldMask right_mask;
-          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                lefts->begin(); it != lefts->end(); it++)
+          FieldMask check_preconditions;
+          for (FieldMaskSet<EquivalenceSet>::const_iterator cit =
+                current_sets->begin(); cit != current_sets->end(); cit++)
           {
-            const FieldMask overlap = it->second & remaining;
+            const FieldMask overlap = remaining & cit->second;
             if (!overlap)
               continue;
-            if (it->first->bounds.overlaps(rect))
-            {
-              to_traverse.insert(it->first, overlap);
-              if (!it->first->bounds.contains(rect))
-                right_mask |= overlap;
-            }
-            else
-              right_mask |= overlap;
+            eq_sets.insert(cit->first, overlap);
             remaining -= overlap;
-            if (!remaining)
-              continue;
-          }
-          if (!!right_mask)
-          {
-            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                  rights->begin(); it != rights->end(); it++)
+            new_subscriptions.insert(this, overlap);
+            if (record_subscription(tracker, tracker_space, overlap))
             {
-              const FieldMask overlap = it->second & right_mask;
-              if (!overlap)
-                continue;
-              if (it->first->bounds.overlaps(rect))
-                to_traverse.insert(it->first, overlap);
-              right_mask -= overlap;
-              if (!right_mask)
-                break;
+#ifdef DEBUG_LEGION
+              assert(!subscribed);
+#endif
+              subscribed = true;
+            }
+            if (current_set_preconditions != NULL)
+              check_preconditions |= overlap;
+            if (!remaining)
+              break;
+          }
+          if (!!check_preconditions)
+          {
+            // Check to see if there are any pending set creation events
+            // still valid for this event, if so we still need to 
+            // record them to make sure we don't try to use this set
+            // until it is actually ready
+            for (LegionMap<RtEvent,FieldMask>::iterator it =
+                  current_set_preconditions->begin(); it !=
+                  current_set_preconditions->end(); /*nothing*/)
+            {
+              if (!it->first.has_triggered())
+              {
+                if (!(check_preconditions * it->second))
+                {
+                  pending_sets.push_back(it->first);
+                  check_preconditions -= it->second;
+                  if (!check_preconditions)
+                    break;
+                }
+                it++;
+              }
+              else
+              {
+                // Perform the previous invalidations now that the
+                // event has triggered
+                invalidate_previous_sets(it->second, to_invalidate_previous);
+                LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
+                current_set_preconditions->erase(to_delete);
+              }
+            }
+            if (current_set_preconditions->empty())
+            {
+              delete current_set_preconditions;
+              current_set_preconditions = NULL;
             }
           }
         }
-        // Re-introduce the fields we want to try to refine here
-        if (!!all_previous_below && (rect == this->bounds))
-          remaining |= (all_previous_below & mask);
         if (!!remaining)
         {
-          // These are fields that are unrefined, see if we already
-          // have equivalence sets for them
-          if (current_sets != NULL)
+          // if we still have remaining fields, check for any pending
+          // sets that might be in the process of being made
+          if (pending_set_creations != NULL)
           {
-            FieldMask check_preconditions;
-            for (FieldMaskSet<EquivalenceSet>::const_iterator cit =
-                  current_sets->begin(); cit != current_sets->end(); cit++)
+            for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
+                  pending_set_creations->begin(); it !=
+                  pending_set_creations->end(); it++)
             {
-              const FieldMask overlap = remaining & cit->second;
+              const FieldMask overlap = remaining & it->second;
               if (!overlap)
                 continue;
-              eq_sets.insert(cit->first, overlap);
+              pending_sets.push_back(it->first);
               remaining -= overlap;
               new_subscriptions.insert(this, overlap);
               if (record_subscription(tracker, tracker_space, overlap))
@@ -6866,72 +6887,58 @@ namespace Legion {
 #endif
                 subscribed = true;
               }
-              if (current_set_preconditions != NULL)
-                check_preconditions |= overlap;
               if (!remaining)
                 break;
-            }
-            if (!!check_preconditions)
-            {
-              // Check to see if there are any pending set creation events
-              // still valid for this event, if so we still need to 
-              // record them to make sure we don't try to use this set
-              // until it is actually ready
-              for (LegionMap<RtEvent,FieldMask>::iterator it =
-                    current_set_preconditions->begin(); it !=
-                    current_set_preconditions->end(); /*nothing*/)
-              {
-                if (!it->first.has_triggered())
-                {
-                  if (!(check_preconditions * it->second))
-                  {
-                    pending_sets.push_back(it->first);
-                    check_preconditions -= it->second;
-                    if (!check_preconditions)
-                      break;
-                  }
-                  it++;
-                }
-                else
-                {
-                  LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
-                  current_set_preconditions->erase(to_delete);
-                }
-              }
-              if (current_set_preconditions->empty())
-              {
-                delete current_set_preconditions;
-                current_set_preconditions = NULL;
-              }
             }
           }
           if (!!remaining)
           {
-            // if we still have remaining fields, check for any pending
-            // sets that might be in the process of being made
-            if (pending_set_creations != NULL)
+            // Next check to see if we have to traverse below any nodes
+            // below because they have been refined. If they're all previous
+            // below and we're trying to make equivalence sets here then we
+            // can skip traversing below since we'll be able to coarsen
+            if (!!all_previous_below && (rect == this->bounds))
+              remaining -= all_previous_below;
+            if ((lefts != NULL) && !(remaining * lefts->get_valid_mask()))
             {
-              for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
-                    pending_set_creations->begin(); it !=
-                    pending_set_creations->end(); it++)
+              FieldMask right_mask;
+              for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                    lefts->begin(); it != lefts->end(); it++)
               {
-                const FieldMask overlap = remaining & it->second;
+                const FieldMask overlap = it->second & remaining;
                 if (!overlap)
                   continue;
-                pending_sets.push_back(it->first);
-                remaining -= overlap;
-                new_subscriptions.insert(this, overlap);
-                if (record_subscription(tracker, tracker_space, overlap))
+                if (it->first->bounds.overlaps(rect))
                 {
-#ifdef DEBUG_LEGION
-                  assert(!subscribed);
-#endif
-                  subscribed = true;
+                  to_traverse.insert(it->first, overlap);
+                  if (!it->first->bounds.contains(rect))
+                    right_mask |= overlap;
                 }
+                else
+                  right_mask |= overlap;
+                remaining -= overlap;
                 if (!remaining)
-                  break;
+                  continue;
+              }
+              if (!!right_mask)
+              {
+                for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator
+                      it = rights->begin(); it != rights->end(); it++)
+                {
+                  const FieldMask overlap = it->second & right_mask;
+                  if (!overlap)
+                    continue;
+                  if (it->first->bounds.overlaps(rect))
+                    to_traverse.insert(it->first, overlap);
+                  right_mask -= overlap;
+                  if (!right_mask)
+                    break;
+                }
               }
             }
+            // Re-introduce the fields we want to try to refine here
+            if (!!all_previous_below && (rect == this->bounds))
+              remaining |= (all_previous_below & mask);
             if (!!remaining)
             {
               // if we still have remaining fields, then we're going to 
@@ -7046,6 +7053,14 @@ namespace Legion {
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_get_previous.begin(); it != to_get_previous.end(); it++)
         it->first->find_all_previous_sets(it->second, creation_srcs); 
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            to_invalidate_previous.begin(); it != 
+            to_invalidate_previous.end(); it++)
+      {
+        it->first->invalidate_all_previous_sets(it->second);
+        if (it->first->remove_reference())
+          delete it->first;
+      }
       return new_subs;
     }
 
@@ -7124,8 +7139,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      // We shouldn't have any existing refinements for these fields
       assert((lefts == NULL) || (mask * lefts->get_valid_mask()));
       assert((rights == NULL) || (mask * rights->get_valid_mask()));
+      // We shouldn't have any current sets either for these fields
+      assert((current_sets == NULL) || (mask * current_sets->get_valid_mask()));
       if (pending_set_creations != NULL)
       {
         // Invalidations should never be racing with pending set
@@ -7255,12 +7273,6 @@ namespace Legion {
             all_previous_below |= mask & previous_sets->get_valid_mask();
             clone_previous(prior_left, prior_right, mask);
           }
-          if (current_sets != NULL)
-          {
-            if (!!all_previous_below)
-              all_previous_below -= mask & current_sets->get_valid_mask();
-            clone_current(prior_left, prior_right, mask);
-          }
           return;
         }
       }
@@ -7283,12 +7295,6 @@ namespace Legion {
         all_previous_below |= mask & previous_sets->get_valid_mask();
         clone_previous(new_left, new_right, mask);
       }
-      if (current_sets != NULL)
-      {
-        if (!!all_previous_below)
-          all_previous_below -= mask & current_sets->get_valid_mask();
-        clone_current(new_left, new_right, mask);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7307,13 +7313,7 @@ namespace Legion {
         assert(mask * current_sets->get_valid_mask());
 #endif
         if (current_sets->insert(set, mask))
-          set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          if (current_set_preconditions == NULL)
-            current_set_preconditions = new LegionMap<RtEvent,FieldMask>();
-          current_set_preconditions->insert(std::make_pair(ready, mask));
-        }
+          set->add_base_gc_ref(DISJOINT_COMPLETE_REF); 
         // Send notifications to all the subscriptions that are waiting for 
         // the set to be sent to them
         if (subscriptions != NULL)
@@ -7442,8 +7442,21 @@ namespace Legion {
         }
         // Record the new tracker as a subscription
         record_subscription(tracker, source, mask);
-        // perform any previous set invalidations
-        invalidate_previous_sets(mask, to_invalidate_previous);
+        // If the ready event hasn't triggered when need to keep around
+        // this event so no one tries to use the new equivalence set or
+        // invalidate any of the previous sets it depends on until it
+        // is actually ready to be used and all the clones are done
+        if (ready.exists() && !ready.has_triggered())
+        {
+          if (current_set_preconditions == NULL)
+            current_set_preconditions = new LegionMap<RtEvent,FieldMask>();
+          current_set_preconditions->insert(std::make_pair(ready, mask));
+        }
+        else // we can invalidate the previous sets now
+          // we can only do this if the ready event has triggered which
+          // indicates that all the clone operations from the previous
+          // sets are done and it's safe to remove the references
+          invalidate_previous_sets(mask, to_invalidate_previous);
       }
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_invalidate_previous.begin(); it != 
@@ -7686,78 +7699,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void EqKDNode<DIM,T>::clone_current(EqKDNode<DIM,T> *left, 
-                                        EqKDNode<DIM,T> *right, FieldMask mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_sets != NULL);
-#endif
-      // Copy over the preconditions before we go messing with the mask
-      if (current_set_preconditions != NULL)
-      {
-        for (LegionMap<RtEvent,FieldMask>::iterator it =
-              current_set_preconditions->begin(); it !=
-              current_set_preconditions->end(); /*nothing*/)
-        {
-          const FieldMask overlap = it->second & mask; 
-          if (!overlap)
-          {
-            it++;
-            continue;
-          }
-          left->record_precondition(it->first, overlap);
-          right->record_precondition(it->first, overlap);
-          it->second -= overlap;
-          if (!it->second)
-          {
-            LegionMap<RtEvent,FieldMask>::iterator delete_it = it++;
-            current_set_preconditions->erase(delete_it);
-          }
-          else
-            it++;
-        }
-        if (current_set_preconditions->empty())
-        {
-          delete current_set_preconditions;
-          current_set_preconditions = NULL;
-        }
-      }
-      // Copy over the sets themselves
-      std::vector<EquivalenceSet*> to_delete;
-      for (FieldMaskSet<EquivalenceSet>::iterator it =
-            current_sets->begin(); it != current_sets->end(); it++)
-      {
-        const FieldMask overlap = it->second & mask;
-        if (!overlap)
-          continue;
-        left->record_current(it->first, overlap);
-        right->record_current(it->first, overlap);
-        it.filter(overlap);
-        if (!it->second)
-          to_delete.push_back(it->first);
-        mask -= overlap;
-        if (!mask)
-          break;
-      }
-      for (std::vector<EquivalenceSet*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        current_sets->erase(*it); 
-        if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-          delete (*it);
-      }
-      if (current_sets->empty())
-      {
-        delete current_sets;
-        current_sets = NULL;
-      } 
-      else
-        current_sets->tighten_valid_mask();
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     void EqKDNode<DIM,T>::clone_previous(EqKDNode<DIM,T> *left, 
                                          EqKDNode<DIM,T> *right, FieldMask mask)
     //--------------------------------------------------------------------------
@@ -7795,31 +7736,6 @@ namespace Legion {
       }
       else
         previous_sets->tighten_valid_mask();
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void EqKDNode<DIM,T>::record_precondition(RtEvent precondition,
-                                              const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      if (current_set_preconditions == NULL)
-        current_set_preconditions = new LegionMap<RtEvent,FieldMask>();
-      (*current_set_preconditions)[precondition] |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void EqKDNode<DIM,T>::record_current(EquivalenceSet *set, 
-                                         const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      if (current_sets == NULL)
-        current_sets = new FieldMaskSet<EquivalenceSet>();
-      if (current_sets->insert(set, mask))
-        set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -8056,7 +7972,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(this->bounds.contains(rect));
 #endif
-      FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
+      FieldMaskSet<EqKDNode<DIM,T> > to_traverse, to_invalidate_previous;
       typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
       LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
       {
@@ -8119,6 +8035,35 @@ namespace Legion {
         // are either subscribed to it or they aren't
         if (!!unrefined)
         {
+          // First check to see if there are any current sets which
+          // haven't had their previous sets filtered yet
+          if (current_set_preconditions != NULL)
+          {
+            for (LegionMap<RtEvent,FieldMask>::iterator it =
+                  current_set_preconditions->begin(); it !=
+                  current_set_preconditions->end(); /*nothing*/)
+            {
+              if (!(it->second * mask))
+              {
+#ifdef DEBUG_LEGION
+                // Better have triggered by the point we're doing
+                // this invalidation or something is wrong with the
+                // mapping dependences for this refinement operation
+                assert(it->first.has_triggered());
+#endif
+                invalidate_previous_sets(it->second, to_invalidate_previous);
+                LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
+                current_set_preconditions->erase(to_delete);
+              }
+              else
+                it++;
+            }
+            if (current_set_preconditions->empty())
+            {
+              delete current_set_preconditions;
+              current_set_preconditions = NULL;
+            }
+          }
           // These are the fields for which we have arrived and therefor
           // the ones we need to filter here locally
           // Filter current sets back to the previous sets
@@ -8302,6 +8247,14 @@ namespace Legion {
         EqSetTracker::invalidate_subscriptions(runtime, this, 
                                   to_invalidate, invalidated);
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            to_invalidate_previous.begin(); it != 
+            to_invalidate_previous.end(); it++)
+      {
+        it->first->invalidate_all_previous_sets(it->second);
+        if (it->first->remove_reference())
+          delete it->first;
+      }
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
         const Rect<DIM,T> intersection = rect.intersection(it->first->bounds);
@@ -8355,10 +8308,15 @@ namespace Legion {
             subscriptions = NULL;
           }
         }
+        else
+          subscription_finder->second.tighten_valid_mask();
         return true;
       }
       else
+      {
+        subscription_finder->second.tighten_valid_mask();
         return false;
+      }
     }
 
     /////////////////////////////////////////////////////////////
