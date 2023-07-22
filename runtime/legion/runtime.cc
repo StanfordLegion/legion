@@ -3597,9 +3597,7 @@ namespace Legion {
           register_now, mapping),
         context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
         op_gen(o->get_generation()), op_depth(o->get_context()->get_depth()),
-#ifdef LEGION_SPY
         op_uid(o->get_unique_op_id()),
-#endif
         provenance(prov), future_map_domain(domain),
         completion_event(o->get_completion_event())
     //--------------------------------------------------------------------------
@@ -3625,10 +3623,8 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
         context(ctx), op(NULL), op_ctx_index(index), op_gen(0), op_depth(0),
-#ifdef LEGION_SPY
-        op_uid(0),
-#endif
-        provenance(prov), future_map_domain(d), completion_event(completion)
+        op_uid(0), provenance(prov), future_map_domain(d), 
+        completion_event(completion)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3645,20 +3641,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, size_t index,
-                                 GenerationID gen, int depth,
-#ifdef LEGION_SPY
-                                 UniqueID uid,
-#endif
+                                 GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, ApEvent completion,
                                  Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
-#ifdef LEGION_SPY
-        op_uid(uid),
-#endif
-        provenance(prov), future_map_domain(domain),completion_event(completion)
+        op_uid(uid), provenance(prov), future_map_domain(domain),
+        completion_event(completion)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3674,20 +3665,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
-      : DistributedCollectable(rhs), context(NULL), op(NULL), op_ctx_index(0),
-        op_gen(0), op_depth(0),
-#ifdef LEGION_SPY
-        op_uid(0),
-#endif
-        provenance(NULL), future_map_domain(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     FutureMapImpl::~FutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
@@ -3700,15 +3677,6 @@ namespace Legion {
         delete future_map_domain;
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMapImpl& FutureMapImpl::operator=(const FutureMapImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -3803,8 +3771,7 @@ namespace Legion {
         result->add_nested_resource_ref(did);
         futures[point] = result;
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                         result->did, point);
+          LegionSpy::log_future_creation(op_uid, result->did, point);
         return Future(result);
       }
     }
@@ -4145,10 +4112,7 @@ namespace Legion {
                               IndexSpaceNode *domain, PointTransformFnptr fnptr,
                               Provenance *prov)
       : FutureMapImpl(prev->context, prev->op, prev->op_ctx_index, prev->op_gen,
-          prev->op_depth,
-#ifdef LEGION_SPY
-          prev->op_uid,
-#endif
+          prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prev->completion_event, prov),
         previous(prev), own_functor(false), is_functor(false)
@@ -4163,10 +4127,7 @@ namespace Legion {
           IndexSpaceNode *domain, PointTransformFunctor *functor, bool own_func,
           Provenance *prov)
       : FutureMapImpl(prev->context, prev->op, prev->op_ctx_index, prev->op_gen,
-          prev->op_depth,
-#ifdef LEGION_SPY
-          prev->op_uid,
-#endif
+          prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prev->completion_event, prov),
         previous(prev), own_functor(own_func), is_functor(true)
@@ -4177,16 +4138,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TransformFutureMapImpl::TransformFutureMapImpl(
-                                              const TransformFutureMapImpl &rhs)
-      : FutureMapImpl(rhs), previous(NULL), own_functor(false),is_functor(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     TransformFutureMapImpl::~TransformFutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
@@ -4194,16 +4145,6 @@ namespace Legion {
         delete previous;
       if (own_functor)
         delete transform.functor;
-    }
-
-    //--------------------------------------------------------------------------
-    TransformFutureMapImpl& TransformFutureMapImpl::operator=(
-                                              const TransformFutureMapImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -4402,9 +4343,8 @@ namespace Legion {
       : FutureMapImpl(ctx, op, domain, rt, did, prov,
                       false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
-        op_depth(ctx->get_depth()), op_uid(op->get_unique_op_id()),
-        sharding_function(NULL), own_sharding_function(false),
-        collective_performed(false)
+        op_depth(ctx->get_depth()), sharding_function(NULL), 
+        own_sharding_function(false), collective_performed(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4423,9 +4363,8 @@ namespace Legion {
       : FutureMapImpl(ctx, rt, domain, did, index, completion, prov, 
                       false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
-        op_depth(ctx->get_depth()), op_uid(ctx->get_unique_id()),
-        sharding_function(NULL), own_sharding_function(false),
-        collective_performed(false)
+        op_depth(ctx->get_depth()), sharding_function(NULL),
+        own_sharding_function(false), collective_performed(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4525,8 +4464,7 @@ namespace Legion {
         result->add_nested_resource_ref(did);
         futures[point] = result;
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                         result->did, point);
+          LegionSpy::log_future_creation(op_uid, result->did, point);
         return Future(result);
       }
     }

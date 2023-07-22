@@ -652,16 +652,13 @@ namespace Legion {
                     bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
-                    GenerationID gen, int depth, 
-#ifdef LEGION_SPY
-                    UniqueID uid,
-#endif
+                    GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
                     ApEvent completion, Provenance *provenance);
-      FutureMapImpl(const FutureMapImpl &rhs);
+      FutureMapImpl(const FutureMapImpl &rhs) = delete;
       virtual ~FutureMapImpl(void);
     public:
-      FutureMapImpl& operator=(const FutureMapImpl &rhs);
+      FutureMapImpl& operator=(const FutureMapImpl &rhs) = delete;
     public:
       virtual bool is_replicate_future_map(void) const { return false; }
     public:
@@ -705,9 +702,7 @@ namespace Legion {
       const size_t op_ctx_index;
       const GenerationID op_gen;
       const int op_depth;
-#ifdef LEGION_SPY
       const UniqueID op_uid;
-#endif
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
       const ApEvent completion_event;
@@ -731,10 +726,11 @@ namespace Legion {
       TransformFutureMapImpl(FutureMapImpl *previous, IndexSpaceNode *domain,
                              PointTransformFunctor *functor, bool own_functor,
                              Provenance *provenance);
-      TransformFutureMapImpl(const TransformFutureMapImpl &rhs);
+      TransformFutureMapImpl(const TransformFutureMapImpl &rhs) = delete;
       virtual ~TransformFutureMapImpl(void);
     public:
-      TransformFutureMapImpl& operator=(const TransformFutureMapImpl &rhs);
+      TransformFutureMapImpl& operator=(
+          const TransformFutureMapImpl &rhs) = delete;
     public:
       virtual bool is_replicate_future_map(void) const;
       virtual Future get_future(const DomainPoint &point, 
@@ -800,7 +796,6 @@ namespace Legion {
       // node where they are made so we store their producer op information
       // in case they have to make futures from remote shards
       const int op_depth; 
-      const UniqueID op_uid;
     protected:
       RtUserEvent sharding_function_ready;
       std::atomic<ShardingFunction*> sharding_function;
