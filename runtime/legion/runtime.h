@@ -3394,6 +3394,7 @@ namespace Legion {
       static void configure_interoperability(bool separate_runtimes);
       static Processor configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
+          std::set<Processor> &local_procs,
           std::map<Processor,Runtime*> &processor_mapping,
           bool background, bool default_mapper);
       static int wait_for_shutdown(void);

@@ -22268,15 +22268,18 @@ namespace Legion {
       if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
         configure_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
+      std::set<Processor> local_procs;
       std::map<Processor,Runtime*> processor_mapping;
       const Processor first_proc = configure_runtime(argc, argv,
-          config, realm, processor_mapping, background, supply_default_mapper);
+          config, realm, local_procs, processor_mapping, background,
+          supply_default_mapper);
 #ifdef DEBUG_LEGION
       // Startup kind should be a CPU or a Utility processor
       assert((first_proc.kind() == Processor::LOC_PROC) ||
           (first_proc.kind() == Processor::UTIL_PROC));
       // First processor should be on node zero
       assert(first_proc.address_space() == 0);
+      assert(!local_procs.empty());
 #endif
       // We have to set these prior to starting Realm as once we start
       // Realm it might fork child processes so they all need to see
@@ -22305,6 +22308,18 @@ namespace Legion {
         // start-up task as it broadcasts through the nodes
         startup_barrier = find_or_wait_for_startup_barrier();
       }
+      // We also need to run a nop task on every processor to make sure
+      // that Realm has finished initializing that processor. This is
+      // especially important for things like Python processors which 
+      // might still be loading modules and we want to ensure that they
+      // are completely done doing that before we try to do anything
+      std::vector<RtEvent> nop_events;
+      nop_events.reserve(local_procs.size());
+      for (std::set<Processor>::const_iterator it =
+            local_procs.begin(); it != local_procs.end(); it++)
+        nop_events.push_back(RtEvent(it->spawn(
+                  Processor::TASK_ID_PROCESSOR_NOP, NULL, 0)));
+      // Now we can initialize the Legion runtime(s) on this node
       if (config.separate_runtime_instances)
       {
         for (std::map<Processor,Runtime*>::const_iterator it =
@@ -22316,9 +22331,14 @@ namespace Legion {
       if (startup_barrier.exists())
       {
         // Make sure all the nodes are done
-        startup_barrier.arrive(1/*count*/);
+        startup_barrier.arrive(1/*count*/, Runtime::merge_events(nop_events));
         // Wait for all the nodes to be done with the initialization
         startup_barrier.wait();
+      }
+      else
+      {
+        const RtEvent initialized = Runtime::merge_events(nop_events);
+        initialized.wait();
       }
       // Launch the top-level task if we have a main set
       if (the_runtime->address_space == 0)
@@ -22982,6 +23002,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ Processor Runtime::configure_runtime(int argc, char **argv,
                          const LegionConfiguration &config, RealmRuntime &realm,
+                         std::set<Processor> &local_procs,
                          std::map<Processor,Runtime*> &processor_mapping,
                          bool background, bool supply_default_mapper)
     //--------------------------------------------------------------------------
@@ -22990,7 +23011,6 @@ namespace Legion {
       // Do some error checking in case we are running with separate instances
       Machine machine = Machine::get_machine();
       // Compute the data structures necessary for constructing a runtime 
-      std::set<Processor> local_procs;
       std::set<Processor> local_util_procs;
       Processor::Kind startup_kind = Processor::NO_KIND;
       // First we find all our local processors
