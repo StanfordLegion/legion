@@ -411,7 +411,38 @@ namespace Legion {
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
+      {
+        // If this is a close operation then we still need to update the mask
+        if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
+        {
+#ifdef DEBUG_LEGION
+          assert(!replay_info.empty());
+          assert(op_map.find(std::make_pair(source, source_gen)) != 
+              op_map.end());
+#endif
+          OperationInfo &info = replay_info.back();
+#ifdef DEBUG_LEGION
+          bool found = false;
+          assert(!info.closes.empty());
+#endif
+          // Find the right close info and record the dependence 
+          for (unsigned idx = 0; idx < info.closes.size(); idx++)
+          {
+            CloseInfo &close = info.closes[idx];
+            if (close.close_op != source)
+              continue;
+#ifdef DEBUG_LEGION
+            found = true;
+#endif
+            close.close_mask |= dep_mask;
+            break;
+          }
+#ifdef DEBUG_LEGION
+          assert(found);
+#endif
+        }
         return false;
+      }
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
       assert((op_map.find(std::make_pair(source, source_gen)) != op_map.end())
@@ -567,6 +598,7 @@ namespace Legion {
       return finder->second;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void LogicalTrace::perform_logging(
                                UniqueID prev_fence_uid, UniqueID curr_fence_uid)
@@ -604,6 +636,7 @@ namespace Legion {
         LegionSpy::log_mapping_dependence(context_uid, prev_fence_uid, 0,
             curr_fence_uid, 0, LEGION_TRUE_DEPENDENCE);
     }
+#endif
 #endif
 
     //--------------------------------------------------------------------------
@@ -1776,17 +1809,6 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      if (trace->is_replaying())
-      {
-        PhysicalTrace *physical_trace = trace->get_physical_trace();
-#ifdef DEBUG_LEGION
-        assert(physical_trace != NULL);
-#endif
-        trace->perform_logging(
-         physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
-      }
-#endif
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 

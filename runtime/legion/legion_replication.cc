@@ -8613,17 +8613,6 @@ namespace Legion {
     void ReplTraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      if (trace->is_replaying())
-      {
-        PhysicalTrace *physical_trace = trace->get_physical_trace();
-#ifdef DEBUG_LEGION
-        assert(physical_trace != NULL);
-#endif
-        trace->perform_logging(
-         physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
-      }
-#endif
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 
@@ -8643,10 +8632,6 @@ namespace Legion {
         current_template = physical_trace->get_current_template();
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
-#endif
-#ifdef LEGION_SPY
-        trace->perform_logging(
-            current_template->get_fence_uid(), unique_op_id);
 #endif
         // Get our fence barriers
         initialize_fence_barriers();

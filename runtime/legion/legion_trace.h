@@ -189,7 +189,6 @@ namespace Legion {
           const std::vector<StaticDependence> &dependences);
 #ifdef LEGION_SPY
     public:
-      void perform_logging(UniqueID prev_fence_uid, UniqueID curr_fence_uid);
       UniqueID get_current_uid_by_index(unsigned op_idx) const;
 #endif
     public:
@@ -623,7 +622,6 @@ namespace Legion {
                               PhysicalTemplate *tpl,
                               Operation *invalidator,
                               Provenance *provenance);
-      void perform_logging(void);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
