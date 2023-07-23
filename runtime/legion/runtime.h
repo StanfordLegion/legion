@@ -1337,7 +1337,6 @@ namespace Legion {
     public:
       void prepare_for_shutdown(void);
     public:
-      void startup_mappers(void);
       void add_mapper(MapperID mid, MapperManager *m, 
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
@@ -2743,7 +2742,7 @@ namespace Legion {
       void register_static_projections(void);
       void register_static_sharding_functors(void);
       void initialize_legion_prof(const LegionConfiguration &config);
-      void log_machine(Machine machine) const;
+      void log_machine(void) const;
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
@@ -2758,7 +2757,7 @@ namespace Legion {
       RtEvent perform_registration_callback(void *callback, const void *buffer,
           size_t size, bool withargs, bool global, bool preregistered,
           bool deduplicate, size_t dedup_tag);
-      void startup_runtime(void);
+      void broadcast_startup_barrier(RtBarrier startup_barrier);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
@@ -3094,6 +3093,7 @@ namespace Legion {
                                     const void *message, size_t message_size, 
                                     unsigned message_kind, int radix,int index);
     public:
+      void send_startup_barrier(AddressSpaceID target, Serializer &rez);
       void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
       void send_steal_request(const std::multimap<Processor,MapperID> &targets,
@@ -3503,6 +3503,7 @@ namespace Legion {
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
+      void handle_startup_barrier(Deserializer &derez);
       void handle_task(Deserializer &derez);
       void handle_steal(Deserializer &derez);
       void handle_advertisement(Deserializer &derez);
@@ -4241,7 +4242,7 @@ namespace Legion {
     public:
       // These are the static methods that become the meta-tasks
       // for performing all the needed runtime operations
-      static void initialize_runtime_task(
+      static void startup_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
@@ -4257,10 +4258,6 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void startup_runtime_task(
-                          const void *args, size_t arglen, 
-			  const void *userdata, size_t userlen,
-			  Processor p);
       static void endpoint_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
@@ -4269,6 +4266,8 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+    protected:
+      static RtBarrier find_or_wait_for_startup_barrier(void);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -4698,9 +4697,11 @@ namespace Legion {
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_interoperability(bool separate_runtimes);
-      static RtEvent configure_runtime(int argc, char **argv,
+      static Processor configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
-          Processor::Kind &startup_kind, bool background, bool default_mapper);
+          std::set<Processor> &local_procs,
+          std::map<Processor,Runtime*> &processor_mapping,
+          bool background, bool default_mapper);
       static int wait_for_shutdown(void);
       static void set_return_code(int return_code);
       Future launch_top_level_task(const TaskLauncher &launcher);
@@ -4825,8 +4826,9 @@ namespace Legion {
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
-      static RtUserEvent runtime_started_event;
-      static std::atomic<int> background_waits;
+      static std::atomic<Realm::Event::id_t> startup_event;
+      static Realm::Barrier::timestamp_t startup_timestamp;
+      static std::atomic<bool> background_wait;
       // Shutdown error condition
       static int return_code;
       // Static member variables for MPI interop
@@ -5725,6 +5727,8 @@ namespace Legion {
     {
       switch (kind)
       {
+        case SEND_STARTUP_BARRIER:
+          break;
         case TASK_MESSAGE:
           return TASK_VIRTUAL_CHANNEL;
         case STEAL_MESSAGE:
