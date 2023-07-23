@@ -7583,6 +7583,13 @@ class Operation(object):
                     if current.reqs[0].logical_node.tree_id == tree_id and \
                             field in current.reqs[0].fields:
                         merge_close_ops.append(current)
+                # We also allow mapping fences and execution fences (which are
+                # also a kind of mapping fence to fulfill this purpose)
+                elif current.kind == MAPPING_FENCE_OP_KIND or \
+                        current.kind == EXECUTION_FENCE_OP_KIND: 
+                    merge_close_ops.append(current)
+                    # No need to keep scanning past a fence since it dominates
+                    continue
                 if not current.logical_incoming:
                     continue
                 for next_op in current.logical_incoming:
