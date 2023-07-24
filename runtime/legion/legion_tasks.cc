@@ -780,10 +780,6 @@ namespace Legion {
       }
       if (!options.check_collective_regions.empty() && is_index_space)
       {
-        // We might already have added some region requirements in here
-        // from IndexTask::trigger_prepipeline stage, if so we'll need to
-        // resort and remove duplicates afterwards
-        const bool need_uniquify = !check_collective_regions.empty();
         for (std::set<unsigned>::const_iterator it =
               options.check_collective_regions.begin(); it !=
               options.check_collective_regions.end(); it++)
@@ -802,13 +798,28 @@ namespace Legion {
           else
             check_collective_regions.push_back(*it);
         }
-        if (need_uniquify)
+        if (!check_collective_regions.empty())
         {
-          std::sort(check_collective_regions.begin(), 
-              check_collective_regions.end());
-          std::vector<unsigned>::iterator last = std::unique(
-              check_collective_regions.begin(), check_collective_regions.end());
-          check_collective_regions.erase(last, check_collective_regions.end());
+          // Check to make sure that there are no invertible projection functors
+          // in this index space launch on writing requirements which might
+          // cause point tasks to be interfering. If there are then we can't
+          // perform any collective rendezvous here so the tasks map together
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            const RegionRequirement &req = regions[idx];
+            if (!IS_WRITE(req))
+              continue;
+            if (((req.projection == 0) &&
+                (req.handle_type == LEGION_REGION_PROJECTION)) ||
+                runtime->find_projection_function(
+                  req.projection)->is_invertible)
+            {
+              // Has potential dependences between the points so we can't
+              // assume that this is safe
+              check_collective_regions.clear();
+              break;
+            }
+          }
         }
       }
       if (options.inline_task)
@@ -8660,7 +8671,7 @@ namespace Legion {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
-      regions = launcher.region_requirements;
+      initialize_regions(launcher.region_requirements);
       futures = launcher.futures;
       // If the task has any output requirements, we create fresh region and
       // partition names and return them back to the user
@@ -8793,7 +8804,7 @@ namespace Legion {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
-      regions = launcher.region_requirements;
+      initialize_regions(launcher.region_requirements);
       futures = launcher.futures;
       // If the task has any output requirements, we create fresh region and
       // partition names and return them back to the user
@@ -8916,6 +8927,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::initialize_regions(const std::vector<RegionRequirement> &rs)
+    //--------------------------------------------------------------------------
+    {
+      regions = rs;
+      // Rewrite any singular region requirements to projections
+      for (std::vector<RegionRequirement>::iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (it->handle_type == LEGION_SINGULAR_PROJECTION)
+        {
+          it->handle_type = LEGION_REGION_PROJECTION;
+          it->projection = 0; // identity
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::initialize_predicate(const Future &pred_future,
                                          const UntypedBuffer &pred_arg)
     //--------------------------------------------------------------------------
@@ -8961,47 +8989,6 @@ namespace Legion {
       compute_parent_indexes(); 
       // Count how many total points we need for this index space task
       total_points = index_domain.get_volume();
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        RegionRequirement &req = regions[idx];
-        // any region requirements which were marked singular need to
-        // be promoted up to being a region projection with depth 0
-        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
-        {
-          req.handle_type = LEGION_REGION_PROJECTION;
-          req.projection = 0;
-          // If we're reading or reducing then make a collective view
-          if (IS_READ_ONLY(req) || IS_REDUCE(req))
-            check_collective_regions.push_back(idx);
-        }
-        // If all the points are using the same logical region then
-        // record that we should do a collective rendezvous
-        else if ((req.handle_type == LEGION_REGION_PROJECTION) &&
-            (req.projection == 0) && (IS_READ_ONLY(req) || IS_REDUCE(req)))
-          check_collective_regions.push_back(idx);
-      }
-      if (!check_collective_regions.empty())
-      {
-        // Check to make sure that there are no invertible projection functors
-        // in this index space launch on writing requirements which might cause
-        // point tasks to be interfering. If there are then we can't perform 
-        // any collective rendezvous here so the tasks can map together 
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          const RegionRequirement &req = regions[idx];
-          if (!IS_WRITE(req))
-            continue;
-          if (((req.projection == 0) && 
-              (req.handle_type == LEGION_REGION_PROJECTION)) ||
-              runtime->find_projection_function(req.projection)->is_invertible)
-          {
-            // Has potential dependences between the points so we can't
-            // assume that this is safe
-            check_collective_regions.clear();
-            break;
-          }
-        }
-      }
       // Initialize the privilege paths
       privilege_paths.resize(get_region_count());
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)

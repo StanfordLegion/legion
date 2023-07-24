@@ -1115,6 +1115,7 @@ namespace Legion {
                              bool deterministic,
                              bool track = true,
                              std::vector<OutputRequirement> *outputs = NULL);
+      void initialize_regions(const std::vector<RegionRequirement> &regions);
       void initialize_predicate(const Future &pred_future,
                                 const UntypedBuffer &pred_arg);
       void perform_base_dependence_analysis(void);
