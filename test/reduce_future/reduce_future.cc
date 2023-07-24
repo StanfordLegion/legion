@@ -14,6 +14,7 @@
  */
 
 #include "helpers.h"
+#include <legion/legion_c.h>
 
 enum IDs
 {
@@ -151,6 +152,21 @@ struct Reduction
     result_buffer = result.get_buffer(Memory::SYSTEM_MEM, &result_size);
   }
 
+  void run_capi(Future initial)
+  {
+    legion_runtime_t rt_c = {&rt};
+    legion_context_t ctx_c = {&ctx};
+    legion_future_map_t futures_c = {&futures};
+    legion_future_t initial_c = {&initial};
+
+    legion_future_t result_c = legion_future_map_reduce_with_initial_value(
+        rt_c, ctx_c, futures_c, redop_id, true, 0, 0, NULL, initial_c);
+
+    result = *(Future *)result_c.impl;
+    legion_future_destroy(result_c);
+    result_buffer = result.get_buffer(Memory::SYSTEM_MEM, &result_size);
+  }
+
   bool is_expected(const void *expected_value, size_t expected_size)
   {
     return result_size == expected_size &&
@@ -214,7 +230,7 @@ void do_integer_add_test(Context ctx, Runtime *rt)
   assert(reduction.is_expected_integer(expected_integer(task_count)));
 
   int x = 1000;
-  reduction.run(Future::from_value(x));
+  reduction.run_capi(Future::from_value(x));
   printf("%d\n", reduction.as_integer());
   assert(reduction.is_expected_integer(x + expected_integer(task_count)));
 }
