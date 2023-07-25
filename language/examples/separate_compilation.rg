@@ -22,7 +22,8 @@ do
   local tmpfile = os.tmpname()
   tmp_dir = tmpfile .. ".d/"
   assert(os.execute("mkdir " .. tmp_dir) == 0)
-  os.remove(tmpfile)  -- remove this now that we have our directory
+  -- Hack: keep the tmpfile to be absolutely sure we won't collide
+  -- os.remove(tmpfile)
 end
 
 -- Compile separate tasks.
