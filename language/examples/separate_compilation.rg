@@ -21,6 +21,7 @@ do
   -- use os.tmpname to get a hopefully-unique directory to work in
   local tmpfile = os.tmpname()
   tmp_dir = tmpfile .. ".d/"
+  print("Creating temporary directory " .. tmp_dir)
   assert(os.execute("mkdir " .. tmp_dir) == 0)
   -- Hack: keep the tmpfile to be absolutely sure we won't collide
   -- os.remove(tmpfile)
