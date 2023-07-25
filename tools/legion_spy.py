@@ -5409,7 +5409,11 @@ class EquivalenceSet(object):
         self.restricted_instances = set()
         
     def is_initialized(self):
-        return self.version_number > 0
+        # Due to detach operations, we can actually have cases where we do not
+        # have any valid data in this equivalence set becasue the last valid
+        # data was removed with a detach operation
+        return (self.version_number > 0) and (
+                self.valid_instances or self.pending_fill or self.previous_instances)
 
     def reset(self):
         self.version_number += 1
@@ -5692,9 +5696,10 @@ class EquivalenceSet(object):
                 self.reset()
             self.valid_instances.add(inst)
         elif req.is_read_only():
+            assert self.is_initialized()
             # Just have to add ourselves to the list of valid instances
             # Only do this if we had valid data to begin with
-            if self.is_initialized() and not self.restricted_instances:
+            if not self.restricted_instances:
                 self.valid_instances.add(inst)
         # If we are restricted and we're not read-only we have to issue
         # copies back to the restricted instance
