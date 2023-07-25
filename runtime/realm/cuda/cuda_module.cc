@@ -1703,23 +1703,25 @@ namespace Realm {
       Realm::CoreReservationParameters params;
 
       if (_gpu->info->has_numa_preference) {
-        int numa_domain = 0;
-        // Pick the first numa domain in the retrieved numa mask
+        // Pick the first numa domain in the retrieved numa mask that is available
         // TODO: pass the mask directly to params instead of picking the first one
+        const Realm::CoreMap::DomainMap& available_domains = crs.get_core_map()->by_domain;
         for (size_t numa_idx = 0; numa_idx < _gpu->info->MAX_NUMA_NODE_LEN; numa_idx++) {
+          int numa_domain = 0;
           bool found_numa = false;
           for (size_t numa_offset = 0; numa_offset < sizeof(_gpu->info->numa_node_affinity[0]); numa_offset++) {
-            if (_gpu->info->numa_node_affinity[numa_idx] & (1UL << numa_offset)) {
-              numa_domain = numa_offset + numa_idx * sizeof(_gpu->info->numa_node_affinity[0]);
+            numa_domain = numa_offset + numa_idx * sizeof(_gpu->info->numa_node_affinity[0]);
+            if ((_gpu->info->numa_node_affinity[numa_idx] & (1UL << numa_offset)) &&
+                available_domains.find(numa_domain) != available_domains.end()) {
               found_numa = true;
               break;
             }
           }
           if (found_numa) {
+            params.set_numa_domain(numa_domain);
             break;
           }
         }
-        params.set_numa_domain(numa_domain);
       }
       params.set_num_cores(1);
       params.set_alu_usage(params.CORE_USAGE_SHARED);
