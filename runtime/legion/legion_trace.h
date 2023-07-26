@@ -141,10 +141,11 @@ namespace Legion {
     public:
       inline TraceID get_trace_id(void) const { return tid; }
     public:
-      bool initialize_op_tracing(Operation *op, bool internal,
-                     const std::vector<StaticDependence> *dependences);
+      bool initialize_op_tracing(Operation *op,
+                     const std::vector<StaticDependence> *dependences = NULL);
       bool skip_analysis(RegionTreeID tid) const;
       size_t register_operation(Operation *op, GenerationID gen);
+      void register_internal(InternalOp *op);
       void register_close(MergeCloseOp *op, unsigned creator_idx,
 #ifdef DEBUG_LEGION_COLLECTIVES
                           RegionTreeNode *node,

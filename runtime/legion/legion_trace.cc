@@ -110,11 +110,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalTrace::initialize_op_tracing(Operation *op, bool internal,
+    bool LogicalTrace::initialize_op_tracing(Operation *op,
                                const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
-      if (internal)
+      if (op->is_internal_op())
       {
         if (!recording)
           return false;
@@ -254,6 +254,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalTrace::register_internal(InternalOp *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      const std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      const std::pair<Operation*,GenerationID> creator_key(
+          op->get_creator_op(), op->get_creator_gen());
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        finder = op_map.find(creator_key);
+#ifdef DEBUG_LEGION
+      assert(finder != op_map.end());
+#endif
+      // Record that they have the same entry so that we can detect that
+      // they are the same when recording dependences. We do this for all
+      // internal operations which won't be replayed and for which we will
+      // need to collapse their dependences back onto their creator
+      op_map[key] = finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalTrace::register_close(MergeCloseOp *op, unsigned creator_idx,
 #ifdef DEBUG_LEGION_COLLECTIVES
                                       RegionTreeNode *node,
@@ -335,27 +357,38 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(recording);
 #endif
-      std::pair<Operation*,GenerationID> target_key(target, target_gen);
+      const std::pair<Operation*,GenerationID> target_key(target, target_gen);
       std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
+      {
+#ifdef DEBUG_LEGION
+        assert(!source->is_internal_op());
+#endif
         return false;
+      }
+      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
-      assert(op_map.find(std::make_pair(source, source_gen)) != op_map.end());
+      assert(source_finder != op_map.end());
 #endif
+      // In the case of operations recording dependences on internal operations
+      // such as refinement operations then we don't need to record those as
+      // the refinement operations won't be in the replay
+      if (source_finder->second == target_finder->second)
+      {
+#ifdef DEBUG_LEGION
+        assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+        return true;
+      }
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second);
-      if (source->is_internal_op())
+      if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
-        if (source->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND)
-        {
-#ifdef DEBUG_LEGION
-          assert(source->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
-#endif
-          return true;
-        }
 #ifdef DEBUG_LEGION
         bool found = false;
         assert(!info.closes.empty());
@@ -382,6 +415,10 @@ namespace Legion {
       }
       else
       {
+        // Note that if the source is a non-close internal operation then
+        // we also come through this pathway so that we record dependences
+        // on anything that the operation records any transitive dependences
+        // on things that its internal operations dependended on
         for (LegionVector<DependenceRecord>::iterator it =
               info.dependences.begin(); it != info.dependences.end(); it++)
           if (it->merge(record))
@@ -406,7 +443,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(recording);
 #endif
-      std::pair<Operation*,GenerationID> target_key(target, target_gen);
+      const std::pair<Operation*,GenerationID> target_key(target, target_gen);
       std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
@@ -443,23 +480,28 @@ namespace Legion {
         }
         return false;
       }
+      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
-      assert((op_map.find(std::make_pair(source, source_gen)) != op_map.end())
-          || (source->get_operation_kind() == Operation::REFINEMENT_OP_KIND));
+      assert(source_finder != op_map.end());
 #endif
+      // In the case of operations recording dependences on internal operations
+      // such as refinement operations then we don't need to record those as
+      // the refinement operations won't be in the replay
+      if (source_finder->second == target_finder->second)
+      {
+#ifdef DEBUG_LEGION
+        assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+        return true;
+      }
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second, target_idx, source_idx,
                               validates, dtype, dep_mask);
-      if (source->is_internal_op())
+      if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
-        if (source->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND)
-        {
-#ifdef DEBUG_LEGION
-          assert(source->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
-#endif
-          return true;
-        }
 #ifdef DEBUG_LEGION
         bool found = false;
         assert(!info.closes.empty());
@@ -487,6 +529,10 @@ namespace Legion {
       }
       else
       {
+        // Note that if the source is a non-close internal operation then
+        // we also come through this pathway so that we record dependences
+        // on anything that the operation records any transitive dependences
+        // on things that its internal operations dependended on
         for (LegionVector<DependenceRecord>::iterator it =
               info.dependences.begin(); it != info.dependences.end(); it++)
           if (it->merge(record))

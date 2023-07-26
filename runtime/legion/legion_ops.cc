@@ -1357,8 +1357,7 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      tracing =
-        trace->initialize_op_tracing(this, false/*internal*/, dependences);
+      tracing = trace->initialize_op_tracing(this, dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -10406,7 +10405,8 @@ namespace Legion {
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
       trace = creator->get_trace();
-      tracing = (trace != NULL);
+      if (trace != NULL)
+        tracing = trace->initialize_op_tracing(this);
     }
 
     //--------------------------------------------------------------------------
@@ -10732,23 +10732,17 @@ namespace Legion {
     {
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req);
-      trace = creator->get_trace();
-      if (trace != NULL)
-      {
-        tracing =
-          trace->initialize_op_tracing(this, true/*internal*/, NULL/*no deps*/);
-        if (tracing)
+      if (tracing)
 #ifdef DEBUG_LEGION_COLLECTIVES
-          trace->register_close(this, creator_req_idx,
-              (req.handle_type == LEGION_SINGULAR_PROJECTION) ?
-              (RegionTreeNode*) runtime->forest->get_node(req.region) :
-              (RegionTreeNode*) runtime->forest->get_node(req.partition), req);
+        trace->register_close(this, creator_req_idx,
+            (req.handle_type == LEGION_SINGULAR_PROJECTION) ?
+            (RegionTreeNode*) runtime->forest->get_node(req.region) :
+            (RegionTreeNode*) runtime->forest->get_node(req.partition), req);
 #else
-          trace->register_close(this, creator_req_idx, req);
+        trace->register_close(this, creator_req_idx, req);
 #endif
-        else
-          trace = NULL;
-      }
+      else
+        trace = NULL;
     }
 
 #if 0
@@ -11534,6 +11528,8 @@ namespace Legion {
       initialize_internal(creator, index);
       refinement_node = refine;
       parent_req_index = parent_index;
+      if (tracing)
+        trace->register_internal(this);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 
