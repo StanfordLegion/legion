@@ -1418,12 +1418,12 @@ namespace Legion {
       public:
         CopyFillAggregation(CopyFillAggregator *a, const PhysicalTraceInfo &i,
                             ApEvent p, const bool manage_dst, 
-                            const bool restricted, UniqueID uid,
+                            const bool restricted, UniqueID uid, int s,
                             std::map<InstanceView*,std::vector<ApEvent> > *dsts)
           : LgTaskArgs<CopyFillAggregation>(uid), PhysicalTraceInfo(i),
             dst_events((dsts == NULL) ? NULL : 
                 new std::map<InstanceView*,std::vector<ApEvent> >()),
-            aggregator(a), pre(p), manage_dst_events(manage_dst),
+            aggregator(a), pre(p), stage(s), manage_dst_events(manage_dst),
             restricted_output(restricted)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
@@ -1438,6 +1438,7 @@ namespace Legion {
         std::map<InstanceView*,std::vector<ApEvent> > *const dst_events;
         CopyFillAggregator *const aggregator;
         const ApEvent pre;
+        const int stage;
         const bool manage_dst_events;
         const bool restricted_output;
       }; 
@@ -1580,7 +1581,8 @@ namespace Legion {
                             // destination instance
                             const bool manage_dst_events = true,
                             std::map<InstanceView*,
-                                     std::vector<ApEvent> > *dst_events = NULL);
+                                     std::vector<ApEvent> > *dst_events = NULL,
+                            int stage = -1);
     protected:
       void record_view(LogicalView *new_view);
       void resize_reductions(size_t new_size);
@@ -1599,7 +1601,7 @@ namespace Legion {
       const SelectSourcesResult& select_sources(InstanceView *target,
                           PhysicalManager *target_manager,
                           const std::vector<InstanceView*> &sources);
-      void perform_updates(const LegionMap<InstanceView*,
+      bool perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> > &updates,
                            const PhysicalTraceInfo &trace_info,
                            const ApEvent all_precondition, 
@@ -1639,6 +1641,7 @@ namespace Legion {
       RegionTreeForest *const forest;
       const AddressSpaceID local_space;
       PhysicalAnalysis *const analysis;
+      CollectiveMapping *const collective_mapping;
       const unsigned src_index;
       const unsigned dst_index;
       const RtEvent guard_precondition;
@@ -2921,7 +2924,7 @@ namespace Legion {
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
       public:
-        DeferApplyStateArgs(EquivalenceSet *set, RtUserEvent done_event, 
+        DeferApplyStateArgs(EquivalenceSet *set,
                             const bool foward_to_owner,
                             std::set<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
@@ -3137,7 +3140,8 @@ namespace Legion {
                                    FieldMaskSet<InstanceView> > &target_views,
                                const std::vector<IndividualView*> &source_views,
                                const PhysicalTraceInfo &trace_info,
-                               const bool record_valid);
+                               const bool record_valid,
+                               const bool record_release = false);
       void make_instances_valid(CopyFillAggregator *&aggregator,
                                CopyFillGuard *previous_guard,
                                PhysicalAnalysis *analysis,

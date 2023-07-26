@@ -99,7 +99,8 @@ function base.load_all_libraries()
   end)
 end
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   base.binding_library = "libregent.dylib"
 else
   base.binding_library = "libregent.so"
@@ -475,13 +476,18 @@ end
 -- Assign the basic types IDs for interop with Pygion.
 do
   local primitive_types =
-    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double })
+    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double, bool})
   local base_id = 101
   local type_ids = data.newmap()
-  for _, t in ipairs(primitive_types) do
+  function base.register_type_id(t)
     local type_id = base_id
     base_id = base_id + 1
-    type_ids[t] = type_id
+    if t ~= nil then
+      type_ids[t] = type_id
+    end
+  end
+  for _, t in ipairs(primitive_types) do
+    base.register_type_id(t)
   end
   function base.get_type_semantic_tag()
     return 54321 -- Hack: pick a value that seems unlikely to conflict

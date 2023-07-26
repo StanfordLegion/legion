@@ -1,4 +1,8 @@
-# Realm Events
+---
+layout: page
+permalink: /tutorial/realm/realm_events.html
+title: Realm Events
+---
 
 ## Introduction
 Realm is a fully asynchronous, event-based runtime, and events form

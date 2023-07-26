@@ -1,4 +1,8 @@
-# Realm-CUDA Interop
+---
+layout: page
+permalink: /tutorial/realm/cuda_interop.html
+title: Realm CUDA Interop
+---
 
 ## Introduction
 In this tutorial, we look at how to interoperate with CUDA in order to utilize
@@ -53,6 +57,7 @@ Other notable low-level command line arguments are the following:
 Looking at `main()` in the tutorial, we see most of the standard Realm boilerplate code.  The main difference is that when we want to do something with CUDA, we want to target the `TOC_PROC` (also known as the *throughput optimized compute processor*) rather than the `LOC_PROC` kind (also known as the *latency optimized compute processor*).  It is because when a task is run on a `TOC_LOC` processor, Realm will properly set up the thread state to target the associated device.  In addition, any CUDA work launched or enqueued in a stream will automatically be synchronized in the background after the thread has returned from the task.  We will get back to why this is important later.
 
 To target a `TOC_PROC` for CUDA, we simply change what kind of processors a task id can target when we register it:
+
 ```c++
 Processor::register_task_by_kind(Processor::TOC_PROC,
                                  false /*!global*/,
@@ -79,18 +84,23 @@ For this tutorial, we are looking at doing something relatively simple: allocate
 Allocating linear GPU memory is fairly close to how it is done for standard CPU.  Below are highlights from `main_task()`:
 
 1) Define the memory layout (remember Realm's bounds are inclusive, whereas CUDA's are not, so we subtract one from the width and height here).
+
 ```c++
 std::vector<size_t> field_sizes(1, sizeof(float));
 Rect<2> bounds(Point<2>(0, 0), Point<2>(width - 1, height - 1));
 ```
+
 2) Find the specific memory you want to allocate that suits your needs.
+
 ```c++
 Memory gpu_mem = Machine::MemoryQuery(Machine::get_machine())
                      .has_capacity(bounds.volume() * sizeof(float))
                      .best_affinity_to(gpu)
                      .first();
 ```
+
 3) Create a Realm::RegionInstance, just like in previous tutorials.
+
 ```c++
 RegionInstance::create_instance(linear_instance, gpu_mem, bounds, field_sizes,
                                 /*SOA*/ 1, ProfilingRequestSet());
@@ -124,6 +134,7 @@ Now that the linear memory is allocated, time to allocate the `cudaSurfaceObject
 While a little more complicated, allocating CUDA surface objects can be essentially broken down into the same basic steps as linear memory with one exception; instead of querying for what memory to use, we will allocate the memory directly with CUDA APIs and use the `ExternalCudaArrayResource` class to register the memory with Realm to use.  This means we have to manage the memory lifetime ourselves, but we can still leverage all that Realm provides after we complete the registration:
 
 1) Allocate the cuda array and bind a cudaSurfaceObject_t to be used later.  If this code is unfamiliar to you, check out the [simpleSurfaceWrite][5] CUDA sample for more information.
+
 ```c++
 cudaArray_t array;
 cudaSurfaceObject_t surface_obj;
@@ -143,6 +154,7 @@ cudaCreateSurfaceObject(&surface_obj, &resource_descriptor);
 ```
 
 2) Describe the layout of the memory to Realm.  We have to describe this as a non-affine layout and utilize the `CudaArrayLayoutPiece` class in order to tell Realm this is not ordinarily linear memory and needs to be treated as special.
+
 ```c++
     InstanceLayout<2, int> layout;
     InstanceLayoutGeneric::FieldLayout &field_layout = layout.fields[0];
@@ -162,6 +174,7 @@ cudaCreateSurfaceObject(&surface_obj, &resource_descriptor);
 ```
 
 3) Create a Realm::RegionInstance with the given ExternalCudaArrayResource, this time using create_external_instance instead.
+
 ```c++
 RegionInstance::create_external_instance(
     array_instance, cuda_array_external_resource.suggested_memory(),
@@ -254,10 +267,10 @@ To recap some best practices mentioned above:
 
 More best practices in regard to CUDA can be found in the [CUDA Best Practices Guide][6] and the [CUDA Programming Guide][1].
 
-[1]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/ "CUDA Programming Guide"
-[2]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#interprocess-communication "CUDA Legacy Interprocess Communication"
-[3]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#surface-object-api "CUDA Surface Object API"
-[4]: https://en.wikipedia.org/wiki/Z-order_curve "Z-Order Curves"
-[5]: https://github.com/NVIDIA/cuda-samples/tree/master/Samples/0_Introduction/simpleSurfaceWrite "simpleSurfaceWrite CUDA Sample"
-[6]: https://docs.nvidia.com/cuda/pdf/CUDA_C_Best_Practices_Guide.pdf "CUDA Best Practices Guide"
-[7]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cooperative-groups "CUDA Cooperative Groups"
+\[1]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/ "CUDA Programming Guide"
+\[2]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#interprocess-communication "CUDA Legacy Interprocess Communication"
+\[3]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#surface-object-api "CUDA Surface Object API"
+\[4]: https://en.wikipedia.org/wiki/Z-order_curve "Z-Order Curves"
+\[5]: https://github.com/NVIDIA/cuda-samples/tree/master/Samples/0_Introduction/simpleSurfaceWrite "simpleSurfaceWrite CUDA Sample"
+\[6]: https://docs.nvidia.com/cuda/pdf/CUDA_C_Best_Practices_Guide.pdf "CUDA Best Practices Guide"
+\[7]: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cooperative-groups "CUDA Cooperative Groups"

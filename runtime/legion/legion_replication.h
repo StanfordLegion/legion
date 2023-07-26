@@ -225,6 +225,7 @@ namespace Legion {
       virtual void handle_collective_message(Deserializer &derez);
       // Use this method in case we don't actually end up using the collective
       virtual void elide_collective(void);
+      inline RtEvent get_done_event(void) const { return done_event; }
     protected:
       void initialize_collective(void);
       void construct_message(ShardID target, int stage, Serializer &rez);
@@ -725,8 +726,7 @@ namespace Legion {
       inline ApEvent get_done_event(void) { return done_event; }
     public:
       std::vector<DeppartResult> &results;
-      mutable ApEvent done_event;
-      mutable bool renamed;
+      const ApUserEvent done_event;
     };
 
     /**

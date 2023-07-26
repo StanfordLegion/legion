@@ -406,6 +406,27 @@ namespace Legion {
         output.replicate = replication_enabled;
       else
         output.replicate = false;
+      // If this is an index space task launch, check to see if there are
+      // any region requirements that should be mapped collectively
+      // Our heurisitc for this right now are any regions which all the
+      // point tasks are mapping the same logical region with read-only
+      // or reduction privileges then we'll map them collectively
+      if (task.is_index_space)
+      {
+        for (unsigned idx = 0; idx < task.regions.size(); idx++)
+        {
+          const RegionRequirement &req = task.regions[idx];
+          const bool is_read_only =
+            ((req.privilege & LEGION_READ_WRITE) == LEGION_READ_PRIV);
+          const bool is_reduction =
+            ((req.privilege & LEGION_READ_WRITE) == LEGION_REDUCE_PRIV);
+          if ((is_read_only || is_reduction) &&
+              ((req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                ((req.handle_type == LEGION_REGION_PROJECTION) &&
+                 (req.projection == 0))))
+              output.check_collective_regions.insert(idx);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

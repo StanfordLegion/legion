@@ -80,7 +80,7 @@ pub struct ShardID(u32);
 pub struct UniqueID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
-pub struct FutureID(HexU64);
+pub struct FutureID(u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 pub struct EventID(pub HexU64);
@@ -248,9 +248,9 @@ pub enum Record {
     #[serde(rename = "Mapping Dependence")]
     MappingDependence { ctx: ContextID, prev_id: UniqueID, pidx: u64, next_id: UniqueID, nidx: u64, dtype: u64 },
     #[serde(rename = "Future Creation")]
-    FutureCreate { uid: UniqueID, iid: FutureID, point: Point },
+    FutureCreate { uid: UniqueID, did: FutureID, point: Point },
     #[serde(rename = "Future Usage")]
-    FutureUse { uid: UniqueID, iid: FutureID },
+    FutureUse { uid: UniqueID, did: FutureID },
     #[serde(rename = "Predicate Use")]
     PredicateUse { uid: UniqueID, pred: UniqueID },
 

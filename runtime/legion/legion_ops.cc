@@ -14022,7 +14022,7 @@ namespace Legion {
                                           unique_op_id, context_index);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, 
-                                 future.impl->get_ready_event(), empty_point);
+                                       future.impl->did, empty_point);
       }
       return future;
     }
@@ -14203,8 +14203,7 @@ namespace Legion {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(),
                                            unique_op_id, context_index);
         if ((future.impl != NULL) && future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, future.impl->did); 
       }
       return predicate;
     }
@@ -16080,7 +16079,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new WeightPartitionThunk(pid, weights, granularity);
+      thunk = new WeightPartitionThunk(pid, granularity);
       // Also save this locally for analysis
       populate_sources(weights, pid, true/*needs all futures*/);
       if (runtime->legion_spy_enabled)
@@ -16384,7 +16383,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Perform the partitioning operation
-      const ApEvent ready_event = thunk->perform(this, runtime->forest);
+      const ApEvent ready_event =
+        thunk->perform(this, runtime->forest, sources);
       if (ready_event.exists())
         record_completion_effect(ready_event);
       complete_execution();
@@ -18588,8 +18588,7 @@ namespace Legion {
                                       unique_op_id, context_index);
         if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, future.impl->did); 
       }
     }
 
@@ -19296,8 +19295,7 @@ namespace Legion {
                                       unique_op_id, context_index);
         if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
+          LegionSpy::log_future_use(unique_op_id, future.impl->did); 
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
@@ -22799,13 +22797,13 @@ namespace Legion {
         LegionSpy::log_timing_operation(ctx->get_unique_id(),
                                         unique_op_id, context_index);
         DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id, 
-            result.impl->get_ready_event(), empty_point);
+        LegionSpy::log_future_creation(unique_op_id, result.impl->did,
+                                       empty_point);
         for (std::set<Future>::const_iterator it = preconditions.begin();
               it != preconditions.end(); it++)
         {
           if ((it->impl != NULL) && it->impl->get_ready_event().exists())
-            LegionSpy::log_future_use(unique_op_id,it->impl->get_ready_event());
+            LegionSpy::log_future_use(unique_op_id, it->impl->did);
         }
       }
       return result;
@@ -22968,8 +22966,8 @@ namespace Legion {
         LegionSpy::log_tunable_operation(ctx->get_unique_id(),
                                          unique_op_id, context_index);
         const DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id,
-            result.impl->get_ready_event(), empty_point);
+        LegionSpy::log_future_creation(unique_op_id, result.impl->did,
+                                       empty_point);
         tunable_index = parent_ctx->get_tunable_index();
       }
       return result;
@@ -23148,7 +23146,8 @@ namespace Legion {
     Future AllReduceOp::initialize(InnerContext *ctx, const FutureMap &fm, 
                                    ReductionOpID redid, bool is_deterministic,
                                    MapperID map_id, MappingTagID t,
-                                   Provenance *provenance)
+                                   Provenance *provenance,
+                                   Future initial_value)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
@@ -23161,6 +23160,16 @@ namespace Legion {
       if (serdez_redop_fns == NULL)
         result.impl->set_future_result_size(redop->sizeof_rhs, 
                                             runtime->address_space);
+      else
+      {
+        // Initialize here so that we can set the initial value future
+        future_result_size = 0;
+        serdez_redop_fns->init_fn(redop,
+                                  serdez_redop_buffer,
+                                  future_result_size);
+      }
+      this->initial_value = pick_initial_value(initial_value);
+
       mapper_id = map_id;
       tag = t;
       deterministic = is_deterministic;
@@ -23169,10 +23178,25 @@ namespace Legion {
         LegionSpy::log_all_reduce_operation(ctx->get_unique_id(),
                                             unique_op_id, context_index);
         const DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id,
-            result.impl->get_ready_event(), empty_point);
+        LegionSpy::log_future_creation(unique_op_id, result.impl->did,
+                                       empty_point);
       }
       return result;
+    }
+
+    Future AllReduceOp::pick_initial_value(Future initial_value)
+    {
+      if (!initial_value.is_empty())
+        return initial_value;
+
+      // if present, serdez_redop_fns->init_fn() must have
+      // been called by now
+      const void *value = serdez_redop_fns ? serdez_redop_buffer
+                                           : redop->identity;
+      size_t size = serdez_redop_fns ? future_result_size
+                                     : redop->sizeof_rhs;
+
+      return Future::from_untyped_pointer(value, size);
     }
 
     //--------------------------------------------------------------------------
@@ -23219,8 +23243,18 @@ namespace Legion {
     void AllReduceOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      initial_value.impl->register_dependence(this);
       future_map.impl->register_dependence(this);
     } 
+
+    void AllReduceOp::prepare_future(std::vector<RtEvent> &preconditions,
+                                     FutureImpl *future)
+    {
+      const RtEvent ready = future->request_internal_buffer(this,
+                                                            false/*eager*/);
+      if (ready.exists() && !ready.has_triggered())
+        preconditions.push_back(ready);
+    }
 
     //--------------------------------------------------------------------------
     void AllReduceOp::trigger_ready(void)
@@ -23231,11 +23265,10 @@ namespace Legion {
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent ready =
-          it->second->request_internal_buffer(this, false/*eager*/);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.push_back(ready);
+        prepare_future(preconditions, it->second);
       }
+      prepare_future(preconditions, initial_value.impl);
+
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -23252,6 +23285,16 @@ namespace Legion {
       future_map.impl->get_all_futures(sources);
     }
 
+    void AllReduceOp::fold_serdez(FutureImpl *impl)
+    {
+      size_t src_size = 0;
+      const void *source = impl->find_internal_buffer(parent_ctx, src_size);
+      (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer,
+                                     future_result_size, source);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_future_use(unique_op_id, impl->did);
+    }
+
     //--------------------------------------------------------------------------
     void AllReduceOp::all_reduce_serdez(void)
     //--------------------------------------------------------------------------
@@ -23259,20 +23302,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
+      fold_serdez(initial_value.impl);
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second;
-        size_t src_size = 0;
-        const void *source = impl->find_internal_buffer(parent_ctx, src_size);
-        (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
-                                       future_result_size, source);
-        if (runtime->legion_spy_enabled)
-        {
-          const ApEvent ready_event = impl->get_ready_event();
-          if (ready_event.exists())
-            LegionSpy::log_future_use(unique_op_id, ready_event);
-        }
+        fold_serdez(it->second);
       }
     }
 
@@ -23304,6 +23338,14 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
     }
 
+    void AllReduceOp::subscribe_to_future(std::vector<RtEvent> &ready_events,
+                                          FutureImpl *future)
+    {
+      const RtEvent ready = future->subscribe();
+      if (ready.exists())
+        ready_events.push_back(ready);
+    }
+
     //--------------------------------------------------------------------------
     void AllReduceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -23324,17 +23366,10 @@ namespace Legion {
         for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
         {
-          const RtEvent ready = it->second->subscribe();
-          if (ready.exists())
-            ready_events.push_back(ready);
+          subscribe_to_future(ready_events, it->second);
         }
-        // Serdez redop functions are nasty, we need to actually do the 
-        // computation inline here to figure out how big the output buffer
-        // needs to be for the future instances before we can do the
-        // mapper call which might try to actually make the instances.
-        future_result_size = 0;
-        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
-                                       future_result_size);
+        subscribe_to_future(ready_events, initial_value.impl);
+
         // Wait for the subscriptions to be ready
         if (!ready_events.empty())
         {
@@ -23342,6 +23377,11 @@ namespace Legion {
           if (wait_on.exists() && ! wait_on.has_triggered())
             wait_on.wait();
         }
+
+        // Serdez redop functions are nasty, we need to actually do the 
+        // computation inline here to figure out how big the output buffer
+        // needs to be for the future instances before we can do the
+        // mapper call which might try to actually make the instances.
         all_reduce_serdez();
       }
 #ifdef DEBUG_LEGION
@@ -23382,9 +23422,6 @@ namespace Legion {
         executed = all_reduce_redop();
       else if (serdez_upper_bound < SIZE_MAX)
       {
-        future_result_size = 0;
-        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
-                                       future_result_size);
         all_reduce_serdez();
         // Check that the result is smaller than the bound
         if (serdez_upper_bound < future_result_size)
@@ -23484,13 +23521,28 @@ namespace Legion {
       }
     }
 
+    ApEvent AllReduceOp::init_redop_target(FutureInstance *target)
+    {
+      if (parent_ctx->get_task()->get_shard_id() == 0)
+      {
+        FutureImpl *init = initial_value.impl;
+        return target->copy_from(
+          init->get_canonical_instance(),
+          this,
+          init->get_ready_event(false));
+      }
+      return target->initialize(redop, this);
+    }
+
     //--------------------------------------------------------------------------
     RtEvent AllReduceOp::all_reduce_redop(void)
     //--------------------------------------------------------------------------
     {
       std::vector<ApEvent> preconditions(targets.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
-        preconditions[idx] = targets[idx]->initialize(redop, this);
+      {
+        preconditions[idx] = init_redop_target(targets[idx]);
+      }
       std::set<ApEvent> postconditions;
       if (deterministic)
       {
@@ -23501,11 +23553,7 @@ namespace Legion {
             preconditions[idx] = it->second->reduce_from_canonical(targets[idx],
                 this, redop_id, redop, true/*exclusive*/, preconditions[idx]);
           if (runtime->legion_spy_enabled)
-          {
-            const ApEvent ready_event = it->second->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
+            LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
         for (std::vector<ApEvent>::const_iterator it =
               preconditions.begin(); it != preconditions.end(); it++)
@@ -23525,11 +23573,7 @@ namespace Legion {
               postconditions.insert(done);
           }
           if (runtime->legion_spy_enabled)
-          {
-            const ApEvent ready_event = it->second->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
+            LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
       }
       RtEvent completion_precondition;

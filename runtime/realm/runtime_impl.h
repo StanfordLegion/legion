@@ -80,19 +80,27 @@ namespace Realm {
       static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, IT index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
       static ID make_id(const SubgraphImpl& dummy, int owner, IT index) { return ID::make_subgraph(owner, 0, index); }
 
-      static std::vector<FreeList *> &get_registered_freelists()
+      static std::vector<FreeList *> &get_registered_freelists(Mutex* &lock)
       {
         static std::vector<FreeList *> registered_freelists;
+        static Mutex registered_freelist_lock;
+        lock = &registered_freelist_lock;
         return registered_freelists;
       }
       static void register_freelist(FreeList *free_list)
       {
-        get_registered_freelists().push_back(free_list);
+        Mutex *lock = nullptr;
+        std::vector<FreeList *>& freelists = get_registered_freelists(lock);
+        AutoLock<> al(*lock);
+        freelists.push_back(free_list);
       }
       static ET *steal_freelist_element(FreeList *requestor = nullptr)
       {
         // TODO: improve this by adjusting the starting offset to reduce contention
-        for(FreeList *free_list : get_registered_freelists()) {
+        Mutex *lock = nullptr;
+        std::vector<FreeList *>& freelists = get_registered_freelists(lock);
+        AutoLock<> al(*lock);
+        for(FreeList *free_list : freelists) {
           if(free_list != requestor) {
             ET *elem = free_list->pop_front();
             if(elem != nullptr) {
@@ -403,6 +411,8 @@ namespace Realm {
       }
 
     protected:
+      friend class Runtime;
+
       Module *get_module_untyped(const char *name) const;
 
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;

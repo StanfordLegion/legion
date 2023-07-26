@@ -79,6 +79,7 @@ list(APPEND REALM_SRC
 if(Legion_USE_CUDA)
   list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
+    realm/cuda/cuda_module.inl
     realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
     realm/cuda/cuda_access.h    realm/cuda/cuda_access.cc
   )
@@ -92,6 +93,7 @@ endif()
 if(Legion_USE_HIP)
   list(APPEND REALM_SRC
     realm/hip/hip_module.h    realm/hip/hip_module.cc
+    realm/hip/hip_module.inl
     realm/hip/hip_internal.h  realm/hip/hip_internal.cc
     realm/hip/hip_access.h    realm/hip/hip_access.cc
 		realm/hip/hiphijack_api.h
@@ -291,11 +293,11 @@ endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(RealmRuntime PROPERTIES BUILD_RPATH "\$ORIGIN")
-  set_target_properties(RealmRuntime PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
+  set_property(TARGET RealmRuntime APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  set_target_properties(RealmRuntime PROPERTIES BUILD_RPATH "@loader_path")
-  set_target_properties(RealmRuntime PROPERTIES INSTALL_RPATH "@loader_path")
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "@loader_path")
+  set_property(TARGET RealmRuntime APPEND PROPERTY INSTALL_RPATH "@loader_path")
 endif ()
 
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
@@ -332,7 +334,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     # we'll write the GASNet configuration to a file so that we can rebuild
     #  (only) if it changes
     set(GASNet_CONFIG_FILE ${PROJECT_BINARY_DIR}/embed-gasnet/config.txt)
-    set(GASNet_CONFIG_SETTINGS "CONDUIT=${GASNet_CONDUIT}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
+    set(GASNet_CONFIG_SETTINGS "LEGION_GASNET_CONDUIT=${GASNet_CONDUIT}" "LEGION_GASNET_SYSTEM=${GASNet_SYSTEM}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
     if(Legion_EMBED_GASNet_VERSION)
       # make the source directory version-specific
       set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
@@ -376,6 +378,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 	message(STATUS "Downloading StanfordLegion/gasnet repo from: ${Legion_EMBED_GASNet_GITREPO}")
 	FetchContent_Populate(embed-gasnet)
 	set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
+  message(STATUS "make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}")
       endif()
       execute_process(
 	COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
@@ -606,7 +609,7 @@ if(Legion_USE_Kokkos)
   endif()
 
   if(Legion_USE_OpenMP AND (Kokkos_VERSION_MAJOR GREATER_EQUAL 4))
-    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
+    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer
     #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
     if(Legion_USE_CUDA)
       list(APPEND kokkos_compile_options "-Xcompiler")
@@ -811,50 +814,6 @@ add_library(LegionRuntime ${EXCLUDE_LEGION} ${MAPPER_SRC} ${LEGION_SRC} ${LEGION
 add_library(Legion::LegionRuntime ALIAS LegionRuntime)
 # do we have any cuda source files in Legion itself?
 if(LEGION_CUDA_SRC)
-  # Fill in the most compatible set of architectures we support
-  if("${Legion_CUDA_ARCH}" STREQUAL "")
-    if (${CUDA_VERSION_STRING} VERSION_LESS "11.5")
-      # Prior to 11.5, we don't have -arch=all and have to list the architectures out manually
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "9.0")
-        list(APPEND Legion_CUDA_ARCH 20)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "11.0")
-        list(APPEND Legion_CUDA_ARCH 30)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 35)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "6.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 50)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "8.0")
-        list(APPEND Legion_CUDA_ARCH 60)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "9.0")
-        list(APPEND Legion_CUDA_ARCH 70)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "11.0")
-        list(APPEND Legion_CUDA_ARCH 80)
-      endif ()
-    else ()
-        # New with 11.5, nvcc supports 'all-major' which does all this for us
-        set(CUDA_GENCODE "-arch all-major")
-    endif ()
-  else ()
-      # If the user specified a specific gencode to use, use that
-      string(REPLACE "," ";" Legion_CUDA_ARCH "${Legion_CUDA_ARCH}")
-  endif ()
-
-  if (Legion_CUDA_ARCH)
-    list(SORT Legion_CUDA_ARCH)
-    set(CUDA_GENCODE "${Legion_CUDA_ARCH}")
-    # Add all the specified architectures we support
-    string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
-    list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)
-    # For the last architecture we support, add PTX
-    list(APPEND CUDA_GENCODE "-gencode arch=compute_${COMPUTE_ARCH},code=compute_${COMPUTE_ARCH}")
-  endif ()
-
   # starting with NVCC 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
     set(CUDA_WARNINGS "-Werror all-warnings")
@@ -884,12 +843,6 @@ endif()
 
 if(LEGION_HIP_SRC)
   if (Legion_HIP_TARGET STREQUAL "CUDA")
-    if("${Legion_CUDA_ARCH}" STREQUAL "")
-      set(CUDA_GENCODE "")
-    else()
-      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
-      string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
-    endif()
     # starting with NVCC 10.2, we can error out on all warnings
     if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
       set(CUDA_WARNINGS "-Werror all-warnings")
@@ -957,11 +910,11 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(LegionRuntime PROPERTIES BUILD_RPATH "\$ORIGIN")
-  set_target_properties(LegionRuntime PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  set_property(TARGET LegionRuntime APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
+  set_property(TARGET LegionRuntime APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  set_target_properties(LegionRuntime PROPERTIES BUILD_RPATH "@loader_path")
-  set_target_properties(LegionRuntime PROPERTIES INSTALL_RPATH "@loader_path")
+  set_property(TARGET LegionRuntime APPEND PROPERTY BUILD_RPATH "@loader_path")
+  set_property(TARGET LegionRuntime APPEND PROPERTY INSTALL_RPATH "@loader_path")
 endif ()
 
 target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})

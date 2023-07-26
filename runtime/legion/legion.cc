@@ -63,7 +63,7 @@ namespace Legion {
     static const TypeTag TYPE_TAG_##DIM##D = \
       Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>();
     LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
+#undef DIMFUNC 
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -6332,12 +6332,13 @@ namespace Legion {
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
                                       ReductionOpID redop, bool deterministic,
                                       MapperID map, MappingTagID tag,
-                                      const char *prov)
+                                      const char *prov,
+                                      Future initial_value)
     //--------------------------------------------------------------------------
     {
       Internal::AutoProvenance provenance(prov);
       return ctx->reduce_future_map(future_map, redop, deterministic,
-                                    map, tag, provenance);
+                                    map, tag, provenance, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -8050,8 +8051,12 @@ namespace Legion {
 #endif
       ctx = *((const Context*)data);
       task = ctx->get_task();
-
-      reg = &ctx->begin_task(runtime);
+      const Processor exec_proc = Processor::get_executing_processor();
+#ifdef DEBUG_LEGION
+      assert(exec_proc.exists());
+#endif
+      reg = &ctx->begin_task(exec_proc);
+      runtime = Internal::implicit_runtime->external;
     }
 
     //--------------------------------------------------------------------------

@@ -4359,6 +4359,7 @@ namespace Legion {
       :  CopyFillGuard(Runtime::create_rt_user_event()), 
 #endif
         forest(f), local_space(f->runtime->address_space), analysis(a), 
+        collective_mapping(analysis->get_replicated_mapping()),
         src_index(analysis->index), dst_index(analysis->index),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         guard_precondition((previous == NULL) ? RtEvent::NO_RT_EVENT :
@@ -4390,6 +4391,7 @@ namespace Legion {
       : CopyFillGuard(Runtime::create_rt_user_event()),
 #endif
         forest(f), local_space(f->runtime->address_space), analysis(a),
+        collective_mapping(analysis->get_replicated_mapping()),
         src_index(src_idx), dst_index(dst_idx),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         guard_precondition((previous == NULL) ? alternative_precondition :
@@ -5047,7 +5049,8 @@ namespace Legion {
                       const PhysicalTraceInfo &trace_info,
                       ApEvent precondition, const bool restricted_output,
                       const bool manage_dst_events,
-                      std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
+                      std::map<InstanceView*,std::vector<ApEvent> > *dst_events,
+                      int stage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5059,7 +5062,8 @@ namespace Legion {
           summary_event = Runtime::create_ap_user_event(&trace_info);
         CopyFillAggregation args(this, trace_info, precondition,
                                  manage_dst_events, restricted_output,
-                                 analysis->op->get_unique_op_id(), dst_events);
+                                 analysis->op->get_unique_op_id(), 
+                                 stage, dst_events);
         analysis->runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return summary_event;
@@ -5071,21 +5075,77 @@ namespace Legion {
 #ifndef NON_AGGRESSIVE_AGGREGATORS
       std::set<RtEvent> recorded_events;
 #endif
+      // This is really subtle so pay attention: 
+      // Copy across aggregators issue copies and fills to destination
+      // instances. In some cases those destination instances are filled
+      // and copied to multiple times across the initial sources and then
+      // reductions of this copy fill aggregator. We need a way to make
+      // sure that all the updates to the views for those destination 
+      // instances for the copy users are recorded in the right order.
+      // To facilitate that we have a fast path and slow path. In the
+      // fast path, if all the updates are coming from this node
+      // (in the case with no collective analysis) or from all the nodes
+      // in the collective analysis then we can issue all those copies
+      // back-to-back without interruption because we know that the 
+      // messages being sent are all pipelined and run through ordered
+      // virtual channels. However, if any copies need to be issued 
+      // to a destination that does not share the collective mapping
+      // then we don't have that pipelining guarantee so we need to
+      // block the issuing of the copies between those stages. Whether
+      // we can do this pipelining or not after each stage is tracked
+      // by the 'pipeline' variable. This method will defer itself and
+      // restart when this pipelining is not possible.
+      bool pipeline = true;
       // Perform updates from any sources first
-      if (!sources.empty())
-        perform_updates(sources, trace_info, precondition, 
-#ifdef NON_AGGRESSIVE_AGGREGATORS
-            effects,
-#else
-            recorded_events,
+      if (stage < 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
 #endif
-            -1/*redop index*/, manage_dst_events, restricted_output,dst_events);
+        if (!sources.empty())
+        {
+
+          pipeline = perform_updates(sources, trace_info, precondition,
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+              effects,
+#else
+              recorded_events,
+#endif
+              stage, manage_dst_events, restricted_output, dst_events);
+        }
+        stage = 0;
+      }
       // Then apply any reductions that we might have
       if (!reductions.empty())
       {
         // Skip any passes that we might have already done
-        for (unsigned idx = 0; idx < reductions.size(); idx++)
-          perform_updates(reductions[idx], trace_info, precondition,
+        for (unsigned idx = stage; idx < reductions.size(); idx++)
+        {
+          if (!pipeline)
+          {
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+            const RtEvent stage_pre = Runtime::merge_events(effects);
+            effects.clear();
+#else
+            const RtEvent stage_pre = Runtime::merge_events(recorded_events);
+            recorded_events.clear();
+#endif
+            if (stage_pre.exists() && !stage_pre.has_triggered())
+            {
+              // If it's not safe to pipeline the launching of these copies
+              // with the copies from the previous stage then we need to 
+              // defer launching those copies until the previous ones have
+              // run and registered all of their users
+              CopyFillAggregation args(this, trace_info, precondition,
+                                   manage_dst_events, restricted_output,
+                                   analysis->op->get_unique_op_id(), 
+                                   idx, dst_events);
+              analysis->runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, stage_pre);
+              return summary_event;
+            }
+          }
+          pipeline = perform_updates(reductions[idx], trace_info, precondition,
 #ifdef NON_AGGRESSIVE_AGGREGATORS
                           effects,
 #else
@@ -5093,6 +5153,7 @@ namespace Legion {
 #endif
                           idx/*redop index*/, manage_dst_events,
                           restricted_output, dst_events);
+        }
       }
       // Make sure we do this before we trigger the effects_applied
       // event as it could result in the deletion of this object
@@ -5171,7 +5232,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::perform_updates(
+    bool CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> > &updates,
          const PhysicalTraceInfo &trace_info, const ApEvent precondition,
          std::set<RtEvent> &recorded_events, const int redop_index,
@@ -5179,6 +5240,7 @@ namespace Legion {
          std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
     //--------------------------------------------------------------------------
     {
+      bool pipelined = true;
       std::vector<ApEvent> *target_events = NULL;
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
             uit = updates.begin(); uit != updates.end(); uit++)
@@ -5239,7 +5301,21 @@ namespace Legion {
                          dst_mask, trace_info, manage_dst_events,
                          restricted_output, target_events);
         }
+        // Check whether later stages can be pipelined with respect to this
+        // current stage. The requirement for pipelining is that the target
+        // view have the same collective 
+        if (!pipelined || 
+            (collective_mapping == uit->first->collective_mapping))
+          continue;
+        // If the collective mapping of the target view does not match the
+        // collective mapping of the analysis then we cannot pipeline 
+        // the view analysis for issuing of copies
+        if ((collective_mapping == NULL) ||
+            (uit->first->collective_mapping == NULL) ||
+            (*collective_mapping != *(uit->first->collective_mapping)))
+          pipelined = false;
       }
+      return pipelined;
     }
 
     //--------------------------------------------------------------------------
@@ -5582,7 +5658,7 @@ namespace Legion {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
       cfargs->aggregator->issue_updates(*cfargs, cfargs->pre, 
           cfargs->restricted_output, cfargs->manage_dst_events,
-          cfargs->dst_events);
+          cfargs->dst_events, cfargs->stage);
       cfargs->remove_recorder_reference();
       if (cfargs->dst_events != NULL)
         delete cfargs->dst_events;
@@ -9439,8 +9515,7 @@ namespace Legion {
     CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
                Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
       : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/, false/*immutable*/,
-                         true/*exclusive*/),
-        sources(std::move(srcs))
+                         true/*exclusive*/), sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
     }
@@ -9578,7 +9653,7 @@ namespace Legion {
 
       // This takes ownership of the operation
       CloneAnalysis *analysis = new CloneAnalysis(runtime, original_source,
-                            previous, expr, op, index, std::move(sources));
+          previous, expr, op, index, std::move(sources));
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -13386,7 +13461,7 @@ namespace Legion {
                   const LegionVector<FieldMaskSet<InstanceView> > &target_views,
                   const std::vector<IndividualView*> &source_views,
                   const PhysicalTraceInfo &trace_info,
-                  const bool record_valid)
+                  const bool record_valid, const bool record_release)
     //--------------------------------------------------------------------------
     {
       // Read-write or read-only
@@ -13476,7 +13551,18 @@ namespace Legion {
       }
       if (is_write)
       {
-        if (!!restricted_mask)
+        if (record_release)
+        {
+#ifdef DEBUG_LEGION
+          assert(record_valid);
+          assert(restricted_mask == user_mask);
+#endif
+          // Releases are a bit strange, we actually want to invalidate
+          // all the current valid instances since we're making them all
+          // restricted so their are no partial unrestricted cases
+          filter_valid_instances(expr, expr_covers, user_mask);
+        }
+        else if (!!restricted_mask)
         {
           const FieldMask non_restricted_mask = user_mask - restricted_mask;
           if (!!non_restricted_mask)
@@ -15205,7 +15291,7 @@ namespace Legion {
                                 it->first, (it->first == set_expr),
                                 it->second.get_valid_mask(), targets, views, 
                                 analysis.source_views, analysis.trace_info,
-                                true/*record valid*/);
+                                true/*record valid*/, true/*record release*/);
             // Finally update the tracing postconditions now that we've recorded
             // any copies as part of the trace
             if (tracing_postconditions != NULL)
@@ -15245,7 +15331,8 @@ namespace Legion {
                             &analysis, release_usage, expr, expr_covers, 
                             release_mask, analysis.target_instances, 
                             analysis.target_views, analysis.source_views,
-                            analysis.trace_info, true/*record valid*/);
+                            analysis.trace_info, true/*record valid*/,
+                            true/*record release*/);
       }
     }
 
@@ -17079,6 +17166,8 @@ namespace Legion {
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
+      // Always invalidate first before cloning into this set
+      invalidate_state(expr, expr_covers, clone_mask);
       // Already holding the eq_lock from EquivalenceSet::analyze method
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)
@@ -18040,8 +18129,7 @@ namespace Legion {
         if (ready_event.exists() && !ready_event.has_triggered())
         {
           // Defer this until it is ready to be performed
-          const RtUserEvent applied_event = Runtime::create_rt_user_event();
-          DeferApplyStateArgs args(this, applied_event, forward_to_owner,
+          DeferApplyStateArgs args(this, forward_to_owner,
               applied_events, valid_updates, initialized_updates, 
               reduction_updates, restricted_updates, released_updates,
               read_only_updates, reduction_fill_updates, precondition_updates,
@@ -18062,7 +18150,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
-                                       RtUserEvent done, bool forward,
+                                       bool forward,
                                        std::set<RtEvent> &applied_events,
                                        ExprLogicalViews &valid,
                                        FieldMaskSet<IndexSpaceExpression> &init,
@@ -18089,7 +18177,7 @@ namespace Legion {
         precondition_updates(preconditions),
         anticondition_updates(anticonditions),
         postcondition_updates(postconditions),
-        done_event(done), forward_to_owner(forward)
+        done_event(Runtime::create_rt_user_event()), forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
       for (ExprLogicalViews::const_iterator it =

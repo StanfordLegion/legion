@@ -5419,7 +5419,11 @@ class EquivalenceSet(object):
         self.restricted_instances = set()
         
     def is_initialized(self):
-        return self.version_number > 0
+        # Due to detach operations, we can actually have cases where we do not
+        # have any valid data in this equivalence set becasue the last valid
+        # data was removed with a detach operation
+        return (self.version_number > 0) and (
+                self.valid_instances or self.pending_fill or self.previous_instances)
 
     def reset(self):
         self.version_number += 1
@@ -5701,9 +5705,10 @@ class EquivalenceSet(object):
                 self.reset()
             self.valid_instances.add(inst)
         elif req.is_read_only():
+            assert self.is_initialized()
             # Just have to add ourselves to the list of valid instances
             # Only do this if we had valid data to begin with
-            if self.is_initialized() and not self.restricted_instances:
+            if not self.restricted_instances:
                 self.valid_instances.add(inst)
         # If we are restricted and we're not read-only we have to issue
         # copies back to the restricted instance
@@ -9676,12 +9681,12 @@ class Task(object):
             replay_file.write(struct.pack('I',0))
 
 class Future(object):
-    __slots__ = ['state', 'iid', 'creator_uid', 'logical_creator', 
+    __slots__ = ['state', 'did', 'creator_uid', 'logical_creator', 
                  'physical_creators', 'point', 'user_ids',
                  'logical_users', 'physical_users']
-    def __init__(self, state, iid):
+    def __init__(self, state, did):
         self.state = state
-        self.iid = iid
+        self.did = did
         self.creator_uid = None
         # These can be different for index space operations
         self.logical_creator = None
@@ -11903,9 +11908,9 @@ mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 future_create_pat       = re.compile(
-    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
+    prefix+"Future Creation (?P<uid>[0-9]+) (?P<did>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
-    prefix+"Future Usage (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
+    prefix+"Future Usage (?P<uid>[0-9]+) (?P<did>[0-9]+)")
 predicate_use_pat       = re.compile(
     prefix+"Predicate Use (?P<uid>[0-9]+) (?P<pred>[0-9]+)")
 # Physical instance and mapping decision patterns
@@ -12262,7 +12267,7 @@ def parse_legion_spy_line(line, state):
         return True
     m = future_create_pat.match(line)
     if m is not None:
-        future = state.get_future(int(m.group('iid'),16))
+        future = state.get_future(int(m.group('did')))
         future.set_creator(int(m.group('uid')))
         dim = int(m.group('dim'))
         point = Point(dim)
@@ -12273,7 +12278,7 @@ def parse_legion_spy_line(line, state):
         return True 
     m = future_use_pat.match(line)
     if m is not None:
-        future = state.get_future(int(m.group('iid'),16))
+        future = state.get_future(int(m.group('did')))
         future.add_uid(int(m.group('uid')))
         return True
     m = predicate_use_pat.match(line)
@@ -14148,11 +14153,11 @@ class State(object):
         self.replicants[repl] = result
         return result
 
-    def get_future(self, iid):
-        if iid in self.futures:
-            return self.futures[iid]
-        result = Future(self, iid)
-        self.futures[iid] = result
+    def get_future(self, did):
+        if did in self.futures:
+            return self.futures[did]
+        result = Future(self, did)
+        self.futures[did] = result
         return result
 
     def get_variant(self, vid):

@@ -2968,7 +2968,8 @@ namespace Legion {
         virtual ~PendingPartitionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest) = 0;
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
         virtual bool is_cross_product(void) const { return false; }
       };
@@ -2979,7 +2980,8 @@ namespace Legion {
         virtual ~EqualPartitionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_equal_partition(op, pid, granularity); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -2988,18 +2990,18 @@ namespace Legion {
       };
       class WeightPartitionThunk : public PendingPartitionThunk {
       public:
-        WeightPartitionThunk(IndexPartition id, const FutureMap &w, size_t g)
-          : pid(id), weights(w), granularity(g) { }
+        WeightPartitionThunk(IndexPartition id, size_t g)
+          : pid(id), granularity(g) { }
         virtual ~WeightPartitionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_partition_by_weights(op, pid, 
-                                        weights, granularity); }
+                                        futures, granularity); }
         virtual void perform_logging(PendingPartitionOp *op);
       protected:
         IndexPartition pid;
-        FutureMap weights;
         size_t granularity;
       };
       class UnionPartitionThunk : public PendingPartitionThunk {
@@ -3010,7 +3012,8 @@ namespace Legion {
         virtual ~UnionPartitionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_partition_by_union(op, pid, handle1, handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -3026,7 +3029,8 @@ namespace Legion {
         virtual ~IntersectionPartitionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_partition_by_intersection(op, pid, handle1,
                                                           handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -3042,7 +3046,8 @@ namespace Legion {
         virtual ~IntersectionWithRegionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_partition_by_intersection(op, pid, 
                                                           part, dominates); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -3059,7 +3064,8 @@ namespace Legion {
         virtual ~DifferencePartitionThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_partition_by_difference(op, pid, handle1,
                                                         handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -3078,7 +3084,8 @@ namespace Legion {
           { free(transform); free(extent); }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_partition_by_restriction(pid, 
                                               transform, extent); }
         virtual void perform_logging(PendingPartitionOp *op);
@@ -3090,17 +3097,19 @@ namespace Legion {
       class FutureMapThunk : public PendingPartitionThunk {
       public:
         FutureMapThunk(IndexPartition id, const FutureMap &fm, bool inter)
-          : pid(id), future_map(fm), perform_intersections(inter) { }
+          : pid(id), future_map_domain(fm.impl->get_domain()),
+            perform_intersections(inter) { }
         virtual ~FutureMapThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
-        { return forest->create_partition_by_domain(op, pid, future_map,
-                                              perform_intersections); }
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
+        { return forest->create_partition_by_domain(op, pid, futures,
+                            future_map_domain, perform_intersections); }
         virtual void perform_logging(PendingPartitionOp *op);
       protected:
         IndexPartition pid;
-        FutureMap future_map;
+        const Domain future_map_domain;
         bool perform_intersections;
       };
       class CrossProductThunk : public PendingPartitionThunk {
@@ -3112,7 +3121,8 @@ namespace Legion {
         virtual ~CrossProductThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->create_cross_product_partitions(op, base, source, 
                                 part_color, local_shard, shard_mapping); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -3134,7 +3144,8 @@ namespace Legion {
         virtual ~ComputePendingSpace(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { if (is_partition)
             return forest->compute_pending_space(op, target, handle, is_union);
           else
@@ -3155,7 +3166,8 @@ namespace Legion {
         virtual ~ComputePendingDifference(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
-                                RegionTreeForest *forest)
+            RegionTreeForest *forest,
+            const std::map<DomainPoint,FutureImpl*> &futures)
         { return forest->compute_pending_space(op, target, initial, handles); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -4278,7 +4290,8 @@ namespace Legion {
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
                         ReductionOpID redop, bool deterministic,
                         MapperID mapper_id, MappingTagID tag,
-                        Provenance *provenance);
+                        Provenance *provenance,
+                        Future initial_value);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -4305,6 +4318,15 @@ namespace Legion {
       virtual void all_reduce_serdez(void);
       virtual RtEvent all_reduce_redop(void);
     protected:
+      ApEvent init_redop_target(FutureInstance *target);
+      void fold_serdez(FutureImpl *impl);
+    private:
+      void prepare_future(std::vector<RtEvent> &preconditions,
+                          FutureImpl *future);
+      void subscribe_to_future(std::vector<RtEvent> &ready_events,
+                               FutureImpl *future);
+      Future pick_initial_value(Future initial_value);
+    protected:
       FutureMap future_map;
       ReductionOpID redop_id;
       const ReductionOp *redop; 
@@ -4318,6 +4340,7 @@ namespace Legion {
       MapperID mapper_id;
       MappingTagID tag;
       bool deterministic;
+      Future initial_value;
     };
 
     /**

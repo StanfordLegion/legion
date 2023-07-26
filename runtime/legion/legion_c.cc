@@ -3297,12 +3297,40 @@ legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_mapper_id_t map_id,
                          legion_mapping_tag_id_t tag)
 {
+  Future empty_future;
+
+  legion_future_t initial_value = CObjectWrapper::wrap(&empty_future);
+  return legion_future_map_reduce_with_initial_value(
+    runtime_,
+    ctx_,
+    fm_,
+    redop,
+    deterministic,
+    map_id,
+    tag,
+    NULL,
+    initial_value);
+}
+
+legion_future_t
+legion_future_map_reduce_with_initial_value(legion_runtime_t runtime_,
+                                            legion_context_t ctx_,
+                                            legion_future_map_t fm_,
+                                            legion_reduction_op_id_t redop,
+                                            bool deterministic,
+                                            legion_mapper_id_t map_id,
+                                            legion_mapping_tag_id_t tag,
+                                            const char *provenance,
+                                            legion_future_t initial_value_)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   FutureMap *fm = CObjectWrapper::unwrap(fm_);
+  Future *initial_value = CObjectWrapper::unwrap(initial_value_);
 
   return CObjectWrapper::wrap(new Future(
-      runtime->reduce_future_map(ctx, *fm, redop, deterministic, map_id, tag)));
+      runtime->reduce_future_map(ctx, *fm, redop, deterministic, map_id, tag,
+                                 provenance, *initial_value)));
 }
 
 legion_future_map_t

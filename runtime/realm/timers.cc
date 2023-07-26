@@ -45,7 +45,7 @@ namespace Realm {
   // if set_zero_time() is not called, relative time will equal absolute time
   /*static*/ uint64_t Clock::zero_time = 0;
 
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
   /*static*/ bool Clock::cpu_tsc_enabled = false;
 #endif
 
@@ -96,8 +96,12 @@ namespace Realm {
   /*static*/ void Clock::calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
                                    uint64_t force_cpu_tsc_freq)
   {
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
     if(use_cpu_tsc != 0) {  // "yes" or "dont care"
+      if (force_cpu_tsc_freq == 0) {
+        force_cpu_tsc_freq = raw_cpu_tsc_freq();
+      }
+
       // we want to get two time samples spread by an interesting amount of
       //  real time (TARGET_NANOSECONDS), but we don't know the overhead of
       //  the OS time call so we do iterations with progressively more and

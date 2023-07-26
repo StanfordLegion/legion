@@ -31,7 +31,8 @@ local function dlopen_library(library_name)
   end
 end
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   dlopen_library("libregent.dylib")
 else
   dlopen_library("libregent.so")

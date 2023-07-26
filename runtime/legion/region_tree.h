@@ -219,7 +219,7 @@ namespace Legion {
                                      size_t granularity);
       ApEvent create_partition_by_weights(Operation *op,
                                           IndexPartition pid,
-                                          const FutureMap &map,
+              const std::map<DomainPoint,FutureImpl*> &futures,
                                           size_t granularity);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
@@ -241,7 +241,8 @@ namespace Legion {
                                               const void *transform,
                                               const void *extent);
       ApEvent create_partition_by_domain(Operation *op, IndexPartition pid,
-                                         const FutureMap &future_map,
+                          const std::map<DomainPoint,FutureImpl*> &futures,
+                                         const Domain &future_map_domain,
                                          bool perform_intersections);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
@@ -705,6 +706,7 @@ namespace Legion {
                                   IndexPartNode &par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   Provenance *provenance,
+                                  IndexSpaceExprID expr_id = 0,
                                   CollectiveMapping *mapping = NULL,
                                   unsigned depth = UINT_MAX);
       // We know the disjointness of the index partition
@@ -2197,11 +2199,12 @@ namespace Legion {
                                             int partition_dim) = 0;
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
-                                       FutureMapImpl *future_map,
+                 const std::map<DomainPoint,FutureImpl*> &futures,
+                                       const Domain &future_map_domain,
                                        bool perform_intersections) = 0;
       virtual ApEvent create_by_weights(Operation *op,
                                         IndexPartNode *partition,
-                                        FutureMapImpl *future_map,
+                const std::map<DomainPoint,FutureImpl*> &weights,
                                         size_t granularity) = 0;
       virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
@@ -2400,21 +2403,23 @@ namespace Legion {
                                    const Realm::Rect<N,T> &extent);
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
-                                       FutureMapImpl *future_map,
+               const std::map<DomainPoint,FutureImpl*> &futures,
+                                       const Domain &future_map_domain,
                                        bool perform_intersections);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_domain_helper(Operation *op,
                                       IndexPartNode *partition,
-                                      FutureMapImpl *future_map,
+                const std::map<DomainPoint,FutureImpl*> &futures,
+                                      const Domain &future_map_domain,
                                       bool perform_intersections);
       virtual ApEvent create_by_weights(Operation *op,
                                         IndexPartNode *partition,
-                                        FutureMapImpl *future_map,
+                const std::map<DomainPoint,FutureImpl*> &weights,
                                         size_t granularity);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_weight_helper(Operation *op,
                                       IndexPartNode *partition,
-                                      FutureMapImpl *future_map,
+              const std::map<DomainPoint,FutureImpl*> &weights,
                                       size_t granularity);
       virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
@@ -2577,21 +2582,25 @@ namespace Legion {
       public:
         CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
                              IndexPartNode *p, Operation *o,
-                             FutureMapImpl *fm, bool inter)
-          : node(n), partition(p), op(o), future_map(fm), intersect(inter) { }
+                             const std::map<DomainPoint,FutureImpl*> &fts,
+                             const Domain &domain, bool inter)
+          : node(n), partition(p), op(o), futures(fts), 
+            future_map_domain(domain), intersect(inter) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByDomainHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_domain_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->intersect);
+                creator->partition, creator->futures, 
+                creator->future_map_domain, creator->intersect);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
         IndexPartNode *const partition;
         Operation *const op;
-        FutureMapImpl *const future_map;
+        const std::map<DomainPoint,FutureImpl*> &futures;
+        const Domain &future_map_domain;
         const bool intersect;
         ApEvent result;
       };
@@ -2599,21 +2608,22 @@ namespace Legion {
       public:
         CreateByWeightHelper(IndexSpaceNodeT<DIM,T> *n,
                              IndexPartNode *p, Operation *o,
-                             FutureMapImpl *fm, size_t g)
-          : node(n), partition(p), op(o), future_map(fm), granularity(g) { }
+                             const std::map<DomainPoint,FutureImpl*> &wts,
+                             size_t g)
+          : node(n), partition(p), op(o), weights(wts), granularity(g) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByWeightHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_weight_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->granularity);
+                creator->partition, creator->weights, creator->granularity);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
         IndexPartNode *const partition;
         Operation *const op;
-        FutureMapImpl *const future_map;
+        const std::map<DomainPoint,FutureImpl*> &weights;
         const size_t granularity;
         ApEvent result;
       };
@@ -3107,8 +3117,8 @@ namespace Legion {
       bool handle_disjointness_update(Deserializer &derez);
     public:
       ApEvent create_equal_children(Operation *op, size_t granularity);
-      ApEvent create_by_weights(Operation *op, const FutureMap &weights,
-                                size_t granularity);
+      ApEvent create_by_weights(Operation *op, 
+          const std::map<DomainPoint,FutureImpl*> &weights, size_t granularity);
       ApEvent create_by_union(Operation *Op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
@@ -3118,7 +3128,8 @@ namespace Legion {
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_restriction(const void *transform, const void *extent);
-      ApEvent create_by_domain(FutureMapImpl *future_map);
+      ApEvent create_by_domain(const std::map<DomainPoint,FutureImpl*> &futures,
+                               const Domain &future_map_domain);
     public:
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true); 

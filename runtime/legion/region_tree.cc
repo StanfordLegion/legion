@@ -619,7 +619,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_weights(Operation *op,
                                                        IndexPartition pid,
-                                                       const FutureMap &weights,
+                               const std::map<DomainPoint,FutureImpl*> &weights,
                                                        size_t granularity)
     //--------------------------------------------------------------------------
     {
@@ -692,13 +692,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_domain(Operation *op,
                                                     IndexPartition pid,
-                                                    const FutureMap &future_map,
+                              const std::map<DomainPoint,FutureImpl*> &weights,
+                                                const Domain &future_map_domain,
                                                     bool perform_intersections)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->parent->create_by_domain(op, new_part, future_map.impl, 
-                                                perform_intersections);
+      return new_part->parent->create_by_domain(op, new_part, weights,
+                            future_map_domain, perform_intersections);
     }
 
     //--------------------------------------------------------------------------
@@ -3284,14 +3285,7 @@ namespace Legion {
         {
           index_nodes[sp] = result;
           index_space_requests.erase(sp);
-          if (parent != NULL)
-          {
-#ifdef DEBUG_LEGION
-            assert(!add_root_reference);
-#endif
-            parent->add_child(result);
-          }
-          else if (add_root_reference)
+          if (add_root_reference)
             result->add_base_valid_ref(APPLICATION_REF);
           // If we didn't give it a value add a reference to be removed once
           // the index space node has been set
@@ -3306,6 +3300,14 @@ namespace Legion {
           }
           else
             result->set_bounds(bounds, is_domain, true/*init*/, is_ready);
+          if (parent != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(!add_root_reference);
+#endif
+            // Only do this after we've added all the references
+            parent->add_child(result);
+          }
           result->register_with_runtime();
           return result;
         }
@@ -3325,12 +3327,13 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   Provenance *provenance,
+                                                  IndexSpaceExprID expr_id,
                                                   CollectiveMapping *mapping,
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, &parent, color, did, 0/*expr id*/, 
-                                initialized, depth, provenance, mapping, 
+      IndexSpaceCreator creator(this, sp, &parent, color, did, expr_id,
+                                initialized, depth, provenance, mapping,
                                 true/*tree valid*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
@@ -3350,12 +3353,12 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // Always add a valid reference from the parent
-        parent.add_child(result);
         // Add a reference for when we set this index space node
         // Hold the reference on the parent partition to keep both it
         // and the child index space alive 
         parent.add_base_gc_ref(REGION_TREE_REF);
+        // Only record this with the parent after all the references are added
+        parent.add_child(result);
         result->register_with_runtime();
       } 
       return result;
@@ -9546,11 +9549,13 @@ namespace Legion {
 #endif
           IndexSpace is(context->runtime->get_unique_index_space_id(),
                         handle.get_tree_id(), handle.get_type_tag());
+          const IndexSpaceExprID expr_id =
+            context->runtime->get_unique_index_space_expr_id();
           DistributedID child_did = 
             context->runtime->get_available_distributed_id();
           // Make a new index space node ready when the partition is ready
           IndexSpaceNode *result = context->create_node(is, *this, c, child_did,
-                                        initialized, provenance, child_mapping);
+                               initialized, provenance, expr_id, child_mapping);
           if ((child_mapping != NULL) && (child_mapping->size() > 1))
           {
             // We know other participants are nodes are going to need
@@ -9568,6 +9573,7 @@ namespace Legion {
               rez.serialize(c);
               rez.serialize(is);
               rez.serialize(child_did);
+              rez.serialize(expr_id);
               child_mapping->pack(rez);
             }
             for (std::vector<AddressSpaceID>::const_iterator it =
@@ -9612,6 +9618,8 @@ namespace Legion {
       derez.deserialize(child_handle);
       DistributedID child_did;
       derez.deserialize(child_did);
+      IndexSpaceExprID expr_id;
+      derez.deserialize(expr_id);
       size_t num_spaces;
       derez.deserialize(num_spaces);
 #ifdef DEBUG_LEGION
@@ -9621,7 +9629,7 @@ namespace Legion {
 
       IndexPartNode *parent = forest->get_node(parent_handle);
       forest->create_node(child_handle, *parent, child_color, child_did,
-                      parent->initialized, parent->provenance, mapping);
+              parent->initialized, parent->provenance, expr_id, mapping);
       std::vector<AddressSpaceID> children;
       mapping->get_children(mapping->get_origin(),parent->local_space,children);
       if (!children.empty())
@@ -9633,6 +9641,7 @@ namespace Legion {
           rez.serialize(child_color);
           rez.serialize(child_handle);
           rez.serialize(child_did);
+          rez.serialize(expr_id);
           mapping->pack(rez);
         }
         for (std::vector<AddressSpaceID>::const_iterator it =
@@ -10384,10 +10393,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_weights(Operation *op, 
-                                   const FutureMap &weights, size_t granularity)
+           const std::map<DomainPoint,FutureImpl*> &weights, size_t granularity)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_weights(op, this, weights.impl, granularity);
+      return parent->create_by_weights(op, this, weights, granularity);
     }
 
     //--------------------------------------------------------------------------

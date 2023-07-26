@@ -47,12 +47,15 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
-        total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
+        total_tunable_count(0), overhead_profiler(NULL), 
+        implicit_profiler(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
         inline_task(inline_t), implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
+      if (implicit_task && (runtime->profiler != NULL))
+        implicit_profiler = new ImplicitProfiler();
     }
 
     //--------------------------------------------------------------------------
@@ -74,8 +77,10 @@ namespace Legion {
             (*it->second.second)(it->second.first);
         }
       }
-      if (overhead_tracker != NULL)
-        delete overhead_tracker;
+      if (overhead_profiler != NULL)
+        delete overhead_profiler;
+      if (implicit_profiler != NULL)
+        delete implicit_profiler;
     }
 
     //--------------------------------------------------------------------------
@@ -2068,19 +2073,22 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& TaskContext::begin_task(
-                                                           Legion::Runtime *&rt)
+    const std::vector<PhysicalRegion>& TaskContext::begin_task(Processor proc)
     //--------------------------------------------------------------------------
     {
+      if (implicit_runtime == NULL)
+        implicit_runtime = this->runtime;
       implicit_context = this;
-      implicit_runtime = this->runtime;
-      rt = this->runtime->external;
       implicit_provenance = owner_task->get_unique_op_id();
-      if (overhead_tracker != NULL)
-        previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
+      if (overhead_profiler != NULL)
+        overhead_profiler->previous_profiling_time = 
+          Realm::Clock::current_time_in_nanoseconds();
+      if (implicit_profiler != NULL)
+        implicit_profiler->start_time = 
+          Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
-      executing_processor = Processor::get_executing_processor();
+      executing_processor = proc; 
       owner_task->current_proc = executing_processor;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_task_processor(get_unique_id(), executing_processor.id);
@@ -2467,15 +2475,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::initialize_overhead_tracker(void)
+    void TaskContext::initialize_overhead_profiler(void)
     //--------------------------------------------------------------------------
     {
       // Make an overhead tracker
 #ifdef DEBUG_LEGION
-      assert(overhead_tracker == NULL);
+      assert(overhead_profiler == NULL);
 #endif
-      overhead_tracker = new 
-        Mapping::ProfilingMeasurements::RuntimeOverhead();
+      overhead_profiler = new OverheadProfiler();
     } 
 
     //--------------------------------------------------------------------------
@@ -2518,11 +2525,9 @@ namespace Legion {
           raise_poison_exception();
         return;
       }
-      begin_task_wait(true/*from runtime*/);
       mapped_event.wait_faultaware(poisoned);
       if (poisoned)
         raise_poison_exception();
-      end_task_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -2567,9 +2572,7 @@ namespace Legion {
       // Run this task with minimum priority to allow other things to run
       const RtEvent wait_for = 
         runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
-      begin_task_wait(false/*from runtime*/);
       wait_for.wait();
-      end_task_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -6406,7 +6409,8 @@ namespace Legion {
         epoch_launcher.provenance = launcher.provenance;
         FutureMap result = execute_must_epoch(epoch_launcher);
         return reduce_future_map(result, redop, deterministic,
-                                 launcher.map_id, launcher.tag, provenance);
+                                 launcher.map_id, launcher.tag, provenance,
+                                 Future());
       }
       AutoRuntimeCall call(this);
       if (launcher.launch_domain.exists() &&
@@ -6449,7 +6453,8 @@ namespace Legion {
     Future InnerContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
-                                        Provenance *prov)
+                                        Provenance *prov,
+                                        Future initial_value)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -6464,7 +6469,8 @@ namespace Legion {
       }
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = all_reduce_op->initialize(this, future_map, redop, 
-                                    deterministic, mapper_id, tag, prov);
+                                    deterministic, mapper_id, tag, prov,
+                                    initial_value);
       add_to_dependence_queue(all_reduce_op);
       return result;
     }
@@ -7740,9 +7746,7 @@ namespace Legion {
           wait_event = window_wait;
         }
       }
-      begin_task_wait(false/*from runtime*/);
       wait_event.wait();
-      end_task_wait();
       // Re-increment the count once we are awake again
       outstanding_children_count.fetch_add(1);
     }
@@ -7898,12 +7902,10 @@ namespace Legion {
       }
       if (term_event.exists() && outermost) 
       {
-        begin_task_wait(true/*from runtime*/);
         bool poisoned = false;
         term_event.wait_faultaware(poisoned);
         if (poisoned)
           raise_poison_exception();
-        end_task_wait();
       }
       return true;
     }
@@ -10255,6 +10257,7 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
+      std::set<RtEvent> context_ready_events;
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
       const ContextID ctx = tree_context.get_id();
@@ -10371,18 +10374,13 @@ namespace Legion {
           const FieldMaskSet<EquivalenceSet> &eq_sets = 
             version_infos[idx1].get_equivalence_sets();
           const AddressSpaceID space = runtime->address_space;
-          std::set<RtEvent> context_ready_events;
+          // We used to invalidate here, but we can do that when we do
+          // the copy back now since that is better for handling the
+          // case of predicated tasks that don't actually run
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            eq_set->clone_from(space, it->first, it->second, 
-                         false/*fowrard to owner*/, context_ready_events,
-                         IS_WRITE(regions[idx1])/*invalidate source overlap*/);
-          // If there are any events for making these equivalence sets ready
-          // then we make them look like a mapping fence to ensure that the
-          // equivalence sets are all ready before anyone tries to map
-          if (!context_ready_events.empty())
-            current_mapping_fence_event = 
-              Runtime::merge_events(context_ready_events);
+            eq_set->clone_from(space, it->first, it->second,
+                false/*fowrard to owner*/, context_ready_events);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
@@ -10392,6 +10390,12 @@ namespace Legion {
         if (eq_set->remove_base_gc_ref(CONTEXT_REF))
           assert(false); // should never hit this
       }
+      // If there are any events for making these equivalence sets ready
+      // then we make them look like a mapping fence to ensure that the
+      // equivalence sets are all ready before anyone tries to map
+      if (!context_ready_events.empty())
+        current_mapping_fence_event = 
+          Runtime::merge_events(context_ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -11349,15 +11353,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& InnerContext::begin_task(
-                                                           Legion::Runtime *&rt)
+    const std::vector<PhysicalRegion>& InnerContext::begin_task(Processor proc)
     //--------------------------------------------------------------------------
     {
       // If we have mutable priority we need to save our realm done event
       if (mutable_priority)
         realm_done_event = ApEvent(Processor::get_current_finish_event());
       // Now do the base begin task routine
-      return TaskContext::begin_task(rt);
+      return TaskContext::begin_task(proc);
     }
 
     //--------------------------------------------------------------------------
@@ -11416,12 +11419,21 @@ namespace Legion {
           InnerContext::destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       }
-      if (overhead_tracker != NULL)
+      if (overhead_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        const long long diff = current - previous_profiling_time;
-        overhead_tracker->application_time += diff;
-      } 
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->application_time += diff;
+      }
+      if (implicit_profiler != NULL)
+      {
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        // log this with the profiler 
+        runtime->profiler->record_implicit(get_unique_id(), owner_task->task_id,
+            executing_processor, implicit_profiler->start_time, stop,
+            implicit_profiler->waits);
+      }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
       {
@@ -13305,7 +13317,10 @@ namespace Legion {
     {
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -13343,25 +13358,29 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_index_space(handle, domain, value.did,
             provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -13442,7 +13461,10 @@ namespace Legion {
       }
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -13485,10 +13507,10 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
                                 provenance, &collective_mapping, value.expr_id,
                                 ready, creation_bar);
@@ -13499,15 +13521,19 @@ namespace Legion {
           shard_manager->is_first_local_shard(owner_shard), 
           &(shard_manager->get_collective_mapping()));
       add_to_dependence_queue(creator_op);
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -13626,7 +13652,10 @@ namespace Legion {
         return IndexSpace::NO_SPACE;
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -13664,24 +13693,28 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_union_space(handle, value.did, provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -13721,7 +13754,10 @@ namespace Legion {
         return IndexSpace::NO_SPACE;
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -13759,24 +13795,28 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -13806,7 +13846,10 @@ namespace Legion {
                         get_task_name(), get_unique_id())
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
+      {
         increase_pending_index_spaces(1/*count*/, false/*double*/);
+        pending_index_space_check = 0;
+      }
       IndexSpace handle;
       bool double_next = false;
       bool double_buffer = false;
@@ -13844,24 +13887,28 @@ namespace Legion {
         }
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
-        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        double_buffer = value.double_buffer;
         runtime->forest->create_difference_space(handle, value.did, provenance,
             left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_index_spaces.pop_front();
       // Record this in our context
       register_index_space_creation(handle);
+      if (++pending_index_space_check == pending_index_spaces.size())
+        pending_index_space_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_index_spaces(double_buffer ? 
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_index_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_index_spaces.pop_front();
       return handle;
     }
 
@@ -14172,7 +14219,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (pending_index_partitions.empty())
+      {
         increase_pending_partitions(1/*count*/, false/*double*/);
+        pending_index_partition_check = 0;
+      }
       bool double_next = false;
       bool double_buffer = false;
       std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
@@ -14239,14 +14289,18 @@ namespace Legion {
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       }
-      // Clean up the collective
-      delete collective.first;
-      pending_index_partitions.pop_front();
+      if (++pending_index_partition_check == pending_index_partitions.size()) 
+        pending_index_partition_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_partitions(double_buffer ? 
-        pending_index_partitions.size() + 1 : 1, double_next && !double_buffer);
+        pending_index_partitions.size() + 1 : 1, double_next);
+      // Clean up the collective
+      delete collective.first;
+      pending_index_partitions.pop_front();
       return is_owner;
     }
 
@@ -15898,7 +15952,10 @@ namespace Legion {
     {
       // Seed this with the first field space broadcast
       if (pending_field_spaces.empty())
+      {
         increase_pending_field_spaces(1/*count*/, false/*double*/);
+        pending_field_space_check = 0;
+      }
       FieldSpace space;
       bool double_next = false;
       bool double_buffer = false;
@@ -15948,15 +16005,19 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_field_spaces.pop_front();
+      if (++pending_field_space_check == pending_field_spaces.size())
+        pending_field_space_check = 0;
+      else
+        double_buffer = false;
       // Record this in our context
       register_field_space_creation(space);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_field_spaces(double_buffer ? 
-          pending_field_spaces.size() + 1 : 1, double_next && !double_buffer);
+          pending_field_spaces.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_field_spaces.pop_front();
       return space;
     }
 
@@ -15995,7 +16056,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16018,10 +16082,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -16093,7 +16161,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16116,10 +16187,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -16354,7 +16429,10 @@ namespace Legion {
       if (fid == LEGION_AUTO_GENERATE_ID)
       {
         if (pending_fields.empty())
+        {
           increase_pending_fields(1/*count*/, false/*double*/);
+          pending_field_check = 0;
+        }
         bool double_next = false;
         bool double_buffer = false;
         std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16377,10 +16455,14 @@ namespace Legion {
           fid = value.field_id;
           double_buffer = value.double_buffer;
         }
+        if (++pending_field_check == pending_fields.size())
+          pending_field_check = 0;
+        else
+          double_buffer = false;
+        increase_pending_fields(
+            double_buffer ? pending_fields.size() + 1 : 1, double_next);
         delete collective.first;
         pending_fields.pop_front();
-        increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                double_next && !double_buffer);
       }
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
         REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -16481,7 +16563,10 @@ namespace Legion {
       if (fid == LEGION_AUTO_GENERATE_ID)
       {
         if (pending_fields.empty())
+        {
           increase_pending_fields(1/*count*/, false/*double*/);
+          pending_field_check = 0;
+        }
         bool double_next = false;
         bool double_buffer = false;
         std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16504,10 +16589,14 @@ namespace Legion {
           fid = value.field_id;
           double_buffer = value.double_buffer;
         }
+        if (++pending_field_check == pending_fields.size())
+          pending_field_check = 0;
+        else
+          double_buffer = false;
+        increase_pending_fields(
+            double_buffer ? pending_fields.size() + 1 : 1, double_next);
         delete collective.first;
         pending_fields.pop_front();
-        increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                double_next && !double_buffer);
       }
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
         REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -16647,7 +16736,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16670,10 +16762,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
@@ -16747,7 +16843,10 @@ namespace Legion {
         if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
+          {
             increase_pending_fields(1/*count*/, false/*double*/);
+            pending_field_check = 0;
+          }
           bool double_next = false;
           bool double_buffer = false;
           std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
@@ -16770,10 +16869,14 @@ namespace Legion {
             resulting_fields[idx] = value.field_id;
             double_buffer = value.double_buffer;
           }
+          if (++pending_field_check == pending_fields.size())
+            pending_field_check = 0;
+          else
+            double_buffer = false;
+          increase_pending_fields(
+              double_buffer ? pending_fields.size() + 1 : 1, double_next);
           delete collective.first;
           pending_fields.pop_front();
-          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
-                                  double_next && !double_buffer);
         }
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -16914,7 +17017,10 @@ namespace Legion {
       }
       // Seed this with the first field space broadcast
       if (pending_region_trees.empty())
+      {
         increase_pending_region_trees(1/*count*/, false/*double*/);
+        pending_region_tree_check = 0;
+      }
       LogicalRegion handle(0/*temp*/, index_space, field_space);
       bool double_next = false;
       bool double_buffer = false;
@@ -16964,15 +17070,19 @@ namespace Legion {
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
-      delete collective.first;
-      pending_region_trees.pop_front();
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local, output_region);
+      if (++pending_region_tree_check == pending_region_trees.size())
+        pending_region_tree_check = 0;
+      else
+        double_buffer = false;
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
-      increase_pending_region_trees(double_buffer ? 
-          pending_region_trees.size() + 1 : 1, double_next && !double_buffer);
+      increase_pending_region_trees(
+          double_buffer ? pending_region_trees.size() + 1 : 1, double_next);
+      delete collective.first;
+      pending_region_trees.pop_front();
       return handle;
     }
 
@@ -17604,7 +17714,8 @@ namespace Legion {
         FutureMap result = execute_must_epoch(epoch_launcher);
         // Reduce the future map down to a future
         return reduce_future_map(result, redop, deterministic,
-                                 launcher.map_id, launcher.tag, provenance);
+                                 launcher.map_id, launcher.tag, provenance,
+                                 Future());
       }
       AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
@@ -17668,7 +17779,8 @@ namespace Legion {
     Future ReplicateContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
-                                        Provenance *provenance)
+                                        Provenance *provenance,
+                                        Future initial_value)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -17697,11 +17809,13 @@ namespace Legion {
       // we can just do the standard thing here
       if (!future_map.impl->is_replicate_future_map())
         return InnerContext::reduce_future_map(future_map, redop, deterministic,
-                                               mapper_id, tag, provenance);
+                                               mapper_id, tag, provenance,
+                                               initial_value);
       ReplAllReduceOp *all_reduce_op = 
         runtime->get_available_repl_all_reduce_op();
       Future result = all_reduce_op->initialize(this, future_map, redop,
-                              deterministic, mapper_id, tag, provenance);
+                              deterministic, mapper_id, tag, provenance,
+                              initial_value);
       all_reduce_op->initialize_replication(this);
       add_to_dependence_queue(all_reduce_op);
       return result;
@@ -17746,9 +17860,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (pending_distributed_ids.empty())
+      {
         increase_pending_distributed_ids(1/*count*/, false/*double*/);
+        pending_distributed_id_check = 0;
+      }
       bool double_next = false;
-      bool double_buffer = false;
       std::pair<ValueBroadcast<DIDBroadcast>*,bool> &pending_did =
         pending_distributed_ids.front();
       if (!pending_did.second)
@@ -17761,15 +17877,19 @@ namespace Legion {
         }
       }
       const DIDBroadcast value = pending_did.first->get_value(false);
-      if (pending_did.second)
+      bool double_buffer = false;
+      if (++pending_distributed_id_check == pending_distributed_ids.size())
+      {
         double_buffer = value.double_buffer;
-      delete pending_did.first;
-      pending_distributed_ids.pop_front();
+        pending_distributed_id_check = 0;
+      }
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_distributed_ids(double_buffer ? 
-       pending_distributed_ids.size() + 1 : 1, double_next && !double_buffer);
+       pending_distributed_ids.size() + 1 : 1, double_next);
+      delete pending_did.first;
+      pending_distributed_ids.pop_front();
       return value.did;
     }
 
@@ -19472,11 +19592,7 @@ namespace Legion {
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
         term_event = inorder_bar;
         if (outermost)
-        {
-          begin_task_wait(true/*from runtime*/);
           term_event.wait();
-          end_task_wait();
-        }
         // Not unordered so it must have succeeded
         return true;
       }
@@ -23400,7 +23516,8 @@ namespace Legion {
     Future LeafContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
-                                        Provenance *provenance)
+                                        Provenance *provenance,
+                                        Future initial_value)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -23974,11 +24091,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
-      if (overhead_tracker != NULL)
+      if (overhead_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        const long long diff = current - previous_profiling_time;
-        overhead_tracker->application_time += diff;
+        const long long diff = current - 
+          overhead_profiler->previous_profiling_time;
+        overhead_profiler->application_time += diff;
       }
       if (!index_launch_spaces.empty())
       {

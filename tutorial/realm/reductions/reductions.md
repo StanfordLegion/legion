@@ -1,4 +1,8 @@
-# Reductions
+---
+layout: page
+permalink: /tutorial/realm/reductions.html
+title: Realm Reductions
+---
 
 ## Introduction
 Reductions are an important concept in parallel programming. 
@@ -15,7 +19,7 @@ Here is a list of covered topics:
 * [Basics of Reductions](#basics-of-reductions)
 * [Registering Reduction Operators](#registering-reduction-operators)
 * [Performing Reduction Copies](#performing-reduction-copies)
-* [What's Next?](#what's-next?)
+* [What is Next](#what-is-next)
 
 ## Basics of Reductions
 Reductions are used to combine multiple values into a single value.
@@ -66,7 +70,6 @@ rt.register_reduction<SumReduction>(REDOP_SUM);
 ```
 
 The `REDOP_SUM` id represents an exclusive sum reduction:
-(TODO: Consider adding non-exclusive)
 
 ```c++
 class SumReduction {
@@ -92,7 +95,7 @@ class SumReduction {
 };
 ```
 
-## Performing Reductions Copies
+## Performing Reduction Copies
 
 In the example given, the program performs four reduction copies.
 Specifically, there are two non-exclusive fold reductions over the 
@@ -100,7 +103,8 @@ same instance with an integer type, and two exclusive apply reductions
 over the same instance with a left-hand-side `StructType`.
 
 The sequence looks as following:
-```
+
+```c++
 1. fold<NON-EXCL>(int, int) && fold<NON-EXCL>(int, int)
 2. apply<EXCL>(StructType, int) && apply<EXCL>(StructType, int)
 ```
@@ -108,6 +112,7 @@ The sequence looks as following:
 To execute the reduction copies, the program prepares and issues a
 realm reduction copy by setting the corresponding `redop` field and
 calling `domain.copy(...)`:
+
 ```c++
   std::vector<CopySrcDstField> srcs(1), dsts(1);
   srcs[0].set_field(src_inst, src_fid, src_fsize);
@@ -162,7 +167,7 @@ level, allowing them to run in either order.
 
 For details on reservations, please refer to a dedicated tutorial.
 
-## What's Next?
+## What is Next
 
 The sum reduction is just one example of what can be done with
 reductions, but many other options are also available.

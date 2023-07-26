@@ -60,6 +60,9 @@
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
 
 namespace Realm {
+
+  extern Logger log_taskreg;
+
   namespace Cuda {
 
     Logger log_gpu("gpu");
@@ -1515,6 +1518,7 @@ namespace Realm {
       static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
       static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
       static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
+      static REALM_THREAD_LOCAL int context_sync_required = 0;
     };
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -1549,6 +1553,10 @@ namespace Realm {
       GPUStream *s = gpu_proc->gpu->get_next_task_stream();
       ThreadLocal::current_gpu_stream = s;
       assert(!ThreadLocal::created_gpu_streams);
+
+      // a task can force context sync on task completion either on or off during
+      //  execution, so use -1 as a "no preference" value
+      ThreadLocal::context_sync_required = -1;
 
       // we'll use a "work fence" to track when the kernels launched by this task actually
       //  finish - this must be added to the task _BEFORE_ we execute
@@ -1611,7 +1619,8 @@ namespace Realm {
         gpu_proc->gpu->event_pool.return_event(e);
       }
 
-      if(gpu_proc->gpu->module->cfg_task_context_sync)
+      if((ThreadLocal::context_sync_required > 0) ||
+	 ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->cfg_task_context_sync))
         gpu_proc->ctxsync.add_fence(fence);
       else
 	fence->enqueue_on_stream(s);
@@ -2084,6 +2093,102 @@ namespace Realm {
       return 0;
     }
 
+    bool GPUProcessor::register_task(Processor::TaskFuncID func_id,
+				     CodeDescriptor& codedesc,
+				     const ByteArrayRef& user_data)
+    {
+      // see if we have a function pointer to register
+      const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+
+      // if we don't have a function pointer implementation, see if we can make one
+      if(!fpi) {
+	const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
+	for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+	    it != translators.end();
+	    it++)
+	  if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
+	    FunctionPointerImplementation *newfpi = (*it)->translate<FunctionPointerImplementation>(codedesc);
+	    if(newfpi) {
+	      log_taskreg.info() << "function pointer created: trans=" << (*it)->name << " fnptr=" << (void *)(newfpi->fnptr);
+	      codedesc.add_implementation(newfpi);
+	      fpi = newfpi;
+	      break;
+	    }
+	  }
+      }
+
+      assert(fpi != 0);
+
+      {
+	RWLock::AutoWriterLock al(task_table_mutex);
+
+	// first, make sure we haven't seen this task id before
+	if(gpu_task_table.count(func_id) > 0) {
+	  log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
+	  return false;
+	}
+
+	GPUTaskTableEntry &tte = gpu_task_table[func_id];
+
+	// figure out what type of function we have
+	if(codedesc.type() == TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+	  tte.fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+	  tte.stream_aware_fnptr = 0;
+	} else if(codedesc.type() == TypeConv::from_cpp_type<Cuda::StreamAwareTaskFuncPtr>()) {
+	  tte.fnptr = 0;
+	  tte.stream_aware_fnptr = (Cuda::StreamAwareTaskFuncPtr)(fpi->fnptr);
+	} else {
+	  log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	  assert(0);
+	}
+
+	tte.user_data = user_data;
+      }
+
+      log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
+
+      return true;
+    }
+
+    void GPUProcessor::execute_task(Processor::TaskFuncID func_id,
+				    const ByteArrayRef& task_args)
+    {
+      if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
+	return;
+
+      std::map<Processor::TaskFuncID, GPUTaskTableEntry>::const_iterator it;
+      {
+	RWLock::AutoReaderLock al(task_table_mutex);
+	
+	it = gpu_task_table.find(func_id);
+	if(it == gpu_task_table.end()) {
+	  log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
+	  assert(0);
+	}
+      }
+
+      const GPUTaskTableEntry& tte = it->second;
+
+      if(tte.stream_aware_fnptr) {
+	// shouldn't be here without a valid stream
+	assert(ThreadLocal::current_gpu_stream);
+	CUstream stream = ThreadLocal::current_gpu_stream->get_stream();
+
+	log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.stream_aware_fnptr)) << " (stream aware)";
+      
+	(tte.stream_aware_fnptr)(task_args.base(), task_args.size(),
+				 tte.user_data.base(), tte.user_data.size(),
+				 me, stream);
+      } else {
+	assert(tte.fnptr);
+	log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
+      
+	(tte.fnptr)(task_args.base(), task_args.size(),
+		    tte.user_data.base(), tte.user_data.size(),
+		    me);
+      }
+    }
+
     void GPUProcessor::shutdown(void)
     {
       log_gpu.info("shutting down");
@@ -2342,9 +2447,9 @@ namespace Realm {
     //
     // class GPUFBMemory
 
-    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size)
+    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size, bool isMemmapped /*= false*/)
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
-      , gpu(_gpu), base(_base)
+      , gpu(_gpu), base(_base), isMemmapedMemory(isMemmapped)
     {
       // mark what context we belong to
       add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
@@ -3269,8 +3374,18 @@ namespace Realm {
       delete_container_contents(task_streams);
 
       // free memory
-      if(fbmem_base)
-        CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fbmem_base) );
+      if(fbmem != nullptr) {
+#if CUDA_VERSION >= 11050
+        if (fbmem->isMemmapedMemory) {
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemUnmap)(fbmem->base, fbmem->size) );
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemAddressFree)(fbmem->base, fbmem->size) );
+        }
+        else
+#endif
+        {
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fbmem->base) );
+        }
+      }
 
       if(fb_ibmem_base)
         CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fb_ibmem_base) );
@@ -3358,6 +3473,14 @@ namespace Realm {
           CUresult ret = CUDA_DRIVER_FNPTR(cuCtxEnablePeerAccess)(peer_gpu->context, 0);
           if((ret != CUDA_SUCCESS) && (ret != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED))
             REPORT_CU_ERROR("cuCtxEnablePeerAccess((*it)->context, 0)", ret);
+          if (peer_gpu->fbmem->isMemmapedMemory) {
+            // Enable access to each of this gpu's peer's fbmem.
+            CUmemAccessDesc desc;
+            desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+            desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            desc.location.id = info->index;
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuMemSetAccess)(peer_gpu->fbmem->base, peer_gpu->fbmem->size, &desc, 1));
+          }
         }
         log_gpu.info() << "peer access enabled from GPU " << p << " to FB "
                        << peer_gpu->fbmem->me;
@@ -3407,61 +3530,127 @@ namespace Realm {
       }
     }
 
-    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size)
-    {
+    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size,
+                               size_t ib_size) {
       // need the context so we can get an allocation in the right place
+      bool isMemmapped = false;
       {
-	AutoGPUContext agc(this);
+        AutoGPUContext agc(this);
+        CUresult ret = CUDA_SUCCESS;
+#if CUDA_VERSION >= 11050
+        int mmap_supported = 0, mmap_supports_rdma = 0, rdma_supported = 0;
 
-	CUresult ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fbmem_base, size);
-	if(ret != CUDA_SUCCESS) {
-	  if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
-	    size_t free_bytes, total_bytes;
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)
-                      (&free_bytes, &total_bytes) );
-	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
-			    << ": " << size << " bytes needed (from -ll:fsize), "
-			    << free_bytes << " (out of " << total_bytes << ") available";
-	  } else {
-	    const char *errstring = "error message not available";
-#if CUDA_VERSION >= 6050
-	    CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&mmap_supported,
+         CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED,
+         info->device);
+        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&rdma_supported,
+         CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_SUPPORTED,
+         info->device);
+        CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&mmap_supports_rdma,
+         CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
+         info->device);
+
+        // To prevent bit-rot, and because there's no advantage to not using the
+        // cuMemMap APIs, use them by default unless we need a feature they
+        // don't support.
+        if (!module->cfg_use_cuda_ipc && mmap_supported &&
+            !(rdma_supported && !mmap_supports_rdma)) {
+          CUmemGenericAllocationHandle mem_handle;
+          CUmemAllocationProp mem_prop;
+          size_t granularity = 0;
+          memset(&mem_prop, 0, sizeof(mem_prop));
+          mem_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+          // TODO: Replace with shareable handle type
+          mem_prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_NONE;
+          mem_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+          mem_prop.location.id = info->index;
+          mem_prop.win32HandleMetaData = nullptr;
+          mem_prop.allocFlags.compressionType = 0;
+          // TODO: check if fb_mem actually needs to be rdma capable
+          mem_prop.allocFlags.gpuDirectRDMACapable = mmap_supports_rdma;
+          mem_prop.allocFlags.usage = 0;
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemGetAllocationGranularity)(
+              &granularity, &mem_prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
+          // Round up size to the recommended granularity
+          size = (size + granularity - 1) & ~(granularity - 1);
+          // Create the allocation
+          ret = CUDA_DRIVER_FNPTR(cuMemCreate)(&mem_handle, size, &mem_prop,
+                                               0ULL);
+          if (ret == CUDA_SUCCESS) {
+            ret = CUDA_DRIVER_FNPTR(cuMemAddressReserve)(&fbmem_base, size,
+                                                         0ULL, 0ULL, 0ULL);
+            if (ret == CUDA_SUCCESS) {
+              ret = CUDA_DRIVER_FNPTR(cuMemMap)(fbmem_base, size, 0, mem_handle,
+                                                0ULL);
+              if (ret == CUDA_SUCCESS) {
+                CUmemAccessDesc access_desc;
+                memcpy(&access_desc.location, &mem_prop.location,
+                       sizeof(mem_prop.location));
+                access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                ret = CUDA_DRIVER_FNPTR(cuMemSetAccess)(fbmem_base, size,
+                                                        &access_desc, 1);
+              }
+            }
+            ret = CUDA_DRIVER_FNPTR(cuMemRelease)(mem_handle);
+          }
+          isMemmapped = true;
+        }
+        else
 #endif
-	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
-			    << ": result=" << ret
-			    << " (" << errstring << ")";
-	  }
-	  abort();
-	}
+        {
+          ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fbmem_base, size);
+        }
+
+        if (ret != CUDA_SUCCESS) {
+          if (ret == CUDA_ERROR_OUT_OF_MEMORY) {
+            size_t free_bytes, total_bytes;
+            CHECK_CU(
+                CUDA_DRIVER_FNPTR(cuMemGetInfo)(&free_bytes, &total_bytes));
+            log_gpu.fatal()
+                << "insufficient memory on gpu " << info->index << ": " << size
+                << " bytes needed (from -ll:fsize), " << free_bytes
+                << " (out of " << total_bytes << ") available";
+          } else {
+            const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+            CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+#endif
+            log_gpu.fatal()
+                << "unexpected error from cuMemAlloc on gpu " << info->index
+                << ": result=" << ret << " (" << errstring << ")";
+          }
+          abort();
+        }
       }
 
       Memory m = runtime->next_local_memory_id();
-      fbmem = new GPUFBMemory(m, this, fbmem_base, size);
+      fbmem = new GPUFBMemory(m, this, fbmem_base, size, isMemmapped);
       runtime->add_memory(fbmem);
 
       // FB ibmem is a separate allocation for now (consider merging to make
       //  total number of allocations, network registrations, etc. smaller?)
-      if(ib_size > 0) {
+      if (ib_size > 0) {
         {
           AutoGPUContext agc(this);
 
           CUresult ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fb_ibmem_base, ib_size);
-          if(ret != CUDA_SUCCESS) {
-            if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+          if (ret != CUDA_SUCCESS) {
+            if (ret == CUDA_ERROR_OUT_OF_MEMORY) {
               size_t free_bytes, total_bytes;
-              CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)
-                        (&free_bytes, &total_bytes) );
-              log_gpu.fatal() << "insufficient memory on gpu " << info->index
-                              << ": " << ib_size << " bytes needed (from -ll:ib_fsize), "
-                              << free_bytes << " (out of " << total_bytes << ") available";
-	  } else {
+              CHECK_CU(
+                  CUDA_DRIVER_FNPTR(cuMemGetInfo)(&free_bytes, &total_bytes));
+              log_gpu.fatal()
+                  << "insufficient memory on gpu " << info->index << ": "
+                  << ib_size << " bytes needed (from -ll:ib_fsize), "
+                  << free_bytes << " (out of " << total_bytes << ") available";
+            } else {
               const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
               CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
 #endif
-              log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
-                              << ": result=" << ret
-                              << " (" << errstring << ")";
+              log_gpu.fatal()
+                  << "unexpected error from cuMemAlloc on gpu " << info->index
+                  << ": result=" << ret << " (" << errstring << ")";
             }
             abort();
           }
@@ -4041,89 +4230,91 @@ namespace Realm {
         }
 
         size_t nvswitch_bandwidth = 0;
-        for(std::vector<GPUInfo *>::iterator it = infos.begin(); it != infos.end();
-            ++it) {
-          GPUInfo *info = *it;
-          // NVLINK link rates (in MB/s) based off
-          // https://en.wikipedia.org/wiki/NVLink
-          static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
-                                                          23610};
-          // Iterate each of the links for this GPU and find what's on the other end
-          // of the link, adding this link's bandwidth to the accumulated peer pair
-          // bandwidth.
-          for(size_t i = 0; i < NVML_NVLINK_MAX_LINKS; i++) {
-            nvmlIntNvLinkDeviceType_t dev_type;
-            nvmlEnableState_t link_state;
-            nvmlPciInfo_t pci_info;
-            unsigned int nvlink_version;
-            nvmlReturn_t status =
-                NVML_FNPTR(nvmlDeviceGetNvLinkState)(info->nvml_dev, i, &link_state);
-            if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
-              continue;
-            }
+        if (nvml_initialized) {
+          for (std::vector<GPUInfo *>::iterator it = infos.begin();
+              it != infos.end(); ++it) {
+            GPUInfo *info = *it;
+            // NVLINK link rates (in MB/s) based off
+            // https://en.wikipedia.org/wiki/NVLink
+            static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
+                                                            23610};
+            // Iterate each of the links for this GPU and find what's on the other end
+            // of the link, adding this link's bandwidth to the accumulated peer pair
+            // bandwidth.
+            for(size_t i = 0; i < NVML_NVLINK_MAX_LINKS; i++) {
+              nvmlIntNvLinkDeviceType_t dev_type;
+              nvmlEnableState_t link_state;
+              nvmlPciInfo_t pci_info;
+              unsigned int nvlink_version;
+              nvmlReturn_t status =
+                  NVML_FNPTR(nvmlDeviceGetNvLinkState)(info->nvml_dev, i, &link_state);
+              if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
+                continue;
+              }
 
-            CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
-                                                              &nvlink_version));
-            if(nvlink_version >
-               sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0])) {
-              // Found an unknown nvlink version, so assume the newest version we know
-              nvlink_version =
-                  sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
-            }
+              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
+                                                                &nvlink_version));
+              if(nvlink_version >
+                sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0])) {
+                // Found an unknown nvlink version, so assume the newest version we know
+                nvlink_version =
+                    sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
+              }
 
-            if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
-              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType)(info->nvml_dev,
-                                                                         i, &dev_type));
-            } else {
-              // GetNvLinkRemoteDeviceType not found, probably an older nvml driver, so
-              // assume GPU
-              dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
-            }
+              if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
+                CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType)(info->nvml_dev,
+                                                                          i, &dev_type));
+              } else {
+                // GetNvLinkRemoteDeviceType not found, probably an older nvml driver, so
+                // assume GPU
+                dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
+              }
 
-            unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
-            if ((info->major == 8) && (info->minor > 2)) {
-              // NVML has no way of querying the minor version of nvlink, but
-              // nvlink 3.1 used with non-GA100 ampere systems has significantly
-              // less bandwidth per lane
-              nvlink_bandwidth = 14063;
-            }
+              unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
+              if ((info->major == 8) && (info->minor > 2)) {
+                // NVML has no way of querying the minor version of nvlink, but
+                // nvlink 3.1 used with non-GA100 ampere systems has significantly
+                // less bandwidth per lane
+                nvlink_bandwidth = 14063;
+              }
 
-            if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
-              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemotePciInfo)(info->nvml_dev, i,
-                                                                      &pci_info));
-              // Unfortunately NVML doesn't give a way to return a GPU handle for a remote
-              // end point, so we have to search for the remote GPU using the PCIe
-              // information...
-              int peer_gpu_idx = 0;
-              for(peer_gpu_idx = 0; peer_gpu_idx < num_devices; peer_gpu_idx++) {
-                if(infos[peer_gpu_idx]->pci_busid == static_cast<int>(pci_info.bus) &&
-                   infos[peer_gpu_idx]->pci_deviceid == static_cast<int>(pci_info.device) &&
-                   infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
-                  // Found the peer device on the other end of the link!  Add this link's
-                  // bandwidth to the logical peer link
-                  info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
-                  info->logical_peer_latency[peer_gpu_idx] = 100;
-                  break;
+              if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
+                CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemotePciInfo)(info->nvml_dev, i,
+                                                                        &pci_info));
+                // Unfortunately NVML doesn't give a way to return a GPU handle for a remote
+                // end point, so we have to search for the remote GPU using the PCIe
+                // information...
+                int peer_gpu_idx = 0;
+                for(peer_gpu_idx = 0; peer_gpu_idx < num_devices; peer_gpu_idx++) {
+                  if(infos[peer_gpu_idx]->pci_busid == static_cast<int>(pci_info.bus) &&
+                    infos[peer_gpu_idx]->pci_deviceid == static_cast<int>(pci_info.device) &&
+                    infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
+                    // Found the peer device on the other end of the link!  Add this link's
+                    // bandwidth to the logical peer link
+                    info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
+                    info->logical_peer_latency[peer_gpu_idx] = 100;
+                    break;
+                  }
                 }
-              }
 
-              if(peer_gpu_idx == num_devices) {
-                // We can't make any assumptions about this link, since we don't know
-                // what's on the other side.  This could be a GPU that was removed via
-                // CUDA_VISIBLE_DEVICES, or NVSWITCH / P9 NPU on a system with an slightly
-                // older driver that doesn't support "GetNvlinkRemotePciInfo"
-                log_gpu.info() << "GPU " << info->index
-                               << " has active NVLINK to unknown device "
-                               << pci_info.busId << "(" << std::hex
-                               << pci_info.pciDeviceId << "), ignoring...";
+                if(peer_gpu_idx == num_devices) {
+                  // We can't make any assumptions about this link, since we don't know
+                  // what's on the other side.  This could be a GPU that was removed via
+                  // CUDA_VISIBLE_DEVICES, or NVSWITCH / P9 NPU on a system with an slightly
+                  // older driver that doesn't support "GetNvlinkRemotePciInfo"
+                  log_gpu.info() << "GPU " << info->index
+                                << " has active NVLINK to unknown device "
+                                << pci_info.busId << "(" << std::hex
+                                << pci_info.pciDeviceId << "), ignoring...";
+                }
+              } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
+                // Accumulate the link bandwidth for one gpu and assume symmetry
+                // across all GPUs, and all GPus have access to the NVSWITCH fabric
+                nvswitch_bandwidth += nvlink_bandwidth;
+              } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
+                // TODO: use the npu_bandwidth for sysmem affinities
+                // npu_bandwidth += nvlink_bandwidth;
               }
-            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
-              // Accumulate the link bandwidth for one gpu and assume symmetry
-              // across all GPUs, and all GPus have access to the NVSWITCH fabric
-              nvswitch_bandwidth += nvlink_bandwidth;
-            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
-              // TODO: use the npu_bandwidth for sysmem affinities
-              // npu_bandwidth += nvlink_bandwidth;
             }
           }
         }
@@ -4750,6 +4941,21 @@ namespace Realm {
       gpus.clear();
       
       Module::cleanup();
+    }
+
+    CUstream_st *CudaModule::get_task_cuda_stream()
+    {
+      // if we're not in a gpu task, this'll be null
+      if(ThreadLocal::current_gpu_stream)
+	return ThreadLocal::current_gpu_stream->get_stream();
+      else
+	return 0;
+    }
+
+    void CudaModule::set_task_ctxsync_required(bool is_required)
+    {
+      // if we're not in a gpu task, setting this will have no effect
+      ThreadLocal::context_sync_required = (is_required ? 1 : 0);
     }
 
 

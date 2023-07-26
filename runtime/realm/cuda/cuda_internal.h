@@ -16,7 +16,7 @@
 #ifndef REALM_CUDA_INTERNAL_H
 #define REALM_CUDA_INTERNAL_H
 
-#include "realm/realm_config.h"
+#include "realm/cuda/cuda_module.h"
 
 #include <memory>
 #include <cuda.h>
@@ -118,7 +118,6 @@ namespace Realm {
       size_t pci_bandwidth;   // Current enabled pci-e bandwidth
       std::vector<size_t> logical_peer_bandwidth;
       std::vector<size_t> logical_peer_latency;
-
 
       #ifdef REALM_USE_CUDART_HIJACK
       cudaDeviceProp prop;
@@ -711,8 +710,17 @@ namespace Realm {
       virtual ~GPUProcessor(void);
 
     public:
+      virtual bool register_task(Processor::TaskFuncID func_id,
+				 CodeDescriptor& codedesc,
+				 const ByteArrayRef& user_data);
+
       virtual void shutdown(void);
 
+    protected:
+      virtual void execute_task(Processor::TaskFuncID func_id,
+				const ByteArrayRef& task_args);
+
+    public:
       static GPUProcessor *get_current_gpu_proc(void);
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -783,6 +791,16 @@ namespace Realm {
       ContextSynchronizer ctxsync;
     protected:
       Realm::CoreReservation *core_rsrv;
+
+      struct GPUTaskTableEntry {
+	Processor::TaskFuncPtr fnptr;
+	Cuda::StreamAwareTaskFuncPtr stream_aware_fnptr;
+	ByteArray user_data;
+      };
+
+      // we're not using the parent's task table, but we can use the mutex
+      //RWLock task_table_mutex;
+      std::map<Processor::TaskFuncID, GPUTaskTableEntry> gpu_task_table;
     };
 
     // this can be attached to any MemoryImpl if the underlying memory is
@@ -801,7 +819,7 @@ namespace Realm {
 
     class GPUFBMemory : public LocalManagedMemory {
     public:
-      GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
+      GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size, bool isMemmapped = false);
 
       virtual ~GPUFBMemory(void);
 
@@ -828,6 +846,7 @@ namespace Realm {
       GPU *gpu;
       CUdeviceptr base;
       NetworkSegment local_segment;
+      bool isMemmapedMemory;
     };
 
     class GPUDynamicFBMemory : public MemoryImpl {
@@ -1265,6 +1284,16 @@ namespace Realm {
   __op__(cuStreamCreateWithPriority);                                          \
   __op__(cuStreamDestroy);                                                     \
   __op__(cuStreamSynchronize);                                                 \
+  __op__(cuMemAddressReserve);                                                 \
+  __op__(cuMemAddressFree);                                                    \
+  __op__(cuMemCreate);                                                         \
+  __op__(cuMemRelease);                                                        \
+  __op__(cuMemMap);                                                            \
+  __op__(cuMemUnmap);                                                          \
+  __op__(cuMemSetAccess);                                                      \
+  __op__(cuMemGetAllocationGranularity);                                       \
+  __op__(cuMemExportToShareableHandle);                                        \
+  __op__(cuMemImportFromShareableHandle);                                      \
   __op__(cuStreamWaitEvent)
 
   #if CUDA_VERSION >= 11030

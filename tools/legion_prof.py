@@ -873,7 +873,7 @@ class Field(StatObject):
         if self.name is None:
             return 'fid:' + str(self.field_id)
         else:
-            return self.name
+            return 'fid:' + str(self.field_id) + ':' + self.name
 
 class Align(StatObject):
     __slots__ = ['field_id', 'eqk', 'align_desc', 'has_align']
@@ -5540,7 +5540,7 @@ class StatGatherer(object):
                                reverse=True):
                 kind.print_stats(verbose)
 
-def main() -> None:
+def build_state() -> Optional[State]:
     class MyParser(argparse.ArgumentParser):
         def error(self, message: str) -> NoReturn:
             self.print_usage(sys.stderr)
@@ -5616,6 +5616,12 @@ def main() -> None:
     global assert_verbose
     assert_verbose = verbose
 
+    global EMPTY_OP
+    global prof_uid_ctr
+    EMPTY_OP = Operation(-1)
+    # reset prof_uid to 0
+    prof_uid_ctr = 0
+
     state = State()
     has_matches = False
     has_binary_files = False # true if any of the files are a binary file
@@ -5658,7 +5664,7 @@ def main() -> None:
 
     if not has_matches:
         print('No matches found! Exiting...')
-        return
+        return None
 
     # if number of files
     if state.num_nodes > len(file_names):
@@ -5709,12 +5715,11 @@ def main() -> None:
                              file_names, show_channels, show_instances, force)
         if show_copy_matrix:
             state.show_copy_matrix(copy_output_prefix)
+            
+    return state
 
 if __name__ == '__main__':
-    EMPTY_OP = Operation(-1)
-    # reset prof_uid to 0
-    prof_uid_ctr = 0
     start = time.time()
-    main()
+    build_state()
     end = time.time()
     print("elapsed: " + str(end - start) + "s")

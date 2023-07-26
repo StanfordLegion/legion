@@ -11938,6 +11938,7 @@ namespace Legion {
           (source_fields != NULL) ? *source_fields : fields;
         std::map<unsigned,std::vector<Reservation> > local_reservations;
         std::map<unsigned,std::vector<ApEvent> > reduction_preconditions;
+        local_reservations[dst_index] = dst_reservations;
         // Note the reversed iterator <destination,source>
         for (std::vector<std::pair<unsigned,unsigned> >::const_reverse_iterator 
               it = spanning_copies.rbegin(); it != spanning_copies.rend(); it++)
@@ -11949,33 +11950,34 @@ namespace Legion {
           PhysicalManager *src_manager = src_view->get_manager();
           IndividualView *local_view = local_views[it->first];
           PhysicalManager *local_manager = local_view->get_manager();
-          ApEvent reduce_pre;
-          const bool writing = initialized[it->second];
-          if (writing)
+          if (initialized[it->second])
           {
-            // If the source has already been initialized we might have
-            // some preconditions to find here from other reductions
+            // Save any reduction events into the view
             std::map<unsigned,std::vector<ApEvent> >::iterator finder =
               reduction_preconditions.find(it->second);
-            if (finder != reduction_preconditions.end())
-            {
-              reduce_pre = Runtime::merge_events(&trace_info, finder->second);
-              reduction_preconditions.erase(finder);
-            }
+#ifdef DEBUG_LEGION
+            assert(it->second != dst_index);
+            assert(finder != reduction_preconditions.end());
+#endif
+            const ApEvent reduce_pre = 
+              Runtime::merge_events(&trace_info, finder->second);
+            if (reduce_pre.exists())
+              src_view->add_copy_user(false/*reading*/, redop, reduce_pre, 
+                  copy_mask, copy_expression, op_id, index, *recorded_events,
+                  trace_info.recording, runtime->address_space);
+            reduction_preconditions.erase(finder);
           }
           else
-          {
-            reduce_pre = src_view->find_copy_preconditions(
-                !prepare_allreduce, 0/*redop*/, copy_mask,
-                copy_expression, op_id, index, applied_events, trace_info);
-            src_manager->compute_copy_offsets(copy_mask, 
-                                              local_fields[it->second]);
-          }
+            src_manager->compute_copy_offsets(copy_mask,
+                              local_fields[it->second]);
+          ApEvent reduce_pre = src_view->find_copy_preconditions(
+              !prepare_allreduce, 0/*redop*/, copy_mask,
+              copy_expression, op_id, index, applied_events, trace_info);
           if (!initialized[it->first])
           {
             // Initialize the destination
             local_events[it->first] = local_view->find_copy_preconditions( 
-                false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+                false/*reading*/, redop, copy_mask, copy_expression,
                 op_id, index, applied_events, trace_info);
             local_manager->compute_copy_offsets(copy_mask,
                                                 local_fields[it->first]);
@@ -12008,7 +12010,7 @@ namespace Legion {
           if (local_events[it->second].exists())
           {
             if (!prepare_allreduce)
-              src_view->add_copy_user(!writing, 0/*redop*/,
+              src_view->add_copy_user(true/*reading*/, 0/*redop*/,
                   local_events[it->second], copy_mask, copy_expression,
                   op_id, index, *recorded_events, trace_info.recording,
                   runtime->address_space);
@@ -12995,9 +12997,9 @@ namespace Legion {
             instance_events[dst_inst_index] =
               Runtime::merge_events(&trace_info, dst_events);
           // Update the src and dst instances for the next stage
-          if (++src_inst_index == instances.size())
+          if (++src_inst_index == local_views.size())
             src_inst_index = 0;
-          if (++dst_inst_index == instances.size())
+          if (++dst_inst_index == local_views.size())
             dst_inst_index = 0;
         }
         // Send out the result to any non-participating ranks
