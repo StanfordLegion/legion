@@ -71,6 +71,9 @@
 #endif
 
 // ASAN has issues with thread local destructors, so disable this path for asan
+// Temporarily disable the caching allocator until it is debugged
+// TODO: reenable this
+#define REALM_USE_CACHING_ALLOCATOR 0
 #if !defined(REALM_USE_CACHING_ALLOCATOR) && !defined(ASAN_ENABLED)
   #define REALM_USE_CACHING_ALLOCATOR 1
   #ifndef REALM_TASK_BLOCK_SIZE
