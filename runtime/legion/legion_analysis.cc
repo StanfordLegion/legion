@@ -25701,7 +25701,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
                      VersionInfo *version_info, RegionNode *region_node,
-                     IndexSpaceExpression *expr, const bool expr_covers,
                      const FieldMask &version_mask, UniqueID opid,
                      unsigned parent_req_index, std::set<RtEvent> &ready_events,
                      RtEvent *output_region_ready)
@@ -25721,7 +25720,7 @@ namespace Legion {
         // an important optimization for many applications
         const DistributedID did = runtime->get_available_distributed_id();
         EquivalenceSet *set = new EquivalenceSet(runtime, did,
-            runtime->address_space/*logical owner*/, expr,
+            runtime->address_space/*logical owner*/, region_node->row_source,
             region_node->handle.get_tree_id(), context, true/*register*/);
         version_info->record_equivalence_set(set, version_mask);
         // Launch a meta-task to register this equivalence set with
@@ -25769,8 +25768,7 @@ namespace Legion {
           // Get any fields that are already ready
           if ((version_info != NULL) &&
               !(version_mask * equivalence_sets.get_valid_mask()))
-            record_equivalence_sets(version_info, version_mask,
-                                    expr, expr_covers, ready_events);
+            record_equivalence_sets(version_info, version_mask);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
           if (!remaining_mask)
@@ -25803,8 +25801,7 @@ namespace Legion {
         if (!(remaining_mask * equivalence_sets.get_valid_mask()))
         {
           if (version_info != NULL)
-            record_equivalence_sets(version_info, remaining_mask,
-                                    expr, expr_covers, ready_events);
+            record_equivalence_sets(version_info, remaining_mask);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields here and we're not waiting 
           // on any other computations then we're done
@@ -25825,8 +25822,7 @@ namespace Legion {
 #endif
         // Record that our version info is waiting for these fields
         if (version_info != NULL)
-          waiting_infos.push_back(
-             WaitingVersionInfo(version_info, waiting_mask, expr, expr_covers));
+          waiting_infos.insert(version_info, waiting_mask);
       }
       if (compute_event.exists())
       {
@@ -25871,24 +25867,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::record_equivalence_sets(VersionInfo *version_info,
-                  const FieldMask &mask, IndexSpaceExpression *expr,
-                  const bool expr_covers, std::set<RtEvent> &ready_events) const
+                                                 const FieldMask &mask) const
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-           equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
       {
         const FieldMask overlap = it->second & mask;
         if (!overlap)
           continue;
-        if (!expr_covers)
-        {
-          IndexSpaceExpression *expr_overlap = 
-            runtime->forest->intersect_index_spaces(expr, 
-                                    it->first->set_expr);
-          if (expr_overlap->is_empty())
-            continue;
-        }
         version_info->record_equivalence_set(it->first, overlap);
       }
     }
@@ -26080,23 +26067,21 @@ namespace Legion {
         }
         if (!waiting_infos.empty())
         {
-          for (LegionList<WaitingVersionInfo>::iterator wit = 
-                waiting_infos.begin(); wit != waiting_infos.end(); /*nothing*/)
+          std::vector<VersionInfo*> to_delete;
+          for (FieldMaskSet<VersionInfo>::iterator wit =
+                waiting_infos.begin(); wit != waiting_infos.end(); wit++)
           {
-            const FieldMask info_overlap = wit->waiting_mask & finder->second;
+            const FieldMask info_overlap = wit->second & finder->second;
             if (!info_overlap)
-            {
-              wit++;
               continue;
-            }
-            record_equivalence_sets(wit->version_info, info_overlap,
-                    wit->expr, wit->expr_covers, done_preconditions);
-            wit->waiting_mask -= info_overlap;
-            if (!wit->waiting_mask)
-              wit = waiting_infos.erase(wit);
-            else
-              wit++;
+            record_equivalence_sets(wit->first, info_overlap);
+            wit.filter(info_overlap);
+            if (!wit->second)
+              to_delete.push_back(wit->first);
           }
+          for (std::vector<VersionInfo*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            waiting_infos.erase(*it);
         }
         // We can relax the mask for the equivalence sets here so we don't
         // recompute in the case that we are empty

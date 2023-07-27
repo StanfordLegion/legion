@@ -8145,11 +8145,11 @@ namespace Legion {
                 continue;
               }
               TrackerInvalidations &invalidations = to_invalidate[sit->first];
+              invalidations.all_subscribers_finished = true;
               if (!(sit->second.get_valid_mask() - mask))
               {
                 // Going to invalidate all the trackers 
                 invalidations.subscribers.swap(sit->second);
-                invalidations.all_subscribers_finished = true;
                 LegionMap<AddressSpaceID,
                   FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
                 subscriptions->erase(to_delete);
@@ -8168,6 +8168,8 @@ namespace Legion {
                   it.filter(overlap);
                   if (!it->second)
                     to_delete.push_back(it->first);
+                  else
+                    invalidations.all_subscribers_finished = false;
                 }
                 for (std::vector<EqSetTracker*>::const_iterator it =
                       to_delete.begin(); it != to_delete.end(); it++)
@@ -8181,7 +8183,8 @@ namespace Legion {
                 }
                 else
                 {
-                  invalidations.finished.swap(to_delete);
+                  if (!invalidations.all_subscribers_finished)
+                    invalidations.finished.swap(to_delete);
                   sit->second.tighten_valid_mask();
                   sit++;
                 }

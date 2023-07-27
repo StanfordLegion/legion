@@ -20895,8 +20895,7 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-        row_source, true/*expr covers*/, mask, opid, 
-        parent_req_index, applied, output_region_ready);
+        mask, opid, parent_req_index, applied, output_region_ready);
     }
     
 #if 0

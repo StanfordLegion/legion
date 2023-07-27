@@ -4334,19 +4334,6 @@ namespace Legion {
         const RtUserEvent done_event;
       };
     public:
-      struct WaitingVersionInfo {
-      public:
-        WaitingVersionInfo(VersionInfo *info, const FieldMask &m,
-                           IndexSpaceExpression *e, bool covers)
-          : version_info(info), waiting_mask(m), expr(e), expr_covers(covers) 
-        { }
-      public:
-        VersionInfo *version_info;
-        FieldMask waiting_mask;
-        IndexSpaceExpression *expr;
-        bool expr_covers;
-      }; 
-    public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager) = delete;
       virtual ~VersionManager(void);
@@ -4361,8 +4348,6 @@ namespace Legion {
       void perform_versioning_analysis(InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        RegionNode *region_node,
-                                       IndexSpaceExpression *expr,
-                                       const bool expr_covers,
                                        const FieldMask &version_mask,
                                        UniqueID opid, unsigned parent_req_index,
                                        std::set<RtEvent> &ready,
@@ -4376,10 +4361,7 @@ namespace Legion {
       void remove_node_disjoint_complete_ref(void) const;
 #endif
       void record_equivalence_sets(VersionInfo *version_info,
-                                   const FieldMask &mask,
-                                   IndexSpaceExpression *expr,
-                                   const bool expr_covers,
-                                   std::set<RtEvent> &ready_events) const;
+                                   const FieldMask &mask) const;
     public:
       virtual void add_subscription_reference(unsigned count = 1);
       virtual bool remove_subscription_reference(unsigned count = 1);
@@ -4468,7 +4450,7 @@ namespace Legion {
     protected:
       mutable LocalLock manager_lock;
     protected: 
-      LegionList<WaitingVersionInfo> waiting_infos;
+      FieldMaskSet<VersionInfo> waiting_infos;
       LegionMap<RtUserEvent,FieldMask> equivalence_sets_ready;
 #if 0
     protected:
