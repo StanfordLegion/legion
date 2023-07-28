@@ -70,7 +70,6 @@ rt.register_reduction<SumReduction>(REDOP_SUM);
 ```
 
 The `REDOP_SUM` id represents an exclusive sum reduction:
-(TODO: Consider adding non-exclusive)
 
 ```c++
 class SumReduction {

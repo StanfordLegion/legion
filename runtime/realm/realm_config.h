@@ -70,6 +70,17 @@
 #define REALM_ERROR_BUFFER_SIZE 1024
 #endif
 
+// ASAN has issues with thread local destructors, so disable this path for asan
+// Temporarily disable the caching allocator until it is debugged
+// TODO: reenable this
+#define REALM_USE_CACHING_ALLOCATOR 0
+#if !defined(REALM_USE_CACHING_ALLOCATOR) && !defined(ASAN_ENABLED)
+  #define REALM_USE_CACHING_ALLOCATOR 1
+  #ifndef REALM_TASK_BLOCK_SIZE
+    #define REALM_TASK_BLOCK_SIZE (128ULL*1024ULL)
+  #endif
+#endif
+
 #ifdef __cplusplus
 // runtime configuration settings
 namespace Realm {

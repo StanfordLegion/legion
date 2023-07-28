@@ -19,14 +19,6 @@
 #include "realm/event_impl.h"
 #include "realm/runtime_impl.h"
 
-#if defined(__SSE__)
-// technically pause is an "SSE2" instruction, but it's defined in xmmintrin
-#include <xmmintrin.h>
-static void mm_pause(void) { _mm_pause(); }
-#else
-static void mm_pause(void) { /* do nothing */ }
-#endif
-
 namespace Realm {
 
   Logger log_reservation("reservation");
@@ -942,7 +934,7 @@ namespace Realm {
 	  state.compare_exchange(cur_state,
 				 cur_state | STATE_WRITER_WAITING);
 
-	  mm_pause();
+	  REALM_SPIN_YIELD();
 	  continue;
 	}
 
@@ -1162,7 +1154,7 @@ namespace Realm {
 	// if it failed and we've been asked to spin, assume this is regular
 	//  contention and try again shortly
 	if((mode == SPIN) || (mode == ALWAYS_SPIN)) {
-	  mm_pause();
+	  REALM_SPIN_YIELD();
 	  continue;
 	}
 
