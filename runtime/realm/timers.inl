@@ -22,7 +22,7 @@
 
 #include <climits>
 
-#if defined(REALM_TIMERS_USE_RDTSC)
+#if REALM_TIMERS_USE_RDTSC
 #if defined(REALM_ON_WINDOWS)
 #include <intrin.h>
 #pragma intrinsic(__rdtsc)
