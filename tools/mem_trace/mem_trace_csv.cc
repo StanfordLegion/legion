@@ -52,6 +52,9 @@ int main(int argc, char *argv[])
     }
   }
 
+  // make sure printf specifier for hash is correct
+  static_assert(sizeof(size_t) == sizeof(uintptr_t));
+
   FILE *fin = fopen(in, "rb");
   FILE *fout = fopen(out, "w");
 
