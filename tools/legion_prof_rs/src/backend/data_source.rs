@@ -11,9 +11,6 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
-#[cfg(debug_assertions)]
-use log::info;
-
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{
@@ -709,27 +706,7 @@ impl StateDataSource {
         merged.resize(cont.max_levels() + 1, 0u64);
         let points = cont.time_points();
 
-        // For efficiency, binary search to the part of the timeline we're
-        // interested in. This only works for the upper bound; because tasks
-        // are stacked, there is no safe (and efficient) way to determine a
-        // conservative lower bound.
-
-        let last_index = points.partition_point(|p| {
-            let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
-            start < tile_id.0.stop
-        });
-
-        #[cfg(debug_assertions)]
-        {
-            info!("Debug assertions enabled: checking point overlap");
-            for point in &points[last_index..] {
-                let time_range = cont.entry(point.entry).time_range();
-                let point_interval: ts::Interval = time_range.into();
-                assert!(!point_interval.overlaps(tile_id.0));
-            }
-        }
-
-        for point in &points[..last_index] {
+        for point in points {
             assert!(point.first);
 
             let entry = cont.entry(point.entry);

@@ -429,7 +429,8 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic,
                                    MapperID map_id, MappingTagID tag,
-                                   Provenance *provenance) = 0;
+                                   Provenance *provenance,
+                                   Future initial_value) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              Provenance *provenance,
@@ -1443,7 +1444,8 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag,
-                                       Provenance *provenance);
+                                       Provenance *provenance,
+                                       Future initial_value);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              Provenance *provenance,
@@ -2766,7 +2768,8 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag,
-                                       Provenance *provenance);
+                                       Provenance *provenance,
+                                       Future initial_value);
       using InnerContext::construct_future_map;
       virtual FutureMap construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
@@ -3708,7 +3711,8 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag,
-                                       Provenance *provenance);
+                                       Provenance *provenance,
+                                       Future initial_value);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              Provenance *provenance,

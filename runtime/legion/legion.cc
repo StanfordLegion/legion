@@ -6332,12 +6332,13 @@ namespace Legion {
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
                                       ReductionOpID redop, bool deterministic,
                                       MapperID map, MappingTagID tag,
-                                      const char *prov)
+                                      const char *prov,
+                                      Future initial_value)
     //--------------------------------------------------------------------------
     {
       Internal::AutoProvenance provenance(prov);
       return ctx->reduce_future_map(future_map, redop, deterministic,
-                                    map, tag, provenance);
+                                    map, tag, provenance, initial_value);
     }
 
     //--------------------------------------------------------------------------

@@ -12997,9 +12997,9 @@ namespace Legion {
             instance_events[dst_inst_index] =
               Runtime::merge_events(&trace_info, dst_events);
           // Update the src and dst instances for the next stage
-          if (++src_inst_index == instances.size())
+          if (++src_inst_index == local_views.size())
             src_inst_index = 0;
-          if (++dst_inst_index == instances.size())
+          if (++dst_inst_index == local_views.size())
             dst_inst_index = 0;
         }
         // Send out the result to any non-participating ranks

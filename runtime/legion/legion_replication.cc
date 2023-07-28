@@ -720,6 +720,8 @@ namespace Legion {
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
+        // Still register this with the trace
+        tpl->register_operation(this);
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -5024,7 +5026,10 @@ namespace Legion {
             }
           }
         }
-        return collective_done;
+        if (thunk->is_image())
+          return collective_done;
+        else
+          return scatter->get_done_event();
       }
       else
       {
@@ -6237,16 +6242,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
+      if (parent_ctx->get_task()->get_shard_id() == 0)
+        fold_serdez(initial_value.impl);
+
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second;
-        size_t src_size = 0;
-        const void *source = impl->find_internal_buffer(parent_ctx, src_size);
-        (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
-                                       future_result_size, source);
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_future_use(unique_op_id, impl->did);
+        fold_serdez(it->second);
       }
       // Now we need an all-to-all to get the values from other shards
       const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
@@ -6315,7 +6317,7 @@ namespace Legion {
       // we'll just do our local reductions into the first target initially
       // and then we'll broadcast the result to the targets afterwards
       FutureInstance *local_target = targets.front();
-      ApEvent local_precondition = local_target->initialize(redop, this);
+      ApEvent local_precondition = init_redop_target(local_target);
       if (deterministic)
       {
         for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
@@ -13597,7 +13599,7 @@ namespace Legion {
     DeppartResultScatter::DeppartResultScatter(ReplicateContext *ctx,
                   CollectiveID id, std::vector<DeppartResult> &res)
       : BroadcastCollective(ctx, id, 0/*origin shard*/), results(res),
-        renamed(false)
+        done_event(Runtime::create_ap_user_event(NULL))
     //--------------------------------------------------------------------------
     {
     }
@@ -13619,14 +13621,7 @@ namespace Legion {
         rez.serialize(it->domain);
         rez.serialize(it->color);
       }
-      if (!renamed)
-      {
-        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename, done_event);
-        done_event = rename;
-        renamed = true;
-      }
-      rez.serialize(done_event);
+      rez.serialize<ApEvent>(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -13642,17 +13637,16 @@ namespace Legion {
         derez.deserialize(it->domain);
         derez.deserialize(it->color);
       }
-      derez.deserialize(done_event);
+      ApEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(NULL, done_event, done);
     }
 
     //--------------------------------------------------------------------------
     void DeppartResultScatter::broadcast_results(ApEvent done)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!done_event.exists());
-#endif
-      done_event = done;
+      Runtime::trigger_event(NULL, done_event, done);
       perform_collective_async();
     }
 

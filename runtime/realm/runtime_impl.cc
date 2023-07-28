@@ -498,13 +498,12 @@ namespace Realm {
 
       CodeDescriptor codedesc(taskptr);
       ProfilingRequestSet prs;
-      std::set<Event> events;
+      std::vector<Event> events;
       std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[Network::my_node_id].processors;
-      for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
-	  it != procs.end();
-	  it++) {
-	Event e = (*it)->me.register_task(taskid, codedesc, prs);
-	events.insert(e);
+      for (std::vector<ProcessorImpl *>::iterator it = procs.begin();
+           it != procs.end(); it++) {
+        Event e = (*it)->me.register_task(taskid, codedesc, prs);
+        events.push_back(e);
       }
 
       Event merged = Event::merge_events(events);
@@ -1961,12 +1960,12 @@ namespace Realm {
 		     const void *args, size_t arglen,
 		     Event start_event, int priority)
   {
-    std::set<Event> events;
-    for(typename T::const_iterator it = container_of_procs.begin();
-	it != container_of_procs.end();
-	it++) {
-      Event e = (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
-      events.insert(e);
+    std::vector<Event> events;
+    for (typename T::const_iterator it = container_of_procs.begin();
+         it != container_of_procs.end(); it++) {
+        Event e = (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(),
+                                  start_event, priority);
+        events.push_back(e);
     }
     return Event::merge_events(events);
   }
@@ -2015,14 +2014,14 @@ namespace Realm {
 	Network::gather(root, wait_on, all_events);
 
 	// step 2: merge all the events
-	std::set<Event> event_set;
+	std::vector<Event> events;
 	for(NodeID i = 0; i <= Network::max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
-	    event_set.insert(all_events[i]);
+	    events.push_back(all_events[i]);
 	}
 
-	Event merged_event = Event::merge_events(event_set);
+	Event merged_event = Event::merge_events(events);
 	log_collective.info() << "merged precondition: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << merged_event;
 
 	// step 3: run the task
@@ -2056,7 +2055,9 @@ namespace Realm {
 						bool one_per_node /*= false*/,
 						Event wait_on /*= Event::NO_EVENT*/, int priority /*= 0*/)
     {
-      log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " before=" << wait_on;
+      log_collective.info()
+          << "collective spawn: kind=" << target_kind << " func=" << task_id
+          << " priority=" << priority << " before=" << wait_on;
 
 #ifdef DEBUG_COLLECTIVES
       broadcast_check(target_kind, "target_kind");
@@ -2065,100 +2066,104 @@ namespace Realm {
       broadcast_check(priority, "priority");
 #endif
 
-      // every node is involved in this one, so the root is arbitrary - we'll pick node 0
+      // every node is involved in this one, so the root is arbitrary - we'll
+      // pick node 0
 
       Event merged_event;
 
-      if(Network::my_node_id == 0) {
-	// ROOT NODE
+      if (Network::my_node_id == 0) {
+        // ROOT NODE
 
-	// step 1: receive wait_on from every node
-	std::vector<Event> all_events;
-	Network::gather(0 /*root*/, wait_on, all_events);
+        // step 1: receive wait_on from every node
+        std::vector<Event> all_events;
+        Network::gather(0 /*root*/, wait_on, all_events);
 
-	// step 2: merge all the events
-	std::set<Event> event_set;
-	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  //log_collective.info() << "ev " << i << ": " << all_events[i];
-	  if(all_events[i].exists())
-	    event_set.insert(all_events[i]);
-	}
+        // step 2: merge all the events
+        // Remove all the non-existant events
+        all_events.erase(std::remove_if(all_events.begin(), all_events.end(),
+                                        [](Event e) { return !e.exists(); }),
+                         all_events.end());
 
-	merged_event = Event::merge_events(event_set);
+        merged_event = Event::merge_events(all_events);
 
-	// step 3: broadcast the merged event back to everyone else
-	(void) Network::broadcast(0 /*root*/, merged_event);
+        // step 3: broadcast the merged event back to everyone else
+        (void)Network::broadcast(0 /*root*/, merged_event);
       } else {
-	// NON-ROOT NODE
+        // NON-ROOT NODE
 
-	// step 1: send our wait_on to the root for merging
-	Network::gather(0 /*root*/, wait_on);
+        // step 1: send our wait_on to the root for merging
+        Network::gather(0 /*root*/, wait_on);
 
-	// step 2: twiddle thumbs
+        // step 2: twiddle thumbs
 
-	// step 3: receive merged wait_on event
-	merged_event = Network::broadcast(0 /*root*/, Event::NO_EVENT);
+        // step 3: receive merged wait_on event
+        merged_event = Network::broadcast(0 /*root*/, Event::NO_EVENT);
       }
 
       // now spawn 0 or more local tasks
-      std::set<Event> event_set;
+      std::vector<Event> events;
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
+      const std::vector<ProcessorImpl *> &local_procs =
+          nodes[Network::my_node_id].processors;
 
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
-	if((target_kind == Processor::NO_KIND) || ((*it)->kind == target_kind)) {
-	  Event e = (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
-				    merged_event, priority);
-	  log_collective.info() << "spawn by kind: proc=" << (*it)->me << " func=" << task_id << " before=" << merged_event << " after=" << e;
-	  if(e.exists())
-	    event_set.insert(e);
+      for (std::vector<ProcessorImpl *>::const_iterator it =
+               local_procs.begin();
+           it != local_procs.end(); it++)
+        if ((target_kind == Processor::NO_KIND) ||
+            ((*it)->kind == target_kind)) {
+          Event e =
+              (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
+                              merged_event, priority);
+          log_collective.info()
+              << "spawn by kind: proc=" << (*it)->me << " func=" << task_id
+              << " before=" << merged_event << " after=" << e;
+          if (e.exists())
+            events.push_back(e);
 
-	  if(one_per_node)
-	    break;
-	}
+          if (one_per_node)
+            break;
+        }
 
       // local merge
-      Event my_finish = Event::merge_events(event_set);
+      Event my_finish = Event::merge_events(events);
 
-      if(Network::my_node_id == 0) {
-	// ROOT NODE
+      if (Network::my_node_id == 0) {
+        // ROOT NODE
 
-	// step 1: receive wait_on from every node
-	std::vector<Event> all_events;
-	Network::gather(0 /*root*/, my_finish, all_events);
+        // step 1: receive wait_on from every node
+        std::vector<Event> all_events;
+        Network::gather(0 /*root*/, my_finish, all_events);
+        // Remove all the non-existant events
+        all_events.erase(std::remove_if(all_events.begin(), all_events.end(),
+                                        [](Event e) { return !e.exists(); }),
+                         all_events.end());
 
-	// step 2: merge all the events
-	std::set<Event> event_set;
-	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  //log_collective.info() << "ev " << i << ": " << all_events[i];
-	  if(all_events[i].exists())
-	    event_set.insert(all_events[i]);
-	}
+        Event merged_finish = Event::merge_events(all_events);
 
-	Event merged_finish = Event::merge_events(event_set);
+        // step 3: broadcast the merged event back to everyone
+        (void)Network::broadcast(0 /*root*/, merged_finish);
 
-	// step 3: broadcast the merged event back to everyone
-	(void) Network::broadcast(0 /*root*/, merged_finish);
+        log_collective.info()
+            << "collective spawn: kind=" << target_kind << " func=" << task_id
+            << " priority=" << priority << " after=" << merged_finish;
 
-	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
-
-	return merged_finish;
+        return merged_finish;
       } else {
-	// NON-ROOT NODE
+        // NON-ROOT NODE
 
-	// step 1: send our wait_on to the root for merging
-	Network::gather(0 /*root*/, my_finish);
+        // step 1: send our wait_on to the root for merging
+        Network::gather(0 /*root*/, my_finish);
 
-	// step 2: twiddle thumbs
+        // step 2: twiddle thumbs
 
-	// step 3: receive merged wait_on event
-	Event merged_finish = Network::broadcast(0 /*root*/, Event::NO_EVENT);
+        // step 3: receive merged wait_on event
+        Event merged_finish = Network::broadcast(0 /*root*/, Event::NO_EVENT);
 
-	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
+        log_collective.info()
+            << "collective spawn: kind=" << target_kind << " func=" << task_id
+            << " priority=" << priority << " after=" << merged_finish;
 
-	return merged_finish;
+        return merged_finish;
       }
     }
 

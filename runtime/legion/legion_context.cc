@@ -6409,7 +6409,8 @@ namespace Legion {
         epoch_launcher.provenance = launcher.provenance;
         FutureMap result = execute_must_epoch(epoch_launcher);
         return reduce_future_map(result, redop, deterministic,
-                                 launcher.map_id, launcher.tag, provenance);
+                                 launcher.map_id, launcher.tag, provenance,
+                                 Future());
       }
       AutoRuntimeCall call(this);
       if (launcher.launch_domain.exists() &&
@@ -6452,7 +6453,8 @@ namespace Legion {
     Future InnerContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
-                                        Provenance *prov)
+                                        Provenance *prov,
+                                        Future initial_value)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -6467,7 +6469,8 @@ namespace Legion {
       }
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = all_reduce_op->initialize(this, future_map, redop, 
-                                    deterministic, mapper_id, tag, prov);
+                                    deterministic, mapper_id, tag, prov,
+                                    initial_value);
       add_to_dependence_queue(all_reduce_op);
       return result;
     }
@@ -17711,7 +17714,8 @@ namespace Legion {
         FutureMap result = execute_must_epoch(epoch_launcher);
         // Reduce the future map down to a future
         return reduce_future_map(result, redop, deterministic,
-                                 launcher.map_id, launcher.tag, provenance);
+                                 launcher.map_id, launcher.tag, provenance,
+                                 Future());
       }
       AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
@@ -17775,7 +17779,8 @@ namespace Legion {
     Future ReplicateContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
-                                        Provenance *provenance)
+                                        Provenance *provenance,
+                                        Future initial_value)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -17804,11 +17809,13 @@ namespace Legion {
       // we can just do the standard thing here
       if (!future_map.impl->is_replicate_future_map())
         return InnerContext::reduce_future_map(future_map, redop, deterministic,
-                                               mapper_id, tag, provenance);
+                                               mapper_id, tag, provenance,
+                                               initial_value);
       ReplAllReduceOp *all_reduce_op = 
         runtime->get_available_repl_all_reduce_op();
       Future result = all_reduce_op->initialize(this, future_map, redop,
-                              deterministic, mapper_id, tag, provenance);
+                              deterministic, mapper_id, tag, provenance,
+                              initial_value);
       all_reduce_op->initialize_replication(this);
       add_to_dependence_queue(all_reduce_op);
       return result;
@@ -23509,7 +23516,8 @@ namespace Legion {
     Future LeafContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
-                                        Provenance *provenance)
+                                        Provenance *provenance,
+                                        Future initial_value)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
