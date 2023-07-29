@@ -436,7 +436,6 @@ namespace Legion {
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_PRECONDITION_TASK_ID,
       LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
-      LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
@@ -553,7 +552,6 @@ namespace Legion {
         "Free Instance",                                          \
         "Defer Trace Precondition Test",                          \
         "Defer Trace Postcondition Test",                         \
-        "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \

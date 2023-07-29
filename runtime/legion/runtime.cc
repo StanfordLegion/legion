@@ -32763,7 +32763,7 @@ namespace Legion {
           }
         case LG_FINALIZE_EQ_SETS_TASK_ID:
           {
-            VersionManager::handle_finalize_eq_sets(args);
+            EqSetTracker::handle_finalize_eq_sets(args, runtime);
             break;
           }
         case LG_FINALIZE_OUTPUT_EQ_SET_TASK_ID:
@@ -32862,11 +32862,6 @@ namespace Legion {
         case LG_DEFER_TRACE_POSTCONDITION_TASK_ID:
           {
             TraceConditionSet::handle_postcondition_test(args);
-            break;
-          }
-        case LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID:
-          {
-            TraceConditionSet::handle_finalize_sets(args);
             break;
           }
         case LG_DEFER_TRACE_UPDATE_TASK_ID:

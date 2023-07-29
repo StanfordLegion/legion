@@ -4860,15 +4860,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TraceConditionSet::handle_finalize_sets(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferTraceFinalizeSetsArgs *dargs =
-        (const DeferTraceFinalizeSetsArgs*)args;
-      dargs->set->finalize_computed_sets(); 
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid,
                                                   const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
@@ -4877,33 +4868,31 @@ namespace Legion {
       assert(!!invalid_mask);
 #endif
       AddressSpaceID space = forest->runtime->address_space;
+      // Create a user event and store it in the equivalence set ready structure
+      const RtUserEvent compute_event = Runtime::create_rt_user_event();
+      {
+        AutoLock s_lock(set_lock);
+#ifdef DEBUG_LEGION
+        assert(equivalence_sets_ready == NULL);
+#endif
+        equivalence_sets_ready = new LegionMap<RtUserEvent,FieldMask>();
+        equivalence_sets_ready->insert(
+            std::make_pair(compute_event, invalid_mask));
+      }
       RtEvent ready = context->compute_equivalence_sets(this, space,
                       parent_req_index, condition_expr, invalid_mask);
       if (ready.exists() && !ready.has_triggered())
       {
         // Launch a meta-task to finalize this trace condition set
-        DeferTraceFinalizeSetsArgs args(this, opid);
+        LgFinalizeEqSetsArgs args(this, compute_event, opid,
+            context, parent_req_index, condition_expr);
         return forest->runtime->issue_runtime_meta_task(args, 
                         LG_LATENCY_DEFERRED_PRIORITY, ready);
       }
-      finalize_computed_sets();
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceConditionSet::finalize_computed_sets(void)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need the lock here, there's only one thing looking at these
-      // data structures at this point
-      if (pending_equivalence_sets.empty())
-        return;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            pending_equivalence_sets.begin(); it != 
-            pending_equivalence_sets.end(); it++)
-        if (equivalence_sets.insert(it->first, it->second))
-          it->first->add_base_gc_ref(TRACE_REF);
-      pending_equivalence_sets.clear();
+      else
+        finalize_equivalence_sets(compute_event, context, forest->runtime,
+            parent_req_index, condition_expr, opid);
+      return compute_event;
     }
 
     /////////////////////////////////////////////////////////////

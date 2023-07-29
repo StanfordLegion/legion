@@ -3560,8 +3560,24 @@ namespace Legion {
      */
     class EqSetTracker {
     public:
+      struct LgFinalizeEqSetsArgs : 
+        public LgTaskArgs<LgFinalizeEqSetsArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FINALIZE_EQ_SETS_TASK_ID;
+      public:
+        LgFinalizeEqSetsArgs(EqSetTracker *t, RtUserEvent c, UniqueID uid,
+                             InnerContext *ctx, unsigned parent_req_index,
+                             IndexSpaceExpression *expr);
+      public:
+        EqSetTracker *const tracker;
+        const RtUserEvent compute;
+        InnerContext *const context;
+        IndexSpaceExpression *const expr;
+        const unsigned parent_req_index;
+      };
+    public:
       EqSetTracker(LocalLock &lock);
-      virtual ~EqSetTracker(void) { }
+      virtual ~EqSetTracker(void);
     public:
       void record_equivalence_sets(
           InnerContext *context, const FieldMask &mask,
@@ -3580,7 +3596,6 @@ namespace Legion {
     public:
       virtual RegionTreeID get_region_tree_id(void) const = 0;
       virtual IndexSpaceExpression* get_tracker_expression(void) const = 0;
-      virtual size_t count_outstanding_requests(void) const = 0;
       virtual ReferenceSource get_reference_source_kind(void) const = 0;
     public:
       bool invalidate_equivalence_sets(Runtime *runtime, const FieldMask &mask,
@@ -3610,6 +3625,7 @@ namespace Legion {
                                           const FieldMask &mask);
       static void handle_pending_equivalence_set(Deserializer &derez,
                                                  Runtime *runtime);
+      static void handle_finalize_eq_sets(const void *args, Runtime *runtime);
     protected:
       void record_subscriptions(AddressSpaceID source,
                 const FieldMaskSet<EqKDTree> &new_subs);
@@ -3652,20 +3668,40 @@ namespace Legion {
       RtEvent initialize_new_equivalence_set(EquivalenceSet *set,
           const FieldMask &mask, Runtime *runtime,
           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
+      void finalize_equivalence_sets(RtUserEvent compute_event,
+          InnerContext *context, Runtime *runtime, unsigned parent_req_index,
+          IndexSpaceExpression *expr, UniqueID opid);
+      void record_equivalence_sets(VersionInfo *version_info,
+                                   const FieldMask &mask) const;
+      void find_cancellations(const FieldMask &mask,
+          LegionMap<AddressSpaceID,TreeInvalidations> &to_cancel);
     protected:
       LocalLock &tracker_lock;
+      // Member varialbes that are pointers are transient and only used in
+      // building up the state for this equivalence set tracker, the non-pointer
+      // member variables are the persistent ones that will likely live for
+      // a long period of time to store data
       FieldMaskSet<EquivalenceSet> equivalence_sets;
-      FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
       // These are the EqKDTree objects that we are currently subscribed to
       // for different fields in each address space, this data mirrors the 
       // same data structure in EqKDNode
       LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > current_subscriptions;
+      // Equivalence sets that are about to become part of the canonical
+      // equivalence sets once the compute_equivalence_sets process completes
+      FieldMaskSet<EquivalenceSet> *pending_equivalence_sets;
+      // User events marking when our current equivalence sets are ready
+      LegionMap<RtUserEvent,FieldMask> *equivalence_sets_ready;
+      // Version infos that need to be updated once equivalence sets are ready
+      FieldMaskSet<VersionInfo> *waiting_infos;
+      // Track whether there were any intermediate invalidations that occurred
+      // while we were in the process of computing equivalence sets
+      FieldMask pending_invalidations;
       // These all help with the creation of equivalence sets for which we
       // are the first request to access them 
-      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >     creation_requests;
-      LegionMap<Domain,FieldMask>                         creation_rectangles;
-      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_sources;
-      LegionMap<unsigned,FieldMask>                       remaining_responses;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >     *creation_requests;
+      LegionMap<Domain,FieldMask>                         *creation_rectangles;
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > *creation_sources;
+      LegionMap<unsigned,FieldMask>                       *remaining_responses;
     };
 
     /**
@@ -4302,18 +4338,7 @@ namespace Legion {
                            public LegionHeapify<VersionManager> {
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
-    public:
-      struct LgFinalizeEqSetsArgs : 
-        public LgTaskArgs<LgFinalizeEqSetsArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FINALIZE_EQ_SETS_TASK_ID;
-      public:
-        LgFinalizeEqSetsArgs(VersionManager *man, RtUserEvent c, UniqueID uid)
-          : LgTaskArgs<LgFinalizeEqSetsArgs>(uid), manager(man), compute(c) { }
-      public:
-        VersionManager *const manager;
-        const RtUserEvent compute;
-      };
+    public: 
       struct FinalizeOutputEquivalenceSetArgs :
         public LgTaskArgs<FinalizeOutputEquivalenceSetArgs> {
       public:
@@ -4359,19 +4384,15 @@ namespace Legion {
 #if 0
       void add_node_disjoint_complete_ref(void) const;
       void remove_node_disjoint_complete_ref(void) const;
-#endif
-      void record_equivalence_sets(VersionInfo *version_info,
-                                   const FieldMask &mask) const;
+#endif 
     public:
       virtual void add_subscription_reference(unsigned count = 1);
       virtual bool remove_subscription_reference(unsigned count = 1);
       virtual RegionTreeID get_region_tree_id(void) const;
       virtual IndexSpaceExpression* get_tracker_expression(void) const;
-      virtual size_t count_outstanding_requests(void) const;
       virtual ReferenceSource get_reference_source_kind(void) const 
         { return VERSION_MANAGER_REF; } 
     public:
-      void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);
     public:
 #if 0
@@ -4441,7 +4462,6 @@ namespace Legion {
                                 TreeStateLogger *logger);
 #endif
     public:
-      static void handle_finalize_eq_sets(const void *args);
       static void handle_finalize_output_eq_set(const void *args);
     public:
       const ContextID ctx;
@@ -4449,9 +4469,6 @@ namespace Legion {
       Runtime *const runtime;
     protected:
       mutable LocalLock manager_lock;
-    protected: 
-      FieldMaskSet<VersionInfo> waiting_infos;
-      LegionMap<RtUserEvent,FieldMask> equivalence_sets_ready;
 #if 0
     protected:
       // The fields for which this node has disjoint complete information

@@ -835,16 +835,6 @@ namespace Legion {
         Operation *const op;
         const RtUserEvent done_event;
       };
-      struct DeferTraceFinalizeSetsArgs :
-        public LgTaskArgs<DeferTraceFinalizeSetsArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID;
-      public:
-        DeferTraceFinalizeSetsArgs(TraceConditionSet *s, UniqueID uid)
-          : LgTaskArgs<DeferTraceFinalizeSetsArgs>(uid), set(s) { }
-      public:
-        TraceConditionSet *const set;
-      };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
                         unsigned parent_req_index, IndexSpaceExpression *expr,
@@ -862,7 +852,6 @@ namespace Legion {
         { return tree_id; }
       virtual IndexSpaceExpression* get_tracker_expression(void) const
         { return condition_expr; }
-      virtual size_t count_outstanding_requests(void) const { return 1; }
       virtual ReferenceSource get_reference_source_kind(void) const 
         { return TRACE_REF; }
     public:
@@ -885,11 +874,9 @@ namespace Legion {
     public:
       static void handle_precondition_test(const void *args);
       static void handle_postcondition_test(const void *args);
-      static void handle_finalize_sets(const void *args);
     public:
       RtEvent recompute_equivalence_sets(UniqueID opid, 
                         const FieldMask &invalid_mask);
-      void finalize_computed_sets(void);
     public:
       InnerContext *const context;
       RegionTreeForest *const forest;
