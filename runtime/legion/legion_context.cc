@@ -2988,8 +2988,6 @@ namespace Legion {
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
-      for (unsigned idx = 0; idx < equivalence_set_trees.size(); idx++)
-        assert(equivalence_set_trees[idx] == NULL);
 #endif
     }
 
@@ -3811,7 +3809,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Find the equivalence set tree for this region requirement
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
       // Then ask the index space expression to traverse the tree for
       // all of its rectangles and find the equivalence sets that are needed
       FieldMaskSet<EqKDTree> to_create, new_subscriptions;
@@ -3820,8 +3819,8 @@ namespace Legion {
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
-      expr->compute_equivalence_sets(tree, mask, target, target_space,
-          eq_sets, pending_sets, new_subscriptions, to_create, 
+      expr->compute_equivalence_sets(tree, tree_lock, mask, target,
+          target_space, eq_sets, pending_sets, new_subscriptions, to_create,
           creation_rects, creation_srcs, remote_shard_rects);
 #ifdef DEBUG_LEGION
       assert(remote_shard_rects.empty());
@@ -4030,11 +4029,13 @@ namespace Legion {
       // output equivalence sets have registered themselves, so it's up
       // to us to make an equivalence set tree if one doesn't already
       // exist and then register ourselves with it
-      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index); 
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock);
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       unsigned references = set->set_expr->record_output_equivalence_set(tree,
-        set, mask, source, source_space, new_subscriptions, remote_shard_rects);
+          tree_lock, set, mask, source, source_space, new_subscriptions,
+          remote_shard_rects);
 #ifdef DEBUG_LEGION
       assert(remote_shard_rects.empty());
 #endif
@@ -4151,8 +4152,82 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext::EqKDRoot::EqKDRoot(void)
+      : tree(NULL), lock(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::EqKDRoot::EqKDRoot(EqKDTree *t)
+      : tree(t), lock(new LocalLock())
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tree != NULL);
+#endif
+      tree->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::EqKDRoot::EqKDRoot(EqKDRoot &&rhs)
+      : tree(rhs.tree), lock(rhs.lock)
+    //--------------------------------------------------------------------------
+    {
+      rhs.tree = NULL;
+      rhs.lock = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::EqKDRoot::~EqKDRoot(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Either both NULL or both not NULL
+      assert((tree == NULL) == (lock == NULL));
+#endif
+      if (tree != NULL)
+      {
+        if (tree->remove_reference())
+          delete tree;
+        delete lock;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::EqKDRoot& InnerContext::EqKDRoot::operator=(EqKDRoot &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (tree == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(lock == NULL);
+#endif
+        tree = rhs.tree;
+        lock = rhs.lock;
+        rhs.tree = NULL;
+        rhs.lock = NULL;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(lock != NULL);
+        // Should never be overwriting one tree with another
+        assert(rhs.tree == NULL);
+        assert(rhs.lock == NULL);
+#endif
+        if (tree->remove_reference())
+          delete tree;
+        delete lock;
+        tree = NULL;
+        lock = NULL;
+      }
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_equivalence_set_kd_tree(unsigned req_index,
-                                               bool return_null_if_doesnt_exist)
+                        LocalLock *&tree_lock, bool return_null_if_doesnt_exist)
     //--------------------------------------------------------------------------
     {
       // Use the privilege lock since we also need to access the created
@@ -4167,9 +4242,12 @@ namespace Legion {
           wait_on = finder->second;
         else if (req_index < equivalence_set_trees.size())
         {
-          EqKDTree *tree = equivalence_set_trees[req_index];
+          EqKDTree *tree = equivalence_set_trees[req_index].tree;
           if (tree != NULL)
+          {
+            tree_lock = equivalence_set_trees[req_index].lock;
             return tree;
+          }
           else if (return_null_if_doesnt_exist)
             return NULL;
         }
@@ -4193,12 +4271,15 @@ namespace Legion {
         {
           if (req_index < equivalence_set_trees.size())
           {
-            EqKDTree *tree = equivalence_set_trees[req_index];
+            EqKDTree *tree = equivalence_set_trees[req_index].tree;
             if (tree != NULL)
+            {
+              tree_lock = equivalence_set_trees[req_index].lock;      
               return tree;
+            }
           }
           else
-            equivalence_set_trees.resize(req_index + 1, NULL);
+            equivalence_set_trees.resize(req_index+1);
           // save a guard that we're making this
           pending_equivalence_set_trees[req_index] = 
             RtUserEvent::NO_RT_USER_EVENT;
@@ -4225,10 +4306,10 @@ namespace Legion {
         // Normal contexts and control replication contexts will do 
         // different things here while creating the equivalence set tree
         EqKDTree *tree = create_equivalence_set_kd_tree(node);
-        tree->add_reference();
         // Now we can save it and wake up anyone looking for it
         AutoLock priv_lock(privilege_lock);
-        equivalence_set_trees[req_index] = tree;
+        equivalence_set_trees[req_index] = EqKDRoot(tree);
+        tree_lock = equivalence_set_trees[req_index].lock;
         std::map<unsigned,RtUserEvent>::iterator finder = 
           pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
@@ -4244,15 +4325,16 @@ namespace Legion {
         wait_on.wait();
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-        assert(equivalence_set_trees[req_index] != NULL);
+        assert(equivalence_set_trees[req_index].tree != NULL);
 #endif
-        return equivalence_set_trees[req_index];
+        tree_lock = equivalence_set_trees[req_index].lock;
+        return equivalence_set_trees[req_index].tree;
       }
     }
 
     //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_or_create_output_set_kd_tree(
-                                                             unsigned req_index)
+                                      unsigned req_index, LocalLock *&tree_lock)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle = IndexSpace::NO_SPACE;
@@ -4265,9 +4347,12 @@ namespace Legion {
 #endif
         if (req_index < equivalence_set_trees.size())
         {
-          EqKDTree *tree = equivalence_set_trees[req_index];
+          EqKDTree *tree = equivalence_set_trees[req_index].tree;
           if (tree != NULL)
+          {
+            tree_lock = equivalence_set_trees[req_index].lock;
             return tree;
+          }
         }
         std::map<unsigned,RegionRequirement>::const_iterator finder =
           created_requirements.find(req_index);
@@ -4280,17 +4365,15 @@ namespace Legion {
       EqKDTree *tree = create_equivalence_set_kd_tree(node);
       AutoLock priv_lock(privilege_lock);
       if (equivalence_set_trees.size() <= req_index)
-        equivalence_set_trees.resize(req_index+1, NULL);
-      if (equivalence_set_trees[req_index] == NULL)
-      {
-        tree->add_reference();
-        equivalence_set_trees[req_index] = tree;
-      }
-      else
+        equivalence_set_trees.resize(req_index+1);
+      if (equivalence_set_trees[req_index].tree != NULL)
       {
         delete tree;
-        tree = equivalence_set_trees[req_index];
+        tree = equivalence_set_trees[req_index].tree;
       }
+      else
+        equivalence_set_trees[req_index] = EqKDRoot(tree);
+      tree_lock = equivalence_set_trees[req_index].lock;
       return tree;
     }
 
@@ -4302,7 +4385,7 @@ namespace Legion {
       {
         AutoLock priv_lock(privilege_lock);
         if (equivalence_set_trees.size() <= req_index)
-          equivalence_set_trees.resize(req_index + 1, NULL);
+          equivalence_set_trees.resize(req_index + 1);
         std::map<unsigned,RtUserEvent>::iterator finder =
             pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
@@ -4312,7 +4395,7 @@ namespace Legion {
         // If there are no waiters or the equivalence set tree has
         // already been made then we are just done
         if (!finder->second.exists() || 
-            (equivalence_set_trees[req_index] != NULL))
+            (equivalence_set_trees[req_index].tree != NULL))
         {
           if (finder->second.exists())
             Runtime::trigger_event(finder->second);
@@ -4327,9 +4410,8 @@ namespace Legion {
       // Normal contexts and control replication contexts will do 
       // different things here while creating the equivalence set tree
       EqKDTree *tree = create_equivalence_set_kd_tree(node);
-      tree->add_reference();
       AutoLock priv_lock(privilege_lock);
-      equivalence_set_trees[req_index] = tree;
+      equivalence_set_trees[req_index] = EqKDRoot(tree);
       std::map<unsigned,RtUserEvent>::iterator finder = 
         pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
@@ -4384,8 +4466,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!sharded);
 #endif
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
-      node->invalidate_equivalence_set_kd_tree(tree, refinement_mask,
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      node->invalidate_equivalence_set_kd_tree(tree, tree_lock, refinement_mask,
                             applied_events, true/*move to previous*/);
     }
 
@@ -6782,9 +6865,9 @@ namespace Legion {
         // the equivalence sets for it until we know it is ready
         AutoLock priv_lock(privilege_lock);
         if (equivalence_set_trees.size() <= created_index)
-          equivalence_set_trees.resize(created_index+1, NULL);
+          equivalence_set_trees.resize(created_index+1);
 #ifdef DEBUG_LEGION
-        assert(equivalence_set_trees[created_index] == NULL);
+        assert(equivalence_set_trees[created_index].tree == NULL);
         assert(pending_equivalence_set_trees.find(created_index) ==
             pending_equivalence_set_trees.end());
 #endif
@@ -10937,7 +11020,7 @@ namespace Legion {
       const ContextID ctx = tree_context.get_id();
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
-      equivalence_set_trees.resize(regions.size(), NULL);
+      equivalence_set_trees.resize(regions.size());
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
 #ifdef DEBUG_LEGION
@@ -10957,8 +11040,7 @@ namespace Legion {
         EqKDTree *tree = 
           region_node->row_source->create_equivalence_set_kd_tree(
                                                 get_total_shards());
-        tree->add_reference();
-        equivalence_set_trees[idx1] = tree;
+        equivalence_set_trees[idx1] = EqKDRoot(tree);
         const FieldMask user_mask = 
           region_node->column_source->get_field_mask(req.privilege_fields);
         // For virtual mappings, there are two approaches here
@@ -11101,7 +11183,7 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                        false/*users only*/, node);
-        if (equivalence_set_trees[idx] == NULL)
+        if (equivalence_set_trees[idx].tree == NULL)
           continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
@@ -11109,13 +11191,9 @@ namespace Legion {
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         std::vector<RtEvent> applied_events;
         node->row_source->invalidate_equivalence_set_kd_tree(
-            equivalence_set_trees[idx], close_mask, 
-            applied_events, false/*move to previous*/);
-        if (equivalence_set_trees[idx]->remove_reference())
-          delete equivalence_set_trees[idx];
-#ifdef DEBUG_LEGION
-        equivalence_set_trees[idx] = NULL;
-#endif
+            equivalence_set_trees[idx].tree, equivalence_set_trees[idx].lock,
+            close_mask, applied_events, false/*move to previous*/);
+        equivalence_set_trees[idx] = EqKDRoot();
         if (!applied_events.empty())
           applied.insert(applied_events.begin(), applied_events.end());
       }
@@ -11164,7 +11242,7 @@ namespace Legion {
           invalidated_regions.insert(it->second.region);
         }
         if (equivalence_set_trees.size() <= it->first)
-          equivalence_set_trees.resize(it->first + 1, NULL);
+          equivalence_set_trees.resize(it->first + 1);
         // See if we're a returnable privilege or not
         if (returnable_privileges[it->first] && !is_top)
         {
@@ -11172,9 +11250,12 @@ namespace Legion {
           assert(return_regions.find(it->second.region) == 
                   return_regions.end());
 #endif
-          return_regions[it->second.region] = equivalence_set_trees[it->first];
+          EqKDTree *tree = equivalence_set_trees[it->first].tree;
+          if (tree != NULL)
+            tree->add_reference();
+          return_regions[it->second.region] = tree; 
         }
-        else if (equivalence_set_trees[it->first] != NULL) 
+        else if (equivalence_set_trees[it->first].tree != NULL) 
         {
           // Not returning so invalidate the full thing
 #ifdef DEBUG_LEGION
@@ -11183,16 +11264,13 @@ namespace Legion {
 #endif
           std::vector<RtEvent> applied;
           node->row_source->invalidate_equivalence_set_kd_tree(
-                equivalence_set_trees[it->first], all_ones_mask, 
-                applied, false/*move to previous*/);
-          if (equivalence_set_trees[it->first]->remove_reference())
-            delete equivalence_set_trees[it->first];
+                equivalence_set_trees[it->first].tree, 
+                equivalence_set_trees[it->first].lock,
+                all_ones_mask, applied, false/*move to previous*/);
           if (!applied.empty())
             applied_events.insert(applied.begin(), applied.end());
         }
-#ifdef DEBUG_LEGION
-        equivalence_set_trees[it->first] = NULL;
-#endif
+        equivalence_set_trees[it->first] = EqKDRoot();
       }
       if (!return_regions.empty())
       {
@@ -11235,11 +11313,11 @@ namespace Legion {
         unsigned index = add_created_region(created_nodes[idx]->handle,
                             false/*task local*/, false/*output region*/);
         if (equivalence_set_trees.size() <= index)
-          equivalence_set_trees.resize(index+1, NULL);
+          equivalence_set_trees.resize(index+1);
         if (created_trees[idx] == NULL)
           continue;
         // Check to see if we're the first one or whether we're merging
-        EqKDTree *current = equivalence_set_trees[index];
+        EqKDTree *current = equivalence_set_trees[index].tree;
         if (current != NULL)
         {
           // This happens when we're merging multiple trees coming back
@@ -11256,13 +11334,13 @@ namespace Legion {
         else
         {
           current = created_trees[idx];
-          current->add_reference();
-          equivalence_set_trees[index] = current;
+          equivalence_set_trees[index] = EqKDRoot(current);
           // Filter all the current equivalence sets on to the previous
           const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
           std::vector<RtEvent> applied;
           created_nodes[idx]->row_source->invalidate_equivalence_set_kd_tree(
-              current, all_ones_mask, applied, true/*move to previous*/);
+              current, equivalence_set_trees[index].lock,
+              all_ones_mask, applied, true/*move to previous*/);
           if (!applied.empty())
             applied_events.insert(applied.begin(), applied.end());
         }
@@ -11277,21 +11355,21 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(handle);
       runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
-      EqKDTree *tree =
-        find_equivalence_set_kd_tree(req_index, true/*null if doesn't exist*/);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock,
+                                          true/*null if doesn't exist*/);
       if (tree != NULL)
       {
         std::vector<RtEvent> applied;
         const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        node->row_source->invalidate_equivalence_set_kd_tree(tree,
+        node->row_source->invalidate_equivalence_set_kd_tree(tree, tree_lock,
             all_ones_mask, applied, false/*move to previous*/);
-        if (tree->remove_reference())
-          delete tree;
         if (!applied.empty())
           applied_events.insert(applied.begin(), applied.end());
-#ifdef DEBUG_LEGION
-        equivalence_set_trees[req_index] = NULL;
-#endif
+        // Need the lock before doing this invalidation in case the 
+        // equivalence set trees data structure resizes
+        AutoLock priv_lock(privilege_lock);
+        equivalence_set_trees[req_index] = EqKDRoot();
       }
     }
 
@@ -18056,9 +18134,9 @@ namespace Legion {
         // the equivalence sets for it until we know it is ready
         AutoLock priv_lock(privilege_lock);
         if (equivalence_set_trees.size() <= created_index)
-          equivalence_set_trees.resize(created_index+1, NULL);
+          equivalence_set_trees.resize(created_index+1);
 #ifdef DEBUG_LEGION
-        assert(equivalence_set_trees[created_index] == NULL);
+        assert(equivalence_set_trees[created_index].tree == NULL);
         assert(pending_equivalence_set_trees.find(created_index) ==
             pending_equivalence_set_trees.end());
 #endif
@@ -21467,15 +21545,14 @@ namespace Legion {
           unsigned index = add_created_region(handle,
               false/*task local*/, false/*output region*/);
           if (equivalence_set_trees.size() <= index)
-            equivalence_set_trees.resize(index+1, NULL);
-          current = equivalence_set_trees[index];
+            equivalence_set_trees.resize(index+1);
+          current = equivalence_set_trees[index].tree;
           if (current == NULL)
           {
             // If we're the first make the KD-tree here
             current = 
               node->row_source->create_equivalence_set_kd_tree(total_shards);
-            current->add_reference();
-            equivalence_set_trees[index] = current;
+            equivalence_set_trees[index] = EqKDRoot(current);
           }
         }
         const ShardID local_shard = get_shard_id(); 
@@ -22480,7 +22557,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Find the equivalence set tree for this region requirement
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
       // Then ask the index space expression to traverse the tree for
       // all of its rectangles and find the equivalence sets that are needed
       FieldMaskSet<EqKDTree> to_create;
@@ -22490,7 +22568,7 @@ namespace Legion {
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
-      expr->compute_equivalence_sets(tree, mask, target, target_space,
+      expr->compute_equivalence_sets(tree, tree_lock, mask, target,target_space,
           eq_sets, pending_sets, new_subscriptions, to_create, creation_rects,
           creation_srcs, remote_shard_rects, owner_shard->shard_id);
 #ifdef DEBUG_LEGION
@@ -22531,11 +22609,12 @@ namespace Legion {
                               EquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index); 
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock); 
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       unsigned references = set->set_expr->record_output_equivalence_set(tree,
-          set, mask, source, source_space, new_subscriptions,
+          tree_lock, set, mask, source, source_space, new_subscriptions,
           remote_shard_rects, owner_shard->shard_id);
       std::vector<RtEvent> recorded_events;
       // Send out messages to any shards we need to do the recording on
@@ -22633,10 +22712,12 @@ namespace Legion {
     {
       if (sharded)
       {
-        EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+        LocalLock *tree_lock = NULL;
+        EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
         std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
-        node->invalidate_shard_equivalence_set_kd_tree(tree, refinement_mask,
-                   applied_events, remote_shard_rects, owner_shard->shard_id);
+        node->invalidate_shard_equivalence_set_kd_tree(tree, tree_lock,
+            refinement_mask, applied_events, remote_shard_rects,
+            owner_shard->shard_id);
         // If there are any remote then send them to the target shard
         for (std::map<ShardID,LegionMap<Domain,FieldMask> >::const_iterator 
               sit = remote_shard_rects.begin();
@@ -22670,10 +22751,13 @@ namespace Legion {
     {
       unsigned req_index;
       derez.deserialize(req_index);
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
       size_t num_rects;
       derez.deserialize(num_rects);
       std::vector<RtEvent> invalidated;
+      // Need exclusive access for invalidations
+      AutoLock t_lock(*tree_lock);
       for (unsigned idx = 0; idx < num_rects; idx++)
       {
         Domain domain;
@@ -22746,17 +22830,6 @@ namespace Legion {
       derez.deserialize(mask);
       size_t num_rects;
       derez.deserialize(num_rects);
-      LegionMap<Domain,FieldMask> shard_rects;
-      for (unsigned idx = 0; idx < num_rects; idx++)
-      {
-        Domain domain;
-        derez.deserialize(domain);
-        derez.deserialize(shard_rects[domain]);
-      }
-      size_t expected_responses;
-      derez.deserialize(expected_responses);
-      RtUserEvent ready_event;
-      derez.deserialize(ready_event);
 
       FieldMaskSet<EqKDTree> to_create;
       FieldMaskSet<EquivalenceSet> eq_sets;
@@ -22764,12 +22837,26 @@ namespace Legion {
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
-      for (LegionMap<Domain,FieldMask>::const_iterator it =
-            shard_rects.begin(); it != shard_rects.end(); it++)
-        tree->compute_shard_equivalence_sets(it->first, it->second, target,
-            target_space, eq_sets, pending_sets, new_subscriptions, to_create,
-            creation_rects, creation_srcs, owner_shard->shard_id);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      {
+        // Non-exclusive access to the tree for 
+        AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
+        for (unsigned idx = 0; idx < num_rects; idx++)
+        {
+          Domain rect;
+          derez.deserialize(rect);
+          FieldMask rect_mask;
+          derez.deserialize(rect_mask);
+          tree->compute_shard_equivalence_sets(rect, rect_mask, target,
+              target_space, eq_sets, pending_sets, new_subscriptions, to_create,
+              creation_rects, creation_srcs, owner_shard->shard_id);
+        }
+      }
+      size_t expected_responses;
+      derez.deserialize(expected_responses);
+      RtUserEvent ready_event;
+      derez.deserialize(ready_event);
       // Now we can send the responses
       RtEvent ready = report_equivalence_sets(target, target_space, mask, 
                           eq_sets, new_subscriptions, to_create, creation_rects,
@@ -22794,25 +22881,29 @@ namespace Legion {
         runtime->find_or_request_equivalence_set(did, set_ready);
       size_t num_rects;
       derez.deserialize(num_rects);
-      LegionMap<Domain,FieldMask> shard_rects;
-      for (unsigned idx = 0; idx < num_rects; idx++)
-      {
-        Domain domain;
-        derez.deserialize(domain);
-        derez.deserialize(shard_rects[domain]);
-      }
-      RtUserEvent recorded_event;
-      derez.deserialize(recorded_event);
+      
       FieldMaskSet<EqKDTree> new_subscriptions;
-      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index);
+      LocalLock *tree_lock = NULL;
+      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock);
       if (set_ready.exists() && !set_ready.has_triggered())
         set_ready.wait();
       unsigned references = 0;
-      for (LegionMap<Domain,FieldMask>::const_iterator it =
-            shard_rects.begin(); it != shard_rects.end(); it++)
-        references += tree->record_shard_output_equivalence_set(set, it->first,
-            it->second, source, source_space, new_subscriptions,
+      {
+        // Non exclusive accessor for recording shard output sets
+        AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
+        for (unsigned idx = 0; idx < num_rects; idx++)
+        {
+          Domain rect;
+          derez.deserialize(rect);
+          FieldMask rect_mask;
+          derez.deserialize(rect_mask);
+          references += tree->record_shard_output_equivalence_set(set, rect,
+            rect_mask, source, source_space, new_subscriptions,
             owner_shard->shard_id);
+        }
+      }
+      RtUserEvent recorded_event;
+      derez.deserialize(recorded_event);
       Runtime::trigger_event(recorded_event, report_output_registrations(source,
             source_space, references, new_subscriptions));
       set->unpack_global_ref();

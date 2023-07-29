@@ -725,8 +725,25 @@ namespace Legion {
       // the requirement and the logical region
       std::map<unsigned,unsigned>               deletion_counts;
       // Equivalence set trees are used for finding the equivalence sets
-      // for a given parent region requirement
-      std::vector<EqKDTree*>                    equivalence_set_trees;
+      // for a given parent region requirement. Note that each of these
+      // trees comes with an associated tree lock that guarantees that 
+      // invalidation are exclusive with respect to all other kinds of
+      // operations that traverse the equivalence set trees
+      class EqKDRoot {
+      public:
+        EqKDRoot(void);
+        EqKDRoot(EqKDTree *tree);
+        EqKDRoot(const EqKDRoot &rhs) = delete;
+        EqKDRoot(EqKDRoot &&rhs);
+        ~EqKDRoot(void);
+      public:
+        EqKDRoot& operator=(const EqKDRoot &rhs) = delete;
+        EqKDRoot& operator=(EqKDRoot &&rhs);
+      public:
+        EqKDTree *tree;
+        LocalLock *lock;
+      };
+      std::vector<EqKDRoot>                     equivalence_set_trees;
       // Pending computations for equivalence set trees
       std::map<unsigned,RtUserEvent>            pending_equivalence_set_trees;
     protected:
@@ -1168,8 +1185,9 @@ namespace Legion {
                       AddressSpaceID source_space, unsigned req_index,
                       EquivalenceSet *set, const FieldMask &mask);
       EqKDTree* find_equivalence_set_kd_tree(unsigned req_index,
-                               bool return_null_if_doesnt_exist = false);
-      EqKDTree* find_or_create_output_set_kd_tree(unsigned req_index);
+          LocalLock *&tree_lock, bool return_null_if_doesnt_exist = false);
+      EqKDTree* find_or_create_output_set_kd_tree(unsigned req_index,
+                                                  LocalLock *&tree_lock);
       void finalize_output_eqkd_tree(unsigned req_index, IndexSpace handle);
       RtEvent report_equivalence_sets(EqSetTracker *target, 
           AddressSpaceID target_space, const FieldMask &mask,
