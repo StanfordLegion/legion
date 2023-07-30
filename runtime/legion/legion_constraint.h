@@ -701,7 +701,7 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      // Should be positive integers for offsets
+      // Should be non-negative integers for offsets
       Domain delta;
     };
 
