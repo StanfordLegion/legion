@@ -1262,7 +1262,10 @@ namespace Legion {
     public:
       template<int DIM, typename T>
       inline KDNode<DIM,T>* as_kdnode(void);
-      template<int DIM, typename T>
+      // This method tries to compute a splitting plane either by evenly
+      // dividing the rectangles or by evenly dividing the points in the
+      // sets of rectangles depending on the BY_RECTS parameter
+      template<int DIM, typename T, bool BY_RECTS = true>
       static inline bool compute_best_splitting_plane(
           const Rect<DIM,T> &bounds, const std::vector<Rect<DIM,T> > &rects,
           Rect<DIM,T> &best_left_bounds, Rect<DIM,T> &best_right_bounds,
@@ -3305,7 +3308,8 @@ namespace Legion {
     template<int DIM, typename T>
     class EqKDSparse : public EqKDTreeT<DIM,T> {
     public:
-      EqKDSparse(const Rect<DIM,T> &bound, std::vector<Rect<DIM,T> > &rects);
+      EqKDSparse(const Rect<DIM,T> &bound,
+                 const std::vector<Rect<DIM,T> > &rects);
       EqKDSparse(const EqKDSparse &rhs) = delete;
       virtual ~EqKDSparse(void);
     public:
@@ -3422,8 +3426,11 @@ namespace Legion {
       virtual bool cancel_subscription(EqSetTracker *tracker,
                                AddressSpaceID space, const FieldMask &mask);
     protected:
-      void refine_node(void);
-      EqKDTreeT<DIM,T>* refine_local(void);
+      // Make these methods virtual so they can be overloaded by the sparse
+      // version of this class that inherits from this class as well
+      virtual size_t get_total_volume(void) const;
+      virtual void refine_node(void);
+      virtual EqKDTreeT<DIM,T>* refine_local(void); 
     public:
       // Lower bound shard (inclusive)
       const ShardID lower;
@@ -3433,12 +3440,38 @@ namespace Legion {
       // as the size of bounds for this node are less than this value then
       // we stop splitting and use the smallest shard in the set of shards
       // to handle the results
+      // TODO: change this to a more reasonable value
       static constexpr size_t MIN_SPLIT_SIZE = 1;
     protected:
       // These are atomic since they are lazily instantiated but once
       // they are instantiated then they don't change so we don't need
       // to have a lock in this node of the tree
       std::atomic<EqKDTreeT<DIM,T>*> left, right;
+    };
+
+    /**
+     * \class EqKDSparseSharded
+     * This class handles the case of splitting sparse index spaces down
+     * to subsets of rectangles that can be handled by individual shards.
+     */
+    template<int DIM, typename T>
+    class EqKDSparseSharded : public EqKDSharded<DIM,T> {
+    public:
+      EqKDSparseSharded(const Rect<DIM,T> &bound, ShardID lower, ShardID upper,
+                        std::vector<Rect<DIM,T> > &rects);
+      EqKDSparseSharded(const EqKDSparseSharded &rhs) = delete;
+      virtual ~EqKDSparseSharded(void);
+    public:
+      EqKDSparseSharded& operator=(const EqKDSparseSharded &rhs) = delete;
+    protected:
+      virtual size_t get_total_volume(void) const;
+      virtual void refine_node(void);
+      virtual EqKDTreeT<DIM,T>* refine_local(void);
+      static inline bool sort_by_volume(const Rect<DIM,T> &r1, 
+                                        const Rect<DIM,T> &r2);
+    protected:
+      std::vector<Rect<DIM,T> > rectangles;
+      size_t total_volume;
     };
 
     /**

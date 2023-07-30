@@ -5095,8 +5095,12 @@ namespace Legion {
         // Control replicated path
         if (!realm_index_space.dense())
         {
-          assert(false);
-          return NULL;
+          std::vector<Rect<DIM,T> > rects;
+          for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+                itr.valid; itr.step())
+            rects.push_back(itr.rect);
+          return new EqKDSparseSharded<DIM,T>(realm_index_space.bounds,
+              0/*lower shard*/, total_shards - 1/*upper shard*/, rects);
         }
         else
           return new EqKDSharded<DIM,T>(realm_index_space.bounds, 
@@ -6041,7 +6045,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T>
+    template<int DIM, typename T, bool BY_RECTS>
     /*static*/ inline bool KDTree::compute_best_splitting_plane(
         const Rect<DIM,T> &bounds, const std::vector<Rect<DIM,T> > &rects,
         Rect<DIM,T> &best_left_bounds, Rect<DIM,T> &best_right_bounds,
@@ -6058,69 +6062,109 @@ namespace Legion {
       {
         // Try to compute a splitting plane for this dimension
         // Count how many rectangles start and end at each location
-        std::map<std::pair<T,bool/*stop*/>,unsigned> forward_lines;
-        std::map<std::pair<T,bool/*start*/>,unsigned> backward_lines;
+        std::map<std::pair<T,bool/*stop*/>,uint64_t> forward_lines;
+        std::map<std::pair<T,bool/*start*/>,uint64_t> backward_lines;
         for (unsigned idx = 0; idx < rects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = rects[idx];
           // Start forward
           std::pair<T,bool> start_key(subset_bounds.lo[d],false);
-          typename std::map<std::pair<T,bool>,unsigned>::iterator finder =
+          typename std::map<std::pair<T,bool>,uint64_t>::iterator finder =
             forward_lines.find(start_key);
           if (finder == forward_lines.end())
-            forward_lines[start_key] = 1;
+          {
+            if (BY_RECTS)
+              forward_lines[start_key] = 1;
+            else
+              forward_lines[start_key] = subset_bounds.volume();
+          }
           else
-            finder->second++;
+          {
+            if (BY_RECTS)
+              finder->second++;
+            else
+              finder->second += subset_bounds.volume();
+          }
           // Start backward 
           start_key.second = true;
           finder = backward_lines.find(start_key);
           if (finder == backward_lines.end())
-            backward_lines[start_key] = 1;
+          {
+            if (BY_RECTS)
+              backward_lines[start_key] = 1;
+            else
+              backward_lines[start_key] = subset_bounds.volume();
+          }
           else
-            finder->second++;
+          {
+            if (BY_RECTS)
+              finder->second++;
+            else
+              finder->second += subset_bounds.volume();
+          }
           // Stop forward 
-          std::pair<T,bool> stop_key(subset_bounds.hi[d],true);
+          std::pair<T,uint64_t> stop_key(subset_bounds.hi[d],true);
           finder = forward_lines.find(stop_key);
           if (finder == forward_lines.end())
-            forward_lines[stop_key] = 1;
+          {
+            if (BY_RECTS)
+              forward_lines[stop_key] = 1;
+            else
+              forward_lines[stop_key] = subset_bounds.volume();
+          }
           else
-            finder->second += 1;
+          {
+            if (BY_RECTS)
+              finder->second += 1;
+            else
+              finder->second += subset_bounds.volume();
+          }
           // Stop backward 
           stop_key.second = false;
           finder = backward_lines.find(stop_key);
           if (finder == backward_lines.end())
-            backward_lines[stop_key] = 1;
+          {
+            if (BY_RECTS)
+              backward_lines[stop_key] = 1;
+            else
+              backward_lines[stop_key] = subset_bounds.volume();
+          }
           else
-            finder->second++;
+          {
+            if (BY_RECTS)
+              finder->second++;
+            else
+              finder->second += subset_bounds.volume();
+          }
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
-        std::map<T,unsigned> lower_inclusive, upper_exclusive;
-        unsigned count = 0;
-        for (typename std::map<std::pair<T,bool>,unsigned>::const_iterator
+        std::map<T,uint64_t> lower_inclusive, upper_exclusive;
+        uint64_t total = 0;
+        for (typename std::map<std::pair<T,bool>,uint64_t>::const_iterator
               it = forward_lines.begin(); it != forward_lines.end(); it++)
         {
           // Increment first for starts for inclusivity
           if (!it->first.second)
-            count += it->second;
+            total += it->second;
           // Always record the count for all splits
-          lower_inclusive[it->first.first] = count;
+          lower_inclusive[it->first.first] = total;
         }
         // If all the lines exist at the same value
         // then we'll never have a splitting plane
         if (lower_inclusive.size() == 1)
           continue;
-        count = 0;
+        total = 0;
         for (typename std::map<
-              std::pair<T,bool>,unsigned>::const_reverse_iterator it = 
+              std::pair<T,bool>,uint64_t>::const_reverse_iterator it = 
               backward_lines.rbegin(); it != backward_lines.rend(); it++)
         {
           // Always record the count for all splits
-          upper_exclusive[it->first.first] = count;
+          upper_exclusive[it->first.first] = total;
           // Increment last for stops for exclusivity
           if (!it->first.second)
-            count += it->second;
+            total += it->second;
         }
 #ifdef DEBUG_LEGION
         assert(lower_inclusive.size() == upper_exclusive.size());
@@ -6128,13 +6172,21 @@ namespace Legion {
         // We want to take the mini-max of the two numbers in order
         // to try to balance the splitting plane across the two sets
         T split = 0;
-        unsigned split_max = rects.size();
-        for (typename std::map<T,unsigned>::const_iterator it = 
+        if (!BY_RECTS)
+        {
+          total = 0;
+          for (unsigned idx = 0; idx < rects.size(); idx++)
+            total += rects[idx].volume();
+        }
+        else
+          total = rects.size();
+        uint64_t split_max = total;
+        for (typename std::map<T,uint64_t>::const_iterator it = 
               lower_inclusive.begin(); it != lower_inclusive.end(); it++)
         {
-          const unsigned left = it->second;
-          const unsigned right = upper_exclusive[it->first];
-          const unsigned max = (left > right) ? left : right;
+          const uint64_t left = it->second;
+          const uint64_t right = upper_exclusive[it->first];
+          const uint64_t max = (left > right) ? left : right;
           if (max < split_max)
           {
             split_max = max;
@@ -6142,7 +6194,7 @@ namespace Legion {
           }
         }
         // Check for the case where we can't find a splitting plane
-        if (split_max == rects.size())
+        if (split_max == total)
           continue;
         // Sort the subsets into left and right
         Rect<DIM,T> left_bounds(bounds);
@@ -6166,8 +6218,25 @@ namespace Legion {
 #endif
         // Compute the cost of this refinement
         // First get the percentage reductions of both sets
-        float cost_left = float(left_set.size()) / float(rects.size());
-        float cost_right = float(right_set.size()) / float(rects.size());
+        float cost_left, cost_right;
+        if (BY_RECTS)
+        {
+          cost_left = float(left_set.size()) / float(rects.size());
+          cost_right = float(right_set.size()) / float(rects.size());
+        }
+        else
+        {
+          uint64_t volume = 0;
+          for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+                left_set.begin(); it != left_set.end(); it++)
+            volume += it->volume();
+          cost_left = float(volume) / float(total);
+          volume = 0;
+          for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+                right_set.begin(); it != right_set.end(); it++)
+            volume += it->volume();
+          cost_right = float(volume) / float(total);
+        }
         // We want to give better scores to sets that are closer together
         // so we'll include the absolute value of the difference in the
         // two costs as part of computing the average cost
@@ -8464,7 +8533,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     EqKDSparse<DIM,T>::EqKDSparse(const Rect<DIM,T> &bound,
-                           std::vector<Rect<DIM,T> > &rects)
+                                  const std::vector<Rect<DIM,T> > &rects)
       : EqKDTreeT<DIM,T>(bound)
     //--------------------------------------------------------------------------
     {
@@ -8717,7 +8786,7 @@ namespace Legion {
       if (next == NULL)
       {
         // No refinement yet, see if we need to make one
-        if ((lower == upper) || (this->bounds.volume() <= MIN_SPLIT_SIZE))
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
           // and we can make a local node or node
@@ -8773,7 +8842,7 @@ namespace Legion {
       if (next == NULL)
       {
         // No refinement yet, see if we need to make one
-        if ((lower == upper) || (this->bounds.volume() <= MIN_SPLIT_SIZE))
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
           // and we can make a local node or node
@@ -8819,6 +8888,14 @@ namespace Legion {
             to_create, creation_rects, creation_srcs, remote_shard_rects, 
             local_shard);
       return new_subs;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    size_t EqKDSharded<DIM,T>::get_total_volume(void) const
+    //--------------------------------------------------------------------------
+    {
+      return this->bounds.volume();
     }
 
     //--------------------------------------------------------------------------
@@ -8922,7 +8999,7 @@ namespace Legion {
       if (next == NULL)
       {
         // No refinement yet, see if we need to make one
-        if ((lower == upper) || (this->bounds.volume() <= MIN_SPLIT_SIZE))
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
           // and we can make a local node or node
@@ -8983,7 +9060,7 @@ namespace Legion {
       if (next == NULL)
       {
         // No refinement yet, see if we need to make one
-        if ((lower == upper) || (this->bounds.volume() <= MIN_SPLIT_SIZE))
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
           // and we can make a local node or node
@@ -9027,7 +9104,7 @@ namespace Legion {
       if (next == NULL)
       {
         // No refinement yet, see if we need to make one
-        if ((lower == upper) || (this->bounds.volume() <= MIN_SPLIT_SIZE))
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
           // and we can make a local node or node
@@ -9115,7 +9192,7 @@ namespace Legion {
       if (next == NULL)
       {
         // No refinement yet, see if we need to make one
-        if ((lower == upper) || (this->bounds.volume() <= MIN_SPLIT_SIZE))
+        if ((lower == upper) || (get_total_volume() <= MIN_SPLIT_SIZE))
         {
           // No more refinements, see if the local shard is the lower shard
           // and we can make a local node or node
@@ -9163,6 +9240,158 @@ namespace Legion {
       // should never be called on sharded nodes since they don't track
       assert(false);
       return false;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Equivalence Set KD Sparse Sharded
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    /*static*/ inline bool EqKDSparseSharded<DIM,T>::sort_by_volume(
+                                   const Rect<DIM,T> &r1, const Rect<DIM,T> &r2)
+    //--------------------------------------------------------------------------
+    {
+      return (r1.volume() < r2.volume());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDSparseSharded<DIM,T>::EqKDSparseSharded(const Rect<DIM,T> &bound,
+                    ShardID low, ShardID high, std::vector<Rect<DIM,T> > &rects)
+      : EqKDSharded<DIM,T>(bound, low, high)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rects.size() > 1);
+#endif
+      rectangles.swap(rects);
+      total_volume = 0;
+      for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+            rectangles.begin(); it != rectangles.end(); it++)
+        total_volume += it->volume();
+      // If there's a chance that we might need to refine these then 
+      // stable sort them so that refine_node can rely on them already
+      // being sorted. Note the stable sort! Must maintain deterministic
+      // order across the shards
+      if (this->MIN_SPLIT_SIZE <= total_volume)
+        std::stable_sort(rectangles.begin(), rectangles.end(), sort_by_volume);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDSparseSharded<DIM,T>::~EqKDSparseSharded(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    size_t EqKDSparseSharded<DIM,T>::get_total_volume(void) const
+    //--------------------------------------------------------------------------
+    {
+      return total_volume;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDTreeT<DIM,T>* EqKDSparseSharded<DIM,T>::refine_local(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(this->right.load() == NULL);
+#endif
+      EqKDSparse<DIM,T> *next = new EqKDSparse<DIM,T>(this->bounds, rectangles);
+      EqKDTreeT<DIM,T> *expected = NULL;
+      if (this->left.compare_exchange_strong(expected, next))
+      {
+        next->add_reference();
+        return next;
+      }
+      else
+      {
+        delete next;
+        return expected;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDSparseSharded<DIM,T>::refine_node(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(this->lower < this->upper);
+#endif
+      // Note here that we don't want to evenly divide the rectangles across 
+      // the shards, but instead we want to evenly split the points across the
+      // shards. We have two ways to do this, the first way is to call 
+      // compute_best_splitting_plane which will try to find a good splitting
+      // plane that maintains the integrity of the spatial locality of all the
+      // rectangles. Note that when we call compute_best_splitting_plane we 
+      // ask it to sort based on the number of points and not by the number of
+      // rectangles which should keep the total points balanced across shards
+      Rect<DIM,T> left_bounds, right_bounds;
+      std::vector<Rect<DIM,T> > left_set, right_set;
+      if (!KDTree::compute_best_splitting_plane<DIM,T,false>(this->bounds,
+            rectangles, left_bounds, right_bounds, left_set, right_set))
+      {
+        // If we get here, then compute_best_splitting_plane failed to find
+        // a splitting plane to split the rectangles nicely, so now we're
+        // going to fall back to a dumb and greedy heuristic which will still
+        // give us a good distribution of points around the shards which is
+        // just to go from the largest rectangles to the smallest and assign
+        // them to either the right or the left set depending on which one
+        // is larger to get a roughly evenly distributed set of points
+        // Note that this is determinisitc because the stable sort done in
+        // the constructor of this class maintains the ordering of rectangles
+        // with equivalent volumes across the shards.
+        uint64_t left_volume = 0, right_volume = 0;
+        // Reverse iterator to go from largest to smallest
+        for (typename std::vector<Rect<DIM,T> >::const_reverse_iterator it =
+              rectangles.crbegin(); it != rectangles.crend(); it++)
+        {
+          if (left_volume <= right_volume)
+          {
+            left_set.push_back(*it);
+            left_volume += it->volume();
+            left_bounds = left_bounds.union_bbox(*it);
+          }
+          else
+          {
+            right_set.push_back(*it);
+            right_volume += it->volume();
+            right_bounds = right_bounds.union_bbox(*it);
+          }
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!left_set.empty());
+      assert(!right_set.empty());
+#endif
+      // Find the splitting of the shards
+      ShardID diff = this->upper - this->lower;
+      ShardID mid = this->lower + (diff  / 2);
+      EqKDSharded<DIM,T> *next = NULL;
+      if (left_set.size() > 1)
+        next = new EqKDSparseSharded(left_bounds, this->lower, mid, left_set);
+      else
+        next = new EqKDSharded<DIM,T>(left_set.back(), this->lower, mid);
+      EqKDTreeT<DIM,T> *expected = NULL;
+      if (this->left.compare_exchange_strong(expected, next))
+        next->add_reference();
+      else
+        delete next;
+      if (right_set.size() > 1)
+        next =
+          new EqKDSparseSharded(right_bounds, mid+1, this->upper, right_set);
+      else
+        next = new EqKDSharded<DIM,T>(right_set.back(), mid+1, this->upper);
+      expected = NULL;
+      if (this->right.compare_exchange_strong(expected, next))
+        next->add_reference();
+      else
+        delete next;
     }
 
     /////////////////////////////////////////////////////////////
