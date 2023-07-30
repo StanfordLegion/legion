@@ -3973,7 +3973,8 @@ namespace Legion {
                                    FieldMaskSet<InstanceView> > &target_views,
                                const std::vector<IndividualView*> &source_views,
                                const PhysicalTraceInfo &trace_info,
-                               const bool record_valid);
+                               const bool record_valid,
+                               const bool record_release = false);
       void make_instances_valid(CopyFillAggregator *&aggregator,
                                CopyFillGuard *previous_guard,
                                PhysicalAnalysis *analysis,

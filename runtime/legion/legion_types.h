@@ -742,6 +742,7 @@ namespace Legion {
     };
 
     enum MessageKind {
+      SEND_STARTUP_BARRIER,
       TASK_MESSAGE,
       STEAL_MESSAGE,
       ADVERTISEMENT_MESSAGE,
@@ -1018,6 +1019,7 @@ namespace Legion {
 
 #define LG_MESSAGE_DESCRIPTIONS(name)                                 \
       const char *name[LAST_SEND_KIND] = {                            \
+        "Send Startup Barrier",                                       \
         "Task Message",                                               \
         "Steal Message",                                              \
         "Advertisement Message",                                      \
@@ -1293,21 +1295,19 @@ namespace Legion {
 
     // Runtime task numbering 
     enum {
-      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
 #ifdef LEGION_SEPARATE_META_TASKS
       LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND,
-      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+1,
-      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+2,
-      LG_APP_PROC_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+3,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+1,
+      LG_APP_PROC_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+2,
       LG_TASK_ID_AVAILABLE    = LG_APP_PROC_TASK_ID+LG_LAST_TASK_ID,
 #else
       LG_LEGION_PROFILING_ID  = LG_TASK_ID+1,
-      LG_STARTUP_TASK_ID      = LG_TASK_ID+2,
-      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+3,
-      LG_APP_PROC_TASK_ID     = LG_TASK_ID+4,
-      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+5,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+2,
+      LG_APP_PROC_TASK_ID     = LG_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+4,
 #endif
     };
 

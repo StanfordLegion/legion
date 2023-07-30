@@ -6180,16 +6180,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
+      if (parent_ctx->get_task()->get_shard_id() == 0)
+        fold_serdez(initial_value.impl);
+
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second;
-        size_t src_size = 0;
-        const void *source = impl->find_internal_buffer(parent_ctx, src_size);
-        (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
-                                       future_result_size, source);
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_future_use(unique_op_id, impl->did);
+        fold_serdez(it->second);
       }
       // Now we need an all-to-all to get the values from other shards
       const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
@@ -6258,7 +6255,7 @@ namespace Legion {
       // we'll just do our local reductions into the first target initially
       // and then we'll broadcast the result to the targets afterwards
       FutureInstance *local_target = targets.front();
-      ApEvent local_precondition = local_target->initialize(redop, this);
+      ApEvent local_precondition = init_redop_target(local_target);
       if (deterministic)
       {
         for (std::map<DomainPoint,FutureImpl*>::const_iterator it =

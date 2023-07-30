@@ -18073,7 +18073,7 @@ namespace Legion {
                   const LegionVector<FieldMaskSet<InstanceView> > &target_views,
                   const std::vector<IndividualView*> &source_views,
                   const PhysicalTraceInfo &trace_info,
-                  const bool record_valid)
+                  const bool record_valid, const bool record_release)
     //--------------------------------------------------------------------------
     {
       // Read-write or read-only
@@ -18163,7 +18163,18 @@ namespace Legion {
       }
       if (is_write)
       {
-        if (!!restricted_mask)
+        if (record_release)
+        {
+#ifdef DEBUG_LEGION
+          assert(record_valid);
+          assert(restricted_mask == user_mask);
+#endif
+          // Releases are a bit strange, we actually want to invalidate
+          // all the current valid instances since we're making them all
+          // restricted so their are no partial unrestricted cases
+          filter_valid_instances(expr, expr_covers, user_mask);
+        }
+        else if (!!restricted_mask)
         {
           const FieldMask non_restricted_mask = user_mask - restricted_mask;
           if (!!non_restricted_mask)
@@ -19892,7 +19903,7 @@ namespace Legion {
                                 it->first, (it->first == set_expr),
                                 it->second.get_valid_mask(), targets, views, 
                                 analysis.source_views, analysis.trace_info,
-                                true/*record valid*/);
+                                true/*record valid*/, true/*record release*/);
             // Finally update the tracing postconditions now that we've recorded
             // any copies as part of the trace
             if (tracing_postconditions != NULL)
@@ -19932,7 +19943,8 @@ namespace Legion {
                             &analysis, release_usage, expr, expr_covers, 
                             release_mask, analysis.target_instances, 
                             analysis.target_views, analysis.source_views,
-                            analysis.trace_info, true/*record valid*/);
+                            analysis.trace_info, true/*record valid*/,
+                            true/*record release*/);
       }
     }
 

@@ -11,9 +11,6 @@ use legion_prof_viewer::{
     timestamp as ts,
 };
 
-#[cfg(debug_assertions)]
-use log::info;
-
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{
@@ -255,6 +252,8 @@ impl StateDataSource {
             for kind in &mem_kinds {
                 let group = MemGroup(*node, *kind);
 
+                let Some(mems) = mem_groups.get(&group) else { continue; };
+
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
 
@@ -280,11 +279,9 @@ impl StateDataSource {
                 };
                 let color: Color32 = color.into();
 
-                let mems = mem_groups.get(&group);
-
                 let mut mem_slots = Vec::new();
                 if node.is_some() {
-                    for (mem_index, mem) in mems.iter().copied().flatten().enumerate() {
+                    for (mem_index, mem) in mems.iter().enumerate() {
                         let mem_id = kind_id.child(mem_index as u64);
                         entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
                         mem_entries.insert(*mem, mem_id);
@@ -303,30 +300,28 @@ impl StateDataSource {
                     }
                 }
 
-                if mems.is_some() {
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::MemKind(group));
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::MemKind(group));
 
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: kind_name.to_lowercase(),
-                        long_name: format!("{} {}", node_long_name, kind_name),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: mem_slots,
-                    });
-                }
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: kind_name.to_lowercase(),
+                    long_name: format!("{} {}", node_long_name, kind_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: mem_slots,
+                });
             }
 
             // Channels
-            {
+            loop {
+                let Some(chans) = chan_groups.get(node) else { break; };
+
                 let kind_id = node_id.child(kind_index);
 
                 let color: Color32 = Color::ORANGERED.into();
 
-                let chans = chan_groups.get(node);
-
                 let mut chan_slots = Vec::new();
                 if node.is_some() {
-                    for (chan_index, chan) in chans.iter().copied().flatten().enumerate() {
+                    for (chan_index, chan) in chans.iter().enumerate() {
                         let chan_id = kind_id.child(chan_index as u64);
                         entry_map.insert(chan_id, EntryKind::Chan(*chan));
 
@@ -397,17 +392,17 @@ impl StateDataSource {
                     }
                 }
 
-                if chans.is_some() {
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::ChanKind(*node));
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::ChanKind(*node));
 
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: "chan".to_owned(),
-                        long_name: format!("{} Channel", node_long_name),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: chan_slots,
-                    });
-                }
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: "chan".to_owned(),
+                    long_name: format!("{} Channel", node_long_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: chan_slots,
+                });
+
+                break;
             }
             node_slots.push(EntryInfo::Panel {
                 short_name: node_short_name,
@@ -709,27 +704,7 @@ impl StateDataSource {
         merged.resize(cont.max_levels() + 1, 0u64);
         let points = cont.time_points();
 
-        // For efficiency, binary search to the part of the timeline we're
-        // interested in. This only works for the upper bound; because tasks
-        // are stacked, there is no safe (and efficient) way to determine a
-        // conservative lower bound.
-
-        let last_index = points.partition_point(|p| {
-            let start: ts::Timestamp = cont.entry(p.entry).time_range().start.unwrap().into();
-            start < tile_id.0.stop
-        });
-
-        #[cfg(debug_assertions)]
-        {
-            info!("Debug assertions enabled: checking point overlap");
-            for point in &points[last_index..] {
-                let time_range = cont.entry(point.entry).time_range();
-                let point_interval: ts::Interval = time_range.into();
-                assert!(!point_interval.overlaps(tile_id.0));
-            }
-        }
-
-        for point in &points[..last_index] {
+        for point in points {
             assert!(point.first);
 
             let entry = cont.entry(point.entry);
