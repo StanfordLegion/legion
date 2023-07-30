@@ -52,6 +52,9 @@ int main(int argc, char *argv[])
     }
   }
 
+  // make sure printf specifier for hash is correct
+  static_assert(sizeof(size_t) == sizeof(uintptr_t));
+
   FILE *fin = fopen(in, "rb");
   FILE *fout = fopen(out, "w");
 
@@ -73,7 +76,7 @@ int main(int argc, char *argv[])
       else
       {
         Alloc aalloc = allocation->second;
-        fprintf(fout, "%f,%f,%d,%zu,%p,%zd\n",
+        fprintf(fout, "%f,%f,%d,%zu,%p,%zu\n",
                 aalloc.time, alloc.time, aalloc.kind, aalloc.size, aalloc.ptr, aalloc.hash);
         allocations.erase(allocation);
       }
@@ -88,7 +91,7 @@ int main(int argc, char *argv[])
   {
     KEY ptr = it->first;
     Alloc aalloc = it->second;
-    fprintf(fout, "%f,nan,%d,%zu,%p,%zd\n", aalloc.time, aalloc.kind, aalloc.size, ptr, aalloc.hash);
+    fprintf(fout, "%f,nan,%d,%zu,%p,%zu\n", aalloc.time, aalloc.kind, aalloc.size, ptr, aalloc.hash);
   }
 
   fclose(fin);
