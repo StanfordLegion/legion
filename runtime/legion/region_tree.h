@@ -3437,11 +3437,10 @@ namespace Legion {
       // Upper bound shard (inclusive)
       const ShardID upper;
       // To avoid over-decomposing we specify a minimum split size, as soon
-      // as the size of bounds for this node are less than this value then
-      // we stop splitting and use the smallest shard in the set of shards
-      // to handle the results
-      // TODO: change this to a more reasonable value
-      static constexpr size_t MIN_SPLIT_SIZE = 1;
+      // as the total number of points represented by this  node are less 
+      // than this value then we stop splitting and use the smallest shard
+      // in the set of shards to handle the results
+      static constexpr size_t MIN_SPLIT_SIZE = 4096;
     protected:
       // These are atomic since they are lazily instantiated but once
       // they are instantiated then they don't change so we don't need
