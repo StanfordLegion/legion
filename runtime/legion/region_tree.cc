@@ -17781,7 +17781,11 @@ namespace Legion {
                       new_states.emplace_back(std::move(new_state));
                       finder.filter(upgrade);
                       if (!finder->second)
+                      {
                         it->open_children.erase(finder);
+                        if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
+                          assert(false); // should never hit this
+                      }
                       open_below |= upgrade;
                       // See if we have any remaining fields
                       const FieldMask close_mask = closing_mask - upgrade;
