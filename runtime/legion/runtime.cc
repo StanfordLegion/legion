@@ -9669,10 +9669,6 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
-          // If we need a padding constraint make sure we're
-          // checking for tight region bounds
-          if (constraints.padding_constraint.delta.get_dim() > 0)
-            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9689,7 +9685,8 @@ namespace Legion {
           for (std::deque<PhysicalManager*>::const_iterator it =
                 candidates.begin(); it != candidates.end(); it++)
           {
-            if (!(*it)->meets_expression(space_expr, tight_region_bounds))
+            if (!(*it)->meets_expression(space_expr, tight_region_bounds,
+                  &constraints.padding_constraint.delta))
               continue;
             if ((*it)->entails(constraints, NULL))
             {
@@ -9785,10 +9782,6 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
-          // If we need a padding constraint make sure we're
-          // checking for tight region bounds
-          if (constraints.padding_constraint.delta.get_dim() > 0)
-            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9805,7 +9798,8 @@ namespace Legion {
           for (std::deque<PhysicalManager*>::const_iterator it = 
                 candidates.begin(); it != candidates.end(); it++)
           {
-            if (!(*it)->meets_expression(space_expr, tight_region_bounds))
+            if (!(*it)->meets_expression(space_expr, tight_region_bounds,
+                  &constraints.padding_constraint.delta))
               continue;
             if ((*it)->entails(constraints, NULL))
             {
@@ -9881,10 +9875,6 @@ namespace Legion {
       bool found = false;
       if (!candidates.empty())
       {
-        // If we need a padding constraint make sure we're
-        // checking for tight region bounds
-        if (constraints.padding_constraint.delta.get_dim() > 0)
-          tight_region_bounds = true;
         std::set<IndexSpaceExpression*> region_exprs;
         RegionTreeForest *forest = runtime->forest;
         for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9901,7 +9891,8 @@ namespace Legion {
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds,
+                &constraints.padding_constraint.delta))
             continue;
           if ((*it)->entails(constraints, NULL))
           {
