@@ -450,7 +450,8 @@ namespace Legion {
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
-                         bool tight_region_bounds = false) const;
+                         bool tight_region_bounds = false,
+                         const Domain *padding_delta = NULL) const;
       bool meets_expression(IndexSpaceExpression *expr, 
                             bool tight_bounds = false,
                             const Domain *padding_delta = NULL) const;

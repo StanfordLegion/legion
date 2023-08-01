@@ -1691,7 +1691,9 @@ namespace Legion {
             std::vector<LogicalRegion> regions_to_check(1, 
                                 regions[it->first].region);
             PhysicalManager *phy = manager->as_physical_manager();
-            if (!phy->meets_regions(regions_to_check, true/*tight*/))
+            if (!phy->meets_regions(regions_to_check,
+                  constraints->specialized_constraint.is_exact(),
+                  &constraints->padding_constraint.delta))
             {
               if (constraints->specialized_constraint.is_exact())
                 conflict_constraint = &constraints->specialized_constraint;

@@ -1514,7 +1514,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::meets_regions(
-      const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
+      const std::vector<LogicalRegion> &regions, bool tight_region_bounds,
+      const Domain *padding_delta) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1533,7 +1534,7 @@ namespace Legion {
       }
       IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
         *(region_exprs.begin()) : context->union_index_spaces(region_exprs);
-      return meets_expression(space_expr, tight_region_bounds);
+      return meets_expression(space_expr, tight_region_bounds, padding_delta);
     }
 
     //--------------------------------------------------------------------------
