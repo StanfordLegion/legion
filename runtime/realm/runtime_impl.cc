@@ -931,11 +931,6 @@ namespace Realm {
       machine->add_proc_mem_affinity(pma);
     }
 
-    void RuntimeImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
-    {
-      machine->add_mem_mem_affinity(mma);
-    }
-
     CoreReservationSet& RuntimeImpl::core_reservation_set(void)
     {
       assert(core_reservations);
@@ -993,31 +988,6 @@ namespace Realm {
 	  pma.bandwidth = bandwidth;
 	  pma.latency = latency;
 	  machine->add_proc_mem_affinity(pma);
-	}
-    }
-
-    static void add_mem_mem_affinities(MachineImpl *machine,
-				       const std::set<Memory>& mems1,
-				       const std::set<Memory>& mems2,
-				       int bandwidth,
-				       int latency)
-    {
-      for(std::set<Memory>::const_iterator it1 = mems1.begin();
-	  it1 != mems1.end();
-	  it1++) 
-	for(std::set<Memory>::const_iterator it2 = mems2.begin();
-	    it2 != mems2.end();
-	    it2++) {
-	  std::vector<Machine::MemoryMemoryAffinity> mmas;
-	  machine->get_mem_mem_affinity(mmas, *it1, *it2);
-	  if(!mmas.empty()) continue;
-	  log_runtime.debug() << "adding missing affinity: " << *it1 << " " << *it2 << " " << bandwidth << " " << latency;
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = *it1;
-	  mma.m2 = *it2;
-	  mma.bandwidth = bandwidth;
-	  mma.latency = latency;
-	  machine->add_mem_mem_affinity(mma);
 	}
     }
 
@@ -1174,19 +1144,6 @@ namespace Realm {
                  (serializer << pma.m) &&
                  (serializer << pma.bandwidth) &&
                  (serializer << pma.latency));
-      return ok;
-    }
-
-    template <typename T>
-    static bool serialize_announce(T& serializer,
-                                   const Machine::MemoryMemoryAffinity& mma,
-                                   NetworkModule *net)
-    {
-      bool ok = ((serializer << NODE_ANNOUNCE_MMA) &&
-                 (serializer << mma.m1) &&
-                 (serializer << mma.m2) &&
-                 (serializer << mma.bandwidth) &&
-                 (serializer << mma.latency));
       return ok;
     }
 
@@ -1780,27 +1737,6 @@ namespace Realm {
 				  );
 	}
 
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::GLOBAL_MEM],
-			       30,  // "lower" bandwidth
-			       25  // "higher" latency
-			       );
-
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::DISK_MEM],
-			       15,  // "low" bandwidth
-			       50  // "high" latency
-			       );
-
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::FILE_MEM],
-			       15,  // "low" bandwidth
-			       50  // "high" latency
-			       );
-
 	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
 	    it != local_cpu_kinds.end();
 	    it++) {
@@ -1813,6 +1749,7 @@ namespace Realm {
 				  3   // "small" latency
 				  );
 	}
+
       }
 
       // announce by network type
@@ -1882,28 +1819,7 @@ namespace Realm {
                                                    dbs, max_frag_size, *it2);
 	  }
 
-	// now each memory's affinities with other memories
-	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-	    it != n->memories.end();
-	    it++)
-	  if(*it) {
-	    Memory m = (*it)->me;
-	    std::vector<Machine::MemoryMemoryAffinity> mmas;
-	    machine->get_mem_mem_affinity(mmas, m);
-
-	    for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it2 = mmas.begin();
-		it2 != mmas.end();
-		it2++) {
-	      // only announce intra-node ones and only those with this memory as m1 to avoid
-	      //  duplicates
-	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != Network::my_node_id))
-		continue;
-
-              num_fragments += fragmented_announce(targets, *nit,
-                                                   dbs, max_frag_size, *it2);
-	    }
-	  }
-
+  // announce all the dma channels (and their paths)
 	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
 	    it != n->dma_channels.end();
 	    ++it)
@@ -1930,6 +1846,10 @@ namespace Realm {
 	}
 #endif
       }
+
+      // Now that we have full knowledge of the machine, update the machine
+      // model's mem_mem affinities.
+      machine->enumerate_mem_mem_affinities();
 
       if (Config::path_cache_lru_size) {
         assert(Config::path_cache_lru_size > 0);

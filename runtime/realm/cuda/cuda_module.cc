@@ -1083,31 +1083,6 @@ namespace Realm {
       if(!pinned_sysmems.empty() || !managed_mems.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
-
-        // TODO: move into the dma channels themselves
-        for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
-            it != pinned_sysmems.end(); ++it) {
-          // don't create affinities for IB memories right now
-          if(!ID(*it).is_memory())
-            continue;
-
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = *it;
-          mma.bandwidth = info->pci_bandwidth; // "medium"
-          mma.latency = 200;                   // "bad"
-          r->add_mem_mem_affinity(mma);
-        }
-
-        for(std::set<Memory>::const_iterator it = managed_mems.begin();
-            it != managed_mems.end(); ++it) {
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = *it;
-          mma.bandwidth = info->pci_bandwidth; // "medium"
-          mma.latency = 300;                   // "worse" (pessimistically assume faults)
-          r->add_mem_mem_affinity(mma);
-        }
       } else {
         log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
@@ -1115,19 +1090,6 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
-
-        for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
-            it != cudaipc_mappings.end(); ++it) {
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = it->mem;
-          // TODO: replace with the peer bandwidth calculation done earlier (this means we
-          // need to know the GPU that owns the cudaipc mapping, and it needs to be
-          // enumerated in our process).
-          mma.bandwidth = info->pci_bandwidth;
-          mma.latency = 400;
-          r->add_mem_mem_affinity(mma);
-        }
       }
     }
 
@@ -3496,14 +3458,6 @@ namespace Realm {
           pma.latency = info->logical_peer_latency[i];
           runtime->add_proc_mem_affinity(pma);
         }
-        if (fbmem != nullptr) {
-          Machine::MemoryMemoryAffinity pma;
-          pma.m1 = fbmem->me;
-          pma.m2 = peer_gpu->fbmem->me;
-          pma.bandwidth = info->logical_peer_bandwidth[i];
-          pma.latency = info->logical_peer_latency[i];
-          runtime->add_mem_mem_affinity(pma);
-        }
 
         if(peer_gpu->fb_ibmem != nullptr) {
           // Don't add fb_ibmem to affinity topology as this is an internal
@@ -5113,6 +5067,7 @@ namespace Realm {
     // active messages for establishing cuda ipc mappings
 
     struct CudaIpcResponseEntry {
+      CUuuid src_gpu_uuid;
       Memory mem;
       uintptr_t base_ptr;
       CUipcMemHandle handle;
@@ -5158,6 +5113,7 @@ namespace Realm {
                                                                 (*it)->fbmem_base);
             log_cudaipc.info() << "getmem handle " << std::hex << (*it)->fbmem_base << std::dec << " -> " << ret;
             if(ret == CUDA_SUCCESS) {
+              entry.src_gpu_uuid = (*it)->info->uuid;
               entry.mem = (*it)->fbmem->me;
               entry.base_ptr = (*it)->fbmem_base;
               exported.push_back(entry);
@@ -5221,10 +5177,21 @@ namespace Realm {
               if(ret == CUDA_SUCCESS) {
                 // take the cudaipc mutex to actually add the mapping
                 GPU::CudaIpcMapping mapping;
+                mapping.src_gpu = nullptr;
                 mapping.owner = sender;
                 mapping.mem = entries[i].mem;
                 mapping.local_base = dptr;
                 mapping.address_offset = entries[i].base_ptr - dptr;
+
+                // Find and track the source gpu for this mapping
+                for (GPU *mapping_gpu : cuda_module_singleton->gpus) {
+                  if (memcmp(&mapping_gpu->info->uuid,
+                             &entries[i].src_gpu_uuid,
+                             sizeof(mapping_gpu->info->uuid)) == 0) {
+                    mapping.src_gpu = mapping_gpu;
+                  }
+                }
+
                 {
                   AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
                   (*it)->cudaipc_mappings.push_back(mapping);

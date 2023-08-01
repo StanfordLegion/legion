@@ -883,15 +883,6 @@ namespace Realm {
       if(src_gpu->fb_ibmem)
         local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
 
-      std::vector<Memory> peer_gpu_mems;
-      peer_gpu_mems.insert(peer_gpu_mems.end(),
-                           src_gpu->peer_fbs.begin(),
-                           src_gpu->peer_fbs.end());
-      for(std::vector<GPU::CudaIpcMapping>::const_iterator it = src_gpu->cudaipc_mappings.begin();
-          it != src_gpu->cudaipc_mappings.end();
-          ++it)
-        peer_gpu_mems.push_back(it->mem);
-
       // look for any other local memories that belong to our context or
       //  peer-able contexts
       const Node& n = get_runtime()->nodes[Network::my_node_id];
@@ -902,13 +893,6 @@ namespace Realm {
         if(!cdm) continue;
         if(cdm->context == src_gpu->context) {
           local_gpu_mems.push_back((*it)->me);
-        } else {
-          // if the other context is associated with a gpu and we've got peer
-          //  access, use it
-          // TODO: add option to enable peer access at this point?  might be
-          //  expensive...
-          if(cdm->gpu && (src_gpu->info->peers.count(cdm->gpu->info->device) > 0))
-            peer_gpu_mems.push_back((*it)->me);
         }
       }
 
@@ -924,7 +908,7 @@ namespace Realm {
       switch(_kind) {
       case XFER_GPU_TO_FB:
         {
-          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned bw = src_gpu->info->pci_bandwidth;
           unsigned latency = 1000;  // HACK - estimate at 1 us
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
@@ -938,7 +922,7 @@ namespace Realm {
 
       case XFER_GPU_FROM_FB:
         {
-          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned bw = src_gpu->info->pci_bandwidth;  // HACK - estimate at 10 GB/s
           unsigned latency = 1000;  // HACK - estimate at 1 us
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
@@ -953,8 +937,8 @@ namespace Realm {
       case XFER_GPU_IN_FB:
         {
           // self-path
-          unsigned bw = 200000;  // HACK - estimate at 200 GB/s
-          unsigned latency = 250;  // HACK - estimate at 250 ns
+          unsigned bw = src_gpu->info->logical_peer_bandwidth[_src_gpu->info->index];
+          unsigned latency = src_gpu->info->logical_peer_latency[_src_gpu->info->index];
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
           add_path(local_gpu_mems,
@@ -968,14 +952,45 @@ namespace Realm {
       case XFER_GPU_PEER_FB:
         {
           // just do paths to peers - they'll do the other side
-          unsigned bw = 50000;  // HACK - estimate at 50 GB/s
-          unsigned latency = 1000;  // HACK - estimate at 1 us
-          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+          for (GPU *peer_gpu : src_gpu->module->gpus) {
+            if (src_gpu->info->peers.find(peer_gpu->info->index) !=
+                src_gpu->info->peers.end()) {
+              unsigned bw = static_cast<unsigned>(
+                  src_gpu->info->logical_peer_bandwidth[peer_gpu->info->index]);
+              unsigned latency = static_cast<unsigned>(
+                  src_gpu->info->logical_peer_latency[peer_gpu->info->index]);
+              unsigned frag_overhead = 2000; // HACK - estimate at 2 us
+              if (peer_gpu->fbmem != nullptr) {
+                add_path(local_gpu_mems,
+                        peer_gpu->fbmem->me, bw, latency,
+                        frag_overhead, XFER_GPU_PEER_FB)
+                    .set_max_dim(3);
+              }
+              if (peer_gpu->fb_ibmem != nullptr) {
+                add_path(local_gpu_mems,
+                        peer_gpu->fb_ibmem->me, bw,
+                        latency, frag_overhead, XFER_GPU_PEER_FB)
+                    .set_max_dim(3);
+              }
+            }
+          }
 
-          add_path(local_gpu_mems,
-                   peer_gpu_mems,
-                   bw, latency, frag_overhead, XFER_GPU_PEER_FB)
-            .set_max_dim(3);
+          for (const GPU::CudaIpcMapping &mapping : src_gpu->cudaipc_mappings) {
+            unsigned bw = src_gpu->info->pci_bandwidth;
+            unsigned latency = 1000;       // HACK - estimate at 1 us
+            unsigned frag_overhead = 2000; // HACK - estimate at 2 us
+            if (mapping.src_gpu != nullptr) {
+              bw = static_cast<unsigned>(
+                  src_gpu->info
+                      ->logical_peer_bandwidth[mapping.src_gpu->info->index]);
+              latency = static_cast<unsigned>(
+                  src_gpu->info
+                      ->logical_peer_latency[mapping.src_gpu->info->index]);
+            }
+            add_path(local_gpu_mems, mapping.mem, bw,
+                     latency, frag_overhead, XFER_GPU_PEER_FB)
+                .set_max_dim(3);
+          }
 
           break;
         }
@@ -1478,8 +1493,8 @@ namespace Realm {
         local_gpu_mems.push_back((*it)->me);
       }
 
-      unsigned bw = 300000;  // HACK - estimate at 300 GB/s
-      unsigned latency = 250;  // HACK - estimate at 250 ns
+      unsigned bw = gpu->info->logical_peer_bandwidth[gpu->info->index];
+      unsigned latency = gpu->info->logical_peer_latency[gpu->info->index];
       unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
       add_path(Memory::NO_MEMORY, local_gpu_mems,
@@ -1847,8 +1862,8 @@ namespace Realm {
 
       // intra-FB reduction
       {
-        unsigned bw = 100000;  // HACK - estimate at 100 GB/s
-        unsigned latency = 250;  // HACK - estimate at 250 ns
+        unsigned bw = gpu->info->logical_peer_bandwidth[gpu->info->index];
+        unsigned latency = gpu->info->logical_peer_latency[gpu->info->index];
         unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
         add_path(local_gpu_mems,
@@ -1859,7 +1874,7 @@ namespace Realm {
 
       // zero-copy to FB (no need for intermediate buffer in FB)
       {
-        unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+        unsigned bw = gpu->info->pci_bandwidth;
         unsigned latency = 1000;  // HACK - estimate at 1 us
         unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
