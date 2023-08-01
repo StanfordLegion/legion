@@ -4572,7 +4572,7 @@ namespace Legion {
 #endif
       if (future_map.impl != NULL)
       {
-        if (needs_all_futures)
+        if (!needs_all_futures)
         {
           IndexPartNode *partition = runtime->forest->get_node(pid);
           const Domain future_map_domain = future_map.impl->get_domain();
