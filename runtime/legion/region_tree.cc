@@ -17992,7 +17992,6 @@ namespace Legion {
               if (!it->second)
                 to_delete.push_back(it->first);
             }
-            open_below |= still_open;
           }
           else
           {
