@@ -25137,12 +25137,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != equivalence_sets_ready->end());
 #endif
-        // Check to see if there were any pending invalications performed
-        // on us while we were performing this in which case we need to 
-        // clear out our state and recompute for any overlapping fields
-        // This can happen because invalidations are not precise in the
-        // equivalence set tree and might overlap more than they anticipated
-        // in which case we need to recompute these equivalence sets
+        // Check for the pending invalidations case. This occurs due to 
+        // false aliasing in the Equivalence Set KD tree, were we might
+        // have found some equivalence sets for a subset of points for
+        // this analysis, but some other invalidation came through for
+        // an independent set of points which required refining the 
+        // node in the equivalence set KD tree. This will invalidate
+        // the subscriptions so we'll need to recompute the equivalence 
+        // sets. Note that we're guaranteed that this is only false
+        // aliasing because of the logical dependence analysis which 
+        // implies if there were true aliasing then there would have been
+        // a mapping dependence that prevented this race.
         FieldMask invalidated = finder->second & pending_invalidations;
         while (!!invalidated)
         {

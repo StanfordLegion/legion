@@ -3258,12 +3258,13 @@ namespace Legion {
       void find_rect_equivalence_sets(const Rect<DIM,T> &rect,
           FieldMaskSet<EquivalenceSet> &eq_sets) const;
     protected:
-      void refine_node(const Rect<DIM,T> &rect, const FieldMask &mask);
+      void refine_node(const Rect<DIM,T> &rect, const FieldMask &mask,
+                       bool refine_current = false);
       bool record_subscription(EqSetTracker *tracker, 
           AddressSpaceID tracker_space, const FieldMask &mask);
-      void clone_previous(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
-                          FieldMask clone_mask);
-      void record_previous(EquivalenceSet *set, const FieldMask &mask);
+      void clone_sets(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
+          FieldMask clone, FieldMaskSet<EquivalenceSet> *&sets, bool current);
+      void record_set(EquivalenceSet *set, const FieldMask &mask, bool current);
       void find_to_get_previous(FieldMask &all_prev_below,
           FieldMaskSet<EqKDNode<DIM,T> > &to_get_previous) const;
       void invalidate_previous_sets(const FieldMask &mask,
