@@ -24,6 +24,7 @@ endif()
 
 add_executable(allreduce allreduce.cc)
 target_link_libraries(allreduce Legion::Legion)
+target_compile_options(allreduce PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME allreduce COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:allreduce> ${Legion_TEST_ARGS})
 endif()

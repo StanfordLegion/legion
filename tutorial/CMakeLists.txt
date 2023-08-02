@@ -20,15 +20,6 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.18")
-    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-  elseif(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
-    # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
-    string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
-  endif()
-endif()
-
 add_subdirectory(00_hello_world)
 add_subdirectory(01_tasks_and_futures)
 add_subdirectory(02_index_tasks)

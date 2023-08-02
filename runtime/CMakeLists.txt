@@ -504,6 +504,7 @@ if(Legion_USE_CUDA)
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 
   set_target_cuda_architectures(TARGET RealmRuntime ARCHS ${Legion_CUDA_ARCH})
+  set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
 endif()
 
 if(Legion_USE_HIP)
@@ -827,6 +828,7 @@ if(Legion_USE_CUDA)
   endif()
 
   set_target_cuda_architectures(TARGET LegionRuntime ARCHS ${Legion_CUDA_ARCH})
+  set_target_cuda_standard(LegionRuntime STANDARD ${Legion_CUDA_STANDARD})
 endif()
 
 if(Legion_USE_HIP)
