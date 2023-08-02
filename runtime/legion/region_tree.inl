@@ -7491,39 +7491,39 @@ namespace Legion {
                   continue;
                 to_notify.insert(it->first, overlap);
               }
-#ifdef DEBUG_LEGION
-              assert(!to_notify.empty());
-#endif
-              // Create an event for when this is triggered
-              const RtUserEvent recorded = Runtime::create_rt_user_event();
-              Serializer rez;
+              if (!to_notify.empty())
               {
-                RezCheck z(rez);
-                rez.serialize(set->did);
-                rez.serialize<size_t>(to_notify.size());
-                for (FieldMaskSet<EqSetTracker>::const_iterator it =
-                      to_notify.begin(); it != to_notify.end(); it++)
+                // Create an event for when this is triggered
+                const RtUserEvent recorded = Runtime::create_rt_user_event();
+                Serializer rez;
                 {
-                  rez.serialize(it->first);
-                  rez.serialize(it->second);
+                  RezCheck z(rez);
+                  rez.serialize(set->did);
+                  rez.serialize<size_t>(to_notify.size());
+                  for (FieldMaskSet<EqSetTracker>::const_iterator it =
+                        to_notify.begin(); it != to_notify.end(); it++)
+                  {
+                    rez.serialize(it->first);
+                    rez.serialize(it->second);
+                  }
+                  rez.serialize(recorded);
                 }
-                rez.serialize(recorded);
-              }
-              runtime->send_compute_equivalence_sets_pending(sit->first, rez);
-              // Save this event as a postcondition for any pending set creation
+                runtime->send_compute_equivalence_sets_pending(sit->first, rez);
+                // Save this event as a postcondition for any pending creations
 #ifdef DEBUG_LEGION
-              assert(pending_set_creations != NULL);
+                assert(pending_set_creations != NULL);
 #endif
-              for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
-                    pending_set_creations->begin(); it !=
-                    pending_set_creations->end(); it++)
-              {
-                if (it->second * to_notify.get_valid_mask())
-                  continue;
-                if (pending_postconditions == NULL)
-                  pending_postconditions =
-                    new std::map<RtUserEvent,std::vector<RtEvent> >();
-                (*pending_postconditions)[it->first].push_back(recorded);
+                for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
+                      pending_set_creations->begin(); it !=
+                      pending_set_creations->end(); it++)
+                {
+                  if (it->second * to_notify.get_valid_mask())
+                    continue;
+                  if (pending_postconditions == NULL)
+                    pending_postconditions =
+                      new std::map<RtUserEvent,std::vector<RtEvent> >();
+                  (*pending_postconditions)[it->first].push_back(recorded);
+                }
               }
             }
             else
