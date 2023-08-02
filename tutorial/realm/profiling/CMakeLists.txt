@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_profiling profiling.cc)
 target_link_libraries(realm_profiling Legion::Realm)
+target_compile_options(realm_profiling PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_profiling COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_profiling> ${Legion_TEST_ARGS})

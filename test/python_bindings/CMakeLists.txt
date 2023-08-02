@@ -25,6 +25,7 @@ endif()
 add_executable(python_bindings python_bindings.cc)
 target_compile_definitions(python_bindings PRIVATE PYTHON_MODULES_PATH="${CMAKE_INSTALL_FULL_DATADIR}/Legion/python:${CMAKE_INSTALL_FULL_DATADIR}/Legion/python/tests")
 target_link_libraries(python_bindings Legion::Legion)
+target_compile_options(python_bindings PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python_bindings.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/tests
 )

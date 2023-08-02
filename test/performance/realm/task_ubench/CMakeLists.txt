@@ -47,6 +47,7 @@ else()
 endif()
 
 target_link_libraries(task_ubench Legion::Realm)
+target_compile_options(task_ubench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME task_ubench COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:task_ubench> ${Legion_TEST_ARGS})
 endif()

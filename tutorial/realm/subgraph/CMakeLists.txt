@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_subgraph subgraph.cc)
 target_link_libraries(realm_subgraph Legion::Realm)
+target_compile_options(realm_subgraph PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_subgraph COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_subgraph> ${Legion_TEST_ARGS})

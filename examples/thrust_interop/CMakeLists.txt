@@ -37,3 +37,4 @@ endif()
 target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 
 target_link_libraries(thrust_interop Legion::Legion)
+target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)

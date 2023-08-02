@@ -50,6 +50,9 @@ elseif(Legion_USE_HIP)
 else()
   add_executable(circuit ${CPU_SOURCES})
 endif()
+
+target_compile_options(circuit PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+
 target_link_libraries(circuit Legion::Legion)
 if(Legion_ENABLE_TESTING)
   add_test(NAME circuit COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:circuit> ${Legion_TEST_ARGS})

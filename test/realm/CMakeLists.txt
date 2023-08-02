@@ -97,6 +97,7 @@ foreach(test IN LISTS REALM_TESTS)
     add_executable(${test} ${test}.cc)
   endif()
   target_link_libraries(${test} Legion::Realm)
+  target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
   if(Legion_USE_HIP)
     target_include_directories(${test} PRIVATE ${HIP_INCLUDE_DIRS})
