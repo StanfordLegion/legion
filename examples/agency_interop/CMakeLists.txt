@@ -23,8 +23,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 set(CPU_SOURCES agency_interop.cc)
-set(GPU_SOURCES )
-add_executable(agency_interop ${CPU_SOURCES} ${GPU_SOURCES})
+add_executable(agency_interop ${CPU_SOURCES})
 target_link_libraries(agency_interop Legion::Legion)
 target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
