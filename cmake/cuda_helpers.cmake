@@ -1,18 +1,88 @@
+#------------------------------------------------------------------------------#
+# Copyright 2023 Stanford University
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#------------------------------------------------------------------------------#
 include_guard(GLOBAL)
 
+# Enable the CUDA language and find the CUDA toolkit.
+# Works around bugs in CMake < 3.18 CUDA language support.
+macro(enable_cuda_language_and_find_cuda_toolkit)
+
+  # CMAKE_CUDA_RUNTIME_LIBRARY determines whether CUDA objs link to the static
+  # or shared CUDA runtime library. Must be set before `enable_language(CUDA)`
+  # https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_RUNTIME_LIBRARY.html
+  if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
+    if(BUILD_SHARED_LIBS)
+      set(CMAKE_CUDA_RUNTIME_LIBRARY SHARED)
+    else()
+      set(CMAKE_CUDA_RUNTIME_LIBRARY STATIC)
+    endif()
+  endif()
+
+  # CMake < 3.18 doesn't recognize >=17 as a CUDA standard,
+  # so unset CMAKE_CUDA_STANDARD before enabling the CUDA language.
+  if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND (CMAKE_CUDA_STANDARD GREATER_EQUAL 17))
+    unset(CMAKE_CUDA_STANDARD)
+    unset(CMAKE_CUDA_STANDARD CACHE)
+  endif()
+
+  # Enable the CUDA language
+  enable_language(CUDA)
+
+  # Polyfill a CMake < 3.18 missing CUDA compiler detection variable
+  if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND (NOT CUDAToolkit_NVCC_EXECUTABLE))
+    set(CUDAToolkit_NVCC_EXECUTABLE "${CMAKE_CUDA_COMPILER}")
+  endif()
+
+  # Find the CUDA toolkit
+  find_package(CUDAToolkit REQUIRED)
+
+  # Work around a clangd bug by generating compile commands
+  # with `-isystem <path>` instead of `-isystem=<path>`.
+  # Must come after `enable_language(CUDA)`
+  set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
+
+endmacro(enable_cuda_language_and_find_cuda_toolkit)
+
+function(infer_cuda_standard STANDARD)
+  if(CMAKE_CUDA_STANDARD)
+    # Use CMAKE_CUDA_STANDARD if set
+    set(${STANDARD} ${CMAKE_CUDA_STANDARD} PARENT_SCOPE)
+  elseif(CMAKE_CXX_STANDARD)
+    # Otherwise use CMAKE_CXX_STANDARD
+    set(${STANDARD} ${CMAKE_CXX_STANDARD} PARENT_SCOPE)
+  endif()
+endfunction(infer_cuda_standard)
+
+# If the variable supplied in ARCHS is empty, populate it with a list of the major CUDA architectures.
 function(populate_cuda_archs_list ARCHS)
 
-  set(archs ${${ARCHS}})
+  set(archs )
 
-  if(NOT archs)
-    #
+  if(CMAKE_CUDA_ARCHITECTURES)
+    set(archs ${CMAKE_CUDA_ARCHITECTURES})
+  elseif(NOT ("${${ARCHS}}" STREQUAL ""))
+    # Support comma-delimited lists in addition to semicolons
+    string(REPLACE "," ";" archs "${${ARCHS}}")
+  else()
+    # Default to all major GPU archs
+
     # CMake 3.23 will figure out the list from `CUDA_ARCHITECTURES=all-major`,
     # but in older CMake we have to enumerate the architecture list manually.
     # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html
-    #
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.23")
-      set(${ARCHS} all-major PARENT_SCOPE)
-      return()
+      set(archs all-major)
     else()
       if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "3.2" AND CUDAToolkit_VERSION VERSION_LESS "10.0")
         list(APPEND archs 20)
@@ -38,15 +108,16 @@ function(populate_cuda_archs_list ARCHS)
       if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "11.8.0")
         list(APPEND archs 90)
       endif()
+      # Compile all supported major real architectures (SASS),
+      # and the highest major virtual architecture (PTX+SASS).
+      list(SORT archs)
+      list(POP_BACK archs highest_arch)
+      list(TRANSFORM archs APPEND "-real")
+      list(APPEND archs ${highest_arch})
     endif()
   endif()
 
-  # Compile all supported major real architectures (SASS),
-  # and the highest major virtual architecture (PTX+SASS).
-  list(SORT archs)
-  list(POP_BACK archs highest_arch)
-  list(TRANSFORM archs APPEND "-real")
-  list(APPEND archs ${highest_arch})
+  list(REMOVE_DUPLICATES archs)
 
   set(${ARCHS} ${archs} PARENT_SCOPE)
 endfunction(populate_cuda_archs_list)
