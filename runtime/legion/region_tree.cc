@@ -17650,7 +17650,6 @@ namespace Legion {
           it++;
           continue;
         }
-        FieldMask already_open;
         // Now check the current state
         switch (it->open_state)
         {
@@ -17668,7 +17667,7 @@ namespace Legion {
                   {
                     // Remove the child's open fields from the
                     // list of fields we need to open
-                    open_below |= finder->second;
+                    open_below |= (finder->second & closing_mask);
                   }
                 }
                 it++;
@@ -17678,7 +17677,7 @@ namespace Legion {
                 // Not-read only so traverse the interfering children and
                 // close up anything that is not the next child
                 perform_close_operations(user, closing_mask, it->open_children,
-                    privilege_root, this, next_child, already_open, 
+                    privilege_root, this, next_child, open_below, 
                     analysis, true/*filter next*/);
                 // See if there are still any valid open fields
                 if (!it->valid_fields())
@@ -17792,17 +17791,17 @@ namespace Legion {
                       if (!!close_mask) // Case 4
                         perform_close_operations(user, close_mask,
                             it->open_children, privilege_root, this, next_child,
-                            already_open, analysis, true/*filter next*/);
+                            open_below, analysis, true/*filter next*/);
                     }
                     else // Case 4
                       perform_close_operations(user, closing_mask,
                           it->open_children, privilege_root, this, next_child,
-                          already_open, analysis, true/*filter next*/);
+                          open_below, analysis, true/*filter next*/);
                   }
                   else // Case 4
                     perform_close_operations(user, closing_mask,
                         it->open_children, privilege_root, this, next_child,
-                        already_open, analysis, true/*filter next*/);
+                        open_below, analysis, true/*filter next*/);
                 }
               }
               else if (!IS_REDUCE(user.usage) || 
@@ -17811,7 +17810,7 @@ namespace Legion {
                 // Closing everything up, so just do it
                 perform_close_operations(user, closing_mask,
                     it->open_children, privilege_root, this, next_child,
-                    already_open, analysis, true/*filter next*/);
+                    open_below, analysis, true/*filter next*/);
               }
               // Now see if the current field state is still valid
               if (!it->valid_fields())
@@ -17842,7 +17841,7 @@ namespace Legion {
                 // Need to close up the open field since we're going
                 // to have to do it anyway
                 perform_close_operations(user, closing_mask, it->open_children,
-                    privilege_root, this, next_child, already_open,
+                    privilege_root, this, next_child, open_below,
                     analysis, true/*filter next*/);
                 if (!it->valid_fields())
                   it = state.field_states.erase(it);
@@ -17854,23 +17853,17 @@ namespace Legion {
           default:
             assert(false);
         }
-        if (!!already_open)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_child != NULL);
-#endif
-          FieldState new_state(user.usage, already_open, next_child);
-          new_states.emplace_back(std::move(new_state));
-          open_below |= already_open;
-        }
       }
       // If we had any fields that still need to be opened, create
       // a new field state and add it into the set of new states
-      const FieldMask open_mask = closing_mask - open_below;
-      if ((next_child != NULL) && !!open_mask)
+      if (next_child != NULL)
       {
-        FieldState new_state(user.usage, open_mask, next_child);
-        new_states.emplace_back(std::move(new_state));
+        const FieldMask open_mask = closing_mask - open_below;
+        if (!!open_mask)
+        {
+          FieldState new_state(user.usage, open_mask, next_child);
+          new_states.emplace_back(std::move(new_state));
+        }
       }
       if (!new_states.empty())
         merge_new_field_states(state, new_states);
@@ -17950,14 +17943,16 @@ namespace Legion {
           FieldMask overlap = closing_mask & finder->second;
           if (!!overlap)
           {
-            open_below |= overlap;
             if (filter_next)
             {
               FieldMask still_open;
               next_child->close_logical_node(user, overlap, privilege_root,
                                              path_node, analysis, still_open);
               if (!!still_open)
+              {
                 overlap -= still_open;
+                open_below |= still_open;
+              }
               finder.filter(overlap);
               if (!finder->second)
               {
@@ -17967,6 +17962,8 @@ namespace Legion {
                 children.tighten_valid_mask();
               }
             }
+            else
+              open_below |= overlap;
           }
         }
       }
@@ -17986,6 +17983,7 @@ namespace Legion {
                                         path_node, analysis, still_open);
           if (!!still_open)
           {
+            open_below |= still_open;
             if (still_open != close_mask)
             {
               it.filter(close_mask - still_open);
