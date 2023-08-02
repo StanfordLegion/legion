@@ -188,5 +188,17 @@ function(set_target_cuda_architectures cuda_TARGET)
     set_property(TARGET ${cuda_TARGET} PROPERTY CUDA_ARCHITECTURES ${cuda_ARCHITECTURES})
   endif()
 endfunction(set_target_cuda_architectures)
+
+# Set the -Wno-deprecated-gpu-targets option on CUDA targets, and
+# optionally set -Werror=all-warnings if using CUDA Toolkit>=10.2
+function(set_target_cuda_warnings_and_errors cuda_TARGET)
+  set(options )
+  set(oneValueArgs WARN_AS_ERROR)
+  set(multiValueArgs)
+  cmake_parse_arguments(cuda "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+  # starting with nvcc 10.2, we can error out on all warnings
+  if(cuda_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
+    target_compile_options(${cuda_TARGET} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
   endif()
-endfunction()
+  target_compile_options(${cuda_TARGET} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
+endfunction(set_target_cuda_warnings_and_errors)
