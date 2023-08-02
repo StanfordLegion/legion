@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_hello_world hello_world.cc)
 target_link_libraries(realm_hello_world Legion::Realm)
+target_compile_options(realm_hello_world PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_hello_world COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_hello_world> ${Legion_TEST_ARGS})

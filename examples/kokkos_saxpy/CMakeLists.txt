@@ -33,6 +33,7 @@ add_executable(kokkos_saxpy kokkos_saxpy.cc)
 
 target_link_libraries(kokkos_saxpy Kokkos::kokkoscore)
 target_link_libraries(kokkos_saxpy Legion::Legion)
+target_compile_options(kokkos_saxpy PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(KokkosKernels_FOUND)
   target_link_libraries(kokkos_saxpy Kokkos::kokkoskernels)

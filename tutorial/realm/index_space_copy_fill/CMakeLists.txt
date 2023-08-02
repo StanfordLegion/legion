@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_index_space_copy_fill index_space_copy_fill.cc)
 target_link_libraries(realm_index_space_copy_fill Legion::Realm)
+target_compile_options(realm_index_space_copy_fill PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_index_space_copy_fill COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_index_space_copy_fill> ${Legion_TEST_ARGS})

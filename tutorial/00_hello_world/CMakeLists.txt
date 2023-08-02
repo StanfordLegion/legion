@@ -24,6 +24,7 @@ endif()
 
 add_executable(hello_world hello_world.cc)
 target_link_libraries(hello_world Legion::Legion)
+target_compile_options(hello_world PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME hello_world COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:hello_world> ${Legion_TEST_ARGS})
 endif()

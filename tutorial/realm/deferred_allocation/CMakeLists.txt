@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_deferred_allocation deferred_allocation.cc)
 target_link_libraries(realm_deferred_allocation Legion::Realm)
+target_compile_options(realm_deferred_allocation PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_deferred_allocation COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_deferred_allocation> ${Legion_TEST_ARGS})

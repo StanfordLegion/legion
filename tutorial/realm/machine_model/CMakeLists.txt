@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_machine_model machine_model.cc)
 target_link_libraries(realm_machine_model Legion::Realm)
+target_compile_options(realm_machine_model PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_machine_model COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_machine_model> ${Legion_TEST_ARGS})

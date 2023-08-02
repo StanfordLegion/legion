@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_events events_basic.cc)
 target_link_libraries(realm_events Legion::Realm)
+target_compile_options(realm_events PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_events COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_events> ${Legion_TEST_ARGS})

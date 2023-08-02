@@ -26,6 +26,7 @@ set(CPU_SOURCES event_ubench.cc)
 add_executable(event_ubench ${CPU_SOURCES})
 
 target_link_libraries(event_ubench Legion::Realm)
+target_compile_options(event_ubench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME event_ubench COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:event_ubench> ${Legion_TEST_ARGS})
 endif()

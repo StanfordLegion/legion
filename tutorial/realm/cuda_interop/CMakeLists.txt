@@ -45,6 +45,7 @@ elseif(Legion_USE_HIP)
 endif()
 
 target_link_libraries(realm_cuda_interop Legion::Realm)
+target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_cuda_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_cuda_interop> ${Legion_TEST_ARGS} -ll:gpu 1)

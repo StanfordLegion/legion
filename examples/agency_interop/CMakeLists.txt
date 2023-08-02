@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Kitware, Inc.
+# Copyright 2023 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ set(CPU_SOURCES agency_interop.cc)
 set(GPU_SOURCES )
 add_executable(agency_interop ${CPU_SOURCES} ${GPU_SOURCES})
 target_link_libraries(agency_interop Legion::Legion)
+target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 set_source_files_properties(${CPU_SOURCES} PROPERTIES LANGUAGE CUDA)
 

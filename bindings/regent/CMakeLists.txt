@@ -59,6 +59,7 @@ else()
 endif()
 add_library(Legion::Regent ALIAS Regent)
 target_link_libraries(Regent PUBLIC Legion::Legion)
+target_compile_options(Regent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_USE_CUDA)
   target_link_libraries(Regent PRIVATE CUDA::toolkit)

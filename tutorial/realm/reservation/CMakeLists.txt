@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_reservation reservation.cc)
 target_link_libraries(realm_reservation Legion::Realm)
+target_compile_options(realm_reservation PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_reservation COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_reservation> ${Legion_TEST_ARGS})
