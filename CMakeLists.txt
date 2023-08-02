@@ -463,7 +463,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     # Must come after `enable_language(CUDA)`
     set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
 
-    include(cmake/cuda_arch.cmake)
+    include(cmake/cuda_helpers.cmake)
 
     if(CMAKE_CUDA_ARCHITECTURES)
       set(Legion_CUDA_ARCH ${CMAKE_CUDA_ARCHITECTURES})
