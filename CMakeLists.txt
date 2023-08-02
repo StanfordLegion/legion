@@ -421,61 +421,20 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
 
   if(Legion_USE_CUDA OR (Legion_HIP_TARGET STREQUAL "CUDA"))
 
-    # CMAKE_CUDA_RUNTIME_LIBRARY determines whether CUDA objs link to the static
-    # or shared CUDA runtime library. Must be set before `enable_language(CUDA)`
-    # https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_RUNTIME_LIBRARY.html
-    if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
-      if(BUILD_SHARED_LIBS)
-        set(CMAKE_CUDA_RUNTIME_LIBRARY SHARED)
-      else()
-        set(CMAKE_CUDA_RUNTIME_LIBRARY STATIC)
-      endif()
-    endif()
-
-    # Default CMAKE_CUDA_STANDARD to CMAKE_CXX_STANDARD if unset
-    if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
-      set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-    endif()
-
-    # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so unset it before enabling the CUDA language
-    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND (CMAKE_CUDA_STANDARD GREATER_EQUAL 17))
-      unset(CMAKE_CUDA_STANDARD)
-      unset(CMAKE_CUDA_STANDARD CACHE)
-      if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
-        # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
-        string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
-      endif()
-    endif()
-
-    # Enable the CUDA language
-    enable_language(CUDA)
-
-    # Polyfill a CMake < 3.18 missing CUDA compiler detection variable
-    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND (NOT CUDAToolkit_NVCC_EXECUTABLE))
-      set(CUDAToolkit_NVCC_EXECUTABLE "${CMAKE_CUDA_COMPILER}")
-    endif()
-
-    # Find the CUDA toolkit
-    find_package(CUDAToolkit REQUIRED)
-
-    # Work around a clangd bug by generating compile commands
-    # with `-isystem <path>` instead of `-isystem=<path>`.
-    # Must come after `enable_language(CUDA)`
-    set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
-
     include(cmake/cuda_helpers.cmake)
 
-    if(CMAKE_CUDA_ARCHITECTURES)
-      set(Legion_CUDA_ARCH ${CMAKE_CUDA_ARCHITECTURES})
-    elseif(NOT ("${Legion_CUDA_ARCH}" STREQUAL ""))
-      # Support comma-delimited lists in addition to semicolons
-      string(REPLACE "," ";" Legion_CUDA_ARCH "${Legion_CUDA_ARCH}")
-    else()
-      # Default to all major GPU archs
-      populate_cuda_archs_list(Legion_CUDA_ARCH)
-    endif()
+    # Read CMAKE_CUDA_STANDARD or CMAKE_CXX_STANDARD and store in Legion_CUDA_STANDARD
+    infer_cuda_standard(Legion_CUDA_STANDARD)
 
-    list(REMOVE_DUPLICATES Legion_CUDA_ARCH)
+    set(Legion_CUDA_STANDARD "${Legion_CUDA_STANDARD}" CACHE STRING
+      "The CUDA C++ standard to use (14, 17, 20, etc.)"
+      FORCE)
+
+    # Enable the CUDA language and find the CUDA toolkit
+    enable_cuda_language_and_find_cuda_toolkit()
+
+    # Populate the Legion_CUDA_ARCH list, defaulting to all major GPU archs if unset
+    populate_cuda_archs_list(Legion_CUDA_ARCH)
 
     set(Legion_CUDA_ARCH "${Legion_CUDA_ARCH}" CACHE STRING
       "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)"
