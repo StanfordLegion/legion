@@ -866,32 +866,33 @@ namespace Realm {
     //
     // class GPUChannel
 
-    GPUChannel::GPUChannel(GPU* _src_gpu, XferDesKind _kind,
+    GPUChannel::GPUChannel(GPU *_src_gpu, XferDesKind _kind,
                            BackgroundWorkManager *bgwork)
-      : SingleXDQChannel<GPUChannel,GPUXferDes>(bgwork,
-                                                _kind,
-                                                stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
-    {
+        : SingleXDQChannel<GPUChannel, GPUXferDes>(
+              bgwork, _kind,
+              stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index
+                              << " kind=" << (int)_kind << ")") {
       src_gpu = _src_gpu;
 
       // switch out of ordered mode if multi-threaded dma is requested
-      if(_src_gpu->module->cfg_multithread_dma)
+      if (_src_gpu->module->cfg_multithread_dma)
         xdq.ordered_mode = false;
 
       std::vector<Memory> local_gpu_mems;
       local_gpu_mems.push_back(src_gpu->fbmem->me);
-      if(src_gpu->fb_ibmem)
+      if (src_gpu->fb_ibmem)
         local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
 
       // look for any other local memories that belong to our context or
       //  peer-able contexts
-      const Node& n = get_runtime()->nodes[Network::my_node_id];
-      for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
-          it != n.memories.end();
-          ++it) {
-        CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
-        if(!cdm) continue;
-        if(cdm->context == src_gpu->context) {
+      const Node &n = get_runtime()->nodes[Network::my_node_id];
+      for (std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+           it != n.memories.end(); ++it) {
+        CudaDeviceMemoryInfo *cdm =
+            (*it)->find_module_specific<CudaDeviceMemoryInfo>();
+        if (!cdm)
+          continue;
+        if (cdm->context == src_gpu->context) {
           local_gpu_mems.push_back((*it)->me);
         }
       }
@@ -905,95 +906,125 @@ namespace Realm {
                              src_gpu->managed_mems.begin(),
                              src_gpu->managed_mems.end());
 
-      switch(_kind) {
-      case XFER_GPU_TO_FB:
-        {
-          unsigned bw = src_gpu->info->pci_bandwidth;
-          unsigned latency = 1000;  // HACK - estimate at 1 us
-          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+      switch (_kind) {
+      case XFER_GPU_TO_FB: {
+        unsigned bw = src_gpu->info->pci_bandwidth;
+        unsigned latency = 1000;       // HACK - estimate at 1 us
+        unsigned frag_overhead = 2000; // HACK - estimate at 2 us
 
-          add_path(mapped_cpu_mems,
-                   local_gpu_mems,
-                   bw, latency, frag_overhead, XFER_GPU_TO_FB)
+        add_path(mapped_cpu_mems, local_gpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_TO_FB)
             .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
 
-          break;
-        }
+        break;
+      }
 
-      case XFER_GPU_FROM_FB:
-        {
-          unsigned bw = src_gpu->info->pci_bandwidth;  // HACK - estimate at 10 GB/s
-          unsigned latency = 1000;  // HACK - estimate at 1 us
-          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+      case XFER_GPU_FROM_FB: {
+        unsigned bw =
+            src_gpu->info->pci_bandwidth; // HACK - estimate at 10 GB/s
+        unsigned latency = 1000;          // HACK - estimate at 1 us
+        unsigned frag_overhead = 2000;    // HACK - estimate at 2 us
 
-          add_path(local_gpu_mems,
-                   mapped_cpu_mems,
-                   bw, latency, frag_overhead, XFER_GPU_FROM_FB)
+        add_path(local_gpu_mems, mapped_cpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_FROM_FB)
             .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
 
-          break;
-        }
+        break;
+      }
 
-      case XFER_GPU_IN_FB:
-        {
-          // self-path
-          unsigned bw = src_gpu->info->logical_peer_bandwidth[_src_gpu->info->index];
-          unsigned latency = src_gpu->info->logical_peer_latency[_src_gpu->info->index];
-          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+      case XFER_GPU_IN_FB: {
+        // self-path
+        unsigned bw =
+            src_gpu->info->logical_peer_bandwidth[_src_gpu->info->index];
+        unsigned latency =
+            src_gpu->info->logical_peer_latency[_src_gpu->info->index];
+        unsigned frag_overhead = 2000; // HACK - estimate at 2 us
 
-          add_path(local_gpu_mems,
-                   local_gpu_mems,
-                   bw, latency, frag_overhead, XFER_GPU_IN_FB)
+        add_path(local_gpu_mems, local_gpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_IN_FB)
             .set_max_dim(3);
 
-          break;
-        }
+        break;
+      }
 
-      case XFER_GPU_PEER_FB:
-        {
-          // just do paths to peers - they'll do the other side
-          for (GPU *peer_gpu : src_gpu->module->gpus) {
-            if (src_gpu->info->peers.find(peer_gpu->info->index) !=
-                src_gpu->info->peers.end()) {
-              unsigned bw = static_cast<unsigned>(
-                  src_gpu->info->logical_peer_bandwidth[peer_gpu->info->index]);
-              unsigned latency = static_cast<unsigned>(
-                  src_gpu->info->logical_peer_latency[peer_gpu->info->index]);
-              unsigned frag_overhead = 2000; // HACK - estimate at 2 us
-              if (peer_gpu->fbmem != nullptr) {
-                add_path(local_gpu_mems,
-                        peer_gpu->fbmem->me, bw, latency,
-                        frag_overhead, XFER_GPU_PEER_FB)
-                    .set_max_dim(3);
-              }
-              if (peer_gpu->fb_ibmem != nullptr) {
-                add_path(local_gpu_mems,
-                        peer_gpu->fb_ibmem->me, bw,
-                        latency, frag_overhead, XFER_GPU_PEER_FB)
-                    .set_max_dim(3);
-              }
+      case XFER_GPU_PEER_FB: {
+        // just do paths to peers - they'll do the other side
+        for (GPU *peer_gpu : src_gpu->module->gpus) {
+          // Skip paths to the same GPU
+          if (peer_gpu == src_gpu)
+            continue;
+          if (src_gpu->info->peers.find(peer_gpu->info->index) !=
+              src_gpu->info->peers.end()) {
+            unsigned bw = static_cast<unsigned>(
+                src_gpu->info->logical_peer_bandwidth[peer_gpu->info->index]);
+            unsigned latency = static_cast<unsigned>(
+                src_gpu->info->logical_peer_latency[peer_gpu->info->index]);
+            unsigned frag_overhead = 2000; // HACK - estimate at 2 us
+            if (peer_gpu->fbmem != nullptr) {
+              add_path(local_gpu_mems, peer_gpu->fbmem->me, bw, latency,
+                       frag_overhead, XFER_GPU_PEER_FB)
+                  .set_max_dim(3);
+            }
+            if (peer_gpu->fb_ibmem != nullptr) {
+              add_path(local_gpu_mems, peer_gpu->fb_ibmem->me, bw, latency,
+                       frag_overhead, XFER_GPU_PEER_FB)
+                  .set_max_dim(3);
+            }
+            // Add paths for peer managed memories
+            for (Realm::Memory mem : peer_gpu->managed_mems) {
+              bw = src_gpu->info->pci_bandwidth; // HACK - be pessimestic with
+                                                 // managed memory
+              latency = 2000;                    // HACK - estimate at 2 us
+              add_path(local_gpu_mems, mem, bw, latency, frag_overhead,
+                       XFER_GPU_PEER_FB)
+                  .set_max_dim(3);
             }
           }
+        }
 
-          for (const GPU::CudaIpcMapping &mapping : src_gpu->cudaipc_mappings) {
-            unsigned bw = src_gpu->info->pci_bandwidth;
-            unsigned latency = 1000;       // HACK - estimate at 1 us
-            unsigned frag_overhead = 2000; // HACK - estimate at 2 us
-            if (mapping.src_gpu != nullptr) {
-              bw = static_cast<unsigned>(
-                  src_gpu->info
-                      ->logical_peer_bandwidth[mapping.src_gpu->info->index]);
-              latency = static_cast<unsigned>(
-                  src_gpu->info
-                      ->logical_peer_latency[mapping.src_gpu->info->index]);
+        for (const GPU::CudaIpcMapping &mapping : src_gpu->cudaipc_mappings) {
+          unsigned bw = src_gpu->info->pci_bandwidth;
+          unsigned latency = 1000;       // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000; // HACK - estimate at 2 us
+          if (mapping.src_gpu != nullptr) {
+            bw = static_cast<unsigned>(
+                src_gpu->info
+                    ->logical_peer_bandwidth[mapping.src_gpu->info->index]);
+            latency = static_cast<unsigned>(
+                src_gpu->info
+                    ->logical_peer_latency[mapping.src_gpu->info->index]);
+          }
+          add_path(local_gpu_mems, mapping.mem, bw, latency, frag_overhead,
+                   XFER_GPU_PEER_FB)
+              .set_max_dim(3);
+        }
+
+        // Add paths for GPU dynamic memories
+        Node &node = get_runtime()->nodes[Network::my_node_id];
+        for (MemoryImpl *memImpl : node.memories) {
+          if (memImpl->get_kind() == Realm::Memory::GPU_DYNAMIC_MEM) {
+            CudaDeviceMemoryInfo *cdm =
+                memImpl->find_module_specific<CudaDeviceMemoryInfo>();
+            if (cdm->gpu == src_gpu) {
+              continue;
             }
-            add_path(local_gpu_mems, mapping.mem, bw,
-                     latency, frag_overhead, XFER_GPU_PEER_FB)
+            if (src_gpu->info->peers.find(cdm->gpu->info->index) ==
+                src_gpu->info->peers.end()) {
+              continue;
+            }
+            unsigned bw = static_cast<unsigned>(
+                src_gpu->info->logical_peer_bandwidth[cdm->gpu->info->index]);
+            unsigned latency = static_cast<unsigned>(
+                src_gpu->info->logical_peer_latency[cdm->gpu->info->index]);
+            unsigned frag_overhead = 2000; // HACK - estimate at 2 us
+            add_path(local_gpu_mems, memImpl->me, bw, latency, frag_overhead,
+                     XFER_GPU_PEER_FB)
                 .set_max_dim(3);
           }
-
-          break;
         }
+
+        break;
+      }
 
       default:
         assert(0);
@@ -1846,7 +1877,7 @@ namespace Realm {
           //  access, use it
           // TODO: add option to enable peer access at this point?  might be
           //  expensive...
-          if(cdm->gpu && (gpu->info->peers.count(cdm->gpu->info->device) > 0))
+          if(cdm->gpu && (gpu->info->peers.count(cdm->gpu->info->index) > 0))
             peer_gpu_mems.push_back((*it)->me);
         }
       }

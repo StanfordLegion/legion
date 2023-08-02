@@ -3297,7 +3297,7 @@ namespace Realm {
       for(std::vector<GPUInfo *>::const_iterator it = module->gpu_info.begin();
 	  it != module->gpu_info.end();
 	  ++it)
-	if(info->peers.count((*it)->device) != 0)
+	if(info->peers.count((*it)->index) != 0)
 	  peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
 
       task_streams.resize(module->cfg_task_streams);
@@ -3422,7 +3422,7 @@ namespace Realm {
           continue;
 
         // ignore gpus that we don't expect to be able to peer with
-        if(info->peers.count(peer_gpu->info->device) == 0)
+        if(info->peers.count(peer_gpu->info->index) == 0)
           continue;
 
         // ignore gpus with no fb
@@ -3474,7 +3474,7 @@ namespace Realm {
         CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
         if(!cdm)
           continue;
-        if(cdm->gpu && (info->peers.count(cdm->gpu->info->device) > 0)) {
+        if(cdm->gpu && (info->peers.count(cdm->gpu->info->index) > 0)) {
           Machine::ProcessorMemoryAffinity pma;
           pma.p = p;
           pma.m = (*it)->me;
@@ -4278,7 +4278,7 @@ namespace Realm {
         // query peer-to-peer access (all pairs)
         for(size_t i = 0; i < infos.size(); i++) {
           // two contexts on the same device can always "peer to peer"
-          infos[i]->peers.insert(infos[i]->device);
+          infos[i]->peers.insert(infos[i]->index);
           {
             // Gather the framebuffer bandwidth and latency from CUDA
             int memclk /*kHz*/, buswidth;
@@ -4304,7 +4304,7 @@ namespace Realm {
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceCanAccessPeer)(
                 &can_access, infos[i]->device, infos[j]->device));
             if (can_access) {
-              infos[i]->peers.insert(infos[j]->device);
+              infos[i]->peers.insert(infos[j]->index);
               if (infos[i]->logical_peer_bandwidth[j] == 0) {
                 // Not nvlink (otherwise this would have been enumerated
                 // earlier), so assume this is NVSWITCH (if we detected nvswitch
