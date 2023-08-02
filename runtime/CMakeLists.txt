@@ -503,8 +503,8 @@ if(Legion_USE_CUDA)
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 
-  set_target_cuda_architectures(TARGET RealmRuntime ARCHS ${Legion_CUDA_ARCH})
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
 endif()
 
 if(Legion_USE_HIP)
@@ -826,8 +826,8 @@ if(Legion_USE_CUDA)
     target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
   endif()
 
-  set_target_cuda_architectures(TARGET LegionRuntime ARCHS ${Legion_CUDA_ARCH})
   set_target_cuda_standard(LegionRuntime STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(LegionRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
 endif()
 
 if(Legion_USE_HIP)

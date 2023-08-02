@@ -63,13 +63,13 @@ target_compile_options(Regent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARN
 
 if(Legion_USE_CUDA)
   target_link_libraries(Regent PRIVATE CUDA::toolkit)
-  set_target_cuda_architectures(TARGET Regent ARCHS ${Legion_CUDA_ARCH})
   # starting with nvcc 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
     target_compile_options(Regent PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
   endif()
   target_compile_options(Regent PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
   set_target_cuda_standard(Regent STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(Regent ARCHITECTURES ${Legion_CUDA_ARCH})
 elseif(Legion_USE_HIP)
   target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
   if (Legion_HIP_TARGET STREQUAL "CUDA")

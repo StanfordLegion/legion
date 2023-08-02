@@ -30,8 +30,6 @@ target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BU
 
 set_source_files_properties(${CPU_SOURCES} PROPERTIES LANGUAGE CUDA)
 
-set_target_cuda_architectures(TARGET agency_interop ARCHS ${Legion_CUDA_ARCH})
-
 # starting with nvcc 10.2, we can error out on all warnings
 if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
   target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
@@ -39,3 +37,5 @@ endif()
 
 target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 set_target_cuda_standard(agency_interop STANDARD ${Legion_CUDA_STANDARD})
+set_target_cuda_architectures(agency_interop ARCHITECTURES ${Legion_CUDA_ARCH})
+set_target_cuda_warnings_and_errors(agency_interop WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
