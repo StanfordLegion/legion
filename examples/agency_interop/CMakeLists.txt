@@ -38,3 +38,4 @@ if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.
 endif()
 
 target_compile_options(agency_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
+set_target_cuda_standard(agency_interop STANDARD ${Legion_CUDA_STANDARD})

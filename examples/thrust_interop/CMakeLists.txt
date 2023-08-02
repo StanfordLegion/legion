@@ -36,5 +36,6 @@ if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.
 endif()
 target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
 
+set_target_cuda_standard(thrust_interop STANDARD ${Legion_CUDA_STANDARD})
 target_link_libraries(thrust_interop Legion::Legion)
 target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)

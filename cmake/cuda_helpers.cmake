@@ -122,6 +122,31 @@ function(populate_cuda_archs_list ARCHS)
   set(${ARCHS} ${archs} PARENT_SCOPE)
 endfunction(populate_cuda_archs_list)
 
+# Set a target's CUDA_STANDARD property.
+# Since CMake < 3.18 doesn't recognize >=17 as a CUDA standard,
+# this function falls back to setting the `-std=` compile option.
+function(set_target_cuda_standard cuda_TARGET)
+  set(options )
+  set(oneValueArgs STANDARD)
+  set(multiValueArgs)
+  cmake_parse_arguments(cuda "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  if(NOT ("${cuda_STANDARD}" STREQUAL ""))
+    if((CMAKE_VERSION VERSION_GREATER_EQUAL "3.18") OR (cuda_STANDARD LESS 17))
+      set_target_properties(${cuda_TARGET} PROPERTIES CUDA_STANDARD ${cuda_STANDARD} CUDA_STANDARD_REQUIRED ON)
+    else()
+      # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set the `-std=` compile option instead.
+      get_target_property(target_opts ${cuda_TARGET} COMPILE_OPTIONS)
+      get_target_property(interface_opts ${cuda_TARGET} INTERFACE_COMPILE_OPTIONS)
+      set(target_and_interface_opts ${target_opts} ${interface_opts})
+      # Only set `-std=` if it's not already in the target's list of compile options
+      if(NOT ("${target_and_interface_opts}" MATCHES ".*-std=.*"))
+        target_compile_options(${cuda_TARGET} PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-std=c++${CMAKE_CXX_STANDARD}>)
+      endif()
+    endif()
+  endif()
+endfunction(set_target_cuda_standard)
+
 # Set a target's CUDA_ARCHITECTURES property, or translate the archs list
 # to --generate-code flags for CMake < 3.18
 function(set_target_cuda_architectures)
