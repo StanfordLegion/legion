@@ -24115,7 +24115,8 @@ namespace Legion {
                                 std::map<EquivalenceSet*,
                                   LegionMap<Domain,FieldMask> > &creation_srcs,
                                 FieldMaskSet<EqKDTree> &new_subscriptions,
-                                AddressSpaceID source, unsigned total_responses,
+                                unsigned new_references, AddressSpaceID source,
+                                unsigned total_responses,
                                 std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
@@ -24179,15 +24180,14 @@ namespace Legion {
               pending_equivalence_sets->insert(it->first, it->second);
           }
         }
+        if (new_references > 0)
+          add_subscription_reference(new_references);
         // Record subscription owners
         if (!new_subscriptions.empty())
         {
           FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
           if (subscriptions.empty())
-          {
             subscriptions.swap(new_subscriptions);
-            add_subscription_reference(subscriptions.size());
-          }
           else
             record_subscriptions(source, new_subscriptions);
         }
@@ -24293,12 +24293,7 @@ namespace Legion {
       assert(!new_subscriptions.empty());
 #endif
       FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
-      if (subscriptions.empty())
-      {
-        subscriptions = new_subscriptions;
-        add_subscription_reference(subscriptions.size());
-      }
-      else
+      if (!subscriptions.empty())
       {
         for (FieldMaskSet<EqKDTree>::const_iterator it =
               new_subscriptions.begin(); it != new_subscriptions.end(); it++)
@@ -24307,10 +24302,11 @@ namespace Legion {
           assert((subscriptions.find(it->first) == subscriptions.end()) ||
               (subscriptions.find(it->first)->second * it->second));
 #endif
-          if (subscriptions.insert(it->first, it->second))
-            add_subscription_reference();
+          subscriptions.insert(it->first, it->second);
         }
       }
+      else
+        subscriptions = new_subscriptions;
     }
 
     //--------------------------------------------------------------------------

@@ -7061,6 +7061,15 @@ namespace Legion {
                 const RtUserEvent ready = Runtime::create_rt_user_event();
                 pending_set_creations->insert(
                     std::make_pair(ready, remaining));
+                // Record the subscription now so we know whether to 
+                // add a reference to the tracker or not
+                if (record_subscription(tracker, tracker_space, remaining))
+                {
+#ifdef DEBUG_LEGION
+                  assert(!subscribed);
+#endif
+                  subscribed = true;
+                }
                 to_create.insert(this, remaining);
                 creation_rects[this] = Domain(rect);
                 // Find any creation sources
@@ -7474,6 +7483,9 @@ namespace Legion {
               for (FieldMaskSet<EqSetTracker>::const_iterator it =
                     sit->second.begin(); it != sit->second.end(); it++)
               {
+                // Skip the creator tracker since it made it
+                if ((sit->first == source) && (it->first == tracker))
+                  continue;
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
                   continue;
@@ -7520,6 +7532,9 @@ namespace Legion {
               for (FieldMaskSet<EqSetTracker>::const_iterator it =
                     sit->second.begin(); it != sit->second.end(); it++)
               {
+                // Skip the creator tracker since it made it
+                if ((sit->first == source) && (it->first == tracker))
+                  continue;
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
                   continue;
@@ -7583,8 +7598,6 @@ namespace Legion {
           delete pending_set_creations;
           pending_set_creations = NULL;
         }
-        // Record the new tracker as a subscription
-        record_subscription(tracker, source, mask);
         // If the ready event hasn't triggered when need to keep around
         // this event so no one tries to use the new equivalence set or
         // invalidate any of the previous sets it depends on until it

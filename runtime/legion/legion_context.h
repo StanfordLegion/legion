@@ -1193,7 +1193,7 @@ namespace Legion {
       RtEvent report_equivalence_sets(EqSetTracker *target, 
           AddressSpaceID target_space, const FieldMask &mask,
           FieldMaskSet<EquivalenceSet> &eq_sets,
-          FieldMaskSet<EqKDTree> &new_subscriptions,
+          FieldMaskSet<EqKDTree> &new_subscriptions, unsigned new_references,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,

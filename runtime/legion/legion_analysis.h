@@ -3585,7 +3585,7 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
-          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &subscriptions, unsigned new_references,
           AddressSpaceID source, unsigned expected_responses,
           std::vector<RtEvent> &ready_events);
       void record_output_subscriptions(AddressSpaceID source,
