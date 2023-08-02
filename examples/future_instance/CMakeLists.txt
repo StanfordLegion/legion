@@ -30,10 +30,6 @@ set(GPU_SOURCES future_instance.cu)
 add_executable(future_instance ${GPU_SOURCES})
 set_target_cuda_standard(future_instance STANDARD ${Legion_CUDA_STANDARD})
 set_target_cuda_architectures(future_instance ARCHITECTURES ${Legion_CUDA_ARCH})
-# starting with nvcc 10.2, we can error out on all warnings
-if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-  target_compile_options(future_instance PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Werror=all-warnings>)
-endif()
-target_compile_options(future_instance PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Wno-deprecated-gpu-targets>)
+set_target_cuda_warnings_and_errors(future_instance WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 
 target_link_libraries(future_instance Legion::Legion)
