@@ -8235,75 +8235,82 @@ namespace Legion {
       {
         // No matter what we're going to do here we need to invalidate the
         // subscriptions so do that first to get them in flight
-        if (subscriptions != NULL)
+        // Note that while we don't need the lock for most of this method
+        // we do need it here since cancel_subscription calls can come 
+        // back and try to touch the subscription data structure while
+        // we're doing the invalidation 
+        typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
+        LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
         {
-          typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
-          LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
-          for (LegionMap<AddressSpaceID,
-                         FieldMaskSet<EqSetTracker> >::iterator
-                sit = subscriptions->begin(); 
-                sit != subscriptions->end(); /*nothing*/)
+          AutoLock n_lock(node_lock);
+          if (subscriptions != NULL)
           {
-            if (sit->second.get_valid_mask() * current_mask)
+            for (LegionMap<AddressSpaceID,
+                           FieldMaskSet<EqSetTracker> >::iterator
+                  sit = subscriptions->begin(); 
+                  sit != subscriptions->end(); /*nothing*/)
             {
-              sit++;
-              continue;
-            }
-            TrackerInvalidations &invalidations = to_invalidate[sit->first];
-            invalidations.all_subscribers_finished = true;
-            if (!(sit->second.get_valid_mask() - current_mask))
-            {
-              // Going to invalidate all the trackers 
-              invalidations.subscribers.swap(sit->second);
-              LegionMap<AddressSpaceID,
-                FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
-              subscriptions->erase(to_delete);
-            }
-            else
-            {
-              // Selectively filter the trackers
-              std::vector<EqSetTracker*> to_delete;
-              for (FieldMaskSet<EqSetTracker>::iterator it =
-                    sit->second.begin(); it != sit->second.end(); it++)
+              if (sit->second.get_valid_mask() * current_mask)
               {
-                const FieldMask overlap = current_mask & it->second;
-                if (!overlap)
-                  continue;
-                invalidations.subscribers.insert(it->first, overlap);
-                it.filter(overlap);
-                if (!it->second)
-                  to_delete.push_back(it->first);
-                else
-                  invalidations.all_subscribers_finished = false;
+                sit++;
+                continue;
               }
-              for (std::vector<EqSetTracker*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-                sit->second.erase(*it);
-              if (sit->second.empty())
+              TrackerInvalidations &invalidations = to_invalidate[sit->first];
+              invalidations.all_subscribers_finished = true;
+              if (!(sit->second.get_valid_mask() - current_mask))
               {
-                invalidations.all_subscribers_finished = true;
+                // Going to invalidate all the trackers 
+                invalidations.subscribers.swap(sit->second);
                 LegionMap<AddressSpaceID,
                   FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
                 subscriptions->erase(to_delete);
               }
               else
               {
-                if (!invalidations.all_subscribers_finished)
-                  invalidations.finished.swap(to_delete);
-                sit->second.tighten_valid_mask();
-                sit++;
+                // Selectively filter the trackers
+                std::vector<EqSetTracker*> to_delete;
+                for (FieldMaskSet<EqSetTracker>::iterator it =
+                      sit->second.begin(); it != sit->second.end(); it++)
+                {
+                  const FieldMask overlap = current_mask & it->second;
+                  if (!overlap)
+                    continue;
+                  invalidations.subscribers.insert(it->first, overlap);
+                  it.filter(overlap);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                  else
+                    invalidations.all_subscribers_finished = false;
+                }
+                for (std::vector<EqSetTracker*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  sit->second.erase(*it);
+                if (sit->second.empty())
+                {
+                  invalidations.all_subscribers_finished = true;
+                  LegionMap<AddressSpaceID,
+                    FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
+                  subscriptions->erase(to_delete);
+                }
+                else
+                {
+                  if (!invalidations.all_subscribers_finished)
+                    invalidations.finished.swap(to_delete);
+                  sit->second.tighten_valid_mask();
+                  sit++;
+                }
               }
             }
+            if (subscriptions->empty())
+            {
+              delete subscriptions;
+              subscriptions = NULL;
+            }
           }
-          if (subscriptions->empty())
-          {
-            delete subscriptions;
-            subscriptions = NULL;
-          }
-          if (!to_invalidate.empty())
-            EqSetTracker::invalidate_subscriptions(runtime, this,
-                                      to_invalidate, invalidated);
         }
+        if (!to_invalidate.empty())
+          EqSetTracker::invalidate_subscriptions(runtime, this,
+                                    to_invalidate, invalidated);
         if (this->bounds == rect)
         {
           // We know these fields no longer need to be filtered
