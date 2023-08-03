@@ -4325,7 +4325,6 @@ namespace Legion {
                           FutureImpl *future);
       void subscribe_to_future(std::vector<RtEvent> &ready_events,
                                FutureImpl *future);
-      Future pick_initial_value(Future initial_value);
     protected:
       FutureMap future_map;
       ReductionOpID redop_id;
