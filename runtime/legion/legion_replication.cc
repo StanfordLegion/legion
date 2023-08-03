@@ -5617,24 +5617,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::map_replicate_tasks(void) const
+    void ReplMustEpochOp::map_replicate_tasks(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(dependence_exchange != NULL);
       assert(single_tasks.size() == mapping_dependences.size());
 #endif
-      std::map<DomainPoint,RtUserEvent> mapped_events;
+      std::vector<RtEvent> local_mapped_events;
+      local_mapped_events.reserve(shard_single_tasks.size());
       for (std::set<SingleTask*>::const_iterator it = 
             shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
-        mapped_events[(*it)->index_point] = Runtime::create_rt_user_event();
+      {
+        const RtUserEvent mapped = Runtime::create_rt_user_event();
+        mapped_events[(*it)->index_point] = mapped;
+        local_mapped_events.push_back(mapped);
+      }
       // Now exchange completion events for the point tasks we own
       // and end up with a set of the completion event for each task
       // First compute the set of mapped events for the points that we own
       dependence_exchange->exchange_must_epoch_dependences(mapped_events);
 
       MustEpochMapArgs args(const_cast<ReplMustEpochOp*>(this));
-      std::set<RtEvent> local_mapped_events;
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
       for (unsigned idx = 0; idx < single_tasks.size(); idx++)
@@ -5667,16 +5671,12 @@ namespace Legion {
         if (!preconditions.empty())
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
-          done = runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
+          runtime->issue_runtime_meta_task(args, 
+                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
         }
         else
-          done = runtime->issue_runtime_meta_task(args, 
+          runtime->issue_runtime_meta_task(args, 
                       LG_THROUGHPUT_DEFERRED_PRIORITY);
-        local_mapped_events.insert(done);
-        // We can trigger our completion event once the task is done
-        RtUserEvent mapped = mapped_events[single_tasks[idx]->index_point];
-        Runtime::trigger_event(mapped, done);
       }
       // Now we have to wait for all our mapping operations to be done
       if (!local_mapped_events.empty())
@@ -5684,6 +5684,7 @@ namespace Legion {
         RtEvent mapped_event = Runtime::merge_events(local_mapped_events);
         mapped_event.wait();
       }
+      mapped_events.clear();
     }
 
     //--------------------------------------------------------------------------

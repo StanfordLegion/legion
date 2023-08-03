@@ -14964,6 +14964,7 @@ namespace Legion {
       dependences.clear();
       single_task_map.clear();
       mapping_dependences.clear();
+      mapped_events.clear();
       input.tasks.clear();
       input.constraints.clear();
       output.task_processors.clear();
@@ -15315,7 +15316,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::map_tasks(void) const
+    void MustEpochOp::map_tasks(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15324,7 +15325,15 @@ namespace Legion {
       MustEpochMapArgs args(const_cast<MustEpochOp*>(this));
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
-      std::vector<RtEvent> mapped_events(single_tasks.size());
+      std::vector<RtEvent> wait_events;
+      wait_events.reserve(single_tasks.size());
+      for (std::vector<SingleTask*>::const_iterator it = 
+            single_tasks.begin(); it != single_tasks.end(); it++)
+      {
+        const RtUserEvent mapped = Runtime::create_rt_user_event();
+        mapped_events[(*it)->index_point] = mapped;
+        wait_events.push_back(mapped);
+      }
       for (unsigned idx = 0; idx < single_tasks.size(); idx++)
       {
         // Figure out our preconditions
@@ -15336,36 +15345,37 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert((*it) < idx);
 #endif
-          preconditions.insert(mapped_events[*it]);
+          preconditions.insert(mapped_events[single_tasks[*it]->index_point]);
         }
         args.task = single_tasks[idx];
         if (!preconditions.empty())
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
-          mapped_events[idx] = 
-            runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
         }
         else
-          mapped_events[idx] = 
-            runtime->issue_runtime_meta_task(args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+          runtime->issue_runtime_meta_task(args,
+                LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
-      std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
         mapped_event.wait();
       }
+      mapped_events.clear();
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::map_single_task(SingleTask *task)
+    void MustEpochOp::record_mapped_event(const DomainPoint &point, 
+                                          RtEvent mapped)
     //--------------------------------------------------------------------------
     {
-      RtEvent done_mapping = task->perform_mapping(this);
-      if (done_mapping.exists())
-        done_mapping.wait();
+#ifdef DEBUG_LEGION
+      assert(mapped_events.find(point) != mapped_events.end());
+#endif
+      // No need for a lock since this data structure is read-only here
+      Runtime::trigger_event(mapped_events[point], mapped);
     }
 
     //--------------------------------------------------------------------------
@@ -15373,7 +15383,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
-      map_args->owner->map_single_task(map_args->task);
+      map_args->task->perform_mapping(map_args->owner);
     }
 
     //--------------------------------------------------------------------------
