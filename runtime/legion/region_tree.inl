@@ -8142,107 +8142,97 @@ namespace Legion {
 #endif
       // This is very important: invalidations are protected from the root
       // of the equivalence set tree with an exclusive lock, that means that
-      // any invalidation traversing the tree does not need to take any 
-      // local locks inside these nodes since we know that the entire 
-      // traversal and mutation of the tree for invalidations is excluisve.
+      // any invalidation traversing the tree does not need to protect against
+      // races with compute_equivalence_set traversals since.
       // This property is what allows us to safely propogate the information
       // about the all_previous_below safely up the tree. While it's expensive
       // to have a whole-tree lock like this, invalidations being done by
       // refinements should be pretty rare so it shouldn't impact performance.
+      // Note we still need to take the node lock here in this node because
+      // calls like record_equivalence_set or cancel_subscription can still
+      // be coming back asynchronously to touch data structures in these nodes
 
-      // First check to see if there are any current sets which
-      // haven't had their previous sets filtered yet. We have to
-      // do this first to ensure that the lefts and rights and data
-      // structures only contain real lefts and rights and not ones
-      // that we were just holding on to for previous reasons
-      if (current_set_preconditions != NULL)
+      FieldMask remaining = mask;
+      FieldMaskSet<EqKDNode<DIM,T> > to_invalidate_previous;
+      typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
+      LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
       {
-        FieldMaskSet<EqKDNode<DIM,T> > to_invalidate_previous;
-        for (LegionMap<RtEvent,FieldMask>::iterator it =
-              current_set_preconditions->begin(); it !=
-              current_set_preconditions->end(); /*nothing*/)
+        // Take the lock to protect against data structures that might
+        // be racing with recording equivalence sets or cancelling subscriptions
+        AutoLock n_lock(node_lock);
+        // First check to see if there are any current sets which
+        // haven't had their previous sets filtered yet. We have to
+        // do this first to ensure that the lefts and rights and data
+        // structures only contain real lefts and rights and not ones
+        // that we were just holding on to for previous reasons
+        if (current_set_preconditions != NULL)
         {
-          if (!(it->second * mask))
+          for (LegionMap<RtEvent,FieldMask>::iterator it =
+                current_set_preconditions->begin(); it !=
+                current_set_preconditions->end(); /*nothing*/)
           {
+            if (!(it->second * mask))
+            {
 #ifdef DEBUG_LEGION
-            // Better have triggered by the point we're doing
-            // this invalidation or something is wrong with the
-            // mapping dependences for this refinement operation
-            assert(it->first.has_triggered());
+              // Better have triggered by the point we're doing
+              // this invalidation or something is wrong with the
+              // mapping dependences for this refinement operation
+              assert(it->first.has_triggered());
 #endif
-            invalidate_previous_sets(it->second, to_invalidate_previous);
-            LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
-            current_set_preconditions->erase(to_delete);
+              invalidate_previous_sets(it->second, to_invalidate_previous);
+              LegionMap<RtEvent,FieldMask>::iterator to_delete = it++;
+              current_set_preconditions->erase(to_delete);
+            }
+            else
+              it++;
+          }
+          if (current_set_preconditions->empty())
+          {
+            delete current_set_preconditions;
+            current_set_preconditions = NULL;
+          } 
+        }
+        // Special case for where we're just invalidating everything so we
+        // can filter things from the previous sets eagerly 
+        if (!move_to_previous && (previous_sets != NULL) &&
+            !(mask * previous_sets->get_valid_mask()))
+        {
+          std::vector<EquivalenceSet*> to_delete;
+          for (FieldMaskSet<EquivalenceSet>::iterator it =
+                previous_sets->begin(); it != previous_sets->end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          for (std::vector<EquivalenceSet*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            previous_sets->erase(*it);
+            if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+              delete (*it);
+          }
+          if (previous_sets->empty())
+          {
+            delete previous_sets;
+            previous_sets = NULL;
           }
           else
-            it++;
+            previous_sets->tighten_valid_mask();
         }
-        if (current_set_preconditions->empty())
+        // Check to see which fields we have current equivalence sets
+        // for on this node as these are the ones that will ultimately
+        // have to be invalidated
+        FieldMask current_mask;
+        if (current_sets != NULL)
+          current_mask = mask & current_sets->get_valid_mask();
+        if (!!current_mask)
         {
-          delete current_set_preconditions;
-          current_set_preconditions = NULL;
-        }
-        for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-              to_invalidate_previous.begin(); it != 
-              to_invalidate_previous.end(); it++)
-        {
-          it->first->invalidate_all_previous_sets(it->second);
-          if (it->first->remove_reference())
-            delete it->first;
-        }
-      }
-
-      // Special case for where we're just invalidating everything so we
-      // can filter things from the previous sets eagerly 
-      if (!move_to_previous && (previous_sets != NULL) &&
-          !(mask * previous_sets->get_valid_mask()))
-      {
-        std::vector<EquivalenceSet*> to_delete;
-        for (FieldMaskSet<EquivalenceSet>::iterator it =
-              previous_sets->begin(); it != previous_sets->end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          it.filter(overlap);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        for (std::vector<EquivalenceSet*>::const_iterator it =
-              to_delete.begin(); it != to_delete.end(); it++)
-        {
-          previous_sets->erase(*it);
-          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete (*it);
-        }
-        if (previous_sets->empty())
-        {
-          delete previous_sets;
-          previous_sets = NULL;
-        }
-        else
-          previous_sets->tighten_valid_mask();
-      }
-
-      // Check to see which fields we have current equivalence sets
-      // for on this node as these are the ones that will ultimately
-      // have to be invalidated
-      FieldMask current_mask;
-      if (current_sets != NULL)
-        current_mask = mask & current_sets->get_valid_mask();
-      FieldMask remaining = mask;
-      if (!!current_mask)
-      {
-        // No matter what we're going to do here we need to invalidate the
-        // subscriptions so do that first to get them in flight
-        // Note that while we don't need the lock for most of this method
-        // we do need it here since cancel_subscription calls can come 
-        // back and try to touch the subscription data structure while
-        // we're doing the invalidation 
-        typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
-        LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
-        {
-          AutoLock n_lock(node_lock);
+          // No matter what we're going to do here we need to 
+          // invalidate the subscriptions so do that first 
           if (subscriptions != NULL)
           {
             for (LegionMap<AddressSpaceID,
@@ -8307,95 +8297,106 @@ namespace Legion {
               subscriptions = NULL;
             }
           }
-        }
-        if (!to_invalidate.empty())
-          EqSetTracker::invalidate_subscriptions(runtime, this,
-                                    to_invalidate, invalidated);
-        if (this->bounds == rect)
-        {
-          // We know these fields no longer need to be filtered
-          // since we're going to filter them here
-          remaining -= current_mask;
-          // We have permissions to perform all the invalidations
-          // here without needing to refine. First filter the 
-          // previous sets for these fields since we know we're
-          // going to have current sets to flush back to the 
-          // previous sets for them
-          if (move_to_previous)
+          if (this->bounds == rect)
           {
-            if (previous_sets == NULL)
-              previous_sets = new FieldMaskSet<EquivalenceSet>();
-            else if (!(current_mask * previous_sets->get_valid_mask()))
+            // We know these fields no longer need to be filtered
+            // since we're going to filter them here
+            remaining -= current_mask;
+            // We have permissions to perform all the invalidations
+            // here without needing to refine. First filter the 
+            // previous sets for these fields since we know we're
+            // going to have current sets to flush back to the 
+            // previous sets for them
+            if (move_to_previous)
             {
-              // Very important that we only filter previous sets
-              // if we actually have current sets to replace them with
-              std::vector<EquivalenceSet*> to_delete;
-              for (FieldMaskSet<EquivalenceSet>::iterator it =
-                    previous_sets->begin(); it != previous_sets->end(); it++)
+              if (previous_sets == NULL)
+                previous_sets = new FieldMaskSet<EquivalenceSet>();
+              else if (!(current_mask * previous_sets->get_valid_mask()))
               {
-                it.filter(current_mask);
-                if (!it->second)
-                  to_delete.push_back(it->first);
+                // Very important that we only filter previous sets
+                // if we actually have current sets to replace them with
+                std::vector<EquivalenceSet*> to_delete;
+                for (FieldMaskSet<EquivalenceSet>::iterator it =
+                      previous_sets->begin(); it != previous_sets->end(); it++)
+                {
+                  it.filter(current_mask);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                }
+                for (std::vector<EquivalenceSet*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                {
+                  previous_sets->erase(*it);
+                  if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+                    delete (*it);
+                }
+                // No need to delete previous sets or tighten its valid
+                // mask since we know that there will be current sets
+                // getting store into the previous sets for all those fields
               }
-              for (std::vector<EquivalenceSet*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-              {
-                previous_sets->erase(*it);
-                if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-                  delete (*it);
-              }
-              // No need to delete previous sets or tighten its valid
-              // mask since we know that there will be current sets
-              // getting store into the previous sets for all those fields
             }
-          }
-          // Now we can invalidate the current sets and flush them
-          // back to the previous sets if we're moving them
-          std::vector<EquivalenceSet*> to_delete;
-          for (FieldMaskSet<EquivalenceSet>::iterator it =
-                current_sets->begin(); it != current_sets->end(); it++)
-          {
-            const FieldMask overlap = it->second & current_mask;
-            if (!overlap)
-              continue;
-            if (move_to_previous && previous_sets->insert(it->first, overlap))
-              it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-            current_mask -= overlap;
-            if (!current_mask)
-              break;
-          }
-          for (std::vector<EquivalenceSet*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            current_sets->erase(*it);
-            if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-              delete (*it);
-          }
-          if (current_sets->empty())
-          {
-            delete current_sets;
-            current_sets = NULL;
+            // Now we can invalidate the current sets and flush them
+            // back to the previous sets if we're moving them
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it =
+                  current_sets->begin(); it != current_sets->end(); it++)
+            {
+              const FieldMask overlap = it->second & current_mask;
+              if (!overlap)
+                continue;
+              if (move_to_previous && previous_sets->insert(it->first, overlap))
+                it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+              current_mask -= overlap;
+              if (!current_mask)
+                break;
+            }
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              current_sets->erase(*it);
+              if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+                delete (*it);
+            }
+            if (current_sets->empty())
+            {
+              delete current_sets;
+              current_sets = NULL;
+            }
+            else
+              current_sets->tighten_valid_mask();
           }
           else
-            current_sets->tighten_valid_mask();
-        }
-        else
-        {
-          // It's unsound for us to partially invalidate this node
-          // if the rect is only a subset of the bounds because if
-          // we don't have permissions to perform the invalidations
-          // for those points then we might end up trying to change
-          // the equivalence sets while other operations are trying
-          // to mutate those equivalence sets leading to races. To
-          // avoid this we'll check to see if we have any current
-          // equivalence sets
-          refine_node(rect, current_mask, true/*refine current*/);
+          {
+            // It's unsound for us to partially invalidate this node
+            // if the rect is only a subset of the bounds because if
+            // we don't have permissions to perform the invalidations
+            // for those points then we might end up trying to change
+            // the equivalence sets while other operations are trying
+            // to mutate those equivalence sets leading to races. To
+            // avoid this we'll check to see if we have any current
+            // equivalence sets
+            refine_node(rect, current_mask, true/*refine current*/);
+          }
         }
       }
+      if (!to_invalidate.empty())
+        EqSetTracker::invalidate_subscriptions(runtime, this,
+                                  to_invalidate, invalidated);
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            to_invalidate_previous.begin(); it != 
+            to_invalidate_previous.end(); it++)
+      {
+        it->first->invalidate_all_previous_sets(it->second);
+        if (it->first->remove_reference())
+          delete it->first;
+      }
       // Now see if we need to continue the traversal for any remaining fields
+      // Note that we know we don't need the lock here since we know that
+      // the shape of the equivalence set KD tree can't be changing since 
+      // we hold the tree lock at the root
       if (!!remaining)
       {
         // We can skip performing invalidations if we know that everything
