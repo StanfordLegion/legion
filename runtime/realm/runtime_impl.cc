@@ -931,11 +931,6 @@ namespace Realm {
       machine->add_proc_mem_affinity(pma);
     }
 
-    void RuntimeImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma)
-    {
-      machine->add_mem_mem_affinity(mma);
-    }
-
     CoreReservationSet& RuntimeImpl::core_reservation_set(void)
     {
       assert(core_reservations);
@@ -993,31 +988,6 @@ namespace Realm {
 	  pma.bandwidth = bandwidth;
 	  pma.latency = latency;
 	  machine->add_proc_mem_affinity(pma);
-	}
-    }
-
-    static void add_mem_mem_affinities(MachineImpl *machine,
-				       const std::set<Memory>& mems1,
-				       const std::set<Memory>& mems2,
-				       int bandwidth,
-				       int latency)
-    {
-      for(std::set<Memory>::const_iterator it1 = mems1.begin();
-	  it1 != mems1.end();
-	  it1++) 
-	for(std::set<Memory>::const_iterator it2 = mems2.begin();
-	    it2 != mems2.end();
-	    it2++) {
-	  std::vector<Machine::MemoryMemoryAffinity> mmas;
-	  machine->get_mem_mem_affinity(mmas, *it1, *it2);
-	  if(!mmas.empty()) continue;
-	  log_runtime.debug() << "adding missing affinity: " << *it1 << " " << *it2 << " " << bandwidth << " " << latency;
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = *it1;
-	  mma.m2 = *it2;
-	  mma.bandwidth = bandwidth;
-	  mma.latency = latency;
-	  machine->add_mem_mem_affinity(mma);
 	}
     }
 
@@ -1174,19 +1144,6 @@ namespace Realm {
                  (serializer << pma.m) &&
                  (serializer << pma.bandwidth) &&
                  (serializer << pma.latency));
-      return ok;
-    }
-
-    template <typename T>
-    static bool serialize_announce(T& serializer,
-                                   const Machine::MemoryMemoryAffinity& mma,
-                                   NetworkModule *net)
-    {
-      bool ok = ((serializer << NODE_ANNOUNCE_MMA) &&
-                 (serializer << mma.m1) &&
-                 (serializer << mma.m2) &&
-                 (serializer << mma.bandwidth) &&
-                 (serializer << mma.latency));
       return ok;
     }
 
@@ -1780,27 +1737,6 @@ namespace Realm {
 				  );
 	}
 
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::GLOBAL_MEM],
-			       30,  // "lower" bandwidth
-			       25  // "higher" latency
-			       );
-
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::DISK_MEM],
-			       15,  // "low" bandwidth
-			       50  // "high" latency
-			       );
-
-	add_mem_mem_affinities(machine,
-			       mems_by_kind[Memory::SYSTEM_MEM],
-			       mems_by_kind[Memory::FILE_MEM],
-			       15,  // "low" bandwidth
-			       50  // "high" latency
-			       );
-
 	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
 	    it != local_cpu_kinds.end();
 	    it++) {
@@ -1813,6 +1749,7 @@ namespace Realm {
 				  3   // "small" latency
 				  );
 	}
+
       }
 
       // announce by network type
@@ -1882,28 +1819,7 @@ namespace Realm {
                                                    dbs, max_frag_size, *it2);
 	  }
 
-	// now each memory's affinities with other memories
-	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-	    it != n->memories.end();
-	    it++)
-	  if(*it) {
-	    Memory m = (*it)->me;
-	    std::vector<Machine::MemoryMemoryAffinity> mmas;
-	    machine->get_mem_mem_affinity(mmas, m);
-
-	    for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it2 = mmas.begin();
-		it2 != mmas.end();
-		it2++) {
-	      // only announce intra-node ones and only those with this memory as m1 to avoid
-	      //  duplicates
-	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != Network::my_node_id))
-		continue;
-
-              num_fragments += fragmented_announce(targets, *nit,
-                                                   dbs, max_frag_size, *it2);
-	    }
-	  }
-
+  // announce all the dma channels (and their paths)
 	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
 	    it != n->dma_channels.end();
 	    ++it)
@@ -1930,6 +1846,10 @@ namespace Realm {
 	}
 #endif
       }
+
+      // Now that we have full knowledge of the machine, update the machine
+      // model's mem_mem affinities.
+      machine->enumerate_mem_mem_affinities();
 
       if (Config::path_cache_lru_size) {
         assert(Config::path_cache_lru_size > 0);
@@ -2301,9 +2221,9 @@ namespace Realm {
     {
       // sleep until shutdown has been requested by somebody
       {
-	AutoLock<> al(shutdown_mutex);
-	while(!shutdown_initiated)
-	  shutdown_condvar.wait();
+        AutoLock<> al(shutdown_mutex);
+        while (!shutdown_initiated)
+          shutdown_condvar.wait();
       }
       log_runtime.info("shutdown request received - terminating");
 
@@ -2312,19 +2232,20 @@ namespace Realm {
       //  the shutdown) has finished - in legacy mode this is the "shutdown"
       //  task, otherwise it's just a NOP (task 0)
       {
-	Processor::TaskFuncID flush_task_id = (run_method_called ?
-					         Processor::TASK_ID_PROCESSOR_SHUTDOWN :
-					         Processor::TASK_ID_PROCESSOR_NOP);
+        Processor::TaskFuncID flush_task_id =
+            (run_method_called ? Processor::TASK_ID_PROCESSOR_SHUTDOWN
+                               : Processor::TASK_ID_PROCESSOR_NOP);
 
-	// legacy shutdown - call shutdown task on processors
-	log_runtime.info() << "local processor shutdown tasks initiated";
+        // legacy shutdown - call shutdown task on processors
+        log_runtime.info() << "local processor shutdown tasks initiated";
 
-	const std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
-	Event e = spawn_on_all(local_procs, flush_task_id, 0, 0,
-			       Event::NO_EVENT,
-			       INT_MIN); // runs with lowest priority
-	e.external_wait();
-	log_runtime.info() << "local processor shutdown tasks complete";
+        const std::vector<ProcessorImpl *> &local_procs =
+            nodes[Network::my_node_id].processors;
+        Event e =
+            spawn_on_all(local_procs, flush_task_id, 0, 0, Event::NO_EVENT,
+                         INT_MIN); // runs with lowest priority
+        e.external_wait();
+        log_runtime.info() << "local processor shutdown tasks complete";
       }
 
       {
@@ -2339,28 +2260,29 @@ namespace Realm {
       optable.shutdown_check();
 
       // make sure the network is completely quiescent
-      if(Network::max_node_id > 0) {
-	int tries = 0;
-	while(true) {
-	  tries++;
-	  bool done = Network::check_for_quiescence(message_manager);
-	  if(done) {
-	    if(Network::my_node_id == 0)
-	      log_runtime.info() << "quiescent after " << tries << " attempts";
-	    break;
-	  }
+      if (Network::max_node_id > 0) {
+        int tries = 0;
+        while (true) {
+          tries++;
+          bool done = Network::check_for_quiescence(message_manager);
+          if (done) {
+            if (Network::my_node_id == 0)
+              log_runtime.info() << "quiescent after " << tries << " attempts";
+            break;
+          }
 
-	  if(tries >= 10) {
-	    log_runtime.fatal() << "network still not quiescent after " << tries << " attempts";
-	    abort();
-	  }
-	}
+          if (tries >= 10) {
+            log_runtime.fatal()
+                << "network still not quiescent after " << tries << " attempts";
+            abort();
+          }
+        }
       }
-      
+
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown
       shutdown_in_progress.store(true);
-      
+
 #ifdef REALM_USE_KOKKOS
       // finalize the kokkos runtime
       KokkosInterop::kokkos_finalize(nodes[Network::my_node_id].processors);
@@ -2371,36 +2293,36 @@ namespace Realm {
       // stop processors before most other things, as they may be helping with
       //  background work
       {
-	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	    it != local_procs.end();
-	    it++)
-	  (*it)->shutdown();
+        std::vector<ProcessorImpl *> &local_procs =
+            nodes[Network::my_node_id].processors;
+        for (std::vector<ProcessorImpl *>::const_iterator it =
+                 local_procs.begin();
+             it != local_procs.end(); it++)
+          (*it)->shutdown();
       }
 
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
 
-      for(std::vector<Channel *>::iterator it = nodes[Network::my_node_id].dma_channels.begin();
-	  it != nodes[Network::my_node_id].dma_channels.end();
-	  ++it)
-	(*it)->shutdown();
+      for (std::vector<Channel *>::iterator it =
+               nodes[Network::my_node_id].dma_channels.begin();
+           it != nodes[Network::my_node_id].dma_channels.end(); ++it)
+        (*it)->shutdown();
       stop_dma_system();
 
       repl_heap.cleanup();
 
       // let network-dependent cleanup happen before we detach
-      for(std::vector<Module *>::iterator it = modules.begin();
-          it != modules.end();
-          it++) {
+      for (std::vector<Module *>::iterator it = modules.begin();
+           it != modules.end(); it++) {
         (*it)->pre_detach_cleanup();
       }
 
       // detach from the network
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->detach(this, network_segments);
+      for (std::vector<NetworkModule *>::const_iterator it =
+               network_modules.begin();
+           it != network_modules.end(); it++)
+        (*it)->detach(this, network_segments);
 
 #ifdef DEBUG_REALM
       event_triggerer.shutdown_work_item();
@@ -2413,20 +2335,19 @@ namespace Realm {
 
       sampling_profiler.shutdown();
 
-      if(Config::profile_activemsg_handlers)
-	activemsg_handler_table.report_message_handler_stats();
+      if (Config::profile_activemsg_handlers)
+        activemsg_handler_table.report_message_handler_stats();
 
 #ifdef EVENT_TRACING
-      if(event_trace_file) {
-	printf("writing event trace to %s\n", event_trace_file);
+      if (event_trace_file) {
+        printf("writing event trace to %s\n", event_trace_file);
         Tracer<EventTraceItem>::dump_trace(event_trace_file, false);
-	free(event_trace_file);
-	event_trace_file = 0;
+        free(event_trace_file);
+        event_trace_file = 0;
       }
 #endif
 #ifdef LOCK_TRACING
-      if (lock_trace_file)
-      {
+      if (lock_trace_file) {
         printf("writing lock trace to %s\n", lock_trace_file);
         Tracer<LockTraceItem>::dump_trace(lock_trace_file, false);
         free(lock_trace_file);
@@ -2438,73 +2359,74 @@ namespace Realm {
       {
         RuntimeImpl *rt = get_runtime();
         printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
-               Network::my_node_id,
-               rt->local_event_free_list->next_alloc,
+               Network::my_node_id, rt->local_event_free_list->next_alloc,
                rt->local_reservation_free_list->next_alloc,
                rt->local_index_space_free_list->next_alloc,
                rt->local_proc_group_free_list->next_alloc);
       }
 #endif
       cleanup_query_caches();
-      // delete processors, memories, nodes, etc.
       {
-	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  Node& n = nodes[i];
+        // Clean up all the modules before tearing down the runtime state.
+        for (std::vector<Module *>::iterator it = modules.begin();
+             it != modules.end(); it++) {
+          (*it)->cleanup();
+          delete (*it);
+        }
 
-	  delete_container_contents(n.memories);
-	  delete_container_contents(n.processors);
-	  delete_container_contents(n.ib_memories);
-	  delete_container_contents(n.dma_channels);
-
-	  for(std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> >::iterator it = n.sparsity_maps.begin();
-	      it != n.sparsity_maps.end();
-	      ++it)
-	    delete it->load();
-
-	  for(std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> >::iterator it = n.subgraphs.begin();
-	      it != n.subgraphs.end();
-	      ++it)
-	    delete it->load();
-
-	  for(std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> >::iterator it = n.proc_groups.begin();
-	      it != n.proc_groups.end();
-	      ++it)
-	    delete it->load();
-	}
-	
-	delete[] nodes;
-	delete local_event_free_list;
-	delete local_barrier_free_list;
-	delete local_reservation_free_list;
-	delete local_compqueue_free_list;
-	delete_container_contents(local_sparsity_map_free_lists);
-	delete_container_contents(local_subgraph_free_lists);
-	delete_container_contents(local_proc_group_free_lists);
-
-	// same for code translators
-	delete_container_contents(code_translators);
-
-	NodeSetBitmask::free_allocations();
-
-	for(std::vector<Module *>::iterator it = modules.begin();
-	    it != modules.end();
-	    it++) {
-	  (*it)->cleanup();
-	  delete (*it);
-	}
-
-	for(std::vector<NetworkModule *>::iterator it = network_modules.begin();
-	    it != network_modules.end();
-	    it++) {
-	  (*it)->cleanup();
-	  delete (*it);
-	}
+        for (std::vector<NetworkModule *>::iterator it =
+                 network_modules.begin();
+             it != network_modules.end(); it++) {
+          (*it)->cleanup();
+          delete (*it);
+        }
         Network::single_network = 0;
 
-	module_registrar.unload_module_sofiles();
+        module_registrar.unload_module_sofiles();
+
+        // delete processors, memories, nodes, etc.
+        for (NodeID i = 0; i <= Network::max_node_id; i++) {
+          Node &n = nodes[i];
+
+          delete_container_contents(n.memories);
+          delete_container_contents(n.processors);
+          delete_container_contents(n.ib_memories);
+          delete_container_contents(n.dma_channels);
+
+          for (std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *>>::
+                   iterator it = n.sparsity_maps.begin();
+               it != n.sparsity_maps.end(); ++it)
+            delete it->load();
+
+          for (std::vector<atomic<DynamicTable<SubgraphTableAllocator> *>>::
+                   iterator it = n.subgraphs.begin();
+               it != n.subgraphs.end(); ++it)
+            delete it->load();
+
+          for (std::vector<atomic<
+                   DynamicTable<ProcessorGroupTableAllocator> *>>::iterator it =
+                   n.proc_groups.begin();
+               it != n.proc_groups.end(); ++it)
+            delete it->load();
+        }
+
+        delete[] nodes;
+        delete local_event_free_list;
+        delete local_barrier_free_list;
+        delete local_reservation_free_list;
+        delete local_compqueue_free_list;
+        delete_container_contents(local_sparsity_map_free_lists);
+        delete_container_contents(local_subgraph_free_lists);
+        delete_container_contents(local_proc_group_free_lists);
+
+        // same for code translators
+        delete_container_contents(code_translators);
+
+        NodeSetBitmask::free_allocations();
       }
 
-      if(!Threading::cleanup()) exit(1);
+      if (!Threading::cleanup())
+        exit(1);
 
       // very last step - unregister our signal handlers
       unregister_error_signal_handler();
