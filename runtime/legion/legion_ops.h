@@ -2902,9 +2902,9 @@ namespace Legion {
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
                                       std::set<ApEvent> &tasks_complete);
       // Make this virtual so we can override it for control replication
-      void map_tasks(void) const;
-      void map_single_task(SingleTask *task);
+      void map_tasks(void);
     public:
+      void record_mapped_event(const DomainPoint &point, RtEvent mapped);
       static void handle_map_task(const void *args);
     protected:
       void distribute_tasks(void);
@@ -2948,6 +2948,7 @@ namespace Legion {
         unsigned/*op idx*/,unsigned/*req idx*/> > > internal_dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
+      std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
     protected:
@@ -4349,7 +4350,6 @@ namespace Legion {
                           FutureImpl *future);
       void subscribe_to_future(std::vector<RtEvent> &ready_events,
                                FutureImpl *future);
-      Future pick_initial_value(Future initial_value);
     protected:
       FutureMap future_map;
       ReductionOpID redop_id;

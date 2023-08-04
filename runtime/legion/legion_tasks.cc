@@ -4206,6 +4206,15 @@ namespace Legion {
           delete remote_trace_recorder;
         remote_trace_recorder = NULL;
       }
+      if (must_epoch_op != NULL)
+      {
+        // If we are part of a must epoch operation, then report the 
+        // event that describes when all of our mapping activies are done
+        RtEvent mapping_applied;
+        if (!map_applied_conditions.empty())
+          mapping_applied = Runtime::merge_events(map_applied_conditions);
+        must_epoch_op->record_mapped_event(index_point, mapping_applied);
+      }
       return RtEvent::NO_RT_EVENT;
     }
 

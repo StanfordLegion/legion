@@ -2258,7 +2258,7 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
-      void map_replicate_tasks(void) const;
+      void map_replicate_tasks(void);
       void distribute_replicate_tasks(void);
     public:
       void initialize_replication(ReplicateContext *ctx);

@@ -15129,6 +15129,7 @@ namespace Legion {
       dependences.clear();
       single_task_map.clear();
       mapping_dependences.clear();
+      mapped_events.clear();
       input.tasks.clear();
       input.constraints.clear();
       output.task_processors.clear();
@@ -15480,7 +15481,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::map_tasks(void) const
+    void MustEpochOp::map_tasks(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15489,7 +15490,15 @@ namespace Legion {
       MustEpochMapArgs args(const_cast<MustEpochOp*>(this));
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
-      std::vector<RtEvent> mapped_events(single_tasks.size());
+      std::vector<RtEvent> wait_events;
+      wait_events.reserve(single_tasks.size());
+      for (std::vector<SingleTask*>::const_iterator it = 
+            single_tasks.begin(); it != single_tasks.end(); it++)
+      {
+        const RtUserEvent mapped = Runtime::create_rt_user_event();
+        mapped_events[(*it)->index_point] = mapped;
+        wait_events.push_back(mapped);
+      }
       for (unsigned idx = 0; idx < single_tasks.size(); idx++)
       {
         // Figure out our preconditions
@@ -15501,36 +15510,37 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert((*it) < idx);
 #endif
-          preconditions.insert(mapped_events[*it]);
+          preconditions.insert(mapped_events[single_tasks[*it]->index_point]);
         }
         args.task = single_tasks[idx];
         if (!preconditions.empty())
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
-          mapped_events[idx] = 
-            runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
         }
         else
-          mapped_events[idx] = 
-            runtime->issue_runtime_meta_task(args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+          runtime->issue_runtime_meta_task(args,
+                LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
-      std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
         mapped_event.wait();
       }
+      mapped_events.clear();
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::map_single_task(SingleTask *task)
+    void MustEpochOp::record_mapped_event(const DomainPoint &point, 
+                                          RtEvent mapped)
     //--------------------------------------------------------------------------
     {
-      RtEvent done_mapping = task->perform_mapping(this);
-      if (done_mapping.exists())
-        done_mapping.wait();
+#ifdef DEBUG_LEGION
+      assert(mapped_events.find(point) != mapped_events.end());
+#endif
+      // No need for a lock since this data structure is read-only here
+      Runtime::trigger_event(mapped_events[point], mapped);
     }
 
     //--------------------------------------------------------------------------
@@ -15538,7 +15548,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
-      map_args->owner->map_single_task(map_args->task);
+      map_args->task->perform_mapping(map_args->owner);
     }
 
     //--------------------------------------------------------------------------
@@ -23327,15 +23337,7 @@ namespace Legion {
       if (serdez_redop_fns == NULL)
         result.impl->set_future_result_size(redop->sizeof_rhs, 
                                             runtime->address_space);
-      else
-      {
-        // Initialize here so that we can set the initial value future
-        future_result_size = 0;
-        serdez_redop_fns->init_fn(redop,
-                                  serdez_redop_buffer,
-                                  future_result_size);
-      }
-      this->initial_value = pick_initial_value(initial_value);
+      this->initial_value = initial_value;
 
       mapper_id = map_id;
       tag = t;
@@ -23349,21 +23351,6 @@ namespace Legion {
                                        empty_point);
       }
       return result;
-    }
-
-    Future AllReduceOp::pick_initial_value(Future initial_value)
-    {
-      if (!initial_value.is_empty())
-        return initial_value;
-
-      // if present, serdez_redop_fns->init_fn() must have
-      // been called by now
-      const void *value = serdez_redop_fns ? serdez_redop_buffer
-                                           : redop->identity;
-      size_t size = serdez_redop_fns ? future_result_size
-                                     : redop->sizeof_rhs;
-
-      return Future::from_untyped_pointer(value, size);
     }
 
     //--------------------------------------------------------------------------
@@ -23410,12 +23397,15 @@ namespace Legion {
     void AllReduceOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      initial_value.impl->register_dependence(this);
+      if (initial_value.impl != NULL)
+        initial_value.impl->register_dependence(this);
       future_map.impl->register_dependence(this);
     } 
 
+    //--------------------------------------------------------------------------
     void AllReduceOp::prepare_future(std::vector<RtEvent> &preconditions,
                                      FutureImpl *future)
+    //--------------------------------------------------------------------------
     {
       const RtEvent ready = future->request_internal_buffer(this,
                                                             false/*eager*/);
@@ -23434,7 +23424,8 @@ namespace Legion {
       {
         prepare_future(preconditions, it->second);
       }
-      prepare_future(preconditions, initial_value.impl);
+      if (initial_value.impl != NULL)
+        prepare_future(preconditions, initial_value.impl);
 
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -23452,7 +23443,9 @@ namespace Legion {
       future_map.impl->get_all_futures(sources);
     }
 
+    //--------------------------------------------------------------------------
     void AllReduceOp::fold_serdez(FutureImpl *impl)
+    //--------------------------------------------------------------------------
     {
       size_t src_size = 0;
       const void *source = impl->find_internal_buffer(parent_ctx, src_size);
@@ -23468,8 +23461,14 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
-#endif
-      fold_serdez(initial_value.impl);
+#endif 
+      // Initialize here so that we can set the initial value future
+      future_result_size = 0;
+      serdez_redop_fns->init_fn(redop,
+                                serdez_redop_buffer,
+                                future_result_size);
+      if (initial_value.impl != NULL)
+        fold_serdez(initial_value.impl);
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
@@ -23505,8 +23504,10 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
     }
 
+    //--------------------------------------------------------------------------
     void AllReduceOp::subscribe_to_future(std::vector<RtEvent> &ready_events,
                                           FutureImpl *future)
+    //--------------------------------------------------------------------------
     {
       const RtEvent ready = future->subscribe();
       if (ready.exists())
@@ -23524,9 +23525,7 @@ namespace Legion {
       // in case they need to make any instances
       if (serdez_redop_fns == NULL)
         future_result_size = redop->sizeof_rhs;
-      else if (serdez_upper_bound < SIZE_MAX)
-        future_result_size = serdez_upper_bound;
-      else
+      else if (serdez_upper_bound == SIZE_MAX)
       {
         // Need to do our subscriptions now
         std::vector<RtEvent> ready_events;
@@ -23535,8 +23534,8 @@ namespace Legion {
         {
           subscribe_to_future(ready_events, it->second);
         }
-        subscribe_to_future(ready_events, initial_value.impl);
-
+        if (initial_value.impl != NULL)
+          subscribe_to_future(ready_events, initial_value.impl); 
         // Wait for the subscriptions to be ready
         if (!ready_events.empty())
         {
@@ -23677,26 +23676,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       targets.reserve(target_mems.size());
+      // If we don't have serdez functions or the upper bound is not set
+      // then we can use the future_result_size since we know it is the
+      // right size for the futures, otherwise we need to trust the 
+      // serdez_upper_bound size as the size of these futures.
+      const size_t result_size = 
+        ((serdez_redop_fns == NULL) || (serdez_upper_bound == SIZE_MAX)) ?
+        future_result_size : serdez_upper_bound;
       for (std::vector<Memory>::const_iterator it =
             target_mems.begin(); it != target_mems.end(); it++)
       {
         MemoryManager *manager = runtime->find_memory_manager(*it);
         FutureInstance *instance = manager->create_future_instance(this, 
-          unique_op_id, get_completion_event(), future_result_size, 
-          false/*eager*/);
+          unique_op_id, get_completion_event(), result_size, false/*eager*/);
         targets.push_back(instance);
       }
     }
 
+    //--------------------------------------------------------------------------
     ApEvent AllReduceOp::init_redop_target(FutureInstance *target)
+    //--------------------------------------------------------------------------
     {
       if (parent_ctx->get_task()->get_shard_id() == 0)
       {
         FutureImpl *init = initial_value.impl;
-        return target->copy_from(
-          init->get_canonical_instance(),
-          this,
-          init->get_ready_event(false));
+        if (init != NULL)
+          return target->copy_from(
+            init->get_canonical_instance(),
+            this,
+            init->get_ready_event(false));
       }
       return target->initialize(redop, this);
     }
