@@ -1128,7 +1128,13 @@ namespace Legion {
         }
         if (redop > 0)
           finish_index_task_reduction();
-        complete_execution();
+        if (output_size_collective != NULL)
+        {
+          output_size_collective->perform_collective_async();
+          complete_execution(output_size_collective->get_done_event());
+        }
+        else
+          complete_execution();
         trigger_children_complete();
         trigger_children_committed();
       }
