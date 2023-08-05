@@ -23282,6 +23282,8 @@ namespace Legion {
     void AllReduceOp::fold_serdez(FutureImpl *impl)
     //--------------------------------------------------------------------------
     {
+      if (impl == NULL)
+        return;
       size_t src_size = 0;
       const void *source = impl->find_internal_buffer(parent_ctx, src_size);
       (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer,
@@ -23302,13 +23304,10 @@ namespace Legion {
       serdez_redop_fns->init_fn(redop,
                                 serdez_redop_buffer,
                                 future_result_size);
-      if (initial_value.impl != NULL)
-        fold_serdez(initial_value.impl);
+      fold_serdez(initial_value.impl);
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
-      {
         fold_serdez(it->second);
-      }
     }
 
     //--------------------------------------------------------------------------
