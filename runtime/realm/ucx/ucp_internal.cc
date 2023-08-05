@@ -979,7 +979,8 @@ err:
 
       ucp_request_param_t param;
       param.op_attr_mask     = UCP_OP_ATTR_FIELD_CALLBACK  |
-                               UCP_OP_ATTR_FIELD_REQUEST;
+                               UCP_OP_ATTR_FIELD_REQUEST   |
+                               UCP_OP_ATTR_FIELD_RECV_INFO;
       param.cb.recv_am       = &am_rndv_recv_data_handler;
       param.request          = req;
       param.recv_info.length = &recv_info_length;

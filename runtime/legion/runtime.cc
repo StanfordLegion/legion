@@ -5299,27 +5299,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
-            // Now we can compute the bounds on this instance
-            const Domain &delta= 
-              manager->layout->constraints->padding_constraint.delta;
-#ifdef DEBUG_LEGION
-            assert(domain.get_dim() == delta.get_dim());
-#endif
-            const Domain padded_bounds =
-              Domain(domain.lo() - delta.lo(), domain.hi() + delta.hi());
-            switch (domain.get_dim())
+            // Do not add padding to empty domains
+            if (!domain.empty())
             {
+              // Now we can compute the bounds on this instance
+              const Domain &delta= 
+                manager->layout->constraints->padding_constraint.delta;
+#ifdef DEBUG_LEGION
+              assert(domain.get_dim() == delta.get_dim());
+#endif
+              const Domain padded_bounds =
+                Domain(domain.lo() - delta.lo(), domain.hi() + delta.hi());
+              switch (domain.get_dim())
+              {
 #define DIMFUNC(DIM) \
-              case DIM: \
-                { \
-                  RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to( \
+                case DIM: \
+                  { \
+                    RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to( \
                       padded_bounds, realm_is, type_tag, "get_instance_info"); \
-                  break; \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
+                    break; \
+                  }
+                LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-              default:
-                assert(false);
+                default:
+                  assert(false);
+              }
             }
           }
           return manager->get_instance();
@@ -5408,13 +5412,18 @@ namespace Legion {
 #endif
           if (inner != NULL)
             *inner = bounds;
-          // Now we can compute the bounds on this instance
-          const Domain &delta= 
-            manager->layout->constraints->padding_constraint.delta;
+          if (!bounds.empty())
+          {
+            // Now we can compute the bounds on this instance
+            const Domain &delta= 
+              manager->layout->constraints->padding_constraint.delta;
 #ifdef DEBUG_LEGION
-          assert(bounds.get_dim() == delta.get_dim());
+            assert(bounds.get_dim() == delta.get_dim());
 #endif
-          outer = Domain(bounds.lo() - delta.lo(), bounds.hi() + delta.hi());
+            outer = Domain(bounds.lo() - delta.lo(), bounds.hi() + delta.hi());
+          }
+          else
+            outer = bounds;
           return manager->get_instance();
         }
       }

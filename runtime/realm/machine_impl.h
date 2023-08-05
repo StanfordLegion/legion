@@ -124,15 +124,14 @@ namespace Realm {
 
       void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma,
 				 bool lock_held = false);
-      void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma,
-				bool lock_held = false);
 
       void add_subscription(Machine::MachineUpdateSubscriber *subscriber);
       void remove_subscription(Machine::MachineUpdateSubscriber *subscriber);
 
+      void enumerate_mem_mem_affinities(void);
+
       mutable Mutex mutex;
       std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
-      std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
       std::set<Machine::MachineUpdateSubscriber *> subscribers;
 
       std::map<int, MachineNodeInfo *> nodeinfos;
@@ -374,7 +373,6 @@ namespace Realm {
     NODE_ANNOUNCE_MEM,  // MEM id size
     NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
     NODE_ANNOUNCE_PMA,  // PMA proc_id mem_id bw latency
-    NODE_ANNOUNCE_MMA,  // MMA mem1_id mem2_id bw latency
     NODE_ANNOUNCE_DMA_CHANNEL,
   };
 

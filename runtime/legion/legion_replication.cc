@@ -6186,9 +6186,7 @@ namespace Legion {
 
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
-      {
         fold_serdez(it->second);
-      }
       // Now we need an all-to-all to get the values from other shards
       const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
         serdez_redop_collective->exchange_buffers(serdez_redop_buffer,
