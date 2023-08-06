@@ -10824,7 +10824,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
       assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
+      assert(collective_mapping->contains(target));
 #endif
       if (target != local_space)
       {
