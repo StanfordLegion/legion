@@ -10958,7 +10958,10 @@ namespace Legion {
         local_view->add_copy_user(false/*reading*/, source->redop, reduced,
             copy_mask, copy_expression, op_id, index, recorded_events,
             trace_info.recording, runtime->address_space);
-      // Do the broadcast out, start with any children
+      // Do the broadcast out, remove the redop from local fields
+      for (unsigned idx = 0; idx < local_fields.size(); idx++)
+        local_fields[idx].set_redop(0/*redop*/, false/*fold*/);
+      // Start with any children
       std::vector<AddressSpaceID> children;
       collective_mapping->get_children(local_space, local_space, children);
       ApBarrier all_bar;
