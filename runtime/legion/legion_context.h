@@ -95,11 +95,11 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual Future from_value(const void *value, size_t value_size,
-                                bool owned, Provenance *provenance);
+          bool owned, Provenance *provenance, bool shard_local);
       virtual Future from_value(const void *value, size_t size, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&),
-          Provenance *provenance);
+          Provenance *provenance, bool shard_local);
       virtual Future consensus_match(const void *input, void *output,
           size_t num_elements, size_t element_size, Provenance *provenance);
     public:
@@ -437,7 +437,8 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false) = 0;
+                                             bool internal = false,
+                                             bool check_space = true) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -449,7 +450,8 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false) = 0;
+                                             bool implicit = false,
+                                             bool check_space = true) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
@@ -1518,7 +1520,8 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -1530,7 +1533,8 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
@@ -2525,11 +2529,11 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual Future from_value(const void *value, size_t value_size,
-                                bool owned, Provenance *provenance);
+          bool owned, Provenance *provenance, bool shard_local);
       virtual Future from_value(const void *buffer, size_t size, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&),
-          Provenance *provenance);
+          Provenance *provenance, bool shard_local);
       virtual Future consensus_match(const void *input, void *output,
           size_t num_elements, size_t element_size, Provenance *provenance); 
     public:
@@ -2879,14 +2883,16 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(IndexSpace space,
                     const std::map<DomainPoint,Future> &futures,
                                              Provenance *provenance,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool check_space = true);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
                                    Provenance *provenance);
@@ -3885,7 +3891,8 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -3897,7 +3904,8 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,

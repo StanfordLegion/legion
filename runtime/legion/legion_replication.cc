@@ -6187,9 +6187,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
+      future_result_size = 0;
+      serdez_redop_fns->init_fn(redop,
+                                serdez_redop_buffer,
+                                future_result_size);
+      // Only include the initial value one time for control replication
+      // to avoid double inclusion
       if (parent_ctx->get_task()->get_shard_id() == 0)
         fold_serdez(initial_value.impl);
-
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
         fold_serdez(it->second);

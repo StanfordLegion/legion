@@ -159,7 +159,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future TaskContext::from_value(const void *value, size_t size,
-                                   bool owned, Provenance *provenance) 
+                           bool owned, Provenance *provenance, bool shard_local) 
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -191,7 +191,7 @@ namespace Legion {
     Future TaskContext::from_value(const void *buffer, size_t size, bool owned,
                        const Realm::ExternalInstanceResource &resource,
                        void (*freefunc)(const Realm::ExternalInstanceResource&),
-                       Provenance *provenance)
+                       Provenance *provenance, bool shard_local)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -7264,7 +7264,8 @@ namespace Legion {
     FutureMap InnerContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
-                                ShardingID sid, bool implicit, bool internal)
+                                ShardingID sid, bool implicit, 
+                                bool internal, bool check_space)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -7304,12 +7305,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // this method is deprecated so don't care about provenance
-      // pretend this is internal since it is deprecated and we don't 
-      // want to check collective behavior which could be wrong since 
-      // each shard might have a different index space
+      // make sure we don't do any control replication checks on the
+      // space since we can't guarantee it is the same across the shards
       return construct_future_map(find_index_launch_space(domain, NULL/*prov*/),
           data, NULL/*deprecated so no provenance*/, collective, sid, 
-          implicit, true/*internal*/);
+          implicit, false/*internal*/, false/*check space*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7317,14 +7317,15 @@ namespace Legion {
                                     const std::map<DomainPoint,Future> &futures,
                                     Provenance *provenance,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    bool check_space)
     //--------------------------------------------------------------------------
     {
       if (!internal)
       {
         AutoRuntimeCall call(this);
         return construct_future_map(space, futures, provenance,true/*internal*/,
-                                    collective, sid, implicit);
+                                    collective, sid, implicit, check_space);
       }
       CreationOp *creation_op = runtime->get_available_creation_op();
       creation_op->initialize_map(this, provenance, futures);
@@ -7350,12 +7351,11 @@ namespace Legion {
                                  ShardingID sid, bool implicit) 
     //--------------------------------------------------------------------------
     {
-      // pretend this is internal since it is deprecated and we don't 
-      // want to check collective behavior which could be wrong since 
-      // each shard might have a different index space
+      // Make sure we don't do any control replication checks on the 
+      // space here since it might not be the same across the shards
       return construct_future_map(find_index_launch_space(domain, NULL),
               futures, NULL/*deprecated so no provenance*/, true/*internal*/,
-              collective, sid, implicit);
+              collective, sid, implicit, false/*check space*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13134,12 +13134,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::from_value(const void *value, size_t size,
-                                        bool owned, Provenance *provenance)
+                           bool owned, Provenance *provenance, bool shard_local)
     //--------------------------------------------------------------------------
     {
-      Future result = TaskContext::from_value(value, size, owned, provenance);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
-            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      Future result = 
+        TaskContext::from_value(value, size, owned, provenance, shard_local);
+      for (int i = 0; runtime->safe_control_replication && !shard_local &&
+        (i < 2) && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_FUTURE_FROM_VALUE, __func__);
@@ -13156,13 +13157,13 @@ namespace Legion {
     Future ReplicateContext::from_value(const void *buffer, size_t size,
                    bool owned, const Realm::ExternalInstanceResource &resource,
                    void (*freefunc)(const Realm::ExternalInstanceResource&),
-                   Provenance *provenance)
+                   Provenance *provenance, bool shard_local)
     //--------------------------------------------------------------------------
     {
       Future result = TaskContext::from_value(buffer, size, owned,
-                                              resource, freefunc, provenance);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
-            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+          resource, freefunc, provenance, shard_local);
+      for (int i = 0; runtime->safe_control_replication && !shard_local &&
+        (i < 2) && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_FUTURE_FROM_VALUE, __func__);
@@ -16113,7 +16114,8 @@ namespace Legion {
       for (std::map<DomainPoint,Domain>::const_iterator it = 
             domains.begin(); it != domains.end(); it++)
         shard_futures[it->first] = TaskContext::from_value(
-            &it->second, sizeof(it->second), false/*owned*/, provenance);
+            &it->second, sizeof(it->second), false/*owned*/, 
+            provenance, false/*shard local*/);
       future_map.impl->set_all_futures(shard_futures);
       return create_partition_by_domain(parent, future_map, color_space, 
        perform_intersections, part_kind, color, provenance, true/*skip check*/);
@@ -18975,7 +18977,8 @@ namespace Legion {
     FutureMap ReplicateContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
-                                ShardingID sid, bool implicit, bool internal)
+                                ShardingID sid, bool implicit, bool internal,
+                                bool check_space)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -18987,7 +18990,8 @@ namespace Legion {
           Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
                                 i > 0, provenance);
           hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP, __func__);
-          hasher.hash(space, "space");
+          if (check_space)
+            hasher.hash(space, "space");
           if (!collective)
           {
             for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
@@ -19004,7 +19008,7 @@ namespace Legion {
             break;
         }
         return construct_future_map(space, data, provenance, collective,
-                                    sid, implicit, true/*internal*/);
+            sid, implicit, true/*internal*/, check_space);
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
       Domain domain;
@@ -19081,7 +19085,8 @@ namespace Legion {
     FutureMap ReplicateContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,Future> &futures,
                                 Provenance *provenance, bool internal,
-                                bool collective, ShardingID sid, bool implicit)
+                                bool collective, ShardingID sid, bool implicit,
+                                bool check_space)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -19093,7 +19098,8 @@ namespace Legion {
           Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
                                 i > 0, provenance);
           hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP, __func__);
-          hasher.hash(space, "space");
+          if (check_space)
+            hasher.hash(space, "space");
           if (!collective)
           {
             for (std::map<DomainPoint,Future>::const_iterator it =
@@ -19110,7 +19116,7 @@ namespace Legion {
             break;
         }
         return construct_future_map(space, futures, provenance,
-                  true/*internal*/, collective, sid, implicit);
+            true/*internal*/, collective, sid, implicit, check_space);
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
       CreationOp *creation_op = runtime->get_available_creation_op();
@@ -25559,7 +25565,8 @@ namespace Legion {
     FutureMap LeafContext::construct_future_map(IndexSpace domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
-                                ShardingID sid, bool implicit, bool internal)
+                                ShardingID sid, bool implicit, bool internal,
+                                bool check_space)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -25585,7 +25592,8 @@ namespace Legion {
                                     const std::map<DomainPoint,Future> &futures,
                                     Provenance *provenance,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit, 
+                                    bool check_space)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,

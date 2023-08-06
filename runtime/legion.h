@@ -1451,11 +1451,11 @@ namespace Legion {
           const void *buffer, size_t bytes, bool take_ownership = false);
       static Future from_untyped_pointer(
           const void *buffer, size_t bytes, bool take_ownership = false,
-          const char *provenance = NULL);
+          const char *provenance = NULL, bool shard_local = false);
       static Future from_value(const void *buffer, size_t bytes, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL,
-          const char *provenance = NULL);
+          const char *provenance = NULL, bool shard_local = false);
     private:
       // This should only be available for accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
