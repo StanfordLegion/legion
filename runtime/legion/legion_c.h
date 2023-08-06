@@ -2661,6 +2661,19 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see Legion::Future::from_untyped_pointer()
+   */
+  legion_future_t
+  legion_future_from_untyped_pointer_detailed(legion_runtime_t runtime,
+                                              const void *buffer,
+                                              size_t size,
+                                              bool take_ownership,
+                                              const char *provenance,
+                                              bool shard_local);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see Legion::Future::Future()
    */
   legion_future_t
