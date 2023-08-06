@@ -32613,7 +32613,7 @@ namespace Legion {
           {
             const TaskOp::FinalizeOutputEqKDTreeArgs *fargs =
               (const TaskOp::FinalizeOutputEqKDTreeArgs*)args;
-            fargs->proxy_this->finalize_output_regions();
+            fargs->proxy_this->finalize_output_region_trees();
             break;
           }
         case LG_DEFERRED_LAUNCH_TASK_ID:

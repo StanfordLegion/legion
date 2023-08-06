@@ -1525,7 +1525,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::finalize_output_regions(void)
+    void TaskOp::finalize_output_region_trees(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2660,7 +2660,8 @@ namespace Legion {
               logical_regions[idx], version_info, ready_events); 
       }
       if (!output_events.empty())
-        record_output_registered(Runtime::merge_events(output_events));
+        record_output_registered(
+            Runtime::merge_events(output_events), ready_events);
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
       return RtEvent::NO_RT_EVENT;
@@ -6272,7 +6273,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_output_registered(RtEvent registered)
+    void IndividualTask::record_output_registered(RtEvent registered,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6282,13 +6284,16 @@ namespace Legion {
       {
         // Send the message on to the origin node to tell it
         // to launch the meta task to perform the registration
+        const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(orig_task);
           rez.serialize(registered);
+          rez.serialize(applied);
         }
         runtime->send_individual_remote_output_registration(orig_proc, rez);
+        applied_events.insert(applied);
       }
       else
       {
@@ -6311,7 +6316,14 @@ namespace Legion {
       derez.deserialize(task);
       RtEvent registered;
       derez.deserialize(registered);
-      task->record_output_registered(registered);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      std::set<RtEvent> applied_events;
+      task->record_output_registered(registered, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
     }
 
     //--------------------------------------------------------------------------
@@ -7292,10 +7304,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::record_output_registered(RtEvent registered)
+    void PointTask::record_output_registered(RtEvent registered,
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_output_registered(registered);
+      slice_owner->record_output_registered(registered, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -8654,7 +8667,7 @@ namespace Legion {
         }
       }
       // If we get here then we can finalize our output regions
-      finalize_output_regions();
+      finalize_output_regions(true/*first invocation*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12010,6 +12023,7 @@ namespace Legion {
       // If we get here then we need to send the sizes back to the index owner
       if (is_remote())
       {
+        const RtUserEvent applied = Runtime::create_rt_user_event();
         // Send a message back to the owner with the output region extents
         Serializer rez;
         {
@@ -12027,8 +12041,14 @@ namespace Legion {
               rez.serialize(it->second);
             }
           }
+          rez.serialize(applied);
         }
         runtime->send_slice_remote_output_extents(orig_proc, rez);
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(num_uncomplete_points > 0);
+#endif
+        complete_preconditions.insert(applied);
       }
       else
         index_owner->record_output_extents(output_region_extents);
@@ -12057,10 +12077,14 @@ namespace Legion {
         }
       }
       index_owner->record_output_extents(output_region_extents);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      Runtime::trigger_event(applied);
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_output_registered(RtEvent registered)
+    void SliceTask::record_output_registered(RtEvent registered,
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12070,13 +12094,16 @@ namespace Legion {
       {
         // Send a message back to the index owner about the equivalence
         // sets for the output regions being registered
+        const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(index_owner);
           rez.serialize(registered);
+          rez.serialize(applied);
         }
         runtime->send_slice_remote_output_registration(orig_proc, rez);
+        applied_events.insert(applied);
       }
       else
         index_owner->record_output_registered(registered);
@@ -12092,7 +12119,10 @@ namespace Legion {
       derez.deserialize(index_owner);
       RtEvent registered;
       derez.deserialize(registered);
+      RtUserEvent applied;
+      derez.deserialize(applied);
       index_owner->record_output_registered(registered);
+      Runtime::trigger_event(applied);
     }
 
     //--------------------------------------------------------------------------

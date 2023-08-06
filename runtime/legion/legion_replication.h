@@ -1771,7 +1771,7 @@ namespace Legion {
     public:
       // Output regions
       virtual void record_output_registered(RtEvent registered);
-      virtual void finalize_output_regions(bool first_invocation = true);
+      virtual void finalize_output_regions(bool first_invocation);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);

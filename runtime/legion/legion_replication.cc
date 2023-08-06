@@ -1741,7 +1741,19 @@ namespace Legion {
         // We need to gather output region sizes from all the other shards
         // to determine the sizes of globally indexed output regions
         output_size_collective->perform_collective_async();
-        // The collective will call us when it is ready
+        // The collective will call us when it is ready but we still need
+        // to make sure that we fold the completion event for the 
+        // collective back into the completion events
+        const RtEvent done_event = output_size_collective->get_done_event();
+        if (done_event.exists() && !done_event.has_triggered())
+        {
+          AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+          // We should still not be complete if we're here
+          assert(complete_points < total_points);
+#endif
+          complete_preconditions.insert(done_event);
+        }
         return;
       }
 #ifdef DEBUG_LEGION

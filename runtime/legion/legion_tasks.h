@@ -244,7 +244,7 @@ namespace Legion {
       void compute_point_region_requirements(void);
       void complete_point_projection(void);
       bool prepare_steal(void);
-      void finalize_output_regions(void);
+      void finalize_output_region_trees(void);
     public:
       void compute_parent_indexes(TaskContext *alt_context = NULL);
       void perform_intra_task_alias_analysis(void);
@@ -424,7 +424,6 @@ namespace Legion {
                                    const RegionRequirement &req,
                                    Memory target,
                                    const LayoutConstraintSet &constraints);
-      void finalize_output_regions(void);
     public:
       virtual InnerContext* create_implicit_context(void);
       void configure_execution_context(InnerContext *ctx);
@@ -474,7 +473,8 @@ namespace Legion {
       virtual void record_output_extent(unsigned idx,
           const DomainPoint &color, const DomainPoint &extents) 
         { assert(false); }
-      virtual void record_output_registered(RtEvent registered)
+      virtual void record_output_registered(RtEvent registered,
+                                            std::set<RtEvent> &applied_events)
         { assert(false); }
       virtual void trigger_replay(void);
       // For tasks that are sharded off by control replication
@@ -786,7 +786,8 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
-      virtual void record_output_registered(RtEvent registered);
+      virtual void record_output_registered(RtEvent registered,
+                                      std::set<RtEvent> &applied_events);
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
@@ -909,7 +910,8 @@ namespace Legion {
       virtual bool is_output_valid(unsigned idx) const;
       virtual void record_output_extent(unsigned idx,
           const DomainPoint &color, const DomainPoint &extents);
-      virtual void record_output_registered(RtEvent registered);
+      virtual void record_output_registered(RtEvent registered,
+                                            std::set<RtEvent> &applied_events);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1165,7 +1167,7 @@ namespace Legion {
                                    const OutputRequirement& output_requirement,
                                    const OutputExtentMap& output_sizes) const;
     public:
-      virtual void finalize_output_regions(bool first_invocation = true);
+      virtual void finalize_output_regions(bool first_invocation);
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -1393,7 +1395,8 @@ namespace Legion {
                               std::set<RtEvent> &applied_conditions);
       void record_output_extent(unsigned index,
           const DomainPoint &color, const DomainPoint &extent);
-      void record_output_registered(RtEvent registered);
+      void record_output_registered(RtEvent registered,
+                                    std::set<RtEvent> &applied_events);
       RtEvent verify_concurrent_execution(const DomainPoint &point,
                                           Processor target);
     protected:
