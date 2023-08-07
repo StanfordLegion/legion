@@ -677,6 +677,7 @@ namespace Realm {
 
       struct CudaIpcMapping {
         NodeID owner;
+        GPU *src_gpu;
         Memory mem;
         uintptr_t local_base;
         uintptr_t address_offset; // add to convert from original to local base

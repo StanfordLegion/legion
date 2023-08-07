@@ -273,8 +273,10 @@ err:
     ucs_status_ptr_t status_ptr;
 
     param.op_attr_mask = UCP_OP_ATTR_FLAG_FORCE_IMM_CMPL |
+                         UCP_OP_ATTR_FIELD_MEMORY_TYPE   |
                          UCP_OP_ATTR_FIELD_FLAGS;
 
+    param.memory_type  = memtype;
     param.flags        = UCP_AM_SEND_FLAG_COPY_HEADER |
                          UCP_AM_SEND_FLAG_REPLY;
 

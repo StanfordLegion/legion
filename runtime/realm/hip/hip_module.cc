@@ -1040,21 +1040,6 @@ namespace Realm {
       if(!pinned_sysmems.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
-
-        // TODO: move into the dma channels themselves
-        for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
-            it != pinned_sysmems.end();
-            ++it) {
-          // don't create affinities for IB memories right now
-          if(!ID(*it).is_memory()) continue;
-
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = *it;
-          mma.bandwidth = 20; // "medium"
-          mma.latency = 200;  // "bad"
-          r->add_mem_mem_affinity(mma);
-        }
       } else {
         log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
@@ -1062,29 +1047,6 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !hipipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
-
-        // TODO: move into the dma channels themselves
-        for(std::set<Memory>::const_iterator it = peer_fbs.begin();
-            it != peer_fbs.end();
-            ++it) {
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = *it;
-          mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-          mma.latency = 400;  // ~twice the latency as zcmem
-          r->add_mem_mem_affinity(mma);
-        }
-
-        for(std::vector<HipIpcMapping>::const_iterator it = hipipc_mappings.begin();
-            it != hipipc_mappings.end();
-            ++it) {
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = it->mem;
-          mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-          mma.latency = 400;  // ~twice the latency as zcmem
-          r->add_mem_mem_affinity(mma);
-        }     
       }
     }
 

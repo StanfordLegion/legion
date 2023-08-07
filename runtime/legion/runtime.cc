@@ -2370,27 +2370,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
-            // Now we can compute the bounds on this instance
-            const Domain &delta= 
-              manager->layout->constraints->padding_constraint.delta;
-#ifdef DEBUG_LEGION
-            assert(domain.get_dim() == delta.get_dim());
-#endif
-            const Domain padded_bounds =
-              Domain(domain.lo() - delta.lo(), domain.hi() + delta.hi());
-            switch (domain.get_dim())
+            // Do not add padding to empty domains
+            if (!domain.empty())
             {
+              // Now we can compute the bounds on this instance
+              const Domain &delta =
+                manager->layout->constraints->padding_constraint.delta;
+#ifdef DEBUG_LEGION
+              assert(domain.get_dim() == delta.get_dim());
+#endif
+              const Domain padded_bounds =
+                Domain(domain.lo() - delta.lo(), domain.hi() + delta.hi());
+              switch (domain.get_dim())
+              {
 #define DIMFUNC(DIM) \
-              case DIM: \
-                { \
-                  RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to( \
+                case DIM: \
+                  { \
+                    RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to( \
                       padded_bounds, realm_is, type_tag, "get_instance_info"); \
-                  break; \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
+                    break; \
+                  }
+                LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-              default:
-                assert(false);
+                default:
+                  assert(false);
+              }
             }
           }
           return manager->get_instance(context->owner_task->index_point);
@@ -2473,19 +2477,24 @@ namespace Legion {
           // be dense so then we can just add the offsets
           ApEvent dom_ready;
           Domain bounds = 
-            manager->instance_domain->get_domain(dom_ready,true/*tight*/);
+            manager->instance_domain->get_domain(dom_ready, true/*tight*/);
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
           if (inner != NULL)
             *inner = bounds;
-          // Now we can compute the bounds on this instance
-          const Domain &delta= 
-            manager->layout->constraints->padding_constraint.delta;
+          if (!bounds.empty())
+          {
+            // Now we can compute the bounds on this instance
+            const Domain &delta= 
+              manager->layout->constraints->padding_constraint.delta;
 #ifdef DEBUG_LEGION
-          assert(bounds.get_dim() == delta.get_dim());
+            assert(bounds.get_dim() == delta.get_dim());
 #endif
-          outer = Domain(bounds.lo() - delta.lo(), bounds.hi() + delta.hi());
+            outer = Domain(bounds.lo() - delta.lo(), bounds.hi() + delta.hi());
+          }
+          else
+            outer = bounds;
           return manager->get_instance(context->owner_task->index_point);
         }
       }
@@ -5937,10 +5946,6 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
-          // If we need a padding constraint make sure we're
-          // checking for tight region bounds
-          if (constraints.padding_constraint.delta.get_dim() > 0)
-            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -5957,7 +5962,8 @@ namespace Legion {
           for (std::deque<PhysicalManager*>::const_iterator it =
                 candidates.begin(); it != candidates.end(); it++)
           {
-            if (!(*it)->meets_expression(space_expr, tight_region_bounds))
+            if (!(*it)->meets_expression(space_expr, tight_region_bounds,
+                  &constraints.padding_constraint.delta))
               continue;
             if ((*it)->entails(constraints, DomainPoint(), NULL))
             {
@@ -6051,10 +6057,6 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
-          // If we need a padding constraint make sure we're
-          // checking for tight region bounds
-          if (constraints.padding_constraint.delta.get_dim() > 0)
-            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -6071,7 +6073,8 @@ namespace Legion {
           for (std::deque<PhysicalManager*>::const_iterator it = 
                 candidates.begin(); it != candidates.end(); it++)
           {
-            if (!(*it)->meets_expression(space_expr, tight_region_bounds))
+            if (!(*it)->meets_expression(space_expr, tight_region_bounds,
+                  &constraints.padding_constraint.delta))
               continue;
             if ((*it)->entails(constraints, DomainPoint(), NULL))
             {
@@ -6147,10 +6150,6 @@ namespace Legion {
       bool found = false;
       if (!candidates.empty())
       {
-        // If we need a padding constraint make sure we're
-        // checking for tight region bounds
-        if (constraints.padding_constraint.delta.get_dim() > 0)
-          tight_region_bounds = true;
         std::set<IndexSpaceExpression*> region_exprs;
         RegionTreeForest *forest = runtime->forest;
         for (std::vector<LogicalRegion>::const_iterator it = 
@@ -6167,7 +6166,8 @@ namespace Legion {
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds,
+                &constraints.padding_constraint.delta))
             continue;
           if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
