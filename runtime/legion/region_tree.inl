@@ -778,7 +778,8 @@ namespace Legion {
     template<int DIM, typename T>
     inline bool IndexSpaceExpression::meets_layout_expression_internal(
                           IndexSpaceExpression *space_expr, bool tight_bounds,
-                          const Rect<DIM,T> *piece_list, size_t piece_list_size)
+                          const Rect<DIM,T> *piece_list, size_t piece_list_size,
+                          const Domain *padding_delta)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -795,6 +796,23 @@ namespace Legion {
         // Check to see if we contain the space expression
         if (!local.bounds.contains(other.bounds))
           return false;
+        if ((padding_delta != NULL) && (padding_delta->get_dim() > 0))
+        {
+#ifdef DEBUG_LEGION
+          assert(padding_delta->get_dim() == DIM);
+#endif
+          // We need to check that the dimensions are exactly matching for
+          // any which have a non-trival padding
+          for (int dim = 0; dim < DIM; dim++)
+          {
+            if ((padding_delta->lo()[dim] > 0) && 
+                (local.bounds.lo[dim] != other.bounds.lo[dim]))
+              return false;
+            if ((padding_delta->hi()[dim] > 0) &&
+                (local.bounds.hi[dim] != other.bounds.hi[dim]))
+              return false;
+          }
+        }
         // If tight, check to see if they are equivalent
         if (tight_bounds)
           return local.bounds == other.bounds;
@@ -802,6 +820,9 @@ namespace Legion {
       }
       else
       {
+        // Padding is not supported for sparse layouts
+        if ((padding_delta != NULL) && (padding_delta->get_dim() > 0))
+          return false;
 #ifdef DEBUG_LEGION
         assert(piece_list_size > 0);
 #endif
@@ -1394,7 +1415,8 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceOperationT<DIM,T>::meets_layout_expression(
                             IndexSpaceExpression *space_expr, bool tight_bounds,
-                            const void *piece_list, size_t piece_list_size)
+                            const void *piece_list, size_t piece_list_size,
+                            const Domain *padding_delta)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1402,7 +1424,8 @@ namespace Legion {
 #endif
       return meets_layout_expression_internal<DIM,T>(space_expr, tight_bounds,
                                   static_cast<const Rect<DIM,T>*>(piece_list),
-                                  piece_list_size / sizeof(Rect<DIM,T>));
+                                  piece_list_size / sizeof(Rect<DIM,T>),
+                                  padding_delta);
     }
 
     //--------------------------------------------------------------------------
@@ -4911,7 +4934,8 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::meets_layout_expression(
                             IndexSpaceExpression *space_expr, bool tight_bounds,
-                            const void *piece_list, size_t piece_list_size)
+                            const void *piece_list, size_t piece_list_size,
+                            const Domain *padding_delta)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4919,7 +4943,8 @@ namespace Legion {
 #endif
       return meets_layout_expression_internal<DIM,T>(space_expr, tight_bounds,
                                   static_cast<const Rect<DIM,T>*>(piece_list),
-                                  piece_list_size / sizeof(Rect<DIM,T>));
+                                  piece_list_size / sizeof(Rect<DIM,T>),
+                                  padding_delta);
     }
 
     //--------------------------------------------------------------------------

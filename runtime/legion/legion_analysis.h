@@ -796,7 +796,7 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(LEGION_SINGULAR_PROJECTION),
-          projection_space(NULL) { }
+          projection_space(NULL),sharding_function(NULL),sharding_space(NULL){ }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      IndexSpaceNode *launch_space,ShardingFunction *func = NULL,
                      IndexSpace shard_space = IndexSpace::NO_SPACE);

@@ -1691,7 +1691,9 @@ namespace Legion {
             std::vector<LogicalRegion> regions_to_check(1, 
                                 regions[it->first].region);
             PhysicalManager *phy = manager->as_physical_manager();
-            if (!phy->meets_regions(regions_to_check, true/*tight*/))
+            if (!phy->meets_regions(regions_to_check,
+                  constraints->specialized_constraint.is_exact(),
+                  &constraints->padding_constraint.delta))
             {
               if (constraints->specialized_constraint.is_exact())
                 conflict_constraint = &constraints->specialized_constraint;
@@ -4198,6 +4200,15 @@ namespace Legion {
         if (remote_trace_recorder->remove_recorder_reference())
           delete remote_trace_recorder;
         remote_trace_recorder = NULL;
+      }
+      if (must_epoch_op != NULL)
+      {
+        // If we are part of a must epoch operation, then report the 
+        // event that describes when all of our mapping activies are done
+        RtEvent mapping_applied;
+        if (!map_applied_conditions.empty())
+          mapping_applied = Runtime::merge_events(map_applied_conditions);
+        must_epoch_op->record_mapped_event(index_point, mapping_applied);
       }
       return RtEvent::NO_RT_EVENT;
     }

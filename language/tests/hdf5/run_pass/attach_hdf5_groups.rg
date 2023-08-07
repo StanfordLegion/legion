@@ -112,6 +112,7 @@ task main()
     fill_region(r2, 1)
     compare_regions(is, r1, r2)
     detach(hdf5, r2.{a, b, c})
+    __fence(__execution)
   end
 
   -- test 2: attach and directly read/write the file but use acquire/release
@@ -125,6 +126,7 @@ task main()
     compare_regions(is, r1, r2)
     release(r2)
     detach(hdf5, r2.{a, b, c})
+    __fence(__execution)
   end
 
   -- test 3: write different data and then re-attach - should see old data
@@ -138,6 +140,7 @@ task main()
     compare_regions(is, r1, r2)
     release(r2)
     detach(hdf5, r2.{a, b, c})
+    __fence(__execution)
   end
 
   -- test 4: use explicit copies (no acquire/release needed)
