@@ -1118,6 +1118,9 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
+        // Finalize any output regions
+        if (output_size_collective != NULL)
+          finalize_output_regions(true/*first invocation*/);
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
         {
@@ -1128,13 +1131,7 @@ namespace Legion {
         }
         if (redop > 0)
           finish_index_task_reduction();
-        if (output_size_collective != NULL)
-        {
-          output_size_collective->perform_collective_async();
-          complete_execution(output_size_collective->get_done_event());
-        }
-        else
-          complete_execution();
+        complete_execution();
         trigger_children_complete();
         trigger_children_committed();
       }
