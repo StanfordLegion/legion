@@ -1120,7 +1120,10 @@ namespace Legion {
 #endif
         // Finalize any output regions
         if (output_size_collective != NULL)
+        {
           finalize_output_regions(true/*first invocation*/);
+          record_output_registered(RtEvent::NO_RT_EVENT);
+        }
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
         {
@@ -1704,13 +1707,14 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(output_bar.exists());
-      assert(registered.exists());
       assert(!output_regions.empty());
 #endif
       // Record it in the set of output events and if we've seen all of them
       // then we can launch the meta-task to do the final regisration
       AutoLock o_lock(op_lock);
-      output_preconditions.push_back(registered);
+      // Can be a no-event if we've been shared off
+      if (registered.exists())
+        output_preconditions.push_back(registered);
 #ifdef DEBUG_LEGION
       assert(output_preconditions.size() <= total_points);
 #endif
