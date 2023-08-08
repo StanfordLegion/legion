@@ -8077,7 +8077,7 @@ namespace Legion {
         if (remote_handle.exists())
         {
           IndexPartNode *result = context->get_node(remote_handle, defer);
-          if (can_fail)
+          if (can_fail && (result != NULL))
             result->add_base_resource_ref(REGION_TREE_REF);
           return result;
         }
