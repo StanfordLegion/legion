@@ -736,6 +736,15 @@ namespace Realm {
     class RemoteChannelInfo;
     class RemoteChannel;
 
+    struct ChannelCopyInfo {
+      Memory src_mem;
+      Memory dst_mem;
+      Memory ind_mem = Memory::NO_MEMORY;
+      bool is_scatter = false;
+      bool is_ranges = false;
+      size_t addr_size = 0;
+    };
+
     class Channel {
     public:
       Channel(XferDesKind _kind)
