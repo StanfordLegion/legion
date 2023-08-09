@@ -4825,7 +4825,7 @@ namespace Legion {
                                                    privilege_path, analysis);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
-      parent_ctx->update_current_implicit(this);
+      parent_ctx->update_current_implicit_creation(this);
     }
 
     //--------------------------------------------------------------------------

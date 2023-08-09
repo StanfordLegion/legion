@@ -692,19 +692,7 @@ namespace Legion {
       {
         const RtEvent precondition = Runtime::merge_events(done_events);
         if (precondition.exists() && !precondition.has_triggered())
-        {
-          if (is_inner_context())
-          {
-            InnerContext *ctx = static_cast<InnerContext*>(this);
-            // Need a fence to make sure that no one tries to use these
-            // fields where they haven't been made visible yet
-            CreationOp *creator = runtime->get_available_creation_op();
-            creator->initialize_fence(ctx, precondition, provenance);
-            ctx->add_to_dependence_queue(creator);
-          }
-          else
-            precondition.wait();
-        }
+          precondition.wait();
       }
       return fid;
     }
@@ -752,19 +740,7 @@ namespace Legion {
       {
         const RtEvent precondition = Runtime::merge_events(done_events);
         if (precondition.exists() && !precondition.has_triggered())
-        {
-          if (is_inner_context())
-          {
-            // Need a fence to make sure that no one tries to use these
-            // fields where they haven't been made visible yet
-            InnerContext *ctx = static_cast<InnerContext*>(this);
-            CreationOp *creator = runtime->get_available_creation_op();
-            creator->initialize_fence(ctx, precondition, provenance);
-            ctx->add_to_dependence_queue(creator);
-          }
-          else
-            precondition.wait();
-        }
+          precondition.wait();
       }
     }
 
@@ -2831,8 +2807,8 @@ namespace Legion {
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0),
         currently_active_context(false), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
-        current_execution_fence_index(0), last_implicit(NULL),
-        last_implicit_gen(0)
+        current_execution_fence_index(0), last_implicit_creation(NULL),
+        last_implicit_creation_gen(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5610,8 +5586,8 @@ namespace Legion {
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();  
       const ApEvent ready = creator_op->get_completion_event();
-      creator_op->initialize_fields(this, node, resulting_fields, sizes, 
-                                    RtEvent::NO_RT_EVENT, provenance);
+      creator_op->initialize_fields(this, node, resulting_fields,
+                                    sizes, provenance);
       node->initialize_fields(ready, resulting_fields, serdez_id,
                               creator_op->get_provenance());
       register_all_field_creations(space, false/*local*/, resulting_fields);
@@ -5735,9 +5711,11 @@ namespace Legion {
       RtEvent precondition;
       FieldSpaceNode *node = runtime->forest->allocate_field(space, ready, fid, 
                                           serdez_id, provenance, precondition);
-      creator_op->initialize_field(this, node, fid, field_size,
-                                   precondition, provenance);
+      creator_op->initialize_field(this, node, fid, field_size, provenance);
       register_field_creation(space, fid, local);
+      // Make sure the IDs are valid for the user 
+      if (precondition.exists() && !precondition.has_triggered())
+        precondition.wait();
       add_to_dependence_queue(creator_op);
       return fid;
     }
@@ -5869,8 +5847,11 @@ namespace Legion {
       FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready, 
                     resulting_fields, serdez_id, provenance, precondition);
       creator_op->initialize_fields(this, node, resulting_fields, 
-                                    sizes, precondition, provenance);
+                                    sizes, provenance);
       register_all_field_creations(space, local, resulting_fields);
+      // Need to make sure that field IDs are valid for users
+      if (precondition.exists() && !precondition.has_triggered())
+        precondition.wait();
       add_to_dependence_queue(creator_op);
     }
 
@@ -9262,14 +9243,16 @@ namespace Legion {
       // If there are any outstanding unmapped dependent partition operations
       // outstanding then we might have an implicit dependence on its execution
       // so we always record a dependence on it
-      if (last_implicit != NULL)
+      if (last_implicit_creation != NULL)
       {
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
-        op->register_dependence(last_implicit, last_implicit_gen);
+        op->register_dependence(last_implicit_creation, 
+                                last_implicit_creation_gen);
 #else
-        if (op->register_dependence(last_implicit, last_implicit_gen))
-          last_implicit = NULL;
+        if (op->register_dependence(last_implicit_creation,
+                                    last_implicit_creation_gen))
+          last_implicit_creation = NULL;
 #endif
       }
       if (current_mapping_fence_event.exists())
@@ -9532,13 +9515,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::update_current_implicit(Operation *op)
+    void InnerContext::update_current_implicit_creation(Operation *op)
     //--------------------------------------------------------------------------
     {
       // Just overwrite since we know we already recorded a dependence
       // between this operation and the previous last deppart op
-      last_implicit = op;
-      last_implicit_gen = op->get_generation();
+      last_implicit_creation = op;
+      last_implicit_creation_gen = op->get_generation();
     }
 
     //--------------------------------------------------------------------------
@@ -16106,6 +16089,7 @@ namespace Legion {
       const bool local_shard = (owner_space == runtime->address_space) ?
         (creator_shard == owner_shard->shard_id) :
         shard_manager->is_first_local_shard(owner_shard);
+      const RtBarrier creation_bar = creation_barrier.next(this);
       // This deduplicates multiple shards on the same node
       if (local_shard)
       {
@@ -16113,20 +16097,17 @@ namespace Legion {
         FieldSpaceNode *node = runtime->forest->get_node(space);
         node->initialize_fields(sizes, resulting_fields, serdez_id, 
                                 provenance, true/*collective*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         if (runtime->legion_spy_enabled && !non_owner)
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
              sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
       }
-      const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
-      // Launch the creation op in this context to act as a fence to ensure
-      // that the allocations are done on all shard nodes before anyone else
-      // tries to use them or their meta-data
-      CreationOp *creator_op = runtime->get_available_creation_op();
-      creator_op->initialize_fence(this, creation_bar, provenance);
-      add_to_dependence_queue(creator_op);
+      else
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       register_all_field_creations(space, false/*loca*/, resulting_fields);
+      // Make sure all the field allocations are done on all shards
+      creation_bar.wait();
       return space;
     }
 
@@ -16219,32 +16200,34 @@ namespace Legion {
       const bool local_shard = (owner_space == runtime->address_space) ?
         (creator_shard == owner_shard->shard_id) :
         shard_manager->is_first_local_shard(owner_shard);
+      const RtBarrier creation_bar = creation_barrier.next(this);
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
-      const RtBarrier creation_bar = creation_barrier.next(this);
+      FieldSpaceNode *node = runtime->forest->get_node(space);
       // This deduplicates multiple shards on the same node
       if (local_shard)
       {
         const ApEvent ready = creator_op->get_completion_event();
         const bool owner = (creator_shard == owner_shard->shard_id);
-        FieldSpaceNode *node = runtime->forest->get_node(space);
         node->initialize_fields(ready, resulting_fields, serdez_id,
                                 provenance, true/*collective*/);
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         creator_op->initialize_fields(this, node, resulting_fields, 
-                                      sizes, RtEvent::NO_RT_EVENT,
-                                      provenance, owner);
+                                      sizes, provenance, owner);
       }
       else
       {
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
-        creator_op->initialize_fence(this, creation_bar, provenance);
+        creator_op->initialize_fields(this, node, resulting_fields, 
+                                      sizes, provenance, false/*owner*/);
       }
+      register_all_field_creations(space, false/*local*/, resulting_fields);
+      // Make sure the field IDs are valid everywhere
+      creation_bar.wait();
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       add_to_dependence_queue(creator_op);
-      register_all_field_creations(space, false/*local*/, resulting_fields);
       return space;
     }
 
@@ -16490,13 +16473,9 @@ namespace Legion {
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
       Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
-      // Launch the creation op in this context to act as a fence to ensure
-      // that the allocations are done on all shard nodes before anyone else
-      // tries to use them or their meta-data
-      CreationOp *creator_op = runtime->get_available_creation_op();
-      creator_op->initialize_fence(this, creation_bar, provenance);
-      add_to_dependence_queue(creator_op);
       register_field_creation(space, fid, local);
+      // Make sure the field IDs are valid everywhere
+      creation_bar.wait();
       return fid;
     }
 
@@ -16626,20 +16605,25 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_field(space, ready,
             fid, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_bar,1/*count*/,precondition);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
         creator_op->initialize_field(this, node, fid, field_size, 
-                                     precondition, provenance, owner);
+                                     provenance, owner);
       }
       else
-      {
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
-        creator_op->initialize_fence(this, creation_bar, provenance);
+      register_field_creation(space, fid, local);
+      // Make sure the IDs are valid everywhere
+      creation_bar.wait();
+      if (!finder->second.second)
+      {
+        FieldSpaceNode *node = runtime->forest->get_node(space);
+        creator_op->initialize_field(this, node, fid, field_size, 
+                                     provenance, false/*owner*/);
       }
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       add_to_dependence_queue(creator_op);
-      register_field_creation(space, fid, local);
       return fid;
     }
 
@@ -16799,13 +16783,9 @@ namespace Legion {
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
       Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
-      // Launch the creation op in this context to act as a fence to ensure
-      // that the allocations are done on all shard nodes before anyone else
-      // tries to use them or their meta-data
-      CreationOp *creator_op = runtime->get_available_creation_op();
-      creator_op->initialize_fence(this, creation_bar, provenance);
-      add_to_dependence_queue(creator_op);
       register_all_field_creations(space, local, resulting_fields);
+      // Make sure all the field IDs are valid everywhere
+      creation_bar.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -16911,20 +16891,25 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
                 resulting_fields, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_bar,1/*count*/,precondition);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
         creator_op->initialize_fields(this, node, resulting_fields, 
-                                      sizes, precondition, provenance, owner);
+                                      sizes, provenance, owner);
       }
       else
-      {
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
-        creator_op->initialize_fence(this, creation_bar, provenance);
+      register_all_field_creations(space, local, resulting_fields);
+      // Make sure the field IDs are valid everywhere
+      creation_bar.wait();
+      if (!finder->second.second)
+      {
+        FieldSpaceNode *node = runtime->forest->get_node(space);
+        creator_op->initialize_fields(this, node, resulting_fields, 
+                                      sizes, provenance, false/*owner*/);
       }
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       add_to_dependence_queue(creator_op);
-      register_all_field_creations(space, local, resulting_fields);
     }
 
     //--------------------------------------------------------------------------
