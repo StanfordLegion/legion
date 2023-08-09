@@ -12756,7 +12756,6 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!precondition.exists());
-        assert(post.exists());
 #endif
         postcondition = post;
         return perform_collective_wait(false/*block*/);
