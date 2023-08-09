@@ -212,8 +212,9 @@ def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
         ([('HDF_ROOT', hdf_dir),
           ('USE_HDF', '1')]
          if hdf_enabled() else []) +
-        [('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config')),
-         ('CMAKE_PREFIX_PATH', llvm_dir)]
+        ([('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config')),
+          ('CMAKE_PREFIX_PATH', llvm_dir)]
+         if llvm_dir is not None else [])
     )
 
     if use_cmake and hdf_enabled():
@@ -331,53 +332,7 @@ def check_dirty_build(name, build_result, component_dir):
         print_advice(component_dir)
         sys.exit(1)
 
-def driver(prefix_dir=None, scratch_dir=None, cache=False,
-           legion_use_cmake=False, extra_flags=[], llvm_version=None,
-           terra_url=None, terra_branch=None, terra_lua=None, terra_use_cmake=None,
-           gasnet_version=None, gasnet_config_version=None,
-           thread_count=None, insecure=False):
-    if not cache:
-        if 'CC' not in os.environ:
-            raise Exception('Please set CC in your environment')
-        if 'CXX' not in os.environ:
-            raise Exception('Please set CXX in your environment')
-        if 'LG_RT_DIR' in os.environ:
-            raise Exception('Please unset LG_RT_DIR in your environment')
-
-    is_cray = 'CRAYPE_VERSION' in os.environ
-
-    if not cache and is_cray:
-        print('This system has been detected as a Cray system.')
-        print()
-        print('Note: The Cray wrappers are broken for various purposes')
-        print('(particularly, dynamically linked libraries). For this')
-        print('reason this script requires that HOST_CC and HOST_CXX')
-        print('be set to the underlying compilers (GCC and G++, etc.).')
-        print()
-        if 'HOST_CC' not in os.environ:
-            raise Exception('Please set HOST_CC in your environment')
-        if 'HOST_CXX' not in os.environ:
-            raise Exception('Please set HOST_CXX in your environment')
-
-    if terra_use_cmake is None:
-        terra_use_cmake = True
-
-    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    legion_dir = os.path.dirname(root_dir)
-
-    if prefix_dir is None:
-        prefix_dir = root_dir
-    else:
-        prefix_dir = os.path.abspath(prefix_dir)
-
-    if thread_count is None:
-        try:
-            # this correctly considers the current affinity mask
-            thread_count = len(os.sched_getaffinity(0))
-        except AttributeError:
-            # this works on macos
-            thread_count = multiprocessing.cpu_count()
-
+def setup_gasnet(gasnet_version, gasnet_config_version, prefix_dir, cache):
     gasnet_build_dir = None
     conduit = None
     if gasnet_enabled():
@@ -403,7 +358,9 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             else:
                 check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
             assert os.path.exists(gasnet_build_result)
+    return (gasnet_build_dir, conduit)
 
+def setup_cmake(legion_use_cmake, terra_binary, prefix_dir, cache, insecure):
     cmake_exe = None
     try:
         cmake_version = subprocess.check_output(['cmake', '--version']).decode('utf-8')
@@ -418,7 +375,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             raise Exception('Cannot parse CMake version:\n\n%s' % cmake_version)
         else:
             cmake_exe = 'cmake' # CMake is ok, use it
-    if cache or (cmake_exe is None):
+    if (cache or (cmake_exe is None)) and (legion_use_cmake or not terra_binary):
         cmake_system = platform.system()
         if cmake_system == 'Darwin':
             cmake_system = 'macos'
@@ -451,6 +408,45 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         if cmake_system == 'macos':
             cmake_exe = os.path.join(cmake_install_dir, 'CMake.app', 'Contents', 'bin', 'cmake')
 
+    return cmake_exe
+
+def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, terra_use_cmake, cmake_exe, prefix_dir, scratch_dir, thread_count, cache, is_cray, insecure):
+    if terra_binary:
+        terra_system = platform.system()
+        if terra_system == 'Darwin':
+            terra_system = 'OSX'
+        terra_processor = platform.machine()
+
+        release_version = terra_branch[len('release-'):]
+
+        release_commits = {'1.1.0': 'be89521'}
+        release_commit = release_commits[release_version]
+
+        bin_key = '%s-%s-%s' % (terra_system, terra_processor, release_commit)
+        bin_stem = 'terra-%s' % (bin_key)
+
+        bin_shasums = {
+            # 1.1.0
+            'Linux-aarch64-be89521': 'e46ac766a41a9dd04f0a04076173b5f2dd331379faf6e165cf4ba3455d16cdb4',
+            'Linux-ppc64le-be89521': '95af7749f5bf8e3060d41dce4c8908f63adf016f006045e97a8b8279f566ed20',
+            'Linux-x86_64-be89521': 'ee2b13715704da41b0d475b44e1e0432f4395edff44b535353652bda8f6610b1',
+            'OSX-x86_64-be89521': '08607ea2919b3571dd9882ac594b62f551f001f7a21151bc99e85155d89c63d3',
+        }
+        bin_shasum = bin_shasums[bin_key]
+
+        bin_basename = '%s.tar.xz' % (bin_stem)
+        bin_url = 'https://github.com/terralang/terra/releases/download/%s/%s' % (
+            terra_branch, bin_basename,
+        )
+        bin_tarball = os.path.join(prefix_dir, bin_basename)
+        bin_dir = os.path.join(prefix_dir, bin_stem)
+        if not os.path.exists(bin_dir):
+            if not os.path.exists(bin_tarball):
+                download(bin_tarball, bin_url, bin_shasum, insecure=insecure)
+            if not cache:
+                extract(prefix_dir, bin_tarball, 'xz')
+        return (bin_dir, None)
+
     llvm_dir = os.path.realpath(os.path.join(prefix_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
     llvm_build_result = os.path.join(llvm_install_dir, 'bin', 'llvm-config')
@@ -478,6 +474,9 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     if not cache:
         assert os.path.exists(terra_build_result)
 
+    return (terra_dir, llvm_install_dir)
+
+def setup_hdf(prefix_dir, thread_count, cache, is_cray, insecure):
     hdf_install_dir = None
     if hdf_enabled():
         hdf_dir = os.path.join(prefix_dir, 'hdf')
@@ -492,6 +491,74 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             check_dirty_build('hdf', hdf_build_result, hdf_dir)
         if not cache:
             assert os.path.exists(hdf_build_result)
+    return hdf_install_dir
+
+def driver(prefix_dir=None, scratch_dir=None, cache=False,
+           legion_use_cmake=False, extra_flags=[], llvm_version=None,
+           terra_url=None, terra_branch=None, terra_binary=None, terra_lua=None, terra_use_cmake=None,
+           gasnet_version=None, gasnet_config_version=None,
+           thread_count=None, insecure=False):
+    if not cache:
+        if 'CC' not in os.environ:
+            raise Exception('Please set CC in your environment')
+        if 'CXX' not in os.environ:
+            raise Exception('Please set CXX in your environment')
+        if 'LG_RT_DIR' in os.environ:
+            raise Exception('Please unset LG_RT_DIR in your environment')
+
+    is_cray = 'CRAYPE_VERSION' in os.environ
+
+    if not cache and is_cray:
+        print('This system has been detected as a Cray system.')
+        print()
+        print('Note: The Cray wrappers are broken for various purposes')
+        print('(particularly, dynamically linked libraries). For this')
+        print('reason this script requires that HOST_CC and HOST_CXX')
+        print('be set to the underlying compilers (GCC and G++, etc.).')
+        print()
+        if 'HOST_CC' not in os.environ:
+            raise Exception('Please set HOST_CC in your environment')
+        if 'HOST_CXX' not in os.environ:
+            raise Exception('Please set HOST_CXX in your environment')
+
+    if terra_binary is None:
+        terra_binary = True
+    if terra_binary:
+        if terra_url != 'https://github.com/terralang/terra.git':
+            raise Exception('Cannot specify --terra-url when using a Terra binary (set --no-terra-binary for a source build)')
+        if not terra_branch.startswith('release-'):
+            raise Exception('Must specify a Terra release when using a Terra binary (set --no-terra-binary for a source build)')
+        if terra_lua is not None:
+            raise Exception('Cannot specify --terra-lua when using a Terra binary (set --no-terra-binary for a source build)')
+        if terra_use_cmake is not None:
+            raise Exception('Cannot specify --terra-cmake or --no-terra-cmake when using a Terra binary (set --no-terra-binary for a source build)')
+
+    if terra_use_cmake is None and not terra_binary:
+        terra_use_cmake = True
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    legion_dir = os.path.dirname(root_dir)
+
+    if prefix_dir is None:
+        prefix_dir = root_dir
+    else:
+        prefix_dir = os.path.abspath(prefix_dir)
+
+    if thread_count is None:
+        try:
+            # this correctly considers the current affinity mask
+            thread_count = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # this works on macos
+            thread_count = multiprocessing.cpu_count()
+
+    (gasnet_build_dir, conduit) = setup_gasnet(gasnet_version, gasnet_config_version, prefix_dir, cache)
+
+    cmake_exe = setup_cmake(legion_use_cmake, terra_binary, prefix_dir, cache, insecure)
+
+    (terra_dir, llvm_install_dir) = setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, terra_use_cmake, cmake_exe, prefix_dir, scratch_dir, thread_count, cache, is_cray, insecure)
+
+    hdf_install_dir = setup_hdf(prefix_dir, thread_count, cache, is_cray, insecure)
 
     if not cache:
         build_regent(root_dir, legion_use_cmake, cmake_exe, extra_flags,
@@ -535,6 +602,12 @@ if __name__ == '__main__':
         default='release-1.1.0',
         help='Branch of Terra repository to checkout.')
     parser.add_argument(
+        '--terra-binary', dest='terra_binary', action='store_true', default=None,
+        help='Download Terra binary instead of building from source.')
+    parser.add_argument(
+        '--no-terra-binary', dest='terra_binary', action='store_false', default=None,
+        help='Force Terra to build from source.')
+    parser.add_argument(
         '--terra-lua', dest='terra_lua', required=False,
         default=None,
         help='Lua implementation to use for Terra (luajit or moonjit).')
@@ -543,7 +616,7 @@ if __name__ == '__main__':
         help='Use CMake to build Terra.')
     parser.add_argument(
         '--no-terra-cmake', dest='terra_use_cmake', action='store_false', default=None,
-        help='Use CMake to build Terra.')
+        help='Use Make to build Terra.')
     parser.add_argument(
         '--gasnet-version', dest='gasnet_version', required=False,
         default=os.environ.get('GASNET_VERSION', 'GASNet-2023.3.0'),
