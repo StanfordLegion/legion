@@ -1369,7 +1369,8 @@ namespace Legion {
             collective_done = reduction_collective->get_done_event();
           else
             collective_done = 
-              broadcast_collective->async_broadcast(reduction_instance);
+              broadcast_collective->async_broadcast(reduction_instance,
+                  ApEvent::NO_AP_EVENT, reduction_collective->get_done_event());
         }
         else
           collective_done = all_reduce_collective->async_reduce(
@@ -6360,7 +6361,8 @@ namespace Legion {
           collective_done = reduction_collective->get_done_event();
         else
           collective_done = 
-            broadcast_collective->async_broadcast(targets.front());
+            broadcast_collective->async_broadcast(targets.front(),
+                ApEvent::NO_AP_EVENT, reduction_collective->get_done_event());
       }
       else
         collective_done = all_reduce_collective->async_reduce(targets.front(),
@@ -12734,7 +12736,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FutureBroadcastCollective::async_broadcast(FutureInstance *inst,
-                                                       ApEvent precondition)
+                                             ApEvent precondition, RtEvent post)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12743,6 +12745,9 @@ namespace Legion {
       instance = inst;
       if (is_origin())
       {
+#ifdef DEBUG_LEGION
+        assert(!post.exists());
+#endif
         Runtime::trigger_event(NULL, finished, precondition);
         perform_collective_async();
         return RtEvent::NO_RT_EVENT;
@@ -12751,7 +12756,9 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!precondition.exists());
+        assert(post.exists());
 #endif
+        postcondition = post;
         return perform_collective_wait(false/*block*/);
       }
     }

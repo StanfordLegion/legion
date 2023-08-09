@@ -318,14 +318,17 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual void elide_collective(void);
+      virtual RtEvent post_broadcast(void) { return postcondition; }
     public:
       RtEvent async_broadcast(FutureInstance *instance, 
-          ApEvent precondition = ApEvent::NO_AP_EVENT);
+          ApEvent precondition = ApEvent::NO_AP_EVENT,
+          RtEvent postcondition = RtEvent::NO_RT_EVENT);
     public:
       Operation *const op;
       const ApUserEvent finished;
     protected:
       FutureInstance *instance;
+      RtEvent postcondition;
     };
 
     /**
