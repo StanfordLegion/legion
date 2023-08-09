@@ -1709,6 +1709,10 @@ namespace Legion {
       // Override this so it can broadcast the future result
       virtual Future create_future(void);
     public:
+      // Override for saying when it is safe to use output region trees
+      virtual void record_output_registered(RtEvent registered,
+                                      std::set<RtEvent> &applied_events);
+    public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
     protected:
@@ -1716,6 +1720,7 @@ namespace Legion {
       IndexSpaceNode *launch_space;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      RtBarrier output_bar;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

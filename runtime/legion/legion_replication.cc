@@ -543,6 +543,7 @@ namespace Legion {
       launch_space = NULL;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      output_bar = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -688,6 +689,8 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
+        if (output_bar.exists())
+          record_output_registered(RtEvent::NO_RT_EVENT,map_applied_conditions);
         shard_off(RtEvent::NO_RT_EVENT);
       }
       else // We own it, so it goes on the ready queue
@@ -741,6 +744,9 @@ namespace Legion {
       // Only set the future on shard 0 (note we know that all the shards
       // have resolved false so we don't need to ask the sharding functor
       // which one we want to do the work)
+      // Trigger the output barrier if we have one
+      if (output_bar.exists())
+        Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
       if (repl_ctx->owner_shard->shard_id > 0)
         shard_off(RtEvent::NO_RT_EVENT);
       else
@@ -804,6 +810,8 @@ namespace Legion {
       else
         handle = ctx->find_index_launch_space(index_domain, get_provenance());
       launch_space = runtime->forest->get_node(handle);
+      if (!output_regions.empty())
+        output_bar = ctx->get_next_output_regions_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -832,6 +840,26 @@ namespace Legion {
       DistributedID future_did = repl_ctx->get_next_distributed_id();
       return repl_ctx->shard_manager->deduplicate_future_creation(
           repl_ctx, future_did, this, index_point);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::record_output_registered(RtEvent registered,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_remote());
+      assert(output_bar.exists());
+      assert(!output_regions.empty());
+#endif
+      // Launch the meta-task to perform the registration
+      // Make sure we don't complete the task until the barrier is done
+      // on the shard that actually owns the task
+      Runtime::phase_barrier_arrive(output_bar, 1/*count*/, registered);
+      FinalizeOutputEqKDTreeArgs args(this);
+      output_regions_registered = 
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, output_bar);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1445,7 +1473,10 @@ namespace Legion {
         }
       }
       if (output_size_collective != NULL)
+      {
         output_size_collective->elide_collective();
+        Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
+      }
       predicate_false_collective_view_rendezvous();
       // Now continue through and do the base case
       IndexTask::predicate_false();
