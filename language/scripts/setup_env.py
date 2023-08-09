@@ -410,7 +410,7 @@ def setup_cmake(legion_use_cmake, terra_binary, prefix_dir, cache, insecure):
 
     return cmake_exe
 
-def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, terra_use_cmake, cmake_exe, prefix_dir, thread_count, cache, is_cray, insecure):
+def setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, terra_use_cmake, cmake_exe, prefix_dir, scratch_dir, thread_count, cache, is_cray, insecure):
     if terra_binary:
         terra_system = platform.system()
         if terra_system == 'Darwin':
@@ -556,7 +556,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
 
     cmake_exe = setup_cmake(legion_use_cmake, terra_binary, prefix_dir, cache, insecure)
 
-    (terra_dir, llvm_install_dir) = setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, terra_use_cmake, cmake_exe, prefix_dir, thread_count, cache, is_cray, insecure)
+    (terra_dir, llvm_install_dir) = setup_terra(llvm_version, terra_url, terra_branch, terra_binary, terra_lua, terra_use_cmake, cmake_exe, prefix_dir, scratch_dir, thread_count, cache, is_cray, insecure)
 
     hdf_install_dir = setup_hdf(prefix_dir, thread_count, cache, is_cray, insecure)
 
