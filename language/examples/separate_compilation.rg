@@ -14,6 +14,10 @@
 
 import "regent"
 
+-- FIXME (Elliott): debugging https://github.com/StanfordLegion/legion/issues/1514
+io.stdout:setvbuf("no")
+io.stderr:setvbuf("no")
+
 -- Make sure this all happens in a temporary directory in case we're
 -- running concurrently.
 local tmp_dir
