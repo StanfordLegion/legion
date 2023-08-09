@@ -1948,7 +1948,7 @@ namespace Realm {
       return true;
     }
 
-    uint64_t GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+    uint64_t GPUreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                              CustomSerdezID src_serdez_id,
                                              CustomSerdezID dst_serdez_id,
                                              ReductionOpID redop_id,
@@ -1965,7 +1965,7 @@ namespace Realm {
         return 0;
 
       // then delegate to the normal supports_path logic
-      return Channel::supports_path(src_mem, dst_mem,
+      return Channel::supports_path(channel_copy_info,
                                     src_serdez_id, dst_serdez_id, redop_id,
                                     total_bytes, src_frags, dst_frags,
                                     kind_ret, bw_ret, lat_ret);
@@ -2066,7 +2066,7 @@ namespace Realm {
       : RemoteChannel(_remote_ptr)
     {}
 
-    uint64_t GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+    uint64_t GPUreduceRemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                                    CustomSerdezID src_serdez_id,
                                                    CustomSerdezID dst_serdez_id,
                                                    ReductionOpID redop_id,
@@ -2083,7 +2083,7 @@ namespace Realm {
         return 0;
 
       // then delegate to the normal supports_path logic
-      return Channel::supports_path(src_mem, dst_mem,
+      return Channel::supports_path(channel_copy_info,
                                     src_serdez_id, dst_serdez_id, redop_id,
                                     total_bytes, src_frags, dst_frags,
                                     kind_ret, bw_ret, lat_ret);
