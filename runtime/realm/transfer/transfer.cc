@@ -3381,6 +3381,13 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
+        // TODO(apryakhin@): Technically this is not a correct number
+        // of destination fragements that we get during scatter.
+        // domain_size() returns just a maximum number of addresses
+        // that we need to scatter and hence this value would be the
+        // worst case. The actual number of consecutive rectangles (e.g
+        // fragments) to handle can be less. Consider finding a
+        // better way to handle this (same for gather op).
         std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
         bool ok = find_fastest_path(src_mem, insts[i].get_location(), serdez_id,
                                     0, domain_size() * bytes_per_element,
