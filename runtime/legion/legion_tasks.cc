@@ -9184,8 +9184,6 @@ namespace Legion {
     {
       // First compute the parent indexes
       compute_parent_indexes(); 
-      // Count how many total points we need for this index space task
-      total_points = index_domain.get_volume();
       // Initialize the privilege paths
       privilege_paths.resize(get_region_count());
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
