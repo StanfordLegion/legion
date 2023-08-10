@@ -1790,7 +1790,6 @@ namespace Legion {
       static const AllocationType alloc_type = CREATION_OP_ALLOC;
     public:
       enum CreationKind {
-        FENCE_CREATION,
         INDEX_SPACE_CREATION,
         FIELD_ALLOCATION,
         FUTURE_MAP_CREATION,
@@ -1802,21 +1801,17 @@ namespace Legion {
     public:
       CreationOp& operator=(const CreationOp &rhs);
     public:
-      void initialize_fence(InnerContext *ctx, RtEvent precondition,
-                            Provenance *provenance);
       void initialize_index_space(InnerContext *ctx, IndexSpaceNode *node, 
                             const Future &future, Provenance *provenance,
                             bool owner = true, 
                             const CollectiveMapping *mapping = NULL);
       void initialize_field(InnerContext *ctx, FieldSpaceNode *node,
                             FieldID fid, const Future &field_size,
-                            RtEvent precondition, Provenance *provenance,
-                            bool owner = true);
+                            Provenance *provenance, bool owner = true);
       void initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                              const std::vector<FieldID> &fids,
                              const std::vector<Future> &field_sizes,
-                             RtEvent precondition, Provenance *provenance,
-                             bool owner = true);
+                             Provenance *provenance, bool owner = true);
       void initialize_map(InnerContext *ctx, Provenance *provenance,
                           const std::map<DomainPoint,Future> &futures);
     public:
@@ -1834,7 +1829,6 @@ namespace Legion {
       FieldSpaceNode *field_space_node;
       std::vector<Future> futures;
       std::vector<FieldID> fields;
-      RtEvent mapping_precondition;
       const CollectiveMapping *mapping;
       bool owner;
     };

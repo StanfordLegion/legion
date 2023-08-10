@@ -9514,22 +9514,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::initialize_fence(InnerContext *ctx, RtEvent precondition,
-                                      Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!mapping_precondition.exists());
-#endif
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      kind = FENCE_CREATION;
-      mapping_precondition = precondition;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id, context_index);
-    }
-
-    //--------------------------------------------------------------------------
     void CreationOp::initialize_index_space(InnerContext *ctx, 
         IndexSpaceNode *n, const Future &f, Provenance *provenance,
         bool own, const CollectiveMapping *map)
@@ -9552,7 +9536,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CreationOp::initialize_field(InnerContext *ctx, FieldSpaceNode *node,
-          FieldID fid, const Future &field_size, RtEvent precondition,
+          FieldID fid, const Future &field_size,
           Provenance *provenance, bool own)
     //--------------------------------------------------------------------------
     {
@@ -9560,14 +9544,12 @@ namespace Legion {
       assert(field_space_node == NULL);
       assert(fields.empty());
       assert(futures.empty());
-      assert(!mapping_precondition.exists());
 #endif
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       kind = FIELD_ALLOCATION;
       field_space_node = node;
       fields.push_back(fid);
       futures.push_back(field_size);
-      mapping_precondition = precondition;
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
@@ -9578,7 +9560,6 @@ namespace Legion {
     void CreationOp::initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                                        const std::vector<FieldID> &fids,
                                        const std::vector<Future> &field_sizes,
-                                       RtEvent precondition,
                                        Provenance *provenance, bool own)
     //--------------------------------------------------------------------------
     {
@@ -9587,14 +9568,12 @@ namespace Legion {
       assert(fields.empty());
       assert(futures.empty());
       assert(fids.size() == field_sizes.size());
-      assert(!mapping_precondition.exists());
 #endif
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       kind = FIELD_ALLOCATION;
       field_space_node = node;     
       fields = fids;
       futures = field_sizes;
-      mapping_precondition = precondition;
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
@@ -9628,7 +9607,6 @@ namespace Legion {
       Operation::activate();
       index_space_node = NULL;
       field_space_node = NULL;
-      mapping_precondition = RtEvent::NO_RT_EVENT;
       mapping = NULL;
       owner = true;
     }
@@ -9673,10 +9651,12 @@ namespace Legion {
         it->impl->register_dependence(this);
       }
       // Record this with the context as an implicit dependence for all
-      // later operations which may rely on this index space for mapping
-      if ((kind == FENCE_CREATION) || (kind == INDEX_SPACE_CREATION) || 
-          (kind == FIELD_ALLOCATION))
-        parent_ctx->update_current_implicit(this);
+      // later operations which may rely on this operation for the creation
+      // Note that future map creations are exempt from this since the 
+      // resource that they are producing (a future map) will have downstream
+      // operations explicitly recording mapping dependences on it
+      if (kind != FUTURE_MAP_CREATION)
+        parent_ctx->update_current_implicit_creation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9690,52 +9670,50 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(futures.size() == 1);
 #endif
-            // Have to request internal buffers before completing mapping
-            // in case we have to make an instance as part of it
-            FutureImpl *impl = futures[0].impl;
-            const RtEvent mapped = 
-              impl->request_internal_buffer(this, false/*eager*/);
-            if (mapped.exists())
+            if (owner)
             {
-              if (mapping_precondition.exists())
-                complete_mapping(
-                    Runtime::merge_events(mapped, mapping_precondition));
-              else
+              // Have to request internal buffers before completing mapping
+              // in case we have to make an instance as part of it
+              FutureImpl *impl = futures[0].impl;
+              const RtEvent mapped = 
+                impl->request_internal_buffer(this, false/*eager*/);
+              if (mapped.exists())
                 complete_mapping(mapped);
+              else
+                complete_mapping();
+              const RtEvent ready = impl->subscribe();
+              if (ready.exists() && !ready.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, ready);
+              else
+                trigger_execution();
             }
-            else
-              complete_mapping(mapping_precondition);
-            const RtEvent ready = impl->subscribe();
-            if (ready.exists() && !ready.has_triggered())
-              parent_ctx->add_to_trigger_execution_queue(this, ready);
             else
               trigger_execution();
             break;
           }
         case FIELD_ALLOCATION:
           {
-            std::set<RtEvent> mapped_events, ready_events;
+            std::vector<RtEvent> mapped_events, ready_events;
             // Have to request internal buffers before completing mapping
             // in case we have to make an instance as part of it
-            for (unsigned idx = 0; idx < futures.size(); idx++)
+            if (owner)
             {
-              FutureImpl *impl = futures[idx].impl;
-              const RtEvent mapped =
-                impl->request_internal_buffer(this,false/*eager*/);
-              if (mapped.exists())
-                mapped_events.insert(mapped);
-              const RtEvent subscribed = impl->subscribe();
-              if (subscribed.exists())
-                ready_events.insert(subscribed);
+              for (unsigned idx = 0; idx < futures.size(); idx++)
+              {
+                FutureImpl *impl = futures[idx].impl;
+                const RtEvent mapped =
+                  impl->request_internal_buffer(this,false/*eager*/);
+                if (mapped.exists())
+                  mapped_events.push_back(mapped);
+                const RtEvent subscribed = impl->subscribe();
+                if (subscribed.exists())
+                  ready_events.push_back(subscribed);
+              }
             }
             if (!mapped_events.empty())
-            {
-              if (mapping_precondition.exists())
-                mapped_events.insert(mapping_precondition);
               complete_mapping(Runtime::merge_events(mapped_events));
-            }
             else
-              complete_mapping(mapping_precondition);
+              complete_mapping();
             if (!ready_events.empty())
             {
               const RtEvent ready = Runtime::merge_events(ready_events);
@@ -9748,10 +9726,9 @@ namespace Legion {
               trigger_execution();
             break;
           }
-        case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
           {
-            complete_mapping(mapping_precondition);
+            complete_mapping();
             complete_execution();
             break;
           }
@@ -9801,17 +9778,18 @@ namespace Legion {
                     " (%zd bytes). Futures passed into field allocation calls "
                     "must contain data of the type size_t.",
                     fields[idx], future_size, sizeof(size_t))
-              field_space_node->update_field_size(fields[idx], *field_size,
-                          complete_preconditions, runtime->address_space);
-              if (runtime->legion_spy_enabled && owner)
-                LegionSpy::log_field_creation(field_space_node->handle.id,
-                    fields[idx], *field_size, (get_provenance() == NULL) ? 
-                    NULL : get_provenance()->human_str());
+              if (owner)
+              {
+                field_space_node->update_field_size(fields[idx], *field_size,
+                            complete_preconditions, runtime->address_space);
+                if (runtime->legion_spy_enabled)
+                  LegionSpy::log_field_creation(field_space_node->handle.id,
+                      fields[idx], *field_size, (get_provenance() == NULL) ?
+                      NULL : get_provenance()->human_str());
+              }
             }
             break;
           }
-        case FENCE_CREATION:
-        case FUTURE_MAP_CREATION:
         default:
           assert(false);
       }
@@ -16487,6 +16465,8 @@ namespace Legion {
     {
       if ((future_map.impl != NULL) && (future_map.impl->op != NULL))
         register_dependence(future_map.impl->op, future_map.impl->op_gen);
+      // Recording this as a pending implicit creation
+      parent_ctx->update_current_implicit_creation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -17276,7 +17256,7 @@ namespace Legion {
                                                    logical_analysis);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
-      parent_ctx->update_current_implicit(this);
+      parent_ctx->update_current_implicit_creation(this);
     }
 
     //--------------------------------------------------------------------------

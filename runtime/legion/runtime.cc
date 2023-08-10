@@ -5325,6 +5325,8 @@ namespace Legion {
                   assert(false);
               }
             }
+            else
+              bounds->get_index_space_domain(realm_is, type_tag);
           }
           return manager->get_instance();
         }
