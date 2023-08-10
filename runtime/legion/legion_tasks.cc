@@ -9415,7 +9415,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do a quick test for empty index space launches
-      if (launch_space->is_empty())
+      total_points = launch_space->get_volume();
+      if (total_points == 0)
       {
         // Clean up this task execution if there are no points
         complete_mapping();

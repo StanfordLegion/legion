@@ -1783,7 +1783,7 @@ namespace Legion {
           AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
           // We should still not be complete if we're here
-          assert(complete_points < total_points);
+          assert((complete_points < total_points) || (total_points == 0));
 #endif
           complete_preconditions.insert(done_event);
         }
