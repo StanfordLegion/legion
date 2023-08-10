@@ -960,20 +960,19 @@ namespace Legion {
 #endif
       set_origin_mapped(true);
       if (!elide_future_return)
-      {
         future_map = must_epoch->get_future_map();
-        const IndexSpace local_space = sharding_space.exists() ?
-            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                launch_space, sharding_space, get_provenance()) :
-            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                launch_space, launch_space->handle, get_provenance());
-        // Figure out which points to enumerate
-        if (local_space.exists())
-        {
-          Domain local_domain;
-          runtime->forest->find_launch_space_domain(local_space, local_domain);
+      const IndexSpace local_space = sharding_space.exists() ?
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+              launch_space, sharding_space, get_provenance()) :
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+              launch_space, launch_space->handle, get_provenance());
+      if (local_space.exists())
+      {
+        Domain local_domain;
+        runtime->forest->find_launch_space_domain(local_space, local_domain);
+        total_points = local_domain.get_volume();
+        if (!elide_future_return)
           enumerate_futures(local_domain);
-        }
       }
     }
 

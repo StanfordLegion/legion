@@ -9171,6 +9171,7 @@ namespace Legion {
       assert(must_epoch != NULL);
 #endif
       set_origin_mapped(true);
+      total_points = launch_space->get_volume();
       if (!elide_future_return)
       {
         future_map = must_epoch->get_future_map(); 
