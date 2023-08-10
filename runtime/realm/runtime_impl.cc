@@ -2743,7 +2743,7 @@ namespace Realm {
         abort();
       }
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-      assert((signal == SIGILL) || (signal == SIGFPE) ||
+      assert((signal == SIGINT) || (signal == SIGFPE) ||
              (signal == SIGABRT) || (signal == SIGSEGV) ||
              (signal == SIGBUS) || (signal == SIGILL));
 #endif
