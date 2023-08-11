@@ -1139,8 +1139,6 @@ namespace Legion {
         // Still need to participate in any collective view rendezvous
         if (!collective_view_rendezvous.empty())
           shard_off_collective_view_rendezvous(complete_preconditions);
-        if (output_bar.exists())
-          Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
         LegionSpy::log_operation_events(unique_op_id, 
