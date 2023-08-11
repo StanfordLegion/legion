@@ -12510,6 +12510,18 @@ namespace Legion {
               rebuild_partial = true;
               if (!(finder->second.get_valid_mask() - it->second))
               {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_nested_expression_reference(did))
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+              else
+              {
                 // Filter out the ones we now subsume
                 std::vector<IndexSpaceExpression*> to_delete;    
                 for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
@@ -12535,18 +12547,6 @@ namespace Legion {
                 }
                 else
                   finder->second.tighten_valid_mask();
-              }
-              else
-              {
-                // We're pruning everything so remove them all now
-                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
-                     finder->second.begin(); eit != finder->second.end(); eit++)
-                  if (eit->first->remove_nested_expression_reference(did))
-                    delete eit->first;
-                // Remove the reference, no need to check for deletion
-                // since we know we added the same reference above
-                finder->first->remove_nested_valid_ref(did);
-                partial_valid_instances.erase(finder);
               }
             }
           } 
@@ -12579,8 +12579,20 @@ namespace Legion {
               rebuild_partial = true;
               if (!(finder->second.get_valid_mask() - valid_mask))
               {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_nested_expression_reference(did))
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+              else
+              {
                 // Filter out the ones we now subsume
-                std::vector<IndexSpaceExpression*> to_delete;    
+                std::vector<IndexSpaceExpression*> to_delete;
                 for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
                      finder->second.begin(); eit != finder->second.end(); eit++)
                 {
@@ -12604,18 +12616,6 @@ namespace Legion {
                 }
                 else
                   finder->second.tighten_valid_mask();
-              }
-              else
-              {
-                // We're pruning everything so remove them all now
-                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
-                     finder->second.begin(); eit != finder->second.end(); eit++)
-                  if (eit->first->remove_nested_expression_reference(did))
-                    delete eit->first;
-                // Remove the reference, no need to check for deletion
-                // since we know we added the same reference above
-                finder->first->remove_nested_valid_ref(did);
-                partial_valid_instances.erase(finder);
               }
             }
           }

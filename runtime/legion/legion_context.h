@@ -1621,7 +1621,7 @@ namespace Legion {
           std::set<ApEvent> &preconditions, bool mapping, bool execution);
       void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      void update_current_implicit(Operation *op);
+      void update_current_implicit_creation(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
@@ -1961,10 +1961,11 @@ namespace Legion {
       // any operations which might need downstream information about 
       // partitions or subspaces. Note that this means that all dependent
       // partitioning operations are guaranteed to map in order currently
-      // We've not extended this to include creation operations as well
-      // for similar reasons, so now this is a general operation class
-      Operation *last_implicit;
-      GenerationID last_implicit_gen;
+      // We've now extended this to include creation operations and pending
+      // partition operations as well for similar reasons, so now this 
+      // is a general operation class
+      Operation *last_implicit_creation;
+      GenerationID last_implicit_creation_gen;
     protected:
       // For managing changing task priorities
       ApEvent realm_done_event;

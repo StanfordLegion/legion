@@ -14,6 +14,10 @@
 
 import "regent"
 
+-- FIXME (Elliott): debugging https://github.com/StanfordLegion/legion/issues/1514
+io.stdout:setvbuf("no")
+io.stderr:setvbuf("no")
+
 -- Make sure this all happens in a temporary directory in case we're
 -- running concurrently.
 local tmp_dir
@@ -77,6 +81,10 @@ local executable_args = terralib.newlist()
 for _, arg in ipairs(args) do
   executable_args:insert(arg)
 end
+-- FIXME (Elliott): debugging https://github.com/StanfordLegion/legion/issues/1514
+executable_args:insert("-lg:registration")
+executable_args:insert("-level")
+executable_args:insert("runtime=3")
 
 local ffi = require("ffi")
 local cmd
