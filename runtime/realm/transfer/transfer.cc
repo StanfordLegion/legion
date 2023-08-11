@@ -2453,7 +2453,7 @@ namespace Realm {
   // transfer path search logic
   //
 
-  static bool best_channel_for_mem_pair(Memory src_mem, Memory dst_mem,
+  static bool best_channel_for_mem_pair(ChannelCopyInfo channel_copy_info,
                                         CustomSerdezID src_serdez_id,
                                         CustomSerdezID dst_serdez_id,
                                         ReductionOpID redop_id,
@@ -2465,8 +2465,8 @@ namespace Realm {
                                         XferDesKind& best_kind)
   {
     // consider dma channels available on either source or dest node
-    NodeID src_node = ID(src_mem).memory_owner_node();
-    NodeID dst_node = ID(dst_mem).memory_owner_node();
+    NodeID src_node = ID(channel_copy_info.src_mem).memory_owner_node();
+    NodeID dst_node = ID(channel_copy_info.dst_mem).memory_owner_node();
 
     best_cost = 0;
     best_channel = 0;
@@ -2478,7 +2478,7 @@ namespace Realm {
 	  it != n.dma_channels.end();
 	  ++it) {
         XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+        uint64_t cost = (*it)->supports_path(channel_copy_info,
                                              src_serdez_id, dst_serdez_id,
                                              redop_id,
                                              total_bytes, src_frags, dst_frags,
@@ -2497,7 +2497,7 @@ namespace Realm {
 	  it != n.dma_channels.end();
 	  ++it) {
         XferDesKind kind = XFER_NONE;
-        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+        uint64_t cost = (*it)->supports_path(channel_copy_info,
                                              src_serdez_id, dst_serdez_id,
                                              redop_id,
                                              total_bytes, src_frags, dst_frags,
@@ -2691,7 +2691,7 @@ namespace Realm {
     return item_list.end();
   }
 
-  static bool find_fastest_path(Memory src_mem, Memory dst_mem,
+  static bool find_fastest_path(ChannelCopyInfo channel_copy_info,
                                 CustomSerdezID serdez_id,
                                 ReductionOpID redop_id,
                                 size_t total_bytes,
@@ -2700,6 +2700,8 @@ namespace Realm {
                                 MemPathInfo& info,
                                 bool skip_final_memcpy = false)
   {
+    Memory src_mem = channel_copy_info.src_mem;
+    Memory dst_mem = channel_copy_info.dst_mem;
     std::vector<size_t> empty_vec;
     log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem
                      << " serdez=" << serdez_id
@@ -2755,7 +2757,7 @@ namespace Realm {
     {
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(src_mem, dst_mem, serdez_id, serdez_id,
+      if(best_channel_for_mem_pair(channel_copy_info, serdez_id, serdez_id,
                                    redop_id, total_bytes, src_frags, dst_frags,
                                    best_cost, channel, kind)) {
         log_xpath.info() << "direct: " << src_mem << "->" << dst_mem
@@ -2807,7 +2809,9 @@ namespace Realm {
       uint64_t cost;
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(src_mem, partials[i].ib_mem,
+      ChannelCopyInfo copy_info = channel_copy_info;
+      copy_info.dst_mem = partials[i].ib_mem;
+      if(best_channel_for_mem_pair(copy_info,
                                    serdez_id, 0 /*no dst serdez*/,
                                    0 /*no redop on not-last hops*/,
                                    total_bytes, src_frags, 0 /*no dst_frags*/,
@@ -2840,8 +2844,10 @@ namespace Realm {
         uint64_t cost;
         Channel *channel;
         XferDesKind kind;
-        if(best_channel_for_mem_pair(partials[src_idx].ib_mem,
-                                     partials[dst_idx].ib_mem,
+        ChannelCopyInfo copy_info = channel_copy_info;
+        copy_info.src_mem = partials[src_idx].ib_mem;
+        copy_info.dst_mem = partials[dst_idx].ib_mem;
+        if(best_channel_for_mem_pair(copy_info,
                                      0, 0, 0, // no serdez or redop on interhops
                                      total_bytes, 0, 0, // no fragmentation also
                                      cost, channel, kind)) {
@@ -2872,7 +2878,9 @@ namespace Realm {
       uint64_t cost;
       Channel *channel;
       XferDesKind kind;
-      if(best_channel_for_mem_pair(partials[i].ib_mem, dst_mem,
+      ChannelCopyInfo copy_info = channel_copy_info;
+      copy_info.src_mem = partials[i].ib_mem;
+      if(best_channel_for_mem_pair(copy_info,
                                    0 /*no src serdez*/, serdez_id, redop_id,
                                    total_bytes, 0 /*no src_frags*/, dst_frags,
                                    cost, channel, kind)) {
@@ -4088,7 +4096,7 @@ namespace Realm {
                                 dst_frags);
 
         MemPathInfo path_info;
-        bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
                                     dsts[i].redop_id,
                                     domain_size * combined_field_size,
                                     &src_frags, &dst_frags,
@@ -4311,7 +4319,7 @@ namespace Realm {
             //                    << " dst_inst=" << dsts[i].inst << " frags=" << PrettyVector<size_t>(dst_frags);
 
 	    MemPathInfo path_info;
-            bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+            bool ok = find_fastest_path(ChannelCopyInfo{src_mem, dst_mem}, serdez_id,
                                         0 /*redop_id*/,
                                         domain_size * combined_field_size,
                                         &src_frags, &dst_frags,
