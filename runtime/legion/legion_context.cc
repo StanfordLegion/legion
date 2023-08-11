@@ -4373,8 +4373,7 @@ namespace Legion {
 #endif
         // If there are no waiters or the equivalence set tree has
         // already been made then we are just done
-        if (!finder->second.exists() || 
-            (equivalence_set_trees[req_index].tree != NULL))
+        if (equivalence_set_trees[req_index].tree != NULL)
         {
           if (finder->second.exists())
             Runtime::trigger_event(finder->second);
@@ -4390,14 +4389,18 @@ namespace Legion {
       // different things here while creating the equivalence set tree
       EqKDTree *tree = create_equivalence_set_kd_tree(node);
       AutoLock priv_lock(privilege_lock);
+#ifdef DEBUG_LEGION
+      // No one else should have made it in the interim
+      assert(equivalence_set_trees[req_index].tree == NULL);
+#endif
       equivalence_set_trees[req_index] = EqKDRoot(tree);
       std::map<unsigned,RtUserEvent>::iterator finder = 
         pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
       assert(finder != pending_equivalence_set_trees.end());
-      assert(finder->second.exists());
 #endif
-      Runtime::trigger_event(finder->second);
+      if (finder->second.exists())
+        Runtime::trigger_event(finder->second);
       pending_equivalence_set_trees.erase(finder);
     }
 
