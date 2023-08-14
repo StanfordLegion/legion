@@ -638,21 +638,6 @@ namespace Realm {
       GPUStream *get_next_task_stream(bool create = false);
       GPUStream *get_next_d2d_stream();
 
-      void launch_batch_affine_kernel(void *copy_info, size_t dim,
-                                      size_t elemSize, size_t volume,
-                                      GPUStream *stream);
-      void launch_indirect_copy_kernel(void *copy_info, size_t dim,
-                                       size_t addr_size, size_t field_size,
-                                       size_t volume, GPUStream *stream);
-
-      void launch_fill_kernel(void *fill_info, size_t dim, size_t elem_size,
-                              size_t volume, GPUStream *stream);
-      void launch_fill_large_kernel(void *copy_info, size_t dim,
-                                    size_t elem_size, size_t volume,
-                                    GPUStream *stream);
-      void launch_transpose_kernel(void *copy_info, size_t elemSize,
-                                   GPUStream *stream);
-
      protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -665,6 +650,21 @@ namespace Realm {
       GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
+
+      CUmodule device_module;
+
+      struct GPUFuncInfo {
+        CUfunction func;
+        int occ_num_threads;
+        int occ_num_blocks;
+      };
+
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][5];
+      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][5];
+      GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM][5];
+      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM][5];
+      GPUFuncInfo transpose_kernels[5];
+
       CUdeviceptr fbmem_base, fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync

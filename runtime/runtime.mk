@@ -955,6 +955,8 @@ CUDA_SRC	+= $(GEN_GPU_SRC)
 HIP_SRC         += $(GEN_GPU_SRC)
 REALM_SRC	?=
 LEGION_SRC	?=
+REALM_CUDA_DIR  ?=
+REALM_CUDA_SRC  ?=
 LEGION_CUDA_SRC	?=
 LEGION_HIP_SRC  ?=
 MAPPER_SRC	?=
@@ -1033,9 +1035,13 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/python/python_module.cc \
 		   $(LG_RT_DIR)/realm/python/python_source.cc
 endif
 ifeq ($(strip $(USE_CUDA)),1)
+REALM_FATBIN_SRC = realm_fatbin.cc
 REALM_SRC 	+= $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
                    $(LG_RT_DIR)/realm/cuda/cuda_access.cc \
-                   $(LG_RT_DIR)/realm/cuda/cuda_internal.cc
+                   $(LG_RT_DIR)/realm/cuda/cuda_internal.cc \
+		   $(REALM_FATBIN_SRC)
+REALM_CUDA_DIR := $(LG_RT_DIR)/realm/cuda
+REALM_CUDA_SRC := $(REALM_CUDA_DIR)/cuda_memcpy.cu
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
 endif
@@ -1198,6 +1204,7 @@ INSTALL_HEADERS += legion.h \
 
 ifeq ($(strip $(USE_CUDA)),1)
 INSTALL_HEADERS += realm/cuda/cuda_redop.h \
+		   INSTALL_HEADERS += realm/cuda/cuda_memcpy.h \
                    realm/cuda/cuda_access.h
 endif
 ifeq ($(strip $(USE_HIP)),1)
@@ -1475,7 +1482,7 @@ endif
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES)
+$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
@@ -1502,3 +1509,21 @@ $(LEGION_DEFINES_HEADER) : $(DEFINES_HEADERS_DEPENDENCY)
 
 $(REALM_DEFINES_HEADER) : $(DEFINES_HEADERS_DEPENDENCY)
 	$(PYTHON) $(LG_RT_DIR)/../tools/generate_defines.py $(REALM_CC_FLAGS) $(GENERATE_DEFINES_FLAGS) -i $(LG_RT_DIR)/../cmake/realm_defines.h.in -o $@
+
+# build realm.fatbin
+ifeq ($(strip $(USE_CUDA)),1)
+REALM_FATBIN = realm.fatbin
+REALM_CUDA_SRC += $(LG_RT_DIR)/realm/cuda/cuda_memcpy.cu
+
+$(REALM_CUDA_SRC) : $(REALM_DEFINES_HEADER)
+
+$(REALM_FATBIN): $(REALM_CUDA_SRC)
+	$(NVCC) $^ -o realm.fatbin --fatbin $(NVCC_FLAGS) $(INC_FLAGS)
+
+$(REALM_FATBIN_SRC): realm.fatbin
+	echo '#include "realm_defines.h"' > $@
+	echo '#include <cstdlib>' >> $@
+	echo 'extern const unsigned char realm_fatbin[];' >> $@
+	echo 'extern const size_t realm_fatbin_len;' >> $@
+	xxd -i $< | sed 's/unsigned/const unsigned/g' | sed 's/unsigned int/size_t/g' >> $@
+endif
