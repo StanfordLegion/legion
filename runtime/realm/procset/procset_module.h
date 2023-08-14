@@ -24,6 +24,21 @@ namespace Realm {
 
   namespace ProcSet {
 
+    class ProcSetModuleConfig : public ModuleConfig {
+      friend class ProcSetModule;
+    protected:
+      ProcSetModuleConfig(void);
+
+    public:
+      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+
+    protected:
+      int cfg_num_mp_threads = 0; // threads per ProcSet
+      int cfg_num_mp_procs = 0; // number of ProcSets
+      int cfg_num_mp_cpus = 0; // additional cpus on any non ProcSet nodes
+      size_t cfg_stack_size = 2 << 20;
+    };
+
    // our interface to the rest of the runtime
     class ProcSetModule : public Module {
     protected:
@@ -32,7 +47,9 @@ namespace Realm {
     public:
       virtual ~ProcSetModule(void);
 
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete
@@ -58,10 +75,7 @@ namespace Realm {
      virtual void cleanup(void);
 
     public:
-     int cfg_num_mp_threads; // threads per ProcSet
-     int cfg_num_mp_procs; // number of ProcSets
-     int cfg_num_mp_cpus; // additional cpus on any non ProcSet nodes
-     size_t cfg_stack_size;
+      ProcSetModuleConfig *config;
     };
 
   }; // namespace ProcSet
