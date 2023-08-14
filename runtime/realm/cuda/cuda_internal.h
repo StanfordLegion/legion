@@ -1245,6 +1245,7 @@ namespace Realm {
 
 #define CUDA_DRIVER_APIS(__op__)                                               \
   __op__(cuModuleGetFunction);                                                 \
+  __op__(cuCtxGetDevice);                                                      \
   __op__(cuCtxEnablePeerAccess);                                               \
   __op__(cuCtxGetFlags);                                                       \
   __op__(cuCtxGetStreamPriorityRange);                                         \
@@ -1301,6 +1302,12 @@ namespace Realm {
   __op__(cuStreamCreateWithPriority);                                          \
   __op__(cuStreamDestroy);                                                     \
   __op__(cuStreamSynchronize);                                                 \
+  __op__(cuOccupancyMaxPotentialBlockSize);                                    \
+  __op__(cuOccupancyMaxPotentialBlockSizeWithFlags);                           \
+  __op__(cuEventSynchronize);                                                  \
+  __op__(cuStreamWaitValue32);                                                 \
+  __op__(cuEventElapsedTime);                                                  \
+  __op__(cuOccupancyMaxActiveBlocksPerMultiprocessor);                         \
   __op__(cuMemAddressReserve);                                                 \
   __op__(cuMemAddressFree);                                                    \
   __op__(cuMemCreate);                                                         \
