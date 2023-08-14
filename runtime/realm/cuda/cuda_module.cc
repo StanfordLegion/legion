@@ -16,6 +16,7 @@
 #include "realm/cuda/cuda_module.h"
 #include "realm/cuda/cuda_internal.h"
 #include "realm/cuda/cuda_access.h"
+#include "realm/cuda/cuda_memcpy.h"
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
@@ -58,6 +59,10 @@
 
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
+
+// The embedded fat binary that holds all the internal
+// realm cuda kernels (see generated file realm_fatbin.c)
+extern const unsigned char realm_fatbin[];
 
 namespace Realm {
 
@@ -2046,27 +2051,6 @@ namespace Realm {
       return device_to_device_streams[d2d_stream_index];
     }
 
-
-    void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim, size_t elem_size,
-                                         size_t volume, GPUStream *stream)
-    {}
-
-    void GPU::launch_fill_kernel(void *fill_info, size_t dim, size_t elem_size,
-                                 size_t volume, GPUStream *stream)
-    {}
-
-    void GPU::launch_fill_large_kernel(void *fill_info, size_t dim, size_t elem_size,
-                                       size_t volume, GPUStream *stream)
-    {}
-
-    void GPU::launch_indirect_copy_kernel(void *copy_info, size_t dim,
-                                          size_t addr_size, size_t field_size,
-                                          size_t volume, GPUStream *stream)
-    {}
-
-    void GPU::launch_transpose_kernel(void* copy_info,
-                                      size_t elem_size, GPUStream *stream) {}
-
     const GPU::CudaIpcMapping *GPU::find_ipc_mapping(Memory mem) const
     {
       for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
@@ -3295,7 +3279,7 @@ namespace Realm {
 	     CUcontext _context)
       : module(_module), info(_info), worker(_worker)
       , proc(0), fbmem(0), fb_ibmem(0)
-      , context(_context), fbmem_base(0), fb_ibmem_base(0)
+      , context(_context), device_module(0), fbmem_base(0), fb_ibmem_base(0)
       , next_task_stream(0), next_d2d_stream(0)
     {
       push_context();
@@ -3309,9 +3293,85 @@ namespace Realm {
       device_to_host_stream = new GPUStream(this, worker);
 
       device_to_device_streams.resize(module->cfg_d2d_streams, 0);
-      for(unsigned i = 0; i < module->cfg_d2d_streams; i++)
+      for(unsigned i = 0; i < module->cfg_d2d_streams; i++) {
         device_to_device_streams[i] = new GPUStream(this, worker,
                                                     module->cfg_d2d_stream_priority);
+      }
+
+      CUdevice dev;
+      int numSMs;
+
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxGetDevice)(&dev));
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+          &numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, dev));
+
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleLoadDataEx)(
+          &device_module, realm_fatbin, 0, NULL, NULL));
+      for(unsigned int log_bit_sz = 0; log_bit_sz < 5; log_bit_sz++) {
+        const unsigned int bit_sz = 8U << log_bit_sz;
+        GPUFuncInfo func_info;
+        char name[30];
+        std::snprintf(name, sizeof(name), "run_memcpy_transpose%u", bit_sz);
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                        device_module, name));
+
+        // We use MaxActiveBlocksPerMultiprocessor here since we have a static
+        // tile size here based on the size of the static shared memory
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads,
+              func_info.func, 0, 0, 0));
+
+        func_info.occ_num_blocks *=
+            numSMs; // Fill up the GPU with the number of blocks if possible
+        transpose_kernels[log_bit_sz] = func_info;
+
+        for(unsigned int d = 1; d <= CUDA_MAX_DIM; d++) {
+          std::snprintf(name, sizeof(name), "memcpy_affine_batch%uD_%u", d,
+                        bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                          device_module, name));
+          // Here, we don't have a constraint on the block size, so allow
+          // the driver to decide the best combination we can launch
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads,
+              func_info.func, 0, 0, 0));
+          batch_affine_kernels[d - 1][log_bit_sz] = func_info;
+
+          std::snprintf(name, sizeof(name), "fill_affine_large%uD_%u", d,
+                        bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                          device_module, name));
+          // Here, we don't have a constraint on the block size, so allow
+          // the driver to decide the best combination we can launch
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads,
+              func_info.func, 0, 0, 0));
+          fill_affine_large_kernels[d - 1][log_bit_sz] = func_info;
+
+          std::snprintf(name, sizeof(name), "fill_affine_batch%uD_%u", d,
+                        bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                          device_module, name));
+          // Here, we don't have a constraint on the block size, so allow
+          // the driver to decide the best combination we can launch
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads,
+              func_info.func, 0, 0, 0));
+          batch_fill_affine_kernels[d - 1][log_bit_sz] = func_info;
+
+          std::snprintf(name, sizeof(name), "run_memcpy_indirect%uD_%u", d,
+                        bit_sz);
+
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
+                                                          device_module, name));
+
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads,
+              func_info.func, 0, 0, 0));
+
+          indirect_copy_kernels[d - 1][log_bit_sz] = func_info;
+        }
+      }
 
       // only create p2p streams for devices we can talk to
       peer_to_peer_streams.resize(module->gpu_info.size(), 0);

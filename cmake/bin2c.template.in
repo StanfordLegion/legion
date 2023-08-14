@@ -1,0 +1,28 @@
+/* Copyright 2022 Stanford University, NVIDIA Corporation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* This is a template file is to allow for embedding binary files into a library
+ * similar to how bin2c works.  The following variables are required:
+ * VAR_NAME - name of the exposed variable to use in other source files containing the data
+ * FILE_CONTENTS_HEX - hexadecimal character encoding of the binary file to be embedded
+ */
+
+#include "@DEFINES_HEADER@"
+
+extern const unsigned char @VAR_NAME@[] = {
+    @FILE_CONTENTS_HEX@
+};
+
+extern const unsigned long long @VAR_NAME@_len = sizeof(@VAR_NAME@);
