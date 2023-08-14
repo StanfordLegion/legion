@@ -2048,6 +2048,27 @@ namespace Realm {
       return device_to_device_streams[d2d_stream_index];
     }
 
+
+    void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim, size_t elem_size,
+                                         size_t volume, GPUStream *stream)
+    {}
+
+    void GPU::launch_fill_kernel(void *fill_info, size_t dim, size_t elem_size,
+                                 size_t volume, GPUStream *stream)
+    {}
+
+    void GPU::launch_fill_large_kernel(void *fill_info, size_t dim, size_t elem_size,
+                                       size_t volume, GPUStream *stream)
+    {}
+
+    void GPU::launch_indirect_copy_kernel(void *copy_info, size_t dim,
+                                          size_t addr_size, size_t field_size,
+                                          size_t volume, GPUStream *stream)
+    {}
+
+    void GPU::launch_transpose_kernel(void* copy_info,
+                                      size_t elem_size, GPUStream *stream) {}
+
     const GPU::CudaIpcMapping *GPU::find_ipc_mapping(Memory mem) const
     {
       for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();

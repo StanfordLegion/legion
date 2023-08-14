@@ -637,7 +637,23 @@ namespace Realm {
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
       GPUStream *get_next_d2d_stream();
-    protected:
+
+      void launch_batch_affine_kernel(void *copy_info, size_t dim,
+                                      size_t elemSize, size_t volume,
+                                      GPUStream *stream);
+      void launch_indirect_copy_kernel(void *copy_info, size_t dim,
+                                       size_t addr_size, size_t field_size,
+                                       size_t volume, GPUStream *stream);
+
+      void launch_fill_kernel(void *fill_info, size_t dim, size_t elem_size,
+                              size_t volume, GPUStream *stream);
+      void launch_fill_large_kernel(void *copy_info, size_t dim,
+                                    size_t elem_size, size_t volume,
+                                    GPUStream *stream);
+      void launch_transpose_kernel(void *copy_info, size_t elemSize,
+                                   GPUStream *stream);
+
+     protected:
       CUmodule load_cuda_module(const void *data);
 
     public:
