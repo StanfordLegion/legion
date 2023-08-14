@@ -83,6 +83,10 @@ if(Legion_USE_CUDA)
     realm/cuda/cuda_module.inl
     realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
     realm/cuda/cuda_access.h    realm/cuda/cuda_access.cc
+    realm/cuda/cuda_memcpy.h    realm/cuda/cuda_memcpy.cu
+  )
+  list(APPEND REALM_CUDA_SRC
+    realm/cuda/cuda_memcpy.cu
   )
   if(REALM_USE_CUDART_HIJACK)
     list(APPEND REALM_SRC
@@ -263,6 +267,78 @@ foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
     endforeach()
   endforeach()
 endforeach()
+
+if (Legion_USE_CUDA)
+  # Fill in the most compatible set of architectures we support
+  if("${Legion_CUDA_ARCH}" STREQUAL "")
+    if (${CUDA_VERSION_STRING} VERSION_LESS "11.5")
+      # Prior to 11.5, we don't have -arch=all and have to list the architectures out manually
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "10.0")
+        list(APPEND Legion_CUDA_ARCH 20)
+      endif ()
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "11.0")
+        list(APPEND Legion_CUDA_ARCH 30)
+      endif ()
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
+        list(APPEND Legion_CUDA_ARCH 35)
+      endif ()
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "6.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
+        list(APPEND Legion_CUDA_ARCH 50)
+      endif ()
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "8.0")
+        list(APPEND Legion_CUDA_ARCH 60)
+      endif ()
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "9.0")
+        list(APPEND Legion_CUDA_ARCH 70)
+      endif ()
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "11.0")
+        list(APPEND Legion_CUDA_ARCH 80)
+      endif ()
+    else ()
+        # New with 11.5, nvcc supports 'all-major' which does all this for us
+        set(CUDA_GENCODE "-arch all-major")
+    endif ()
+  else ()
+      # If the user specified a specific gencode to use, use that
+      list(SORT Legion_CUDA_ARCH)
+      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
+      # Add all the specified architectures we support
+      string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
+      list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)
+      # For the last architecture we support, add PTX
+      list(APPEND CUDA_GENCODE "-gencode arch=compute_${COMPUTE_ARCH},code=compute_${COMPUTE_ARCH}")
+  endif ()
+
+  # starting with NVCC 10.2, we can error out on all warnings
+  if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
+    set(CUDA_WARNINGS "-Werror all-warnings")
+  else()
+    set(CUDA_WARNINGS "")
+  endif()
+
+  set(CUDA_COMPILE_OPTIONS
+      -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
+      ${CUDA_WARNINGS}
+      ${CUDA_GENCODE}
+      -I ${CMAKE_CURRENT_SOURCE_DIR}
+      -I ${PROJECT_BINARY_DIR}/runtime
+      DEBUG -g
+      RELEASE -O2
+      RELWITHDEBINFO -g -O2)
+endif()
+
+if (REALM_CUDA_SRC)
+  # Compile and link all the cuda files into a single fatbin
+  cuda_compile_fatbin(REALM_CUDA_FATBIN ${REALM_CUDA_SRC} OPTIONS ${CUDA_COMPILE_OPTIONS})
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc
+                     COMMAND ${CMAKE_COMMAND} -DDEFINES_HEADER="realm_defines.h" -DIN_FILE=${REALM_CUDA_FATBIN} -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc -DVAR_NAME=realm_fatbin -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
+                     MAIN_DEPENDENCY ${REALM_CUDA_FATBIN}
+                     DEPENDS ${PROJECT_SOURCE_DIR}/cmake/bin2c.template.in
+                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                     COMMENT "Embedding binary object ${REALM_CUDA_FATBIN} -> ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc")
+  # Add a direct dependency on realm_fatbin.h in order to force a rebuild as realm_fatbin.h changes
+  list(APPEND REALM_SRC ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc)
+endif()
 
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
