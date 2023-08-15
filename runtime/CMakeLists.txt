@@ -301,6 +301,15 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set_property(TARGET RealmRuntime APPEND PROPERTY INSTALL_RPATH "@loader_path")
 endif ()
 
+if(Legion_USE_Python)
+  # Realm dlopens libpython.so, so we need to add the directory that contains it
+  # to BUILD_RPATH, otherwise build/lib/librealm.so's dlopen will not find it.
+  # We're assuming that libpython.so will be found in the same dir as librealm.so
+  # after installation, so no need to update INSTALL_RPATH.
+  get_filename_component(PYTHON_LIB_DIR "${PYTHON_LIBRARIES}" DIRECTORY)
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "${PYTHON_LIB_DIR}")
+endif ()
+
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
