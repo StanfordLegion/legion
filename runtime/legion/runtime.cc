@@ -3356,7 +3356,8 @@ namespace Legion {
       rez.serialize(size);
       // Check to see if we can just pass this future instance by value
       if (is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE) &&
-          ((other_ready && (!ready.exists() || ready.has_triggered())) ||
+          ((other_ready && (!ready.exists() || 
+                            ready.has_triggered_faultignorant())) ||
            (!other_ready && (!ready_event.exists() || 
                               ready_event.has_triggered_faultignorant()))))
       {
@@ -3820,7 +3821,11 @@ namespace Legion {
             (warning_string == NULL) ? "" : warning_string)
       if ((op != NULL) && (Internal::implicit_context != NULL))
         Internal::implicit_context->record_blocking_call();
-      completion_event.wait();
+      bool poisoned = false;
+      if (!completion_event.has_triggered_faultaware(poisoned))
+        completion_event.wait_faultaware(poisoned);
+      if (poisoned)
+        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -4552,7 +4557,11 @@ namespace Legion {
       }
       const ApBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
       Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, completion_event);
-      wait_bar.wait();
+      bool poisoned = false;
+      if (!wait_bar.has_triggered_faultaware(poisoned))
+        wait_bar.wait_faultaware(poisoned);
+      if (poisoned)
+        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -6120,10 +6129,9 @@ namespace Legion {
             // For a globally indexed output region, the domain has
             // already been initialized once we reach here, so
             // we just retrieve it.
-            ApEvent ready = ApEvent::NO_AP_EVENT;
-            domain = node->get_domain(ready, true);
-            if (ready.exists())
-              ready.wait();
+            ApEvent ready;
+            domain = node->get_domain(ready, true/*tight*/);
+            // No need to wait on the event since it is tight
           }
         }
         else

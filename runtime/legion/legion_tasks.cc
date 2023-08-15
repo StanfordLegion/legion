@@ -5718,7 +5718,7 @@ namespace Legion {
           reduction_inst_precondition = 
             reduction_instance->reduce_from(instance, this, redop,
                 reduction_op, true/*exclusive*/, reduction_inst_precondition);
-          return reduction_inst_precondition.has_triggered();
+          return reduction_inst_precondition.exists();
         }
       }
     } 
@@ -8517,10 +8517,8 @@ namespace Legion {
 
       // First, we collect all the extents of local outputs.
       // While doing this, we also check the alignment.
-      ApEvent ready = ApEvent::NO_AP_EVENT;
-      Domain color_space = part->color_space->get_domain(ready, true);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      ApEvent ready;
+      Domain color_space = part->color_space->get_domain(ready, true/*tight*/);
 #ifdef DEBUG_LEGION
       assert(color_space.dense());
 #endif
@@ -9079,11 +9077,10 @@ namespace Legion {
               idx, get_task_name(), get_unique_op_id(), req.projection);
 
 #ifdef DEBUG_LEGION
-          ApEvent ready = ApEvent::NO_AP_EVENT;
+          ApEvent ready;
           IndexSpaceNode* node = runtime->forest->get_node(color_space);
-          Domain color_domain = node->get_domain(ready, true);
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
+          Domain color_domain = node->get_domain(ready, true/*tight*/);
+          // No need to wait on the ready event since it is tight
 
           if (req.global_indexing && !color_domain.dense())
             REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,

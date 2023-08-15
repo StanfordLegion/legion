@@ -3361,8 +3361,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (use_event.exists() && !use_event.has_triggered())
-        use_event.wait();
+      if (use_event.exists() && !use_event.has_triggered_faultignorant())
+        use_event.wait_faultignorant();
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       return uintptr_t(inst_ptr);
     }

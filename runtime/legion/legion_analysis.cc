@@ -425,7 +425,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!term_event.exists() || term_event.has_triggered());
+      assert(!term_event.exists() || term_event.has_triggered_faultignorant());
 #endif
       if (local_space != origin_space)
       {

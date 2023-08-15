@@ -19583,7 +19583,12 @@ namespace Legion {
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
         term_event = inorder_bar;
         if (outermost)
-          term_event.wait();
+        {
+          bool poisoned = false;
+          term_event.wait_faultaware(poisoned);
+          if (poisoned)
+            raise_poison_exception(); 
+        }
         // Not unordered so it must have succeeded
         return true;
       }
