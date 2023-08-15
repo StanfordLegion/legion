@@ -4223,26 +4223,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // There are two different implementations here depending on whether we
-      // know that we have a deletion operation on every shard or not
-      // If not, we just let the deletion for shard 0 do all the work, 
-      // otherwise we know we can evenly distribute the work
-      if (kind == LOGICAL_REGION_DELETION)
-      {
-        std::set<RtEvent> preconditions;
-        // Figure out the versioning context for this requirements
-        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = deletion_requirements[idx];
-          repl_ctx->invalidate_region_tree_context(req.region, 
-              find_parent_index(idx), map_applied_conditions);
-        }
-        if (!preconditions.empty())
-          complete_mapping(Runtime::merge_events(preconditions));
-        else
-          complete_mapping();
-      }
-      else if (kind == FIELD_DELETION)
+      if (kind == FIELD_DELETION)
       {
 #ifdef DEBUG_LEGION
         assert(mapping_barrier.exists());
@@ -4254,16 +4235,38 @@ namespace Legion {
           // to be able to free up the resources.
           const TraceInfo trace_info(this);
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+          {
+            const VersionInfo &version_info = version_infos[idx];
             runtime->forest->invalidate_fields(this, idx, 
-                deletion_requirements[idx], version_infos[idx],
+                deletion_requirements[idx], version_info,
                 PhysicalTraceInfo(trace_info, idx), map_applied_conditions,
                 &repl_ctx->shard_manager->get_collective_mapping(),
                 is_first_local_shard);
+            // Make sure we keep the equivalence sets alive while the 
+            // invalidation analysis is running since we're about to 
+            // invalidate the equivalence sets in the next step
+            const FieldMaskSet<EquivalenceSet> &eq_sets = 
+              version_info.get_equivalence_sets();
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  eq_sets.begin(); it != eq_sets.end(); it++)
+              it->first->add_base_gc_ref(FIELD_ALLOCATOR_REF);
+          }
         }
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
         if (allocator->ready_event.exists())
           map_applied_conditions.insert(allocator->ready_event);
+      }
+      // Clean out the physical state for these operations once we know that  
+      // all prior operations that needed the state have been done
+      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = deletion_requirements[idx];
+        parent_ctx->invalidate_region_tree_context(req,
+            find_parent_index(idx), map_applied_conditions);
+      }
+      if (mapping_barrier.exists())
+      {
         if (!map_applied_conditions.empty())
           Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/,
               Runtime::merge_events(map_applied_conditions));
@@ -4271,6 +4274,8 @@ namespace Legion {
           Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
         complete_mapping(mapping_barrier);
       }
+      else if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
       // complete execution once all the shards are done
@@ -4377,6 +4382,16 @@ namespace Legion {
       else if ((kind == LOGICAL_REGION_DELETION) && !parent_req_indexes.empty())
         parent_ctx->remove_deleted_requirements(parent_req_indexes,
                                                 regions_to_destroy);
+      // Remove any references that we added to the equivalence sets
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        const FieldMaskSet<EquivalenceSet> &eq_sets =
+          version_infos[idx].get_equivalence_sets();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              eq_sets.begin(); it != eq_sets.end(); it++)
+          if (it->first->remove_base_gc_ref(FIELD_ALLOCATOR_REF))
+            delete it->first;
+      }
       if (!regions_to_destroy.empty() && is_first_local_shard)
       {
         for (std::vector<LogicalRegion>::const_iterator it =

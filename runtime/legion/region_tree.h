@@ -449,8 +449,8 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
                                        RtEvent *output_region_ready = NULL);
-      void invalidate_current_context(RegionTreeContext ctx, bool users_only,
-                                      RegionNode *top_node);
+      void invalidate_current_context(RegionTreeContext ctx,
+          const RegionRequirement &req, bool filter_specific_fields);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
                                  const InstanceSet &inst1,
@@ -4469,10 +4469,9 @@ namespace Legion {
 #endif
     public:
       void initialize_current_state(ContextID ctx);
-      void invalidate_current_state(ContextID ctx, bool users_only);
+      void invalidate_current_state(ContextID ctx);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
-      void invalidate_logical_states(void);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;

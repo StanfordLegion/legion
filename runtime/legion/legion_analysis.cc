@@ -2372,35 +2372,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CurrentInvalidator::CurrentInvalidator(ContextID c, bool only)
-      : ctx(c), users_only(only)
+    CurrentInvalidator::CurrentInvalidator(ContextID c)
+      : ctx(c)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CurrentInvalidator::CurrentInvalidator(const CurrentInvalidator &rhs)
-      : ctx(0), users_only(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     CurrentInvalidator::~CurrentInvalidator(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CurrentInvalidator& CurrentInvalidator::operator=(
-                                                  const CurrentInvalidator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2414,7 +2395,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx, users_only); 
+      node->invalidate_current_state(ctx); 
       return true;
     }
 
@@ -2422,7 +2403,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx, users_only);
+      node->invalidate_current_state(ctx);
       return true;
     }
 
@@ -2438,28 +2419,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DeletionInvalidator::DeletionInvalidator(const DeletionInvalidator &rhs)
-      : ctx(0), deletion_mask(rhs.deletion_mask)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     DeletionInvalidator::~DeletionInvalidator(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    DeletionInvalidator& DeletionInvalidator::operator=(
-                                                 const DeletionInvalidator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -6182,9 +6144,10 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void LogicalState::clear_logical_users(void)
+    void LogicalState::clear(void)
     //--------------------------------------------------------------------------
     {
+      field_states.clear();
       if (!curr_epoch_users.empty())
       {
         for (OrderedFieldMaskUsers::const_iterator it =
@@ -6201,14 +6164,6 @@ namespace Legion {
             delete it->first;
         prev_epoch_users.clear();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalState::reset(void)
-    //--------------------------------------------------------------------------
-    {
-      field_states.clear();
-      clear_logical_users(); 
       if (!refinement_trackers.empty())
       {
         for (FieldMaskSet<RefinementTracker>::const_iterator it =
@@ -6228,7 +6183,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::clear_deleted_state(const FieldMask &deleted_mask)
+    void LogicalState::clear_deleted_state(ContextID ctx,
+                                           const FieldMask &deleted_mask)
     //--------------------------------------------------------------------------
     {
       for (LegionList<FieldState>::iterator it = field_states.begin();
@@ -6238,6 +6194,70 @@ namespace Legion {
           it = field_states.erase(it);
         else
           it++;
+      }
+      if (!curr_epoch_users.empty() && 
+          !(deleted_mask * curr_epoch_users.get_valid_mask()))
+      {
+        std::vector<LogicalUser*> to_delete;
+        for (OrderedFieldMaskUsers::iterator it =
+              curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
+        {
+          it.filter(deleted_mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<LogicalUser*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          curr_epoch_users.erase(*it);
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
+        curr_epoch_users.tighten_valid_mask();
+      }
+      if (!prev_epoch_users.empty() &&
+          !(deleted_mask * prev_epoch_users.get_valid_mask()))
+      {
+        std::vector<LogicalUser*> to_delete;
+        for (OrderedFieldMaskUsers::iterator it =
+              prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
+        {
+          it.filter(deleted_mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<LogicalUser*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          prev_epoch_users.erase(*it);
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
+        prev_epoch_users.tighten_valid_mask();
+      }
+      if (!refinement_trackers.empty() &&
+          !(deleted_mask * refinement_trackers.get_valid_mask()))
+      {
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+              refinement_trackers.begin(); it != 
+              refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = deleted_mask & it->second;
+          if (!it->second)
+            continue;
+          it->first->invalidate_refinement(ctx, overlap);
+          it.filter(overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+        refinement_trackers.tighten_valid_mask();
       }
     }
 

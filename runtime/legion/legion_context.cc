@@ -11173,8 +11173,8 @@ namespace Legion {
         if (IS_NO_ACCESS(regions[idx]))
           continue;
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
-        runtime->forest->invalidate_current_context(tree_context,
-                                       false/*users only*/, node);
+        runtime->forest->invalidate_current_context(tree_context, 
+            regions[idx], false/*filter specific fields*/);
         if (equivalence_set_trees[idx].tree == NULL)
           continue;
         // State is copied out by the virtual close ops if this is a
@@ -11230,7 +11230,7 @@ namespace Legion {
           // it would have merged the created_requirement and we wouldn't
           // have a non returnable privilege requirement in this context
           runtime->forest->invalidate_current_context(tree_context,
-                                        false/*users only*/, node);
+              it->second, false/*filter specific fields*/);
           invalidated_regions.insert(it->second.region);
         }
         if (equivalence_set_trees.size() <= it->first)
@@ -11340,22 +11340,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_region_tree_context(LogicalRegion handle,
-                          unsigned req_index, std::set<RtEvent> &applied_events)
+    void InnerContext::invalidate_region_tree_context(
+                              const RegionRequirement &req, unsigned req_index,
+                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = runtime->forest->get_node(handle);
-      runtime->forest->invalidate_current_context(tree_context,
-                                          false/*users only*/, node);
       LocalLock *tree_lock = NULL;
       EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock,
                                           true/*null if doesn't exist*/);
       if (tree != NULL)
       {
         std::vector<RtEvent> applied;
-        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        RegionNode *node = runtime->forest->get_node(req.region);
+        const FieldMask invalidate_mask = 
+          node->column_source->get_field_mask(req.privilege_fields);
         node->row_source->invalidate_equivalence_set_kd_tree(tree, tree_lock,
-            all_ones_mask, applied, false/*move to previous*/);
+            invalidate_mask, applied, false/*move to previous*/);
         if (!applied.empty())
           applied_events.insert(applied.begin(), applied.end());
         // Need the lock before doing this invalidation in case the 

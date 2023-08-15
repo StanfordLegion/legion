@@ -1755,7 +1755,7 @@ namespace Legion {
                           const std::vector<EqKDTree*> &created_trees,
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
-      void invalidate_region_tree_context(LogicalRegion handle, 
+      void invalidate_region_tree_context(const RegionRequirement &req,
           unsigned req_index, std::set<RtEvent> &applied_events);
       virtual void free_region_tree_context(void);
     public:

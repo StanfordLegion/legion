@@ -10093,37 +10093,39 @@ namespace Legion {
       // region tree to serve as mapping dependences on things that might
       // use these data structures in the case of recycling, e.g. in the
       // case that we recycle a field index
-      LogicalAnalysis logical_analysis(this);
-      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+      const RegionTreeContext ctx = parent_ctx->get_context();
+      if (!deletion_requirements.empty())
       {
-        const RegionRequirement &req = deletion_requirements[idx];
-        if (req.privilege_fields.empty())
+        LogicalAnalysis logical_analysis(this);
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
+          const RegionRequirement &req = deletion_requirements[idx];
 #ifdef DEBUG_LEGION
-          // Only full region deletions shouldn't have any fields
-          assert(kind == LOGICAL_REGION_DELETION);
+          assert(req.parent == req.region);
 #endif
-          continue;
+          if (req.privilege_fields.empty())
+          {
+#ifdef DEBUG_LEGION
+            // Only full region deletions shouldn't have any fields
+            assert(kind == LOGICAL_REGION_DELETION);
+#endif
+            continue;
+          }
+          ProjectionInfo proj_info;
+          RegionTreePath privilege_path;
+          initialize_privilege_path(privilege_path, req);
+          runtime->forest->perform_dependence_analysis(this, idx, req,
+              proj_info, privilege_path, logical_analysis);
         }
-        ProjectionInfo proj_info;
-        RegionTreePath privilege_path;
-        initialize_privilege_path(privilege_path, req);
-        runtime->forest->perform_dependence_analysis(this, idx, req,
-            proj_info, privilege_path, logical_analysis);
+        // By closing the scope here, we make sure the logical analysis
+        // has applied any close operations to the tree so now we can
+        // safely perform the invalidation of the context
       }
-      if (kind == LOGICAL_REGION_DELETION)
-      {
-        // For logical region deletions then we invalidate the whole tree
-        const RegionTreeContext ctx = parent_ctx->get_context();
-        for (std::vector<RegionRequirement>::const_iterator it =
-              deletion_requirements.begin(); it !=
-              deletion_requirements.end(); it++)
-        {
-          RegionNode *region = runtime->forest->get_node(it->region);
-          runtime->forest->invalidate_current_context(ctx, 
-                              false/*users only*/, region);
-        }
-      }
+      // Now we can invalidate the context since all internal operations
+      // have been recorded in the tree
+      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+        runtime->forest->invalidate_current_context(ctx,
+            deletion_requirements[idx], (kind == FIELD_DELETION));
       // Now pretend like this is going to be a mapping fence on everyone
       // who came before, although we will never actually record ourselves
       // as a mapping fence since we want operations that come after us to
@@ -10195,35 +10197,40 @@ namespace Legion {
     void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     { 
-      // Clean out the physical state for these operations once we know that  
-      // all prior operations that needed the state have been done
-      if (kind == LOGICAL_REGION_DELETION)
-      {
-        // Just need to clean out the version managers which will free
-        // all the equivalence sets and allow the reference counting to
-        // clean everything up
-        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = deletion_requirements[idx];
-          parent_ctx->invalidate_region_tree_context(req.region,
-              find_parent_index(idx), map_applied_conditions);
-        }
-      }
-      else if (kind == FIELD_DELETION)
+      if (kind == FIELD_DELETION)
       {
         // For this case we actually need to go through and prune out any
         // valid instances for these fields in the equivalence sets in order
         // to be able to free up the resources.
         const TraceInfo trace_info(this);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+        {
+          const VersionInfo &version_info = version_infos[idx];
           runtime->forest->invalidate_fields(this, idx, 
-              deletion_requirements[idx], version_infos[idx],
+              deletion_requirements[idx], version_info,
               PhysicalTraceInfo(trace_info, idx), map_applied_conditions,
               NULL/*no collective map*/, false/*not collective*/);
+          // Make sure we keep the equivalence sets alive while the 
+          // invalidation analysis is running since we're about to 
+          // invalidate the equivalence sets in the next step
+          const FieldMaskSet<EquivalenceSet> &eq_sets = 
+            version_info.get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                eq_sets.begin(); it != eq_sets.end(); it++)
+            it->first->add_base_gc_ref(FIELD_ALLOCATOR_REF);
+        }
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
         if (allocator->ready_event.exists())
           map_applied_conditions.insert(allocator->ready_event);
+      }
+      // Clean out the physical state for these operations once we know that  
+      // all prior operations that needed the state have been done
+      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = deletion_requirements[idx];
+        parent_ctx->invalidate_region_tree_context(req,
+            find_parent_index(idx), map_applied_conditions);
       }
       // Mark that we're done mapping and defer the execution as appropriate
       if (!map_applied_conditions.empty())
@@ -10316,6 +10323,16 @@ namespace Legion {
           }
         default:
           assert(false);
+      }
+      // Remove any references that we added to the equivalence sets
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        const FieldMaskSet<EquivalenceSet> &eq_sets =
+          version_infos[idx].get_equivalence_sets();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              eq_sets.begin(); it != eq_sets.end(); it++)
+          if (it->first->remove_base_gc_ref(FIELD_ALLOCATOR_REF))
+            delete it->first;
       }
       if (!regions_to_destroy.empty())
       {

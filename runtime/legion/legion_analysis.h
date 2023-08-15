@@ -1600,9 +1600,8 @@ namespace Legion {
       LogicalState& operator=(const LogicalState &rhs) = delete;
     public:
       void check_init(void);
-      void clear_logical_users(void);
-      void reset(void);
-      void clear_deleted_state(const FieldMask &deleted_mask);
+      void clear(void);
+      void clear_deleted_state(ContextID ctx, const FieldMask &deleted_mask);
 #if 0
       void pack_refinements(Serializer &rez, 
                 std::map<LegionColor,RegionTreeNode*> &to_traverse) const;
@@ -4602,18 +4601,17 @@ namespace Legion {
      */
     class CurrentInvalidator : public NodeTraverser {
     public:
-      CurrentInvalidator(ContextID ctx, bool users_only);
-      CurrentInvalidator(const CurrentInvalidator &rhs);
+      CurrentInvalidator(ContextID ctx);
+      CurrentInvalidator(const CurrentInvalidator &rhs) = delete;
       ~CurrentInvalidator(void);
     public:
-      CurrentInvalidator& operator=(const CurrentInvalidator &rhs);
+      CurrentInvalidator& operator=(const CurrentInvalidator &rhs) = delete;
     public:
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
-      const bool users_only;
     };
 
     /**
@@ -4623,10 +4621,10 @@ namespace Legion {
     class DeletionInvalidator : public NodeTraverser {
     public:
       DeletionInvalidator(ContextID ctx, const FieldMask &deletion_mask);
-      DeletionInvalidator(const DeletionInvalidator &rhs);
+      DeletionInvalidator(const DeletionInvalidator &rhs) = delete;
       ~DeletionInvalidator(void);
     public:
-      DeletionInvalidator& operator=(const DeletionInvalidator &rhs);
+      DeletionInvalidator& operator=(const DeletionInvalidator &rhs) = delete;
     public:
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);

@@ -1765,12 +1765,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
-                                          bool users_only, RegionNode *top_node)
+                      const RegionRequirement &req, bool filter_specific_fields)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INVALIDATE_CONTEXT_CALL);
-      CurrentInvalidator invalidator(ctx.get_id(), users_only);
-      top_node->visit_node(&invalidator);
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+      RegionNode *region_node = get_node(req.region);
+      if (filter_specific_fields)
+      {
+        FieldMask user_mask =
+          region_node->column_source->get_field_mask(req.privilege_fields);
+        DeletionInvalidator invalidator(ctx.get_id(), user_mask);
+        region_node->visit_node(&invalidator);
+      }
+      else
+      {
+        CurrentInvalidator invalidator(ctx.get_id());
+        region_node->visit_node(&invalidator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19785,16 +19799,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_current_state(ContextID ctx,bool users_only)
+    void RegionTreeNode::invalidate_current_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
       if (!logical_states.has_entry(ctx))
         return;
       LogicalState &state = get_logical_state(ctx);
-      if (users_only)
-        state.clear_logical_users();
-      else
-        state.reset(); 
+      state.clear(); 
     }
 
     //--------------------------------------------------------------------------
@@ -19805,18 +19816,7 @@ namespace Legion {
       if (!logical_states.has_entry(ctx))
         return;
       LogicalState &state = get_logical_state(ctx);
-      state.clear_deleted_state(deleted_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_logical_states(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned ctx = 0; ctx < logical_states.max_entries(); ctx++)
-      {
-        if (logical_states.has_entry(ctx))
-          invalidate_current_state(ctx, false/*users only*/);
-      }
+      state.clear_deleted_state(ctx, deleted_mask);
     }
 
     //--------------------------------------------------------------------------
