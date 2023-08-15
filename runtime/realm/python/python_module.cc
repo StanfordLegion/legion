@@ -1024,63 +1024,83 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class PythonModuleConfig
+
+    PythonModuleConfig::PythonModuleConfig(void)
+      : ModuleConfig("python")
+    {
+    }
+
+    void PythonModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // first order of business - read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_int("-ll:py", cfg_num_python_cpus)
+        .add_option_int("-ll:pynuma", cfg_use_numa)
+        .add_option_int_units("-ll:pystack", cfg_stack_size, 'm')
+        .add_option_stringlist("-ll:pyimport", cfg_import_modules)
+        .add_option_stringlist("-ll:pyinit", cfg_init_scripts);
+#ifdef REALM_USE_OPENMP
+        cp.add_option_int("-ll:pyomp", cfg_pyomp_threads);
+#endif
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+        log_py.fatal() << "error reading Python command line parameters";
+        assert(false);
+      }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class PythonModule
 
     /*static*/ std::vector<std::string> PythonModule::extra_import_modules;
 
     PythonModule::PythonModule(void)
       : Module("python")
-      , cfg_num_python_cpus(0)
-      , cfg_use_numa(false)
-      , cfg_stack_size(2 << 20)
-#ifdef REALM_USE_OPENMP
-      , cfg_pyomp_threads(0)
-#endif
+      , config(nullptr)
     {
     }
 
     PythonModule::~PythonModule(void)
-    {}
+    {
+      assert(config != nullptr);
+      delete config;
+    }
 
     /*static*/ void PythonModule::import_python_module(const char *module_name)
     {
       extra_import_modules.push_back(module_name);
     }
 
-    /*static*/ Module *PythonModule::create_module(RuntimeImpl *runtime,
-                                                 std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *PythonModule::create_module_config(RuntimeImpl *runtime)
+    {
+      PythonModuleConfig *config = new PythonModuleConfig();
+      return config;
+    }
+
+    /*static*/ Module *PythonModule::create_module(RuntimeImpl *runtime)
     {
       // create a module to fill in with stuff - we'll delete it if numa is
       //  disabled
       PythonModule *m = new PythonModule;
 
-      // first order of business - read command line parameters
-      {
-        CommandLineParser cp;
-
-        cp.add_option_int("-ll:py", m->cfg_num_python_cpus)
-	  .add_option_int("-ll:pynuma", m->cfg_use_numa)
-	  .add_option_int_units("-ll:pystack", m->cfg_stack_size, 'm')
-	  .add_option_stringlist("-ll:pyimport", m->cfg_import_modules)
-	  .add_option_stringlist("-ll:pyinit", m->cfg_init_scripts);
-#ifdef REALM_USE_OPENMP
-	cp.add_option_int("-ll:pyomp", m->cfg_pyomp_threads);
-#endif
-
-        bool ok = cp.parse_command_line(cmdline);
-        if(!ok) {
-          log_py.fatal() << "error reading Python command line parameters";
-          assert(false);
-        }
-      }
+      PythonModuleConfig *config = dynamic_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
+      assert(config != NULL);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == NULL);
+      m->config = config;
 
       // add extra module imports requested by the application
-      m->cfg_import_modules.insert(m->cfg_import_modules.end(),
+      m->config->cfg_import_modules.insert(m->config->cfg_import_modules.end(),
                                    extra_import_modules.begin(),
                                    extra_import_modules.end());
 
       // if no cpus were requested, there's no point
-      if(m->cfg_num_python_cpus == 0) {
+      if(m->config->cfg_num_python_cpus == 0) {
         log_py.debug() << "no Python cpus requested";
         delete m;
         return 0;
@@ -1088,7 +1108,7 @@ namespace Realm {
 
 #ifndef REALM_USE_DLMOPEN
       // Multiple CPUs are only allowed if we're using dlmopen.
-      if(m->cfg_num_python_cpus > 1) {
+      if(m->config->cfg_num_python_cpus > 1) {
         log_py.fatal() << "support for multiple Python CPUs is not available: recompile with USE_DLMOPEN";
         assert(false);
       }
@@ -1096,13 +1116,13 @@ namespace Realm {
 
       // get number/sizes of NUMA nodes -
       //   disable (with a warning) numa binding if support not found
-      if(m->cfg_use_numa) {
+      if(m->config->cfg_use_numa) {
         std::map<int, NumaNodeCpuInfo> cpuinfo;
         if(numasysif_numa_available() &&
            numasysif_get_cpu_info(cpuinfo) &&
            !cpuinfo.empty()) {
           // filter out any numa domains with insufficient core counts
-          int cores_needed = m->cfg_num_python_cpus;
+          int cores_needed = m->config->cfg_num_python_cpus;
           for(std::map<int, NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
               it != cpuinfo.end();
               ++it) {
@@ -1115,7 +1135,7 @@ namespace Realm {
           }
         } else {
           log_py.warning() << "numa support not found (or not working)";
-          m->cfg_use_numa = false;
+          m->config->cfg_use_numa = false;
         }
       }
 
@@ -1146,16 +1166,16 @@ namespace Realm {
           it != active_numa_domains.end();
           ++it) {
         int cpu_node = *it;
-        for(int i = 0; i < cfg_num_python_cpus; i++) {
+        for(int i = 0; i < config->cfg_num_python_cpus; i++) {
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
                                                        runtime->core_reservation_set(),
-                                                       cfg_stack_size,
+                                                       config->cfg_stack_size,
 #ifdef REALM_USE_OPENMP
-						       cfg_pyomp_threads,
+						       config->cfg_pyomp_threads,
 #endif
-						       cfg_import_modules,
-						       cfg_init_scripts);
+						       config->cfg_import_modules,
+						       config->cfg_init_scripts);
           runtime->add_processor(pi);
 
           // create affinities between this processor and system, numa, reg, and zc memories

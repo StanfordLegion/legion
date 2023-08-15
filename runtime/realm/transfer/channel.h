@@ -736,6 +736,16 @@ namespace Realm {
     class RemoteChannelInfo;
     class RemoteChannel;
 
+    struct ChannelCopyInfo {
+      Memory src_mem;
+      Memory dst_mem;
+      // TODO(apryrkahin@): Uncomment when used in gather/scatter path.
+      // Memory ind_mem = Memory::NO_MEMORY;
+      // bool is_scatter = false;
+      // bool is_ranges = false;
+      // size_t addr_size = 0;
+    };
+
     class Channel {
     public:
       Channel(XferDesKind _kind)
@@ -830,7 +840,7 @@ namespace Realm {
       // returns 0 if the path is not supported, or a strictly-positive
       //  estimate of the time required (in nanoseconds) to transfer data
       //  along a supported path
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -972,7 +982,7 @@ namespace Realm {
        */
       virtual long available();
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1043,7 +1053,7 @@ namespace Realm {
       //  on the cpu in the current process
       static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1101,7 +1111,7 @@ namespace Realm {
       static const bool is_ordered = false;
 
       // override because we don't want to claim non-reduction copies
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,

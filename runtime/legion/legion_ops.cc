@@ -7711,7 +7711,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -8242,7 +8242,7 @@ namespace Legion {
       // the original index domain due to control replication
       IndexSpaceNode *local_points = get_shard_points();
       Domain launch_domain;
-      local_points->get_launch_space_domain(launch_domain);
+      local_points->get_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -14953,8 +14953,7 @@ namespace Legion {
       }
       if (!launch_domain.exists())
       {
-        runtime->forest->find_launch_space_domain(launcher.launch_space, 
-                                                  launch_domain);
+        runtime->forest->find_domain(launcher.launch_space, launch_domain);
 #ifdef DEBUG_LEGION
         assert(launch_domain.exists());
 #endif
@@ -15626,7 +15625,7 @@ namespace Legion {
                   else \
                   { \
                     Domain domain; \
-                    forest->find_launch_space_domain( \
+                    forest->find_domain( \
                         launcher.index_tasks[idx].launch_space, domain); \
                     const DomainT<DIM,coord_t> domaint = domain; \
                     subspaces[idx] = domaint; \
@@ -15660,7 +15659,7 @@ namespace Legion {
         {
           launch_domain = launcher.index_tasks[0].launch_domain;
           if (!launch_domain.exists())
-            forest->find_launch_space_domain(
+            forest->find_domain(
                 launcher.index_tasks[0].launch_space, launch_domain);
         }
       }
@@ -17336,7 +17335,7 @@ namespace Legion {
         // the original index domain due to control replication
         IndexSpaceNode *local_points = get_shard_points();
         Domain launch_domain;
-        local_points->get_launch_space_domain(launch_domain);
+        local_points->get_domain(launch_domain);
         // Now enumerate the points and kick them off
         size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -17473,8 +17472,8 @@ namespace Legion {
       assert(mapped_insts.size() == 1);
 #endif
       IndexSpaceNode *node = runtime->forest->get_node(handle);
-      ApEvent domain_ready;
-      Domain domain = node->get_domain(domain_ready, false/*need tight*/);
+      Domain domain;
+      ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
       if (is_index_space)
       {
         // Update our data structure and see if we are the ones
@@ -19394,7 +19393,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -19652,7 +19651,7 @@ namespace Legion {
       // the original index domain due to control replication
       IndexSpaceNode *local_points = get_shard_points();
       Domain launch_domain;
-      local_points->get_launch_space_domain(launch_domain);
+      local_points->get_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION

@@ -2623,7 +2623,7 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launch_domain, provenance);
       if (!launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+        runtime->forest->find_domain(launch_space, launch_domain);
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(), context_index,
@@ -7254,7 +7254,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       Domain domain;
-      runtime->forest->find_launch_space_domain(space, domain);
+      runtime->forest->find_domain(space, domain);
       if (data.size() != domain.get_volume())
         REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
           "The number of buffers passed into a future map construction (%zd) "
@@ -19000,7 +19000,7 @@ namespace Legion {
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
       Domain domain;
-      domain_node->get_launch_space_domain(domain);
+      domain_node->get_domain(domain);
       FutureMap result;
       if (collective)
       {
@@ -19140,7 +19140,7 @@ namespace Legion {
         }
         // Check that all the points abide by the sharding function
         Domain domain;
-        domain_node->get_launch_space_domain(domain);
+        domain_node->get_domain(domain);
         for (std::map<DomainPoint,Future>::const_iterator it =
               futures.begin(); it != futures.end(); it++)
           if (function->find_owner(it->first, domain) != owner_shard->shard_id)
@@ -20662,7 +20662,12 @@ namespace Legion {
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
         term_event = inorder_bar;
         if (outermost)
-          term_event.wait();
+        {
+          bool poisoned = false;
+          term_event.wait_faultaware(poisoned);
+          if (poisoned)
+            raise_poison_exception(); 
+        }
         // Not unordered so it must have succeeded
         return true;
       }
@@ -20735,9 +20740,9 @@ namespace Legion {
         // without performing any communication between the shards
         IndexSpaceNode *launch_space = proj_info.projection_space;
         Domain launch_domain, shard_domain;
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
         if (proj_info.sharding_space != NULL)
-          proj_info.sharding_space->get_launch_space_domain(shard_domain);
+          proj_info.sharding_space->get_domain(shard_domain);
         else
           shard_domain = launch_domain;
         if (root->is_region())

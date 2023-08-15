@@ -41,7 +41,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
-      domain = is->get_domain(domain_ready, true/*tight*/);
+      domain_ready = is->get_domain(domain, false/*tight*/);
 #ifdef LEGION_SPY
       index_space = req.region.get_index_space();
 #endif
@@ -1074,12 +1074,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::find_launch_space_domain(IndexSpace handle,
-                                                    Domain &launch_domain)
+    void RegionTreeForest::find_domain(IndexSpace handle, Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      node->get_launch_space_domain(launch_domain);
+      node->get_domain(launch_domain);
     }
 
     //--------------------------------------------------------------------------

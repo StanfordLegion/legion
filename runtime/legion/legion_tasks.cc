@@ -5236,7 +5236,7 @@ namespace Legion {
         input.sharding_is = sharding_space;
       else
         input.sharding_is = launch_space->handle;
-      runtime->forest->find_launch_space_domain(internal_space, input.domain);
+      runtime->forest->find_domain(internal_space, input.domain);
       output.verify_correctness = false;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
@@ -5277,7 +5277,7 @@ namespace Legion {
         // Check to make sure the domain is not empty
         Domain &d = slice.domain;
         if ((d == Domain::NO_DOMAIN) && slice.domain_is.exists())
-          runtime->forest->find_launch_space_domain(slice.domain_is, d);
+          runtime->forest->find_domain(slice.domain_is, d);
         bool empty = false;
 	size_t volume = d.get_volume();
 	if (volume == 0)
@@ -5444,7 +5444,7 @@ namespace Legion {
       assert(internal_space.exists());
 #endif
       Domain result;
-      runtime->forest->find_launch_space_domain(internal_space, result);
+      runtime->forest->find_domain(internal_space, result);
       return result; 
     }
 
@@ -5541,7 +5541,7 @@ namespace Legion {
         // Only pack the IDs for our local points
         IndexSpaceNode *node = runtime->forest->get_node(internal_space);
         Domain local_domain;
-        node->get_launch_space_domain(local_domain);
+        node->get_domain(local_domain);
         size_t local_size = local_domain.get_volume();
         rez.serialize(local_size);
         const std::map<DomainPoint,DistributedID> &handles =
@@ -5727,7 +5727,7 @@ namespace Legion {
           reduction_inst_precondition = 
             reduction_instance->reduce_from(instance, this, redop,
                 reduction_op, true/*exclusive*/, reduction_inst_precondition);
-          return reduction_inst_precondition.has_triggered();
+          return reduction_inst_precondition.exists();
         }
       }
     } 
@@ -8705,8 +8705,8 @@ namespace Legion {
     {
       // First, we collect all the extents of local outputs.
       // While doing this, we also check the alignment.
-      ApEvent ignore; // can ignore this when asking for a tight domain
-      Domain color_space = part->color_space->get_domain(ignore, true/*tight*/);
+      Domain color_space;
+      part->color_space->get_domain(color_space);
 #ifdef DEBUG_LEGION
       assert(color_space.dense());
 #endif
@@ -8923,7 +8923,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -9055,7 +9055,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -9257,11 +9257,10 @@ namespace Legion {
               idx, get_task_name(), get_unique_op_id(), req.projection);
 
 #ifdef DEBUG_LEGION
-          ApEvent ready = ApEvent::NO_AP_EVENT;
           IndexSpaceNode* node = runtime->forest->get_node(color_space);
-          Domain color_domain = node->get_domain(ready, true);
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
+          Domain color_domain;
+          node->get_domain(color_domain);
+          // No need to wait on the ready event since it is tight
 
           if (req.global_indexing && !color_domain.dense())
             REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
@@ -9543,8 +9542,7 @@ namespace Legion {
           {
             // Get the domain that we will have to iterate over
             Domain local_domain;
-            runtime->forest->find_launch_space_domain(internal_space, 
-                                                      local_domain);
+            runtime->forest->find_domain(internal_space, local_domain);
             // Handling the future map case
             if (predicate_false_future.impl != NULL)
             {
@@ -10631,8 +10629,7 @@ namespace Legion {
       else if (!elide_future_return)
       {
         Domain internal_domain;
-        runtime->forest->find_launch_space_domain(internal_space,
-                                                  internal_domain);
+        runtime->forest->find_domain(internal_space, internal_domain);
         enumerate_futures(internal_domain);
       }
       // Prepare any setup for performing the concurrent analysis
@@ -11681,7 +11678,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
       Domain internal_domain;
-      runtime->forest->find_launch_space_domain(internal_space,internal_domain);
+      runtime->forest->find_domain(internal_space, internal_domain);
       const size_t num_points = internal_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);

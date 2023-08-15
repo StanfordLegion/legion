@@ -665,7 +665,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         owner_shard = sharding_function->find_owner(index_point, shard_domain);
       }
       else
@@ -784,7 +784,7 @@ namespace Legion {
       // See if we're going to be a local point or not
       Domain shard_domain = index_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
       if (!elide_future_return)
       {
         ShardID owner = sharding_function->find_owner(index_point,shard_domain);
@@ -971,7 +971,7 @@ namespace Legion {
         if (local_space.exists())
         {
           Domain local_domain;
-          runtime->forest->find_launch_space_domain(local_space, local_domain);
+          runtime->forest->find_domain(local_space, local_domain);
           enumerate_futures(local_domain);
         }
       }
@@ -1176,7 +1176,7 @@ namespace Legion {
         if ((redop == 0) && !elide_future_return)
         {
           Domain shard_domain;
-          node->get_launch_space_domain(shard_domain);
+          node->get_domain(shard_domain);
           enumerate_futures(shard_domain);
         }
         // If we still need to slice the task then we can run it 
@@ -1664,9 +1664,9 @@ namespace Legion {
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -1703,9 +1703,9 @@ namespace Legion {
       // going to be coming from a remote shard
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -3358,7 +3358,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         owner_shard = sharding_function->find_owner(index_point, shard_domain);
       }
       else
@@ -4014,9 +4014,9 @@ namespace Legion {
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space,launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -4053,9 +4053,9 @@ namespace Legion {
       // going to be coming from a remote shard
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -4936,8 +4936,8 @@ namespace Legion {
       if (is_index_space)
       {
         IndexSpaceNode *node = runtime->forest->get_node(handle);
-        ApEvent domain_ready;
-        Domain domain = node->get_domain(domain_ready, false/*need tight*/);
+        Domain domain;
+        ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
         bool ready = false;
         {
           AutoLock o_lock(op_lock);
@@ -5118,8 +5118,8 @@ namespace Legion {
           DomainPoint color = 
             node->color_space->delinearize_color_to_point(*itr);
           IndexSpaceNode *child = node->get_child(*itr);
-          ApEvent ready;
-          remote_targets[color] = child->get_domain(ready, false/*need tight*/);
+          ApEvent ready = 
+            child->get_domain(remote_targets[color], false/*need tight*/);
           if (ready.exists())
             preconditions.push_back(ready);
         }
@@ -5329,7 +5329,7 @@ namespace Legion {
       // First find all the tasks that we own on this shard
       Domain shard_domain = launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
       {
@@ -5811,7 +5811,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         return shard_domain;
       }
       else

@@ -4732,10 +4732,11 @@ namespace Legion {
                                                  RtEvent *wait_for = NULL);
     public:
       // Static methods for start-up and callback phases
-      static int start(int argc, char **argv, bool background, bool def_mapper);
+      static int start(int argc, char **argv, bool background, 
+                       bool def_mapper, bool filter);
       static void register_builtin_reduction_operators(void);
       static const LegionConfiguration& initialize(int *argc, char ***argv, 
-                                                   bool filter);
+                                                   bool parse, bool filter);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_interoperability(bool separate_runtimes);
@@ -4865,6 +4866,7 @@ namespace Legion {
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool legion_main_set;
       static bool runtime_initialized;
+      static bool runtime_cmdline_parsed;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;

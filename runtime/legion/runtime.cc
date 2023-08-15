@@ -3356,7 +3356,8 @@ namespace Legion {
       rez.serialize(size);
       // Check to see if we can just pass this future instance by value
       if (is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE) &&
-          ((other_ready && (!ready.exists() || ready.has_triggered())) ||
+          ((other_ready && (!ready.exists() || 
+                            ready.has_triggered_faultignorant())) ||
            (!other_ready && (!ready_event.exists() || 
                               ready_event.has_triggered_faultignorant()))))
       {
@@ -3693,7 +3694,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain result;
-      future_map_domain->get_launch_space_domain(result);
+      future_map_domain->get_domain(result);
       return result;
     }
 
@@ -3820,7 +3821,11 @@ namespace Legion {
             (warning_string == NULL) ? "" : warning_string)
       if ((op != NULL) && (Internal::implicit_context != NULL))
         Internal::implicit_context->record_blocking_call();
-      completion_event.wait();
+      bool poisoned = false;
+      if (!completion_event.has_triggered_faultaware(poisoned))
+        completion_event.wait_faultaware(poisoned);
+      if (poisoned)
+        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -3903,7 +3908,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       Domain domain;
-      future_map_domain->get_launch_space_domain(domain);
+      future_map_domain->get_domain(domain);
       const size_t needed = domain.get_volume();
       AutoLock fm_lock(future_map_lock);
 #ifdef DEBUG_LEGION
@@ -4163,8 +4168,8 @@ namespace Legion {
       assert(future_map_domain->contains_point(point));
 #endif
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4192,8 +4197,8 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_all_futures(previous_futures);
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -4247,8 +4252,8 @@ namespace Legion {
       assert(future_map_domain->contains_point(point));
 #endif
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4276,8 +4281,8 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_shard_local_futures(shard, previous_futures);
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         if (transform.functor->is_invertible())
@@ -4408,7 +4413,7 @@ namespace Legion {
           wait_on.wait();
       }
       Domain domain;
-      shard_domain->get_launch_space_domain(domain);
+      shard_domain->get_domain(domain);
       const ShardID owner_shard = 
         sharding_function.load()->find_owner(point, domain);
       // Figure out which node has this future
@@ -4552,7 +4557,11 @@ namespace Legion {
       }
       const ApBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
       Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, completion_event);
-      wait_bar.wait();
+      bool poisoned = false;
+      if (!wait_bar.has_triggered_faultaware(poisoned))
+        wait_bar.wait_faultaware(poisoned);
+      if (poisoned)
+        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -4561,7 +4570,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain sharding_domain;
-      shard_domain->get_launch_space_domain(sharding_domain);
+      shard_domain->get_domain(sharding_domain);
       if (sharding_function == NULL)
       {
         RtEvent wait_on = get_sharding_function_ready();
@@ -4576,7 +4585,7 @@ namespace Legion {
         return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
       Domain domain;
-      local_points->get_launch_space_domain(domain);
+      local_points->get_domain(domain);
       std::vector<RtEvent> ready_events;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
@@ -5295,7 +5304,7 @@ namespace Legion {
           if (need_padded_bounds)
           {
             Domain domain;
-            bounds->get_launch_space_domain(domain);
+            bounds->get_domain(domain);
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
@@ -5406,9 +5415,8 @@ namespace Legion {
           // If this is a padded instance, then we know that this is an affine
           // instance so we can get it's index space expression and it should
           // be dense so then we can just add the offsets
-          ApEvent dom_ready;
-          Domain bounds = 
-            manager->instance_domain->get_domain(dom_ready,true/*tight*/);
+          Domain bounds;
+          manager->instance_domain->get_domain(bounds);
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
@@ -6100,8 +6108,8 @@ namespace Legion {
     RtEvent OutputRegionImpl::finalize(void)
     //--------------------------------------------------------------------------
     {
-      ApEvent ignore; // can ignore this event when tight
-      Domain domain = region->row_source->get_domain(ignore, true/*tight*/);
+      Domain domain;
+      region->row_source->get_domain(domain);
       // Create a Realm instance and update the physical manager
       // for each output field
       for (std::map<FieldID,ReturnedInstanceInfo>::iterator it =
@@ -15724,7 +15732,7 @@ namespace Legion {
       assert(is_functional);
 #endif
       Domain launch_domain;
-      domain->get_launch_space_domain(launch_domain);
+      domain->get_domain(launch_domain);
       // If we're exclusive, we'll store the handles until after
       // we release the lock to go look them up in the region tree
       std::vector<LogicalRegion> handles;
@@ -16071,7 +16079,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain launch_domain;
-      projection_space->get_launch_space_domain(launch_domain);
+      projection_space->get_domain(launch_domain);
       if (node->is_region())
       {
         RegionNode *region = node->as_region_node();
@@ -16196,8 +16204,8 @@ namespace Legion {
       if (!local_space.exists())
         return result;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       std::map<RegionTreeNode*,ProjectionNode*> node_map;
       node_map[root] = result;
       Mappable *mappable = is_functional ? NULL : op->get_mappable();
@@ -16329,8 +16337,8 @@ namespace Legion {
       if (!local_space.exists())
         return result;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
       node_map[row_source] = result;
       if (root->is_region())
@@ -16396,8 +16404,8 @@ namespace Legion {
       if (!local_space.exists())
         return;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
@@ -30196,6 +30204,7 @@ namespace Legion {
     /*static*/ MapperID Runtime::legion_main_mapper_id = 0;
     /*static*/ bool Runtime::legion_main_set = false;
     /*static*/ bool Runtime::runtime_initialized = false;
+    /*static*/ bool Runtime::runtime_cmdline_parsed = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
@@ -30207,7 +30216,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool supply_default_mapper)
+                                  bool supply_default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
@@ -30252,8 +30261,12 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      const LegionConfiguration &config = initialize(&argc, &argv, false);
+      const LegionConfiguration &config = 
+        initialize(&argc, &argv, !runtime_cmdline_parsed, filter);
       RealmRuntime realm = RealmRuntime::get_runtime();
+      // Finish configuring the machine so we can start querying the machine
+      // model and setting up our data structures before we start Realm
+      realm.finish_configure();
 
       // Perform any waits that the user requested before starting
       if (config.delay_start > 0)
@@ -30367,18 +30380,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ const Runtime::LegionConfiguration& Runtime::initialize(
-                                           int *argc, char ***argv, bool filter)
+                               int *argc, char ***argv, bool parse, bool filter)
     //--------------------------------------------------------------------------
     {
       static LegionConfiguration config;
-      if (runtime_initialized)
-        return config;
-      RealmRuntime realm;
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      if (!runtime_initialized)
+      {
 #ifndef NDEBUG
-      bool ok = 
+        bool ok = 
 #endif
-        realm.network_init(argc, argv);
-      assert(ok);
+          realm.network_init(argc, argv);
+        assert(ok);
+#ifndef NDEBUG
+        ok =
+#endif
+          realm.create_configs(*argc, *argv);
+        assert(ok);
+        runtime_initialized = true;
+      }
+      if (runtime_cmdline_parsed || !parse)
+        return config;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
       std::vector<std::string> cmdline;
@@ -30434,11 +30456,7 @@ namespace Legion {
       cmdline.reserve(cmdline.size() + ((num_args > 0) ? num_args-1 : 0));
       for (unsigned i = 1; i < num_args; i++)
         cmdline.emplace_back((*argv)[i]);
-#ifndef NDEBUG
-      ok = 
-#endif
-        realm.configure_from_command_line(cmdline, filter);
-      assert(ok);
+      realm.parse_command_line(cmdline, filter);
       Realm::CommandLineParser cp; 
       cp.add_option_bool("-lg:warn_backtrace",
                          config.warnings_backtrace, !filter)
@@ -30642,7 +30660,7 @@ namespace Legion {
               "LEVEL_ERROR" :
             (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
               "LEVEL_FATAL" : "LEVEL_NONE")
-      runtime_initialized = true;
+      runtime_cmdline_parsed = true;
       return config;
     }
 

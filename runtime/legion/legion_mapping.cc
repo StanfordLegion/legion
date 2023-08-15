@@ -153,9 +153,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Domain::NO_DOMAIN;
-      Internal::ApEvent ready;
-      Domain domain = impl->instance_domain->get_domain(ready, true);
-      ready.wait_faultignorant();
+      Domain domain;
+      impl->instance_domain->get_domain(domain);
       return domain;
     }
 
