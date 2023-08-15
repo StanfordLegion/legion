@@ -37,11 +37,11 @@ set_target_properties(legion_canonical_python PROPERTIES POSITION_INDEPENDENT_CO
 set_target_properties(legion_canonical_python PROPERTIES OUTPUT_NAME "legion_canonical_python${INSTALL_SUFFIX}")
 set_target_properties(legion_canonical_python PROPERTIES SOVERSION ${SOVERSION})
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(legion_canonical_python PROPERTIES BUILD_RPATH "\$ORIGIN")
-  set_target_properties(legion_canonical_python PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  set_property(TARGET legion_canonical_python APPEND PROPERTY BUILD_RPATH "\$ORIGIN")
+  set_property(TARGET legion_canonical_python APPEND PROPERTY INSTALL_RPATH "\$ORIGIN")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  set_target_properties(legion_canonical_python PROPERTIES BUILD_RPATH "@loader_path")
-  set_target_properties(legion_canonical_python PROPERTIES INSTALL_RPATH "@loader_path")
+  set_property(TARGET legion_canonical_python APPEND PROPERTY BUILD_RPATH "@loader_path")
+  set_property(TARGET legion_canonical_python APPEND PROPERTY INSTALL_RPATH "@loader_path")
 endif ()
 
 install(TARGETS legion_python
