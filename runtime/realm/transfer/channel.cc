@@ -4428,7 +4428,7 @@ namespace Realm {
 	return paths;
       }
 	  
-      uint64_t Channel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t Channel::supports_path(ChannelCopyInfo channel_copy_info,
                                       CustomSerdezID src_serdez_id,
                                       CustomSerdezID dst_serdez_id,
                                       ReductionOpID redop_id,
@@ -4439,7 +4439,9 @@ namespace Realm {
                                       unsigned *bw_ret /*= 0*/,
                                       unsigned *lat_ret /*= 0*/)
       {
-	for(std::vector<SupportedPath>::const_iterator it = paths.begin();
+        Memory src_mem = channel_copy_info.src_mem;
+        Memory dst_mem = channel_copy_info.dst_mem;
+        for(std::vector<SupportedPath>::const_iterator it = paths.begin();
 	    it != paths.end();
 	    ++it) {
 	  if(!it->serdez_allowed && ((src_serdez_id != 0) ||
@@ -5110,7 +5112,7 @@ namespace Realm {
 	return 0;
       }
 
-      uint64_t RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t RemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5127,7 +5129,7 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
@@ -5192,7 +5194,7 @@ namespace Realm {
       }
 
 
-      uint64_t MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t MemcpyChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5209,7 +5211,7 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
@@ -5780,7 +5782,7 @@ namespace Realm {
     xdq.add_to_manager(bgwork);
   }
 
-  uint64_t MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+  uint64_t MemreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                            CustomSerdezID src_serdez_id,
                                            CustomSerdezID dst_serdez_id,
                                            ReductionOpID redop_id,
@@ -5796,7 +5798,7 @@ namespace Realm {
       return 0;
 
     // otherwise consult the normal supports_path logic
-    return Channel::supports_path(src_mem, dst_mem,
+    return Channel::supports_path(channel_copy_info,
                                   src_serdez_id, dst_serdez_id, redop_id,
                                   total_bytes, src_frags, dst_frags,
                                   kind_ret, bw_ret, lat_ret);

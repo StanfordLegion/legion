@@ -29832,6 +29832,7 @@ namespace Legion {
     /*static*/ MapperID Runtime::legion_main_mapper_id = 0;
     /*static*/ bool Runtime::legion_main_set = false;
     /*static*/ bool Runtime::runtime_initialized = false;
+    /*static*/ bool Runtime::runtime_cmdline_parsed = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
@@ -29843,7 +29844,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool supply_default_mapper)
+                                  bool supply_default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
@@ -29888,8 +29889,12 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      const LegionConfiguration &config = initialize(&argc, &argv, false);
+      const LegionConfiguration &config = 
+        initialize(&argc, &argv, !runtime_cmdline_parsed, filter);
       RealmRuntime realm = RealmRuntime::get_runtime();
+      // Finish configuring the machine so we can start querying the machine
+      // model and setting up our data structures before we start Realm
+      realm.finish_configure();
 
       // Perform any waits that the user requested before starting
       if (config.delay_start > 0)
@@ -30003,18 +30008,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ const Runtime::LegionConfiguration& Runtime::initialize(
-                                           int *argc, char ***argv, bool filter)
+                               int *argc, char ***argv, bool parse, bool filter)
     //--------------------------------------------------------------------------
     {
       static LegionConfiguration config;
-      if (runtime_initialized)
-        return config;
-      RealmRuntime realm;
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      if (!runtime_initialized)
+      {
 #ifndef NDEBUG
-      bool ok = 
+        bool ok = 
 #endif
-        realm.network_init(argc, argv);
-      assert(ok);
+          realm.network_init(argc, argv);
+        assert(ok);
+#ifndef NDEBUG
+        ok =
+#endif
+          realm.create_configs(*argc, *argv);
+        assert(ok);
+        runtime_initialized = true;
+      }
+      if (runtime_cmdline_parsed || !parse)
+        return config;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
       std::vector<std::string> cmdline;
@@ -30070,11 +30084,7 @@ namespace Legion {
       cmdline.reserve(cmdline.size() + ((num_args > 0) ? num_args-1 : 0));
       for (unsigned i = 1; i < num_args; i++)
         cmdline.emplace_back((*argv)[i]);
-#ifndef NDEBUG
-      ok = 
-#endif
-        realm.configure_from_command_line(cmdline, filter);
-      assert(ok);
+      realm.parse_command_line(cmdline, filter);
       Realm::CommandLineParser cp; 
       cp.add_option_bool("-lg:warn_backtrace",
                          config.warnings_backtrace, !filter)
@@ -30278,7 +30288,7 @@ namespace Legion {
               "LEVEL_ERROR" :
             (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
               "LEVEL_FATAL" : "LEVEL_NONE")
-      runtime_initialized = true;
+      runtime_cmdline_parsed = true;
       return config;
     }
 

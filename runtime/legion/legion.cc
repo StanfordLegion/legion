@@ -7669,17 +7669,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool default_mapper)
+                                  bool default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background, default_mapper);
+      return Internal::Runtime::start(argc, argv, background, 
+                                      default_mapper, filter);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, 
+                                        bool filter, bool parse)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv, filter);
+      Internal::Runtime::initialize(argc, argv, parse, filter);
     }
 
     //--------------------------------------------------------------------------

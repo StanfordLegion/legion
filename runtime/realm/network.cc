@@ -688,7 +688,7 @@ namespace Realm {
         }
 
         int count = load_network_module_list(e, runtime, argc, argv,
-                                             sofile_handles, modules);
+                                             network_sofile_handles, modules);
         if(count > 0)
           need_loopback = false;
 #else

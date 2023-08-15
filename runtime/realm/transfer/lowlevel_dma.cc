@@ -645,7 +645,7 @@ namespace Realm {
 	  ++it) {
 	unsigned bw = 0;
 	unsigned latency = 0;
-	if((*it)->supports_path(src_mem, dst_mem,
+	if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
 				src_serdez_id, dst_serdez_id,
 				redop_id,
                                 0, 0, 0, // FIXME
@@ -663,7 +663,7 @@ namespace Realm {
 	    ++it) {
 	  unsigned bw = 0;
 	  unsigned latency = 0;
-	  if((*it)->supports_path(src_mem, dst_mem,
+	  if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
 				  src_serdez_id, dst_serdez_id,
 				  redop_id,
                                   0, 0, 0, // FIXME
