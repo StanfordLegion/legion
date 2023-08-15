@@ -10057,6 +10057,11 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator dit = 
               dependences.begin(); dit != dependences.end(); dit++)
           register_dependence(dit->first, dit->second);
+        // We still need to perform the invalidations in this path as well
+        const RegionTreeContext ctx = parent_ctx->get_context();
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+          runtime->forest->invalidate_current_context(ctx,
+              deletion_requirements[idx], (kind == FIELD_DELETION));
         return;
       }
       switch (kind)
