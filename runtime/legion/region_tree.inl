@@ -41,10 +41,7 @@ namespace Legion {
       if (privilege_node != NULL)
       {
         Realm::IndexSpace<DIM,T> privilege_space;
-        const ApEvent ready = 
-          privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
+        privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
         for (unsigned idx = 0; idx < num_pieces; idx++)
         {
           const Rect<DIM,T> &rect = rects[idx];
@@ -1162,9 +1159,7 @@ namespace Legion {
       if (has_volume)
         return volume;
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      get_realm_index_space(temp, true/*tight*/);
       volume = temp.volume();
       __sync_synchronize();
       has_volume = true;
@@ -1369,9 +1364,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
-      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
-      if (space_ready.exists())
-        space_ready.wait();
+      get_realm_index_space(local_is, true/*tight*/);
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                               compact, piece_list, piece_list_size, num_pieces);
     }
@@ -1462,11 +1455,11 @@ namespace Legion {
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
       // See if both the events needed for the tighten call are done
-      if (!this->realm_index_space_ready.has_triggered() || 
+      if (this->realm_index_space_ready.exists() || 
           !valid_event.has_triggered())
       {
         IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-        if (!this->realm_index_space_ready.has_triggered())
+        if (this->realm_index_space_ready.exists())
         {
           if (!valid_event.has_triggered())
             this->tight_index_space_ready = 
@@ -1613,11 +1606,11 @@ namespace Legion {
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
       // See if both the events needed for the tighten call are done
-      if (!this->realm_index_space_ready.has_triggered() || 
+      if (this->realm_index_space_ready.exists() ||
           !valid_event.has_triggered())
       {
         IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-        if (!this->realm_index_space_ready.has_triggered())
+        if (this->realm_index_space_ready.exists())
         {
           if (!valid_event.has_triggered())
             this->tight_index_space_ready = 
@@ -1774,11 +1767,11 @@ namespace Legion {
         // going to want this eventually
         const RtEvent valid_event(this->realm_index_space.make_valid());
         // See if both the events needed for the tighten call are done
-        if (!this->realm_index_space_ready.has_triggered() || 
+        if (this->realm_index_space_ready.exists() ||
             !valid_event.has_triggered())
         {
           IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-          if (!this->realm_index_space_ready.has_triggered())
+          if (this->realm_index_space_ready.exists())
           {
             if (!valid_event.has_triggered())
               this->tight_index_space_ready = 
@@ -2297,11 +2290,12 @@ namespace Legion {
       assert(!tight_index_space_set.has_triggered());
 #endif
       const RtEvent valid_event(realm_index_space.make_valid());
-      if (!index_space_ready.has_triggered() || !valid_event.has_triggered())
+      if (!index_space_ready.has_triggered_faultignorant() || 
+          !valid_event.has_triggered())
       {
         // If this index space isn't ready yet, then we have to defer this 
         TightenIndexSpaceArgs args(this, this);
-        if (!index_space_ready.has_triggered())
+        if (!index_space_ready.has_triggered_faultignorant())
         {
           if (!valid_event.has_triggered())
             context->runtime->issue_runtime_meta_task(args,
@@ -2315,7 +2309,6 @@ namespace Legion {
         else
           context->runtime->issue_runtime_meta_task(args,
               LG_LATENCY_WORK_PRIORITY, valid_event);
-        
         return;
       }
 #ifdef DEBUG_LEGION
@@ -4976,9 +4969,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
-      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
-      if (space_ready.exists())
-        space_ready.wait();
+      get_realm_index_space(local_is, true/*tight*/);
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                               compact, piece_list, piece_list_size, num_pieces);
     }
