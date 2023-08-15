@@ -2366,7 +2366,7 @@ namespace Legion {
           if (need_padded_bounds)
           {
             Domain domain;
-            bounds->get_launch_space_domain(domain);
+            bounds->get_domain(domain);
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
@@ -2475,9 +2475,8 @@ namespace Legion {
           // If this is a padded instance, then we know that this is an affine
           // instance so we can get it's index space expression and it should
           // be dense so then we can just add the offsets
-          ApEvent dom_ready;
-          Domain bounds = 
-            manager->instance_domain->get_domain(dom_ready, true/*tight*/);
+          Domain bounds;
+          manager->instance_domain->get_domain(bounds);
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
@@ -10565,7 +10564,7 @@ namespace Legion {
       const bool find_dependences = is_invertible && IS_WRITE(req);
       Domain launch_domain;
       if (find_dependences)
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
@@ -10687,7 +10686,7 @@ namespace Legion {
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
       Domain launch_domain;
       if (find_dependences)
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
