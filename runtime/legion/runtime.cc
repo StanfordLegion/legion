@@ -3694,7 +3694,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain result;
-      future_map_domain->get_launch_space_domain(result);
+      future_map_domain->get_domain(result);
       return result;
     }
 
@@ -3908,7 +3908,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       Domain domain;
-      future_map_domain->get_launch_space_domain(domain);
+      future_map_domain->get_domain(domain);
       const size_t needed = domain.get_volume();
       AutoLock fm_lock(future_map_lock);
 #ifdef DEBUG_LEGION
@@ -4168,8 +4168,8 @@ namespace Legion {
       assert(future_map_domain->contains_point(point));
 #endif
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4197,8 +4197,8 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_all_futures(previous_futures);
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -4252,8 +4252,8 @@ namespace Legion {
       assert(future_map_domain->contains_point(point));
 #endif
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4281,8 +4281,8 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_shard_local_futures(shard, previous_futures);
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         if (transform.functor->is_invertible())
@@ -4413,7 +4413,7 @@ namespace Legion {
           wait_on.wait();
       }
       Domain domain;
-      shard_domain->get_launch_space_domain(domain);
+      shard_domain->get_domain(domain);
       const ShardID owner_shard = 
         sharding_function.load()->find_owner(point, domain);
       // Figure out which node has this future
@@ -4570,7 +4570,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain sharding_domain;
-      shard_domain->get_launch_space_domain(sharding_domain);
+      shard_domain->get_domain(sharding_domain);
       if (sharding_function == NULL)
       {
         RtEvent wait_on = get_sharding_function_ready();
@@ -4585,7 +4585,7 @@ namespace Legion {
         return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
       Domain domain;
-      local_points->get_launch_space_domain(domain);
+      local_points->get_domain(domain);
       std::vector<RtEvent> ready_events;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
@@ -5304,7 +5304,7 @@ namespace Legion {
           if (need_padded_bounds)
           {
             Domain domain;
-            bounds->get_launch_space_domain(domain);
+            bounds->get_domain(domain);
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
@@ -5415,9 +5415,8 @@ namespace Legion {
           // If this is a padded instance, then we know that this is an affine
           // instance so we can get it's index space expression and it should
           // be dense so then we can just add the offsets
-          ApEvent dom_ready;
-          Domain bounds = 
-            manager->instance_domain->get_domain(dom_ready,true/*tight*/);
+          Domain bounds;
+          manager->instance_domain->get_domain(bounds);
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
@@ -6129,9 +6128,7 @@ namespace Legion {
             // For a globally indexed output region, the domain has
             // already been initialized once we reach here, so
             // we just retrieve it.
-            ApEvent ready;
-            domain = node->get_domain(ready, true/*tight*/);
-            // No need to wait on the event since it is tight
+            node->get_domain(domain);
           }
         }
         else
@@ -6143,7 +6140,7 @@ namespace Legion {
         }
       }
       else
-        node->get_launch_space_domain(domain);
+        node->get_domain(domain);
 
       // Create a Realm instance and update the physical manager
       // for each output field
@@ -15706,7 +15703,7 @@ namespace Legion {
       assert(is_functional);
 #endif
       Domain launch_domain;
-      domain->get_launch_space_domain(launch_domain);
+      domain->get_domain(launch_domain);
       // If we're exclusive, we'll store the handles until after
       // we release the lock to go look them up in the region tree
       std::vector<LogicalRegion> handles;
@@ -16053,7 +16050,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain launch_domain;
-      projection_space->get_launch_space_domain(launch_domain);
+      projection_space->get_domain(launch_domain);
       if (node->is_region())
       {
         RegionNode *region = node->as_region_node();
@@ -16183,8 +16180,8 @@ namespace Legion {
       if (!local_space.exists())
         return result;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
       node_map[row_source] = result;
       if (root->is_region())
@@ -16250,8 +16247,8 @@ namespace Legion {
       if (!local_space.exists())
         return;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();

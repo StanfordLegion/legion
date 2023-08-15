@@ -3406,7 +3406,7 @@ namespace Legion {
         // the overlapping points shard to the same shards.
         elide = true;
         Domain launch_domain;
-        info.projection_space->get_launch_space_domain(launch_domain);
+        info.projection_space->get_domain(launch_domain);
         const size_t launch_volume = info.projection_space->get_volume();
         for (std::set<ProjectionSummary>::const_iterator it =
               shard_projections.begin(); it != shard_projections.end(); it++)
@@ -3417,13 +3417,13 @@ namespace Legion {
             continue;
           // Test all the overlapping points to see if their shards are the same
           Domain shard_domain_prev, shard_domain_next;
-          it->sharding_domain->get_launch_space_domain(shard_domain_prev);
-          info.sharding_space->get_launch_space_domain(shard_domain_next);
+          it->sharding_domain->get_domain(shard_domain_prev);
+          info.sharding_space->get_domain(shard_domain_next);
           // Iterte over whichever one has fewer points
           if (it->domain->get_volume() < launch_volume)
           {
             Domain prev_domain;
-            it->domain->get_launch_space_domain(prev_domain);
+            it->domain->get_domain(prev_domain);
             for (Domain::DomainPointIterator itr(prev_domain); itr; itr++)
             {
               // Check for overlap
@@ -3521,19 +3521,19 @@ namespace Legion {
       if (next.projection_space->get_volume() != 1)
         return false;
       Domain prev_domain, next_domain;
-      prev.domain->get_launch_space_domain(prev_domain);
-      next.projection_space->get_launch_space_domain(next_domain);
+      prev.domain->get_domain(prev_domain);
+      next.projection_space->get_domain(next_domain);
 #ifdef DEBUG_LEGION
       assert(prev_domain.lo() == prev_domain.hi());
       assert(next_domain.lo() == next_domain.hi());
 #endif
       Domain prev_sharding, next_sharding;
       if (prev.domain != prev.sharding_domain)
-        prev.sharding_domain->get_launch_space_domain(prev_sharding);
+        prev.sharding_domain->get_domain(prev_sharding);
       else
         prev_sharding = prev_domain;
       if (next.sharding_space != next.projection_space)
-        next.sharding_space->get_launch_space_domain(next_sharding);
+        next.sharding_space->get_domain(next_sharding);
       else
         next_sharding = next_domain;
       const ShardID prev_shard =

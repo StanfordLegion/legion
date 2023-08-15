@@ -1100,12 +1100,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceOperationT<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    ApEvent IndexSpaceOperationT<DIM,T>::get_domain(Domain &domain, bool tight)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result;
-      ready = get_realm_index_space(result, tight);
-      return DomainT<DIM,T>(result);
+      ApEvent ready = get_realm_index_space(result, tight);
+      domain = result;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -2357,12 +2358,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceNodeT<DIM,T>::get_domain(ApEvent &ready, bool need_tight)
+    ApEvent IndexSpaceNodeT<DIM,T>::get_domain(Domain &domain, bool need_tight)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result;
-      ready = get_realm_index_space(result, need_tight);
-      return DomainT<DIM,T>(result);
+      ApEvent ready = get_realm_index_space(result, need_tight);
+      domain = result;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -4958,16 +4960,6 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)
-    //--------------------------------------------------------------------------
-    {
-      DomainT<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      launch_domain = local_space;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::validate_slicing(
                                   const std::vector<IndexSpace> &slice_spaces, 
                                   MultiTask *task, MapperManager *mapper)
@@ -5039,7 +5031,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
       if (shard_space != handle)
-        context->find_launch_space_domain(shard_space, sharding_domain);
+        context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
       std::vector<Realm::Point<DIM,T> > index_points; 
@@ -5094,7 +5086,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
       if (shard_space.exists() && shard_space != handle)
-        context->find_launch_space_domain(shard_space, sharding_domain);
+        context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
       if (!func->functor->is_invertible())
