@@ -1756,7 +1756,8 @@ namespace Legion {
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
       void invalidate_region_tree_context(const RegionRequirement &req,
-          unsigned req_index, std::set<RtEvent> &applied_events);
+          unsigned req_index, std::set<RtEvent> &applied_events, 
+          bool filter_specific_fields);
       virtual void free_region_tree_context(void);
     public:
       virtual ProjectionNode* construct_projection_tree(

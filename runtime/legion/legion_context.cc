@@ -11341,8 +11341,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_context(
-                              const RegionRequirement &req, unsigned req_index,
-                              std::set<RtEvent> &applied_events)
+                 const RegionRequirement &req, unsigned req_index,
+                 std::set<RtEvent> &applied_events, bool filter_specific_fields)
     //--------------------------------------------------------------------------
     {
       LocalLock *tree_lock = NULL;
@@ -11358,10 +11358,14 @@ namespace Legion {
             invalidate_mask, applied, false/*move to previous*/);
         if (!applied.empty())
           applied_events.insert(applied.begin(), applied.end());
-        // Need the lock before doing this invalidation in case the 
-        // equivalence set trees data structure resizes
-        AutoLock priv_lock(privilege_lock);
-        equivalence_set_trees[req_index] = EqKDRoot();
+        // Check to see if we should actually invalidate this tree
+        if (!filter_specific_fields)
+        {
+          // Need the lock before doing this invalidation in case the 
+          // equivalence set trees data structure resizes
+          AutoLock priv_lock(privilege_lock);
+          equivalence_set_trees[req_index] = EqKDRoot();
+        }
       }
     }
 

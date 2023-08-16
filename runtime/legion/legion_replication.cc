@@ -4262,8 +4262,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
       {
         const RegionRequirement &req = deletion_requirements[idx];
-        parent_ctx->invalidate_region_tree_context(req,
-            find_parent_index(idx), map_applied_conditions);
+        parent_ctx->invalidate_region_tree_context(req, find_parent_index(idx),
+            map_applied_conditions, (kind == FIELD_DELETION));
       }
       if (mapping_barrier.exists())
       {
