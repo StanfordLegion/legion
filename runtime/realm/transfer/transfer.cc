@@ -3093,7 +3093,7 @@ namespace Realm {
 	// new path to compute
 	path_infos.resize(idx + 1);
         std::vector<size_t> src_frags{domain_size()}, dst_frags{1};
-        bool ok = find_fastest_path(insts[i].get_location(), dst_mem, serdez_id,
+        bool ok = find_fastest_path(ChannelCopyInfo{insts[i].get_location(), dst_mem}, serdez_id,
                                     0, domain_size() * bytes_per_element,
                                     &src_frags, &dst_frags, path_infos[idx]);
         assert(ok);
@@ -3397,7 +3397,7 @@ namespace Realm {
         // fragments) to handle can be less. Consider finding a
         // better way to handle this (same for gather op).
         std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
-        bool ok = find_fastest_path(src_mem, insts[i].get_location(), serdez_id,
+        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, insts[i].get_location()}, serdez_id,
                                     0, domain_size() * bytes_per_element,
                                     &src_frags, &dst_frags, path_infos[idx]);
         assert(ok);
