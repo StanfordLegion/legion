@@ -8389,11 +8389,6 @@ namespace Legion {
               runtime->handle_constraint_release(derez);
               break;
             }
-          case SEND_TOP_LEVEL_TASK_REQUEST:
-            {
-              runtime->handle_top_level_task_request(derez);
-              break;
-            }
           case SEND_TOP_LEVEL_TASK_COMPLETE:
             {
               runtime->handle_top_level_task_complete(derez);
@@ -11177,11 +11172,8 @@ namespace Legion {
                            config.legion_collective_participating_spaces),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
         prepared_for_shutdown(false), total_outstanding_tasks(0), 
-        // In the case where the runtime is backgrounded, have node 0 keep
-        // a reference for each node so that we wait until we see all wait
-        // call from each node before we start trying to perform a shutdown
-        outstanding_top_level_tasks(
-            ((unique == 0) && background) ? total_address_spaces : 0),
+        outstanding_top_level_tasks(initialize_outstanding_top_level_tasks(
+              address_space, total_address_spaces, legion_collective_radix)),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
@@ -18748,25 +18740,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_task_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0); // should only happen on node 0
-#endif
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      increment_outstanding_top_level_tasks();
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_top_level_task_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0); // should only happen on node 0
-#endif
       decrement_outstanding_top_level_tasks();
     }
 
@@ -19874,47 +19850,35 @@ namespace Legion {
     void Runtime::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we are on node 0 or not
-      if (address_space != 0)
-      {
-        // Send a message to node 0 requesting permission to 
-        // lauch a new top-level task and wait on an event
-        // to signal that permission has been granted
-        RtUserEvent grant_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        rez.serialize(grant_event);
-        find_messenger(0)->send_message<SEND_TOP_LEVEL_TASK_REQUEST>(rez,
-                                                          true/*flush*/);
-        grant_event.wait();
-      }
-      else
-      {
-        outstanding_top_level_tasks.fetch_add(1);
-      }
+      unsigned previous = outstanding_top_level_tasks.fetch_add(1);
+      if (previous == 0)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_TOP_LEVEL_TASK_CREATION,
+            "Illegal attempt to launch a top-level task after "
+            "Runtime::wait_for_shutdown has been called. All top-level tasks "
+            "must be created on a node before signaling to the runtime that "
+            "the client is ready for Legion to shutdown on that node.")
     }
 
     //--------------------------------------------------------------------------
     void Runtime::decrement_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we are on node 0 or not
-      if (address_space != 0)
-      {
-        // Send a message to node 0 indicating that we finished
-        // executing a top-level task
-        Serializer rez;
-        find_messenger(0)->send_message<SEND_TOP_LEVEL_TASK_COMPLETE>(rez,
-                                                            true/*flush*/);
-      }
-      else
-      {
-        unsigned prev = outstanding_top_level_tasks.fetch_sub(1);
+      unsigned previous = outstanding_top_level_tasks.fetch_sub(1);
 #ifdef DEBUG_LEGION
-        assert(prev > 0);
+      assert(previous > 0);
 #endif
-        // Check to see if we have no more outstanding top-level tasks
-        // If we don't launch a task to handle the try to shutdown the runtime 
-        if (prev == 1)
+      if (previous == 1)
+      {
+        if (address_space > 0)
+        {
+          // Send a message to the next node down the tree to remove our
+          // guard reference that we have there
+          AddressSpaceID parent = (address_space - 1) / legion_collective_radix;
+          Serializer rez;
+          find_messenger(parent)->send_message<SEND_TOP_LEVEL_TASK_COMPLETE>(
+                                                          rez, true/*flush*/);
+        }
+        else // We're the owner node so start the quiesence algorithm
           issue_runtime_shutdown_attempt();
       }
     }
@@ -22364,6 +22328,10 @@ namespace Legion {
       // for the runtime to shutdown, otherwise we can now return
       if (background)
         return 0;
+      // Decrement the total outstanding top-level tasks to reflect that
+      // this node is ready to shutdown when everything is done
+      the_runtime->decrement_outstanding_top_level_tasks();
+      // Wait for Realm shutdown to be complete
       return realm.wait_for_shutdown();
     }
 
@@ -22642,6 +22610,29 @@ namespace Legion {
       runtime_cmdline_parsed = true;
       return config;
     } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned Runtime::initialize_outstanding_top_level_tasks(
+        AddressSpaceID local_space, size_t total_spaces, unsigned radix)
+    //--------------------------------------------------------------------------
+    {
+      // We always have at least one top-level task in the count as a guard
+      // that will be removed once we know that we aren't launching anymore
+      // new top-level tasks on this node
+      unsigned result = 1;
+      // Now count how many notifications we expect to see and add that to
+      // our count to act as an additional guard. This will allow us to do
+      // a tree reduction down from each node towards node 0 which will
+      // start the shutdown quiescence test
+      AddressSpaceID offset = local_space * radix;
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        AddressSpaceID target = offset + idx;
+        if (target < total_spaces)
+          result++;
+      }
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     Future Runtime::launch_top_level_task(const TaskLauncher &launcher)

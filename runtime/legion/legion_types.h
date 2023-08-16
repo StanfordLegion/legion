@@ -838,7 +838,6 @@ namespace Legion {
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
       SEND_CONSTRAINT_RELEASE,
-      SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
       SEND_LIBRARY_MAPPER_REQUEST,
@@ -1024,7 +1023,6 @@ namespace Legion {
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
         "Send Constraint Release",                                    \
-        "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
         "Send Library Mapper Request",                                \

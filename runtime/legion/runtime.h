@@ -2686,7 +2686,6 @@ namespace Legion {
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);
-      void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
@@ -3390,7 +3389,8 @@ namespace Legion {
       static void register_builtin_reduction_operators(void);
       static const LegionConfiguration& initialize(int *argc, char ***argv, 
                                                    bool parse, bool filter);
-      static LegionConfiguration parse_arguments(int argc, char **argv);
+      static unsigned initialize_outstanding_top_level_tasks(
+          AddressSpaceID local_space, size_t total_spaces, unsigned radix);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_interoperability(bool separate_runtimes);
       static Processor configure_runtime(int argc, char **argv,
@@ -4541,8 +4541,6 @@ namespace Legion {
           return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
         case SEND_CONSTRAINT_RELEASE:
           return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
-        case SEND_TOP_LEVEL_TASK_REQUEST:
-          return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_TOP_LEVEL_TASK_COMPLETE:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_MPI_RANK_EXCHANGE:
