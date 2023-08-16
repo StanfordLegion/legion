@@ -97,6 +97,11 @@ namespace Realm {
   #undef DEFINE_FNPTR
 #endif
 
+    // TODO(apryakin@): Consider moving to some helper file.
+    static size_t get_log_size(size_t value) {
+      return value & 1 ? 0 : value & 2 ? 1 : value & 4 ? 2 : value & 8 ? 3 : 4;
+    }
+
 #define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
 
     NVML_APIS(DEFINE_FNPTR);
@@ -2022,6 +2027,11 @@ namespace Realm {
       return NULL;
     }
 
+    bool GPU::can_access_peer(GPU *peer) const {
+      return (peer != NULL) &&
+             (info->peers.find(peer->info->device) != info->peers.end());
+    }
+
     GPUStream* GPU::get_null_task_stream(void) const
     {
       GPUStream *stream = ThreadLocal::current_gpu_stream;
@@ -2051,6 +2061,39 @@ namespace Realm {
       unsigned d2d_stream_index = (next_d2d_stream.fetch_add(1) %
                                    module->config->cfg_d2d_streams);
       return device_to_device_streams[d2d_stream_index];
+    }
+
+    static void launch_kernel(const Realm::Cuda::GPU::GPUFuncInfo &func_info, void *params,
+                              size_t num_elems, GPUStream *stream)
+    {
+      unsigned int num_blocks = 0, num_threads = 0;
+      void *args[] = {params};
+
+      num_threads = std::min(static_cast<unsigned int>(func_info.occ_num_threads),
+                             static_cast<unsigned int>(num_elems));
+      num_blocks = std::min(
+          static_cast<unsigned int>((num_elems + num_threads - 1) / num_threads),
+          static_cast<unsigned int>(
+              func_info.occ_num_blocks)); // Cap the grid based on the given volume
+
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
+                                                 num_threads, 1, 1, 0,
+                                                 stream->get_stream(), args, NULL));
+    }
+
+    void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
+                                         size_t elem_size, size_t volume,
+                                         GPUStream *stream) {
+      size_t log_elem_size = get_log_size(elem_size);
+
+      assert((1ULL << log_elem_size) == elem_size);
+      assert(dim <= REALM_MAX_DIM);
+      assert(dim >= 1);
+
+      // TODO: probably replace this
+      // with a better data-structure
+      GPUFuncInfo &func_info = batch_affine_kernels[dim - 1][log_elem_size];
+      launch_kernel(func_info, copy_info, volume, stream);
     }
 
     const GPU::CudaIpcMapping *GPU::find_ipc_mapping(Memory mem) const
