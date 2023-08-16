@@ -22152,9 +22152,13 @@ namespace Legion {
       assert(is_owner());
       // We should have had a request for this already
       assert(!has_remote_instance(target));
-      assert((collective_mapping == NULL) || 
-              !collective_mapping->contains(target));
 #endif
+      // If the target is in the collective mapping then we don't need to
+      // bother sending the result since that just means that something
+      // requested the equivalence set on a remote node before the equivalence
+      // set creation could propagate there yet
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+        return;
       update_remote_instances(target);
       Serializer rez;
       {
@@ -25502,8 +25506,16 @@ namespace Legion {
                                           runtime->forest, rectangles);
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
-      EquivalenceSet *set = new EquivalenceSet(runtime, did, root, expr,
-                            tid, context, true/*register now*/, mapping);
+      void *location;
+      EquivalenceSet *set = NULL;
+      if (runtime->find_pending_collectable_location(did, location))
+        set = new(location) EquivalenceSet(runtime, did, root, expr,
+            tid, context, false/*register now*/, mapping);
+      else
+        set = new EquivalenceSet(runtime, did, root, expr,
+            tid, context, false/*register now*/, mapping);
+      // Once construction is complete then we do the registration
+      set->register_with_runtime();
       // Register it with any local trees 
       for (FieldMaskSet<EqKDTree>::const_iterator it =
             local_finder->second.begin(); it != 
