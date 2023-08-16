@@ -74,6 +74,10 @@ TESTS += machine_config
   TESTS += cuda_memcpy_test
   endif
 
+  ifeq ($(strip $(USE_CUDA)),1)
+  TESTS += cuda_memcpy_test
+  endif
+
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
 endif
