@@ -38,6 +38,8 @@ NVCC_FLAGS	?=
 HIPCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
+REALM_CUDA_OBJS ?=
+
 
 CXX ?= g++
 
@@ -68,6 +70,10 @@ TESTS += reservations
 TESTS += multiaffine
 TESTS += machine_config
 
+  ifeq ($(strip $(USE_CUDA)),1)
+  TESTS += cuda_memcpy_test
+  endif
+
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
 endif
@@ -90,6 +96,12 @@ TESTARGS_task_stream := -ll:gpu 1
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
               $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
+
+REALM_CUDA_OBJS ?=
+ifeq ($(strip $(USE_CUDA)),1)
+REALM_CUDA_OBJS := $(patsubst %.cu,$(REALM_CUDA_DIR)/%.o,$(notdir $(REALM_CUDA_SRC)))
+endif
+
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
 RUNTIME_VPATH := $(subst $(SPACE),:,$(sort $(dir $(REALM_SRC))))
@@ -111,7 +123,7 @@ run_% : %
 build : $(TESTS)
 
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS)
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN)
 
 # scatter uses C++11 lambdas
 scatter.o : CC_FLAGS += -std=c++11
@@ -119,9 +131,9 @@ scatter.o : CC_FLAGS += -std=c++11
 $(TESTS) : % : %.o librealm.a
 	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)
 
-$(REALM_LIB) : $(REALM_OBJS)
+$(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
 	rm -f $(REALM_LIB)
-	ar rc $(REALM_LIB) $(REALM_OBJS)
+	ar rc $(REALM_LIB) $(REALM_OBJS) $(REALM_CUDA_OBJS)
 
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o

@@ -63,7 +63,7 @@ if(Legion_USE_CUDA)
 
   list(APPEND REALM_TESTS cuda_arrays)
   set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)
-
+  list(APPEND REALM_TESTS cuda_memcpy_test)
   list(APPEND REALM_TESTS task_stream)
   set(CUDASRC_task_stream task_stream_gpu.cu)
 endif()
@@ -125,6 +125,7 @@ set(TESTARGS_alltoall          -ll:csize 1024)
 set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
 set(TESTARGS_cuda_arrays       -ll:gpu 1)
+set(TESTARGS_cuda_memcpy_test      -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
