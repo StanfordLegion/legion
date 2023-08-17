@@ -18,7 +18,6 @@ BraceWrapping:
   SplitEmptyNamespace: false
 ColumnLimit: 90
 ConstructorInitializerIndentWidth: 2
-IndentCaseBlocks: true
 NamespaceIndentation: All
 SpaceBeforeParens: Never
 
