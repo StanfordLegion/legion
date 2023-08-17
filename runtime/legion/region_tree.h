@@ -3115,7 +3115,7 @@ namespace Legion {
                                          Runtime *runtime,
                                          std::vector<RtEvent> &invalidated) = 0;
       // Return true if we should remove the reference on the origin tracker
-      virtual bool cancel_subscription(EqSetTracker *tracker,
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                AddressSpaceID space, const FieldMask &mask) = 0;
       // Just use this method of indirecting into template land
       virtual IndexSpaceExpression* create_from_rectangles(
@@ -3194,7 +3194,7 @@ namespace Legion {
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0) = 0;
-      virtual bool cancel_subscription(EqSetTracker *tracker,
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
                            AddressSpaceID space, const FieldMask &mask) = 0;
       // Just use this method of indirecting into template land
       virtual IndexSpaceExpression* create_from_rectangles(
@@ -3261,7 +3261,7 @@ namespace Legion {
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
-      virtual bool cancel_subscription(EqSetTracker *tracker,
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                  AddressSpaceID space, const FieldMask &mask);
     public:
       void find_all_previous_sets(FieldMask mask,
@@ -3277,7 +3277,7 @@ namespace Legion {
     protected:
       void refine_node(const Rect<DIM,T> &rect, const FieldMask &mask,
                        bool refine_current = false);
-      bool record_subscription(EqSetTracker *tracker, 
+      unsigned record_subscription(EqSetTracker *tracker, 
           AddressSpaceID tracker_space, const FieldMask &mask);
       void clone_sets(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
           FieldMask clone, FieldMaskSet<EquivalenceSet> *&sets, bool current);
@@ -3376,7 +3376,7 @@ namespace Legion {
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
-      virtual bool cancel_subscription(EqSetTracker *tracker,
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                AddressSpaceID space, const FieldMask &mask);
     protected:
       std::vector<EqKDTreeT<DIM,T>*> children;
@@ -3441,7 +3441,7 @@ namespace Legion {
                                          std::vector<RtEvent> &invalidated,
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
-      virtual bool cancel_subscription(EqSetTracker *tracker,
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
                                AddressSpaceID space, const FieldMask &mask);
     protected:
       // Make these methods virtual so they can be overloaded by the sparse

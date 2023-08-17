@@ -3542,15 +3542,6 @@ namespace Legion {
       FieldMask found_covered;
     };
 
-    template<typename T>
-    struct SubscriberInvalidations : 
-      public LegionHeapify<SubscriberInvalidations<T> > {
-      SubscriberInvalidations(void) : all_subscribers_finished(false) { }
-      FieldMaskSet<T> subscribers;
-      std::vector<T*> finished;
-      bool all_subscribers_finished;
-    };
-
     /**
      * \class EqSetTracker
      * This is an abstract class that provides an interface for
@@ -3597,20 +3588,18 @@ namespace Legion {
       virtual IndexSpaceExpression* get_tracker_expression(void) const = 0;
       virtual ReferenceSource get_reference_source_kind(void) const = 0;
     public:
-      bool invalidate_equivalence_sets(Runtime *runtime, const FieldMask &mask,
-                    EqKDTree *tree, AddressSpaceID source, 
-                    std::vector<RtEvent> &invalidated_events);
-      typedef SubscriberInvalidations<EqKDTree> TreeInvalidations;
+      unsigned invalidate_equivalence_sets(Runtime *runtime,
+          const FieldMask &mask, EqKDTree *tree, AddressSpaceID source,
+          std::vector<RtEvent> &invalidated_events);
       void cancel_subscriptions(Runtime *runtime,
-          const LegionMap<AddressSpaceID,TreeInvalidations> &to_cancel,
+          const LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel,
           std::vector<RtEvent> *cancelled_events = NULL);
 #if 0
       bool finish_subscription(EqKDTree *owner, AddressSpaceID space,
                                const FieldMask &mask);
 #endif
-      typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
       static void invalidate_subscriptions(Runtime *runtime, EqKDTree *source,
-          LegionMap<AddressSpaceID,TrackerInvalidations> &subscribers,
+          LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &subscribers,
           std::vector<RtEvent> &applied_events);
       static void handle_cancel_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
@@ -3673,7 +3662,7 @@ namespace Legion {
       void record_equivalence_sets(VersionInfo *version_info,
                                    const FieldMask &mask) const;
       void find_cancellations(const FieldMask &mask,
-          LegionMap<AddressSpaceID,TreeInvalidations> &to_cancel);
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel);
     protected:
       LocalLock &tracker_lock;
       // Member varialbes that are pointers are transient and only used in

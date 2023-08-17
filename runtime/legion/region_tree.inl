@@ -6883,7 +6883,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(this->bounds.contains(rect));
 #endif
-      bool subscribed = false;
+      unsigned new_subs = 0;
       FieldMaskSet<EqKDNode<DIM,T> > 
         to_traverse, to_get_previous, to_invalidate_previous;
       {
@@ -6904,13 +6904,7 @@ namespace Legion {
             eq_sets.insert(cit->first, overlap);
             remaining -= overlap;
             new_subscriptions.insert(this, overlap);
-            if (record_subscription(tracker, tracker_space, overlap))
-            {
-#ifdef DEBUG_LEGION
-              assert(!subscribed);
-#endif
-              subscribed = true;
-            }
+            new_subs += record_subscription(tracker, tracker_space, overlap);
             if (current_set_preconditions != NULL)
               check_preconditions |= overlap;
             if (!remaining)
@@ -6969,13 +6963,7 @@ namespace Legion {
               pending_sets.push_back(it->first);
               remaining -= overlap;
               new_subscriptions.insert(this, overlap);
-              if (record_subscription(tracker, tracker_space, overlap))
-              {
-#ifdef DEBUG_LEGION
-                assert(!subscribed);
-#endif
-                subscribed = true;
-              }
+              new_subs += record_subscription(tracker, tracker_space, overlap);
               if (!remaining)
                 break;
             }
@@ -7046,13 +7034,8 @@ namespace Legion {
                     std::make_pair(ready, remaining));
                 // Record the subscription now so we know whether to 
                 // add a reference to the tracker or not
-                if (record_subscription(tracker, tracker_space, remaining))
-                {
-#ifdef DEBUG_LEGION
-                  assert(!subscribed);
-#endif
-                  subscribed = true;
-                }
+                new_subs += 
+                  record_subscription(tracker, tracker_space, remaining);
                 to_create.insert(this, remaining);
                 creation_rects[this] = Domain(rect);
                 // Find any creation sources
@@ -7162,7 +7145,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(to_traverse.get_valid_mask() * to_get_previous.get_valid_mask());
 #endif
-      unsigned new_subs = subscribed ? 1 : 0;
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -7617,7 +7599,7 @@ namespace Legion {
         ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      bool subscribed = false;
+      unsigned new_subs = 0;
       FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
       {
         FieldMask submask = mask;
@@ -7641,8 +7623,7 @@ namespace Legion {
             if (current_sets->insert(set, local_fields))
               set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
             subscriptions.insert(this, local_fields);
-            if (record_subscription(tracker, tracker_space, local_fields))
-              subscribed = true;
+            new_subs += record_subscription(tracker,tracker_space,local_fields);
             submask -= local_fields;
           }
         }
@@ -7695,7 +7676,6 @@ namespace Legion {
           }
         }
       }
-      unsigned new_subs = subscribed ? 1 : 0;
       // Continue the traversal for anything below
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -7817,7 +7797,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool EqKDNode<DIM,T>::record_subscription(EqSetTracker *tracker,
+    unsigned EqKDNode<DIM,T>::record_subscription(EqSetTracker *tracker,
         AddressSpaceID tracker_space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
@@ -7825,15 +7805,25 @@ namespace Legion {
         subscriptions =
           new LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >();
       FieldMaskSet<EqSetTracker> &trackers = (*subscriptions)[tracker_space];
-      // Add a reference if this is the first time this tracker has
-      // subscribed to us which we'll remove when the subscription ends
-      if (trackers.insert(tracker, mask))
+      FieldMaskSet<EqSetTracker>::iterator finder = trackers.find(tracker);
+      if (finder != trackers.end())
       {
-        this->add_reference();
-        return true;
+        FieldMask new_fields = mask - finder->second;
+        if (!new_fields)
+          return 0;
+        trackers.insert(tracker, new_fields);
+        const unsigned total_fields = new_fields.pop_count();
+        this->add_reference(total_fields);
+        return total_fields;
       }
       else
-        return false;
+      {
+        trackers.insert(tracker, mask);
+        // Add a reference for every field
+        const unsigned total_fields = mask.pop_count();
+        this->add_reference(total_fields);
+        return total_fields;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8134,11 +8124,9 @@ namespace Legion {
       // Note we still need to take the node lock here in this node because
       // calls like record_equivalence_set or cancel_subscription can still
       // be coming back asynchronously to touch data structures in these nodes
-
       FieldMask remaining = mask;
       FieldMaskSet<EqKDNode<DIM,T> > to_invalidate_previous;
-      typedef SubscriberInvalidations<EqSetTracker> TrackerInvalidations;
-      LegionMap<AddressSpaceID,TrackerInvalidations> to_invalidate;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > to_invalidate;
       {
         // Take the lock to protect against data structures that might
         // be racing with recording equivalence sets or cancelling subscriptions
@@ -8228,19 +8216,11 @@ namespace Legion {
                 sit++;
                 continue;
               }
-              TrackerInvalidations &invalidations = to_invalidate[sit->first];
-              invalidations.all_subscribers_finished = true;
-              if (!(sit->second.get_valid_mask() - current_mask))
+              FieldMaskSet<EqSetTracker> &invalidations = 
+                to_invalidate[sit->first];
+              if (!!(sit->second.get_valid_mask() - current_mask))
               {
-                // Going to invalidate all the trackers 
-                invalidations.subscribers.swap(sit->second);
-                LegionMap<AddressSpaceID,
-                  FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
-                subscriptions->erase(to_delete);
-              }
-              else
-              {
-                // Selectively filter the trackers
+                // Filter out specific subscriptions
                 std::vector<EqSetTracker*> to_delete;
                 for (FieldMaskSet<EqSetTracker>::iterator it =
                       sit->second.begin(); it != sit->second.end(); it++)
@@ -8248,30 +8228,27 @@ namespace Legion {
                   const FieldMask overlap = current_mask & it->second;
                   if (!overlap)
                     continue;
-                  invalidations.subscribers.insert(it->first, overlap);
+                  invalidations.insert(it->first, overlap);
                   it.filter(overlap);
                   if (!it->second)
                     to_delete.push_back(it->first);
-                  else
-                    invalidations.all_subscribers_finished = false;
                 }
                 for (std::vector<EqSetTracker*>::const_iterator it =
                       to_delete.begin(); it != to_delete.end(); it++)
                   sit->second.erase(*it);
-                if (sit->second.empty())
-                {
-                  invalidations.all_subscribers_finished = true;
-                  LegionMap<AddressSpaceID,
-                    FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
-                  subscriptions->erase(to_delete);
-                }
-                else
-                {
-                  if (!invalidations.all_subscribers_finished)
-                    invalidations.finished.swap(to_delete);
-                  sit->second.tighten_valid_mask();
-                  sit++;
-                }
+              }
+              else // Invalidating the subscriptions for all fields
+                invalidations.swap(sit->second);
+              if (sit->second.empty())
+              {
+                LegionMap<AddressSpaceID,
+                  FieldMaskSet<EqSetTracker> >::iterator to_delete = sit++;
+                subscriptions->erase(to_delete);
+              }
+              else
+              {
+                sit->second.tighten_valid_mask();
+                sit++;
               }
             }
             if (subscriptions->empty())
@@ -8528,22 +8505,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool EqKDNode<DIM,T>::cancel_subscription(EqSetTracker *tracker,
+    unsigned EqKDNode<DIM,T>::cancel_subscription(EqSetTracker *tracker,
                                     AddressSpaceID space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock); 
       if (subscriptions == NULL)
-        return false;
+        return 0;
       LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::iterator
         subscription_finder = subscriptions->find(space);
       if (subscription_finder == subscriptions->end())
-        return false;
+        return 0;
       FieldMaskSet<EqSetTracker>::iterator finder =
         subscription_finder->second.find(tracker);
       if (finder == subscription_finder->second.end())
-        return false;
-      finder.filter(mask);
+        return 0;
+      const FieldMask overlap = mask & finder->second;
+      if (!overlap)
+        return 0;
+      finder.filter(overlap);
       if (!finder->second)
       {
         subscription_finder->second.erase(finder);
@@ -8558,13 +8538,10 @@ namespace Legion {
         }
         else
           subscription_finder->second.tighten_valid_mask();
-        return true;
       }
       else
-      {
         subscription_finder->second.tighten_valid_mask();
-        return false;
-      }
+      return overlap.pop_count();
     }
 
     /////////////////////////////////////////////////////////////
@@ -8775,13 +8752,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool EqKDSparse<DIM,T>::cancel_subscription(EqSetTracker *tracker,
+    unsigned EqKDSparse<DIM,T>::cancel_subscription(EqSetTracker *tracker,
                                     AddressSpaceID space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       // should never be called on sparse nodes since they don't track
       assert(false);
-      return false;
+      return 0;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9274,13 +9251,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool EqKDSharded<DIM,T>::cancel_subscription(EqSetTracker *tracker,
+    unsigned EqKDSharded<DIM,T>::cancel_subscription(EqSetTracker *tracker,
                                     AddressSpaceID space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       // should never be called on sharded nodes since they don't track
       assert(false);
-      return false;
+      return 0;
     }
 
     /////////////////////////////////////////////////////////////

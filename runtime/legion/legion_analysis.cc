@@ -25176,7 +25176,7 @@ namespace Legion {
           // We've now seen all the responses, so we need to do the actual
           // work of the invalidations now that we're in a consistent state
           // First invalidate any subscriptions 
-          LegionMap<AddressSpaceID,TreeInvalidations> to_cancel;
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
           find_cancellations(invalidated, to_cancel);
           // Then we can prune states out of the pending equivalence sets
           if ((pending_equivalence_sets != NULL) &&
@@ -25212,11 +25212,18 @@ namespace Legion {
           pending_invalidations -= invalidated;
           t_lock.release();
           // Perform any cancellations now that we've released the lock
-          // No need to pay attention to the completion of these cancellations
-          // as they don't impact the fidelity of the physical analysis
-          // so they can happen asynchronously in the background
           if (!to_cancel.empty())
-            cancel_subscriptions(runtime, to_cancel);
+          {
+            std::vector<RtEvent> cancelled_events;
+            cancel_subscriptions(runtime, to_cancel, &cancelled_events);
+            // Make sure all the cancellations are done before we try
+            // again so we don't double count references
+            if (!cancelled_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(cancelled_events);
+              wait_on.wait();
+            }
+          }
           // Now redo the computation
           const RtEvent ready = context->compute_equivalence_sets(this,
               runtime->address_space, parent_req_index, expr, invalidated);
@@ -25624,14 +25631,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EqSetTracker::invalidate_equivalence_sets(Runtime *runtime,
+    unsigned EqSetTracker::invalidate_equivalence_sets(Runtime *runtime,
                                        const FieldMask &mask,
                                        EqKDTree *tree, AddressSpaceID source,
                                        std::vector<RtEvent> &invalidated_events)
     //--------------------------------------------------------------------------
     {
-      bool remove_source_reference = false;
-      LegionMap<AddressSpaceID,TreeInvalidations> to_cancel;
+      unsigned source_references_to_remove = 0;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
       {
         FieldMask remaining = mask;
         AutoLock t_lock(tracker_lock);
@@ -25641,7 +25648,7 @@ namespace Legion {
         {
           remaining -= pending_invalidations;
           if (!remaining)
-            return remove_source_reference;
+            return source_references_to_remove;
         }
         // Invalidations are not precise so we need to handle the case where
         // we get an invalidation in the middle of computing our equivalence
@@ -25678,7 +25685,7 @@ namespace Legion {
 #endif
             pending_invalidations |= to_filter;
             if (!remaining)
-              return remove_source_reference;
+              return source_references_to_remove;
           }
         }
         // See if we won the race to invalidating the source
@@ -25688,21 +25695,24 @@ namespace Legion {
         {
           FieldMaskSet<EqKDTree>::iterator source_finder = 
             finder->second.find(tree);
-          if ((source_finder != finder->second.end()) &&
-                !(source_finder->second * remaining))
+          if (source_finder != finder->second.end())
           {
-            source_finder.filter(remaining);
-            if (!source_finder->second)
+            const FieldMask overlap = source_finder->second & remaining;
+            if (!!overlap)
             {
-              remove_source_reference = true;
-              finder->second.erase(tree);
-              if (finder->second.empty())
-                current_subscriptions.erase(finder);
+              source_references_to_remove += overlap.pop_count();
+              source_finder.filter(overlap);
+              if (!source_finder->second)
+              {
+                finder->second.erase(source_finder);
+                if (finder->second.empty())
+                  current_subscriptions.erase(finder);
+                else
+                  finder->second.tighten_valid_mask();
+              }
               else
                 finder->second.tighten_valid_mask();
             }
-            else
-              finder->second.tighten_valid_mask();
           }
         }
         // Now go through and invalidate all the other subscriptions to cancel
@@ -25733,12 +25743,12 @@ namespace Legion {
       }
       if (!to_cancel.empty())
         cancel_subscriptions(runtime, to_cancel, &invalidated_events);
-      return remove_source_reference;
+      return source_references_to_remove;
     }
 
     //--------------------------------------------------------------------------
     void EqSetTracker::find_cancellations(const FieldMask &mask,
-                         LegionMap<AddressSpaceID,TreeInvalidations> &to_cancel)
+                   LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel)
     //--------------------------------------------------------------------------
     {
       // Lock held from caller
@@ -25751,25 +25761,18 @@ namespace Legion {
           cit++;
           continue;
         }
-        TreeInvalidations &invalidations = to_cancel[cit->first];
-        if (!(cit->second.get_valid_mask() - mask))
+        if (!!(cit->second.get_valid_mask() - mask))
         {
-          invalidations.subscribers.swap(cit->second);
-          invalidations.all_subscribers_finished = true;
-          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
-            delete_it = cit++;
-          current_subscriptions.erase(delete_it);
-        }
-        else
-        {
+          // Selectively filter matches
           std::vector<EqKDTree*> to_delete;
+          FieldMaskSet<EqKDTree> &invalidations = to_cancel[cit->first];
           for (FieldMaskSet<EqKDTree>::iterator it =
                 cit->second.begin(); it != cit->second.end(); it++)
           {
             const FieldMask overlap = it->second & mask;
             if (!overlap)
               continue;
-            invalidations.subscribers.insert(it->first, overlap);
+            invalidations.insert(it->first, overlap);
             it.filter(overlap);
             if (!it->second)
               to_delete.push_back(it->first);
@@ -25777,31 +25780,32 @@ namespace Legion {
           for (std::vector<EqKDTree*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
             cit->second.erase(*it);
-          invalidations.finished.swap(to_delete);
-          if (cit->second.empty())
-          {
-            LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
-              delete_it = cit++;
-            current_subscriptions.erase(delete_it);
-          }
-          else
-          {
-            cit->second.tighten_valid_mask();
-            cit++;
-          }
+        }
+        else // Filtering all the fields so we can swap it out 
+          to_cancel[cit->first].swap(cit->second);
+        if (cit->second.empty())
+        {
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+            delete_it = cit++;
+          current_subscriptions.erase(delete_it);
+        }
+        else
+        {
+          cit->second.tighten_valid_mask();
+          cit++;
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void EqSetTracker::cancel_subscriptions(Runtime *runtime,
-                   const LegionMap<AddressSpaceID,TreeInvalidations> &to_cancel,
-                   std::vector<RtEvent> *cancelled_events)
+        const LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel,
+        std::vector<RtEvent> *cancelled_events)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID local_space = runtime->address_space;
-      for (LegionMap<AddressSpaceID,TreeInvalidations>::const_iterator cit =
-            to_cancel.begin(); cit != to_cancel.end(); cit++)
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+            cit = to_cancel.begin(); cit != to_cancel.end(); cit++)
       {
         if (cit->first != local_space)
         {
@@ -25809,24 +25813,16 @@ namespace Legion {
           {
             RezCheck z(rez);
 #ifdef DEBUG_LEGION
-            assert(!cit->second.subscribers.empty());
+            assert(!cit->second.empty());
 #endif
-            rez.serialize<size_t>(cit->second.subscribers.size());
+            rez.serialize<size_t>(cit->second.size());
             rez.serialize(this);
-            rez.serialize<size_t>(cit->second.finished.size());
-            if (cit->second.finished.empty())
-              rez.serialize<bool>(cit->second.all_subscribers_finished);
             for (FieldMaskSet<EqKDTree>::const_iterator it =
-                  cit->second.subscribers.begin(); it !=
-                  cit->second.subscribers.end(); it++)
+                  cit->second.begin(); it != cit->second.end(); it++)
             {
               rez.serialize(it->first);
               rez.serialize(it->second);
             }
-            for (std::vector<EqKDTree*>::const_iterator it =
-                  cit->second.finished.begin(); it !=
-                  cit->second.finished.end(); it++)
-              rez.serialize(*it);
             if (cancelled_events != NULL)
             {
               const RtUserEvent cancelled = Runtime::create_rt_user_event();
@@ -25842,20 +25838,13 @@ namespace Legion {
         {
           unsigned references_to_remove = 0;
           for (FieldMaskSet<EqKDTree>::const_iterator it =
-                cit->second.subscribers.begin(); it != 
-                cit->second.subscribers.end(); it++)
+                cit->second.begin(); it != cit->second.end(); it++)
           {
-            if (it->first->cancel_subscription(this, local_space, it->second))
-              references_to_remove++;
-            if (cit->second.all_subscribers_finished && 
-                it->first->remove_reference())
+            references_to_remove +=
+              it->first->cancel_subscription(this, local_space, it->second);
+            if (it->first->remove_reference(it->second.pop_count()))
               delete it->first;
           }
-          for (std::vector<EqKDTree*>::const_iterator it =
-                cit->second.finished.begin(); it != 
-                cit->second.finished.end(); it++)
-            if ((*it)->remove_reference())
-              delete (*it);
           if ((references_to_remove > 0) && 
               remove_subscription_reference(references_to_remove))
             assert(false); // should never end up deleting ourselves
@@ -25875,11 +25864,6 @@ namespace Legion {
       {
         EqSetTracker *owner;
         derez.deserialize(owner);
-        size_t num_finished;
-        derez.deserialize(num_finished); 
-        bool all_subscribers_finished = false;
-        if (num_finished == 0)
-          derez.deserialize<bool>(all_subscribers_finished);
         unsigned references_to_remove = 0;
         for (unsigned idx = 0; idx < num_subscribers; idx++)
         {
@@ -25887,9 +25871,9 @@ namespace Legion {
           derez.deserialize(tree);
           FieldMask mask;
           derez.deserialize(mask);
-          if (tree->cancel_subscription(owner, source, mask))
-            references_to_remove++;
-          if (all_subscribers_finished && tree->remove_reference())
+          references_to_remove += 
+            tree->cancel_subscription(owner, source, mask);
+          if (tree->remove_reference(mask.pop_count()))
             delete tree;
         }
         if (references_to_remove > 0)
@@ -25902,13 +25886,6 @@ namespace Legion {
             rez.serialize(references_to_remove);
           }
           runtime->send_invalidate_equivalence_sets_subscription(source, rez);
-        }
-        for (unsigned idx = 0; idx < num_finished; idx++)
-        {
-          EqKDTree *tree;
-          derez.deserialize(tree);
-          if (tree->remove_reference())
-            delete tree;
         }
         RtUserEvent cancelled;
         derez.deserialize(cancelled);
@@ -25929,12 +25906,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void EqSetTracker::invalidate_subscriptions(
         Runtime *runtime, EqKDTree *owner,
-        LegionMap<AddressSpaceID,TrackerInvalidations> &subscribers,
+        LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &subscribers,
         std::vector<RtEvent> &invalidated_events)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID local_space = runtime->address_space;
-      for (LegionMap<AddressSpaceID,TrackerInvalidations>::const_iterator
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::const_iterator
             sit = subscribers.begin(); sit != subscribers.end(); sit++)
       {
         if (sit->first != local_space)
@@ -25944,27 +25921,19 @@ namespace Legion {
           {
             RezCheck z(rez);
 #ifdef DEBUG_LEGION
-            assert(!sit->second.subscribers.empty());
+            assert(!sit->second.empty());
 #endif
-            rez.serialize<size_t>(sit->second.subscribers.size());
+            rez.serialize<size_t>(sit->second.size());
             rez.serialize(owner);
-            rez.serialize<size_t>(sit->second.finished.size());
-            if (sit->second.finished.empty())
-              rez.serialize<bool>(sit->second.all_subscribers_finished);
             for (FieldMaskSet<EqSetTracker>::const_iterator it =
-                  sit->second.subscribers.begin(); it != 
-                  sit->second.subscribers.end(); it++)
+                  sit->second.begin(); it != sit->second.end(); it++)
             {
               rez.serialize(it->first);
               rez.serialize(it->second);
             }
             rez.serialize(invalidated);
-            for (std::vector<EqSetTracker*>::const_iterator it =
-                  sit->second.finished.begin(); it !=
-                  sit->second.finished.end(); it++)
-              rez.serialize(*it);
           }
-          runtime->send_invalidate_equivalence_sets_subscription(sit->first, 
+          runtime->send_invalidate_equivalence_sets_subscription(sit->first,
                                                                  rez);
           invalidated_events.push_back(invalidated);
         }
@@ -25972,24 +25941,18 @@ namespace Legion {
         {
           unsigned references_to_remove = 0;
           for (FieldMaskSet<EqSetTracker>::const_iterator it = 
-                sit->second.subscribers.begin(); it != 
-                sit->second.subscribers.end(); it++)
+                sit->second.begin(); it != sit->second.end(); it++)
           {
-            if (it->first->invalidate_equivalence_sets(runtime, it->second,
-                  owner, runtime->address_space, invalidated_events))
-              references_to_remove++;
-            if (sit->second.all_subscribers_finished && 
-                it->first->remove_subscription_reference())
+            references_to_remove += it->first->invalidate_equivalence_sets(
+                runtime, it->second, owner, runtime->address_space, 
+                invalidated_events);
+            if (it->first->remove_subscription_reference(
+                                  it->second.pop_count()))
               delete it->first;
           }
           if ((references_to_remove > 0) && 
               owner->remove_reference(references_to_remove))
             delete owner;
-          for (std::vector<EqSetTracker*>::const_iterator it =
-                sit->second.finished.begin(); it != 
-                sit->second.finished.end(); it++)
-            if ((*it)->remove_subscription_reference())
-              delete (*it);
         }
       }
     }
@@ -26006,11 +25969,6 @@ namespace Legion {
       {
         EqKDTree *owner;
         derez.deserialize(owner);
-        size_t num_finished;
-        derez.deserialize(num_finished);
-        bool all_subscribers_finished = false;
-        if (num_finished == 0)
-          derez.deserialize<bool>(all_subscribers_finished);
         unsigned references_to_remove = 0;
         std::vector<RtEvent> invalidated_events;
         for (unsigned idx = 0; idx < num_subscribers; idx++)
@@ -26019,11 +25977,9 @@ namespace Legion {
           derez.deserialize(tracker);
           FieldMask mask;
           derez.deserialize(mask);
-          if (tracker->invalidate_equivalence_sets(runtime, mask, 
-                owner, source, invalidated_events))
-            references_to_remove++;
-          if (all_subscribers_finished && 
-              tracker->remove_subscription_reference())
+          references_to_remove += tracker->invalidate_equivalence_sets(
+              runtime, mask, owner, source, invalidated_events);
+          if (tracker->remove_subscription_reference(mask.pop_count()))
             delete tracker;
         }
         RtUserEvent invalidated;
@@ -26043,13 +25999,6 @@ namespace Legion {
             rez.serialize(references_to_remove);
           }
           runtime->send_cancel_equivalence_sets_subscription(source, rez);
-        }
-        for (unsigned idx = 0; idx < num_finished; idx++)
-        {
-          EqSetTracker *tracker;
-          derez.deserialize(tracker);
-          if (tracker->remove_subscription_reference())
-            delete tracker;
         }
       }
       else
@@ -26432,7 +26381,7 @@ namespace Legion {
     {
       // We need to remove any tracked equivalence sets that we have
       FieldMaskSet<EquivalenceSet> to_remove;
-      LegionMap<AddressSpaceID,TreeInvalidations> to_cancel;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -26451,15 +26400,7 @@ namespace Legion {
           to_remove.swap(equivalence_sets);
         else if (current_subscriptions.empty())
           return;
-        for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator it =
-              current_subscriptions.begin(); it != 
-              current_subscriptions.end(); it++)
-        {
-          TreeInvalidations &invalidations = to_cancel[it->first];
-          invalidations.subscribers.swap(it->second);
-          invalidations.all_subscribers_finished = true;
-        }
-        current_subscriptions.clear();
+        to_cancel.swap(current_subscriptions);
       }
 #ifdef DEBUG_LEGION
       assert(node->is_region());

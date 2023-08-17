@@ -4451,7 +4451,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EquivalenceSet> to_remove;
-      LegionMap<AddressSpaceID,TreeInvalidations> to_cancel;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
       {
         AutoLock s_lock(set_lock);
         if (current_subscriptions.empty())
@@ -4464,15 +4464,7 @@ namespace Legion {
         // Copy and not remove since we need to see the acknowledgement
         // before we know when it is safe to remove our references
         to_remove.swap(equivalence_sets);
-        for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator it =
-              current_subscriptions.begin(); it != 
-              current_subscriptions.end(); it++)
-        {
-          TreeInvalidations &invalidations = to_cancel[it->first];
-          invalidations.subscribers.swap(it->second);
-          invalidations.all_subscribers_finished = true;
-        }
-        current_subscriptions.clear();
+        to_cancel.swap(current_subscriptions);
       }
       cancel_subscriptions(context->runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
