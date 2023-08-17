@@ -26065,10 +26065,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
-                     VersionInfo *version_info, RegionNode *region_node,
-                     const FieldMask &version_mask, UniqueID opid,
-                     unsigned parent_req_index, std::set<RtEvent> &ready_events,
-                     RtEvent *output_region_ready)
+                 VersionInfo *version_info, RegionNode *region_node,
+                 const FieldMask &version_mask, UniqueID opid,
+                 unsigned parent_req_index, IndexSpace root_space,
+                 std::set<RtEvent> &ready_events, RtEvent *output_region_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -26092,7 +26092,7 @@ namespace Legion {
         // EqKDTree once the index space domain is ready
         RtUserEvent done_event = Runtime::create_rt_user_event();
         FinalizeOutputEquivalenceSetArgs args(this, opid, context,
-                                parent_req_index, set, done_event);
+                                parent_req_index, set, root_space, done_event);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
             region_node->row_source->get_ready_event());
         *output_region_ready = done_event;
@@ -26203,8 +26203,8 @@ namespace Legion {
         // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
         const RtEvent ready = context->compute_equivalence_sets(this, 
-                            runtime->address_space, parent_req_index,
-                            region_node->row_source, remaining_mask);
+                          runtime->address_space, parent_req_index,
+                          region_node->row_source, remaining_mask, root_space);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -26222,7 +26222,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent VersionManager::finalize_output_equivalence_set(EquivalenceSet *set,
                                                       InnerContext *context,
-                                                      unsigned parent_req_index)
+                                                      unsigned parent_req_index,
+                                                      IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       FieldMask set_mask;
@@ -26236,7 +26237,7 @@ namespace Legion {
         set_mask = finder->second;
       }
       return context->record_output_equivalence_set(this,
-          runtime->address_space, parent_req_index, set, set_mask); 
+          runtime->address_space, parent_req_index, set, set_mask, root_space);
     } 
 
 #if 0
@@ -27914,7 +27915,7 @@ namespace Legion {
       const FinalizeOutputEquivalenceSetArgs *fargs =
         (const FinalizeOutputEquivalenceSetArgs*)args;
       RtEvent done = fargs->proxy_this->finalize_output_equivalence_set(
-          fargs->set, fargs->context, fargs->parent_req_index);
+        fargs->set, fargs->context, fargs->parent_req_index, fargs->root_space);
       Runtime::trigger_event(fargs->done_event, done);
       if (fargs->set->remove_base_gc_ref(META_TASK_REF))
         delete fargs->set;

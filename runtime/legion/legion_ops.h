@@ -2249,6 +2249,8 @@ namespace Legion {
 #endif
       FieldMask refinement_mask;
       RegionTreeNode *refinement_node;
+      // Root index space of the parent region requirement
+      IndexSpace root_space;
       // The parent region requirement for the refinement to update
       unsigned parent_req_index;
       // For uniquely identify this refinement in the context of

@@ -4335,16 +4335,17 @@ namespace Legion {
       public:
         FinalizeOutputEquivalenceSetArgs(VersionManager *proxy,
             UniqueID opid, InnerContext *ctx, unsigned req_index, 
-            EquivalenceSet *s, RtUserEvent done)
+            EquivalenceSet *s, IndexSpace root, RtUserEvent done)
           : LgTaskArgs<FinalizeOutputEquivalenceSetArgs>(opid),
             proxy_this(proxy), context(ctx), parent_req_index(req_index),
-            set(s), done_event(done) 
+            set(s), root_space(root), done_event(done) 
           { set->add_base_gc_ref(META_TASK_REF); }
       public:
         VersionManager *const proxy_this;
         InnerContext *const context;
         const unsigned parent_req_index;
         EquivalenceSet *const set;
+        const IndexSpace root_space;
         const RtUserEvent done_event;
       };
     public:
@@ -4364,11 +4365,13 @@ namespace Legion {
                                        RegionNode *region_node,
                                        const FieldMask &version_mask,
                                        UniqueID opid, unsigned parent_req_index,
+                                       IndexSpace root_space,
                                        std::set<RtEvent> &ready,
                                        RtEvent *output_region_ready);
       RtEvent finalize_output_equivalence_set(EquivalenceSet *set,
                                        InnerContext *context,
-                                       unsigned parent_req_index);
+                                       unsigned parent_req_index,
+                                       IndexSpace root_space);
     protected:
 #if 0
       void add_node_disjoint_complete_ref(void) const;

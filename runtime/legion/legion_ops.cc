@@ -11462,6 +11462,7 @@ namespace Legion {
     {
       InternalOp::activate();
       refinement_node = NULL;
+      root_space = IndexSpace::NO_SPACE;
       parent_req_index = 0;
       refinement_number = 0;
     }
@@ -11527,6 +11528,7 @@ namespace Legion {
 #endif
       initialize_internal(creator, index);
       refinement_node = refine;
+      root_space = parent.get_index_space();
       parent_req_index = parent_index;
       if (tracing)
         trace->register_internal(this);
@@ -11781,7 +11783,7 @@ namespace Legion {
       if (refinement_node->is_region())
       {
         RegionNode *region = refinement_node->as_region_node();
-        parent_ctx->refine_equivalence_sets(parent_req_index,
+        parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
             region->row_source, refinement_mask, map_applied_conditions);
       }
       else
@@ -11795,7 +11797,7 @@ namespace Legion {
           for (ColorSpaceIterator itr(partition); itr; itr++)
           {
             IndexSpaceNode *child = partition->get_child(*itr);
-            parent_ctx->refine_equivalence_sets(parent_req_index,
+            parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
                 child, refinement_mask, map_applied_conditions);
           }
         }
@@ -11805,7 +11807,7 @@ namespace Legion {
           // have the same impact as if we did it by individual subregions 
           // For aliased but incomplete partitions we just do it from the
           // root as well since we can't compute the overlapping parts
-          parent_ctx->refine_equivalence_sets(parent_req_index,
+          parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
               partition->parent, refinement_mask, map_applied_conditions);
         }
       }

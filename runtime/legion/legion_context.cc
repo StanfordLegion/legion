@@ -1261,10 +1261,14 @@ namespace Legion {
           for (std::set<FieldID>::const_iterator fit = to_delete.begin();
                 fit != to_delete.end(); fit++)
           {
-            std::set<FieldID>::const_iterator finder = 
+            std::set<FieldID>::iterator finder = 
               it->second.privilege_fields.find(*fit);
             if (finder != it->second.privilege_fields.end())
+            {
               overlapping_fields.insert(*fit);
+              // Remove this from the created requirements fields
+              it->second.privilege_fields.erase(finder);
+            }
           }
           if (overlapping_fields.empty())
             continue;
@@ -1274,21 +1278,14 @@ namespace Legion {
           req.parent = it->second.region;
           req.privilege = LEGION_READ_WRITE;
           req.prop = LEGION_EXCLUSIVE;
-          req.privilege_fields = overlapping_fields;
+          req.privilege_fields.swap(overlapping_fields);
           req.handle_type = LEGION_SINGULAR_PROJECTION;
           parent_req_indexes.push_back(it->first);
-          std::map<unsigned,unsigned>::iterator deletion_finder =
-            deletion_counts.find(it->first);
-          if (deletion_finder != deletion_counts.end())
-          {
-            deletion_finder->second++;
-            deletion_indexes.push_back(it->first);
-          }
           // We need some extra logging for legion spy
           if (runtime->legion_spy_enabled)
           {
             LegionSpy::log_requirement_fields(get_unique_id(),
-                                              it->first, overlapping_fields);
+                                              it->first, req.privilege_fields);
             owner_task->log_virtual_mapping(it->first, req);
           }
         }
@@ -1350,7 +1347,9 @@ namespace Legion {
               req.parent = it->second.region;
               req.privilege = LEGION_READ_WRITE;
               req.prop = LEGION_EXCLUSIVE;
-              req.privilege_fields = it->second.privilege_fields;
+              // Swap the privilege fields so that nothing else tries
+              // to delete those particular fields
+              req.privilege_fields.swap(it->second.privilege_fields);
               req.handle_type = LEGION_SINGULAR_PROJECTION;
               req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
@@ -1363,17 +1362,12 @@ namespace Legion {
                 deletion_counts[it->first] = 1;
               else
                 deletion_finder->second++;
-              // Can't delete this yet since other deletions might 
-              // need to find it until it is finally applied
-              it++;
             }
-            else // Can erase the returnable privileges now
-            {
-              returnable_privileges.erase(it->first);
-              // Remove the requirement from the created set 
-              std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
-              created_requirements.erase(to_delete);
-            }
+            // Can erase the returnable privileges now
+            returnable_privileges.erase(it->first);
+            // Remove the requirement from the created set 
+            std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
+            created_requirements.erase(to_delete);
           }
           else
             it++;
@@ -1460,7 +1454,9 @@ namespace Legion {
               req.parent = it->second.region;
               req.privilege = LEGION_READ_WRITE;
               req.prop = LEGION_EXCLUSIVE;
-              req.privilege_fields = it->second.privilege_fields;
+              // Swap the privilege fields so that nothing else tries
+              // to delete those particular fields
+              req.privilege_fields.swap(it->second.privilege_fields);
               req.handle_type = LEGION_SINGULAR_PROJECTION;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
@@ -3781,12 +3777,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
                              AddressSpaceID target_space, unsigned req_index,
-                             IndexSpaceExpression *expr, const FieldMask &mask)
+                             IndexSpaceExpression *expr, const FieldMask &mask,
+                             IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree = 
+        find_equivalence_set_kd_tree(req_index, root_space, tree_lock);
       // Then ask the index space expression to traverse the tree for
       // all of its rectangles and find the equivalence sets that are needed
       FieldMaskSet<EqKDTree> to_create, new_subscriptions;
@@ -4000,7 +3998,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent InnerContext::record_output_equivalence_set(EqSetTracker *source,
                               AddressSpaceID source_space, unsigned req_index,
-                              EquivalenceSet *set, const FieldMask &mask)
+                              EquivalenceSet *set, const FieldMask &mask,
+                              IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       // Be very careful, you can't use find_equivalence_set_kd_tree here
@@ -4009,7 +4008,8 @@ namespace Legion {
       // to us to make an equivalence set tree if one doesn't already
       // exist and then register ourselves with it
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree =
+        find_or_create_output_set_kd_tree(req_index, root_space, tree_lock);
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       unsigned references = set->set_expr->record_output_equivalence_set(tree,
@@ -4039,6 +4039,8 @@ namespace Legion {
       derez.deserialize(source_space);
       unsigned req_index;
       derez.deserialize(req_index);
+      IndexSpace root_space;
+      derez.deserialize(root_space);
       DistributedID set_did;
       derez.deserialize(set_did);
       RtEvent set_ready;
@@ -4054,7 +4056,7 @@ namespace Legion {
         set_ready.wait();
       Runtime::trigger_event(recorded,
           context->record_output_equivalence_set(source, source_space,
-            req_index, set, mask));
+            req_index, set, mask, root_space));
       set->unpack_global_ref();
     }
 
@@ -4206,7 +4208,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_equivalence_set_kd_tree(unsigned req_index,
-                        LocalLock *&tree_lock, bool return_null_if_doesnt_exist)
+                                   IndexSpace root_space, LocalLock *&tree_lock,
+                                   bool return_null_if_doesnt_exist)
     //--------------------------------------------------------------------------
     {
       // Use the privilege lock since we also need to access the created
@@ -4231,7 +4234,6 @@ namespace Legion {
             return NULL;
         }
       }
-      IndexSpace handle = IndexSpace::NO_SPACE;
       if (!wait_on.exists())
       {
         // Make sure we didn't lose the race
@@ -4262,29 +4264,23 @@ namespace Legion {
           // save a guard that we're making this
           pending_equivalence_set_trees[req_index] = 
             RtUserEvent::NO_RT_USER_EVENT;
-          if (regions.size() <= req_index)
-          {
-            std::map<unsigned,RegionRequirement>::const_iterator req_finder =
-              created_requirements.find(req_index);
-#ifdef DEBUG_LEGION
-            assert(req_finder != created_requirements.end());
-#endif
-            handle = req_finder->second.region.get_index_space();
-          }
-          else
-            handle = regions[req_index].region.get_index_space();
         }
       }
       if (!wait_on.exists())
       {
 #ifdef DEBUG_LEGION
-        assert(handle.exists());
+        // We need to know the root index space for this parent region
+        // requirement if we haven't made the tree before. This should
+        // always get passed in from the caller, but there are some places
+        // where we don't pass it in because we know this tree should 
+        // already have been initialized and therefore we don't need do it
+        assert(root_space.exists());
 #endif
         // Create the equivalence set tree
-        IndexSpaceNode *node = runtime->forest->get_node(handle);
+        IndexSpaceNode *root = runtime->forest->get_node(root_space);
         // Normal contexts and control replication contexts will do 
         // different things here while creating the equivalence set tree
-        EqKDTree *tree = create_equivalence_set_kd_tree(node);
+        EqKDTree *tree = create_equivalence_set_kd_tree(root);
         // Now we can save it and wake up anyone looking for it
         AutoLock priv_lock(privilege_lock);
         equivalence_set_trees[req_index] = EqKDRoot(tree);
@@ -4313,10 +4309,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EqKDTree* InnerContext::find_or_create_output_set_kd_tree(
-                                      unsigned req_index, LocalLock *&tree_lock)
+               unsigned req_index, IndexSpace root_space, LocalLock *&tree_lock)
     //--------------------------------------------------------------------------
     {
-      IndexSpace handle = IndexSpace::NO_SPACE;
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
@@ -4333,15 +4328,9 @@ namespace Legion {
             return tree;
           }
         }
-        std::map<unsigned,RegionRequirement>::const_iterator finder =
-          created_requirements.find(req_index);
-#ifdef DEBUG_LEGION
-        assert(finder != created_requirements.end());
-#endif
-        handle = finder->second.region.get_index_space();
       }
-      IndexSpaceNode *node = runtime->forest->get_node(handle);
-      EqKDTree *tree = create_equivalence_set_kd_tree(node);
+      IndexSpaceNode *root = runtime->forest->get_node(root_space);
+      EqKDTree *tree = create_equivalence_set_kd_tree(root);
       AutoLock priv_lock(privilege_lock);
       if (equivalence_set_trees.size() <= req_index)
         equivalence_set_trees.resize(req_index+1);
@@ -4358,7 +4347,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::finalize_output_eqkd_tree(unsigned req_index,
-                                                 IndexSpace handle)
+                                                 IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       {
@@ -4384,10 +4373,10 @@ namespace Legion {
         // the tree and it hasn't been made yet, so do that now
       }
       // If we get here then we need to make the new tree
-      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      IndexSpaceNode *root = runtime->forest->get_node(root_space);
       // Normal contexts and control replication contexts will do 
       // different things here while creating the equivalence set tree
-      EqKDTree *tree = create_equivalence_set_kd_tree(node);
+      EqKDTree *tree = create_equivalence_set_kd_tree(root);
       AutoLock priv_lock(privilege_lock);
 #ifdef DEBUG_LEGION
       // No one else should have made it in the interim
@@ -4441,7 +4430,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::refine_equivalence_sets(unsigned req_index,
-                        IndexSpaceNode *node, const FieldMask &refinement_mask,
+                        IndexSpace root_space, IndexSpaceNode *node, 
+                        const FieldMask &refinement_mask,
                         std::vector<RtEvent> &applied_events, bool sharded)
     //--------------------------------------------------------------------------
     {
@@ -4449,7 +4439,8 @@ namespace Legion {
       assert(!sharded);
 #endif
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree =
+        find_equivalence_set_kd_tree(req_index, root_space, tree_lock);
       node->invalidate_equivalence_set_kd_tree(tree, tree_lock, refinement_mask,
                             applied_events, true/*move to previous*/);
     }
@@ -11346,8 +11337,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock,
-                                          true/*null if doesn't exist*/);
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, 
+          IndexSpace::NO_SPACE, tree_lock, true/*null if doesn't exist*/);
       if (tree != NULL)
       {
         std::vector<RtEvent> applied;
@@ -11568,11 +11559,13 @@ namespace Legion {
       derez.deserialize(mask);
       unsigned req_index;
       derez.deserialize(req_index);
+      IndexSpace root_space;
+      derez.deserialize(root_space);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
-                                                        req_index, expr, mask);
+                                            req_index, expr, mask, root_space);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -12967,7 +12960,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
                        AddressSpaceID target_space, unsigned req_index,
-                       IndexSpaceExpression *expr, const FieldMask &mask)
+                       IndexSpaceExpression *expr, const FieldMask &mask,
+                       IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -12977,7 +12971,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::record_output_equivalence_set(EqSetTracker *source,
                        AddressSpaceID source_space, unsigned req_index,
-                       EquivalenceSet *expr, const FieldMask &mask)
+                       EquivalenceSet *expr, const FieldMask &mask,
+                       IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -22566,12 +22561,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent ReplicateContext::compute_equivalence_sets(EqSetTracker *target,
                              AddressSpaceID target_space, unsigned req_index,
-                             IndexSpaceExpression *expr, const FieldMask &mask)
+                             IndexSpaceExpression *expr, const FieldMask &mask,
+                             IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree = 
+        find_equivalence_set_kd_tree(req_index, root_space, tree_lock);
       // Then ask the index space expression to traverse the tree for
       // all of its rectangles and find the equivalence sets that are needed
       FieldMaskSet<EqKDTree> to_create;
@@ -22599,6 +22596,7 @@ namespace Legion {
         rez.serialize(target);
         rez.serialize(target_space);
         rez.serialize(req_index);
+        rez.serialize(root_space);
         rez.serialize(mask);
         rez.serialize<size_t>(sit->second.size());
         for (LegionMap<Domain,FieldMask>::const_iterator it =
@@ -22620,11 +22618,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent ReplicateContext::record_output_equivalence_set(
         EqSetTracker *source, AddressSpaceID source_space, unsigned req_index,
-                              EquivalenceSet *set, const FieldMask &mask)
+        EquivalenceSet *set, const FieldMask &mask, IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock); 
+      EqKDTree *tree =
+        find_or_create_output_set_kd_tree(req_index, root_space, tree_lock); 
       FieldMaskSet<EqKDTree> new_subscriptions;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
       unsigned references = set->set_expr->record_output_equivalence_set(tree,
@@ -22642,6 +22641,7 @@ namespace Legion {
         rez.serialize(source);
         rez.serialize(source_space);
         rez.serialize(req_index);
+        rez.serialize(root_space);
         rez.serialize(set->did);
         set->pack_global_ref();
         rez.serialize<size_t>(sit->second.size());
@@ -22720,14 +22720,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::refine_equivalence_sets(unsigned req_index,
-                        IndexSpaceNode *node, const FieldMask &refinement_mask,
+                        IndexSpace root_space, IndexSpaceNode *node, 
+                        const FieldMask &refinement_mask,
                         std::vector<RtEvent> &applied_events, bool sharded)
     //--------------------------------------------------------------------------
     {
       if (sharded)
       {
         LocalLock *tree_lock = NULL;
-        EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+        EqKDTree *tree = 
+         find_equivalence_set_kd_tree(req_index,IndexSpace::NO_SPACE,tree_lock);
         std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
         node->invalidate_shard_equivalence_set_kd_tree(tree, tree_lock,
             refinement_mask, applied_events, remote_shard_rects,
@@ -22742,6 +22744,7 @@ namespace Legion {
           rez.serialize(shard_manager->did);
           rez.serialize(sit->first);
           rez.serialize(req_index);
+          rez.serialize(root_space);
           rez.serialize<size_t>(sit->second.size());
           for (LegionMap<Domain,FieldMask>::const_iterator it =
                 sit->second.begin(); it != sit->second.end(); it++)
@@ -22755,8 +22758,8 @@ namespace Legion {
         }
       }
       else
-        InnerContext::refine_equivalence_sets(req_index, node, refinement_mask,
-                                              applied_events, sharded);
+        InnerContext::refine_equivalence_sets(req_index, root_space, node, 
+                                refinement_mask, applied_events, sharded);
     }
 
     //--------------------------------------------------------------------------
@@ -22765,8 +22768,11 @@ namespace Legion {
     {
       unsigned req_index;
       derez.deserialize(req_index);
+      IndexSpace root_space;
+      derez.deserialize(root_space);
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree =
+        find_equivalence_set_kd_tree(req_index, root_space, tree_lock);
       size_t num_rects;
       derez.deserialize(num_rects);
       std::vector<RtEvent> invalidated;
@@ -22840,6 +22846,8 @@ namespace Legion {
       derez.deserialize(target_space);
       unsigned req_index;
       derez.deserialize(req_index);
+      IndexSpace root_space;
+      derez.deserialize(root_space);
       FieldMask mask;
       derez.deserialize(mask);
       size_t num_rects;
@@ -22852,7 +22860,8 @@ namespace Legion {
       std::map<EqKDTree*,Domain> creation_rects;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > creation_srcs;
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree = 
+        find_equivalence_set_kd_tree(req_index, root_space, tree_lock);
       unsigned new_references = 0;
       {
         // Non-exclusive access to the tree for 
@@ -22891,6 +22900,8 @@ namespace Legion {
       derez.deserialize(source_space);
       unsigned req_index;
       derez.deserialize(req_index);
+      IndexSpace root_space;
+      derez.deserialize(root_space);
       DistributedID did;
       derez.deserialize(did);
       RtEvent set_ready;
@@ -22901,7 +22912,8 @@ namespace Legion {
       
       FieldMaskSet<EqKDTree> new_subscriptions;
       LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock);
+      EqKDTree *tree =
+        find_or_create_output_set_kd_tree(req_index, root_space, tree_lock);
       if (set_ready.exists() && !set_ready.has_triggered())
         set_ready.wait();
       unsigned references = 0;
@@ -23792,7 +23804,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
                        AddressSpaceID target_space, unsigned req_index,
-                       IndexSpaceExpression *expr, const FieldMask &mask)
+                       IndexSpaceExpression *expr, const FieldMask &mask,
+                       IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23809,6 +23822,7 @@ namespace Legion {
         expr->pack_expression(rez, owner_space);
         rez.serialize(mask);
         rez.serialize(req_index);
+        rez.serialize(root_space);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 
@@ -23819,7 +23833,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::record_output_equivalence_set(EqSetTracker *source,
                               AddressSpaceID source_space, unsigned req_index,
-                              EquivalenceSet *set, const FieldMask &mask)
+                              EquivalenceSet *set, const FieldMask &mask,
+                              IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       const RtUserEvent recorded = Runtime::create_rt_user_event();
@@ -23830,6 +23845,7 @@ namespace Legion {
         rez.serialize(source);
         rez.serialize(source_space);
         rez.serialize(req_index);
+        rez.serialize(root_space);
         rez.serialize(set->did);
         set->pack_global_ref();
         rez.serialize(mask);

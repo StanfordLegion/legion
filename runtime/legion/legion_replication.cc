@@ -2519,7 +2519,7 @@ namespace Legion {
       {
         RegionNode *region = refinement_node->as_region_node();
         // Replicated so no need to do sharding
-        parent_ctx->refine_equivalence_sets(parent_req_index,
+        parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
             region->row_source, refinement_mask, map_applied_conditions);
       }
       else
@@ -2539,7 +2539,7 @@ namespace Legion {
                   itr; itr++)
             {
               IndexSpaceNode *child = partition->get_child(*itr);
-              parent_ctx->refine_equivalence_sets(parent_req_index,
+              parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
                 child, refinement_mask, map_applied_conditions,true/*sharded*/);
             }
           }
@@ -2549,7 +2549,7 @@ namespace Legion {
             for (ColorSpaceIterator itr(partition); itr; itr++)
             {
               IndexSpaceNode *child = partition->get_child(*itr);
-              parent_ctx->refine_equivalence_sets(parent_req_index,
+              parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
                   child, refinement_mask, map_applied_conditions);
             }
           }
@@ -2561,7 +2561,7 @@ namespace Legion {
           // For aliased but incomplete partitions we just do it from the
           // root as well since we can't compute the overlapping parts
           // This is replicated so no need to do sharding
-          parent_ctx->refine_equivalence_sets(parent_req_index,
+          parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
               partition->parent, refinement_mask, map_applied_conditions);
         }
       }

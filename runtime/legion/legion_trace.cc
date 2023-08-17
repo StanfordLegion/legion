@@ -5096,7 +5096,8 @@ namespace Legion {
           assert(req_it->first == it->first);
 #endif
           it->first->perform_versioning_analysis(ctx, context, 
-            &version_infos[index], it->second, opid, req_it->second, eq_events);
+            &version_infos[index], it->second, opid, IndexSpace::NO_SPACE,
+            req_it->second, eq_events);
         }
 #ifdef DEBUG_LEGION
         assert(req_it == trace_region_parent_req_indexes.end());

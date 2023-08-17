@@ -4730,7 +4730,8 @@ namespace Legion {
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
-                                       UniqueID opid, unsigned parent_req_index,
+                                       UniqueID opid, IndexSpace root_space,
+                                       unsigned parent_req_index,
                                        std::set<RtEvent> &ready_events,
                                        RtEvent *output_region_ready = NULL);
 #if 0

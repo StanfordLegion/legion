@@ -1183,15 +1183,18 @@ namespace Legion {
                             TaskTreeCoordinates &coordinates) const;
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
-                      IndexSpaceExpression *expr, const FieldMask &mask);
+                      IndexSpaceExpression *expr, const FieldMask &mask,
+                      IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
                       AddressSpaceID source_space, unsigned req_index,
-                      EquivalenceSet *set, const FieldMask &mask);
+                      EquivalenceSet *set, const FieldMask &mask,
+                      IndexSpace root_space);
       EqKDTree* find_equivalence_set_kd_tree(unsigned req_index,
-          LocalLock *&tree_lock, bool return_null_if_doesnt_exist = false);
+          IndexSpace root_space, LocalLock *&tree_lock, 
+          bool return_null_if_doesnt_exist = false);
       EqKDTree* find_or_create_output_set_kd_tree(unsigned req_index,
-                                                  LocalLock *&tree_lock);
-      void finalize_output_eqkd_tree(unsigned req_index, IndexSpace handle);
+          IndexSpace root_space, LocalLock *&tree_lock);
+      void finalize_output_eqkd_tree(unsigned req_index, IndexSpace root_space);
       RtEvent report_equivalence_sets(EqSetTracker *target, 
           AddressSpaceID target_space, const FieldMask &mask,
           FieldMaskSet<EquivalenceSet> &eq_sets,
@@ -1738,7 +1741,8 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
-      virtual void refine_equivalence_sets(unsigned req_index,
+      virtual void refine_equivalence_sets(unsigned req_index, 
+                                           IndexSpace root_space,
                                            IndexSpaceNode *node,
                                            const FieldMask &refinement_mask,
                                            std::vector<RtEvent> &applied_events,
@@ -2149,10 +2153,12 @@ namespace Legion {
                           const ShardMapping *mapping, ShardID source_shard);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
-                      IndexSpaceExpression *expr, const FieldMask &mask);
+                      IndexSpaceExpression *expr, const FieldMask &mask,
+                      IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
                       AddressSpaceID source_space, unsigned req_index,
-                      EquivalenceSet *set, const FieldMask &mask);
+                      EquivalenceSet *set, const FieldMask &mask,
+                      IndexSpace root_space);
     public:
       const UniqueID root_uid;
     protected:
@@ -2562,6 +2568,7 @@ namespace Legion {
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
       virtual void refine_equivalence_sets(unsigned req_index,
+                                           IndexSpace root_space,
                                            IndexSpaceNode *node,
                                            const FieldMask &refinement_mask,
                                            std::vector<RtEvent> &applied_events,
@@ -3054,10 +3061,12 @@ namespace Legion {
       ShardID get_next_equivalence_set_origin(void);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
-                      IndexSpaceExpression *expr, const FieldMask &mask);
+                      IndexSpaceExpression *expr, const FieldMask &mask,
+                      IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
                       AddressSpaceID source_space, unsigned req_index,
-                      EquivalenceSet *set, const FieldMask &mask);
+                      EquivalenceSet *set, const FieldMask &mask,
+                      IndexSpace root_space);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
 #if 0
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
@@ -3511,10 +3520,12 @@ namespace Legion {
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
-                      IndexSpaceExpression *expr, const FieldMask &mask);
+                      IndexSpaceExpression *expr, const FieldMask &mask,
+                      IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
                       AddressSpaceID source_space, unsigned req_index,
-                      EquivalenceSet *set, const FieldMask &mask);
+                      EquivalenceSet *set, const FieldMask &mask,
+                      IndexSpace root_space);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void pack_task_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(
