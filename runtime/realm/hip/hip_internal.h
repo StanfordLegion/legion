@@ -1047,7 +1047,7 @@ namespace Realm {
 
       // override this because we have to be picky about which reduction ops
       //  we support
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1102,7 +1102,7 @@ namespace Realm {
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,

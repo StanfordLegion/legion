@@ -5937,7 +5937,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain domain;
-      runtime->forest->find_launch_space_domain(space, domain);
+      runtime->forest->find_domain(space, domain);
       return construct_future_map(domain, data, collective, sid, implicit);
     }
 
@@ -5984,7 +5984,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain domain;
-      runtime->forest->find_launch_space_domain(space, domain);
+      runtime->forest->find_domain(space, domain);
       return construct_future_map(domain, futures, internal, collective, sid,
                                   provenance);
     }

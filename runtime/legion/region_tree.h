@@ -406,7 +406,7 @@ namespace Legion {
       size_t get_domain_volume(LogicalRegion handle);
     public:
       // Index space operation methods
-      void find_launch_space_domain(IndexSpace handle, Domain &launch_domain);
+      void find_domain(IndexSpace handle, Domain &launch_domain);
       void validate_slicing(IndexSpace input_space,
                             const std::vector<IndexSpace> &slice_spaces,
                             MultiTask *task, MapperManager *mapper);
@@ -1260,7 +1260,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0; 
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1538,7 +1541,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1598,7 +1604,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
@@ -2156,7 +2165,10 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
@@ -2305,7 +2317,6 @@ namespace Legion {
                                    const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event) = 0;
     public:
-      virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper) = 0;
       virtual void log_launch_space(UniqueID op_id) = 0;
@@ -2368,7 +2379,10 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true);
       virtual bool set_domain(const Domain &domain, AddressSpaceID space);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
@@ -2579,7 +2593,6 @@ namespace Legion {
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
     public:
-      virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper);
       virtual void log_launch_space(UniqueID op_id);

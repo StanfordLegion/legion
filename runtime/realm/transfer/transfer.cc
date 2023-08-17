@@ -2968,7 +2968,7 @@ namespace Realm {
 
     // ... but we need three helpers that will be defined in the typed versions
     virtual size_t num_spaces() const = 0;
-
+    virtual size_t domain_size() const = 0;
     virtual size_t address_size() const = 0;
 
     virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const = 0;
@@ -3092,12 +3092,11 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(insts[i].get_location(),
-				     dst_mem,
-				     serdez_id,
-                                     0 /*redop_id*/,
-				     path_infos[idx]);
-	assert(ok);
+        std::vector<size_t> src_frags{domain_size()}, dst_frags{1};
+        bool ok = find_fastest_path(ChannelCopyInfo{insts[i].get_location(), dst_mem}, serdez_id,
+                                    0, domain_size() * bytes_per_element,
+                                    &src_frags, &dst_frags, path_infos[idx]);
+        assert(ok);
       }
     }
 
@@ -3390,12 +3389,18 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(src_mem,
-				     insts[i].get_location(),
-				     serdez_id,
-                                     0 /*redop_id*/,
-				     path_infos[idx]);
-	assert(ok);
+        // TODO(apryakhin@): Technically this is not a correct number
+        // of destination fragements that we get during scatter.
+        // domain_size() returns just a maximum number of addresses
+        // that we need to scatter and hence this value would be the
+        // worst case. The actual number of consecutive rectangles (e.g
+        // fragments) to handle can be less. Consider finding a
+        // better way to handle this (same for gather op).
+        std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
+        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, insts[i].get_location()}, serdez_id,
+                                    0, domain_size() * bytes_per_element,
+                                    &src_frags, &dst_frags, path_infos[idx]);
+        assert(ok);
       }
     }
 
@@ -3703,7 +3708,7 @@ namespace Realm {
 
   protected:
     virtual size_t num_spaces() const;
-
+    virtual size_t domain_size() const;
     virtual size_t address_size() const;
 
     virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const;
@@ -3749,6 +3754,11 @@ namespace Realm {
   size_t IndirectionInfoTyped<N,T,N2,T2>::num_spaces() const
   {
     return spaces.size();
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  size_t IndirectionInfoTyped<N, T, N2, T2>::domain_size() const {
+    return domain.volume();
   }
 
   template <int N, typename T, int N2, typename T2>
