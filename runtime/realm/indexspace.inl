@@ -882,7 +882,7 @@ namespace Realm {
       // special case: if a field uses all of the fill value, the next
       //  field (if any) is allowed to use the same value
       if((offset > 0) || (dsts[i].size != fill_value_size))
-        offset += dsts[i].size;
+	offset += dsts[i].size;
     }
     return copy(srcs, dsts,
 		std::vector<const typename CopyIndirection<N,T>::Base *>(),
