@@ -151,7 +151,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "archiver"))]
     if cli.archive {
         panic!(
-            "Legion Prof was not build with the \"archiver\" feature. \
+            "Legion Prof was not built with the \"archiver\" feature. \
                 Rebuild with --features=archiver to enable."
         );
     }
@@ -159,7 +159,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "client"))]
     if cli.attach {
         panic!(
-            "Legion Prof was not build with the \"client\" feature. \
+            "Legion Prof was not built with the \"client\" feature. \
                 Rebuild with --features=client to enable."
         );
     }
@@ -167,7 +167,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "server"))]
     if cli.serve {
         panic!(
-            "Legion Prof was not build with the \"server\" feature. \
+            "Legion Prof was not built with the \"server\" feature. \
                 Rebuild with --features=server to enable."
         );
     }
@@ -175,7 +175,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "viewer"))]
     if cli.view {
         panic!(
-            "Legion Prof was not build with the \"viewer\" feature. \
+            "Legion Prof was not built with the \"viewer\" feature. \
                 Rebuild with --features=viewer to enable."
         );
     }
