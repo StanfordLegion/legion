@@ -8543,27 +8543,16 @@ namespace Legion {
       assert((color_map.find(child->color) == color_map.end()) ||
              (color_map[child->color] == NULL));
 #endif
-      if (is_owner())
-      {
-        if (remote_colors.find(INVALID_COLOR) != remote_colors.end())
-        {
-          if (color_map.find(child->color) == color_map.end())
-            REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
-                  "Illegal request for Legion to generated a color for index "
-                  "space %d after a child was already registered with an "
-                  "explicit color. Colors of partitions must either be "
-                  "completely specified by the user or completely generated "
-                  "by the runtime. Mixing of allocation modes is not allowed.",
-                  handle.id)
-        }
-        else if (color_map.empty() && remote_colors.empty() &&
-                  (next_uncollected_color == 0))
-          REPORT_LEGION_WARNING(LEGION_WARNING_USER_SPECIFIED_PARTITION_COLOR,
-              "Detected usage of application generated partition colors for "
-              "index space %d. We recommend that all Legion applications "
-              "transition to runtime generated colors for composability.",
+      if (is_owner() && 
+          (remote_colors.find(INVALID_COLOR) != remote_colors.end()) &&
+          (color_map.find(child->color) == color_map.end()))
+        REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+              "Illegal request for Legion to generated a color for index "
+              "space %d after a child was already registered with an "
+              "explicit color. Colors of partitions must either be "
+              "completely specified by the user or completely generated "
+              "by the runtime. Mixing of allocation modes is not allowed.",
               handle.id)
-      }
       color_map[child->color] = child;
       if (!remote_colors.empty())
         remote_colors.erase(child->color);
@@ -8719,24 +8708,15 @@ namespace Legion {
       // should only happen on the owner node
       assert(get_owner_space() == context->runtime->address_space);
 #endif
-      if (remote_colors.find(INVALID_COLOR) != remote_colors.end())
-      {
-        if (color_map.find(part_color) == color_map.end())
-          REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
-                "Illegal request for Legion to generated a color for index "
-                "space %d after a child was already registered with an "
-                "explicit color. Colors of partitions must either be "
-                "completely specified by the user or completely generated "
-                "by the runtime. Mixing of allocation modes is not allowed.",
-                handle.id)
-      }
-      else if (color_map.empty() && remote_colors.empty() &&
-                (next_uncollected_color == 0))
-        REPORT_LEGION_WARNING(LEGION_WARNING_USER_SPECIFIED_PARTITION_COLOR,
-            "Detected usage of application generated partition colors for "
-            "index space %d. We recommend that all Legion applications "
-            "transition to runtime generated colors for composability.",
-            handle.id)
+      if ((remote_colors.find(INVALID_COLOR) != remote_colors.end()) &&
+          (color_map.find(part_color) == color_map.end()))
+        REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+              "Illegal request for Legion to generated a color for index "
+              "space %d after a child was already registered with an "
+              "explicit color. Colors of partitions must either be "
+              "completely specified by the user or completely generated "
+              "by the runtime. Mixing of allocation modes is not allowed.",
+              handle.id)
       remote_colors[part_color] = pid;
     }
 
