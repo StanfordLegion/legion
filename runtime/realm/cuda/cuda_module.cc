@@ -55,6 +55,7 @@
 #include <string.h>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
@@ -3877,43 +3878,44 @@ namespace Realm {
           CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGet)(&device, i));
           CHECK_CU(
               CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&res_fbmem_sizes[i], device));
-          if (i > 0) {
-            // currently, we assume all gpus are identical
-            assert(res_fbmem_sizes[i] == res_fbmem_sizes[i-1]);
-          }
         }
         resource_discovered = true;
       }
       return resource_discovered;
     }
 
-    bool CudaModuleConfig::get_resource(const std::string name, int &value) const
-    {
+    bool CudaModuleConfig::get_resource(const std::string name,
+                                        int &value) const {
       if (!resource_discovered) {
-	log_gpu.error("Module %s can not detect the int resource: %s", module_name.c_str(), name.c_str());
-	return false;
+        log_gpu.error("Module %s can not detect the int resource: %s",
+                      module_name.c_str(), name.c_str());
+        return false;
       }
       if (name == "gpu") {
         value = res_num_gpus;
-	return true;
+        return true;
       } else {
-        log_gpu.error("Module %s does not have the int resource: %s", module_name.c_str(), name.c_str());
-	return false;
+        log_gpu.error("Module %s does not have the int resource: %s",
+                      module_name.c_str(), name.c_str());
+        return false;
       }
     }
 
-    bool CudaModuleConfig::get_resource(const std::string name, size_t &value) const
-    {
+    bool CudaModuleConfig::get_resource(const std::string name,
+                                        size_t &value) const {
       if (!resource_discovered) {
-	log_gpu.error("Module %s can not detect the size_t resource: %s", module_name.c_str(), name.c_str());
-	return false;
+        log_gpu.error("Module %s can not detect the size_t resource: %s",
+                      module_name.c_str(), name.c_str());
+        return false;
       }
       if (name == "fbmem") {
-        value = res_fbmem_sizes[0];
-	return true;
+        value =
+            *std::min_element(res_fbmem_sizes.begin(), res_fbmem_sizes.end());
+        return true;
       } else {
-        log_gpu.error("Module %s does not have the size_t resource: %s", module_name.c_str(), name.c_str());
-	return false;
+        log_gpu.error("Module %s does not have the size_t resource: %s",
+                      module_name.c_str(), name.c_str());
+        return false;
       }
     }
 
