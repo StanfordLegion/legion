@@ -448,22 +448,39 @@ namespace Realm {
         oscale = 1;
       }
 
-      const size_t planes =
-          std::min(std::min(icount, ocount), (bytes_left / (contig_bytes * lines)));
-      copy_info.dst.strides[0] = out_lstride;
-      copy_info.dst.strides[1] = out_pstride / out_lstride;
+      const size_t planes = std::min(std::min(icount, ocount),
+                                     (bytes_left / (contig_bytes * lines)));
+      if ((in_gpu != NULL) &&
+          in_gpu->can_access_peer(out_gpu) &&  // If this is a gpu->gpu copy
+          (in_pstride ==
+           out_lstride) &&  // And this is a transpose compatible stride
+          (contig_bytes <= CUDA_MAX_FIELD_BYTES)) {
+        transpose_info.src = reinterpret_cast<void *>(in_base + in_offset);
+        transpose_info.dst = reinterpret_cast<void *>(out_base + out_offset);
+        transpose_info.src_stride = in_lstride / contig_bytes;
+        transpose_info.dst_stride = out_pstride / contig_bytes;
+        transpose_info.height = lines;
+        transpose_info.field_size = contig_bytes;
+        transpose_info.width = planes;  // bytes_left / (contig_bytes * lines);
+        // Remove this rectangle from the copy info, since we've put
+        // this in the tranpose info.
+        copy_infos.num_rects--;
+      } else {
+        copy_info.dst.strides[0] = out_lstride;
+        copy_info.dst.strides[1] = out_pstride / out_lstride;
 
-      copy_info.extents[0] = contig_bytes;
-      copy_info.extents[1] = lines;
-      copy_info.extents[2] = planes;
+        copy_info.extents[0] = contig_bytes;
+        copy_info.extents[1] = lines;
+        copy_info.extents[2] = planes;
 
-      copy_info.src.strides[0] = in_lstride;
-      copy_info.src.strides[1] = in_pstride / in_lstride;
+        copy_info.src.strides[0] = in_lstride;
+        copy_info.src.strides[1] = in_pstride / in_lstride;
 
-      copy_info.src.strides[2] = in_pstride;
-      copy_info.dst.strides[2] = out_pstride;
+        copy_info.src.strides[2] = in_pstride;
+        copy_info.dst.strides[2] = out_pstride;
 
-      copy_info.volume = planes * lines * contig_bytes;
+        copy_info.volume = planes * lines * contig_bytes;
+      }
 
       in_alc.advance(id, planes * iscale);
       out_alc.advance(od, planes * oscale);
@@ -672,6 +689,14 @@ namespace Realm {
           // First the non-affine copies
           const size_t bytes = cuda_copy.WidthInBytes * cuda_copy.Height * cuda_copy.Depth;
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
+          bytes_to_fence += bytes;
+        }
+
+        if (transpose_copy.width != 0) {
+          const size_t bytes = transpose_copy.width * transpose_copy.height;
+          assert((in_gpu != NULL) && in_gpu->can_access_peer(out_gpu));
+          stream->get_gpu()->launch_transpose_kernel(transpose_copy, min_align,
+                                                     stream);
           bytes_to_fence += bytes;
         }
 

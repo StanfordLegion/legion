@@ -63,6 +63,58 @@ static __device__ inline size_t coords_to_index(Offset_t *coords, Offset_t *stri
   return i;
 }
 
+template <typename T, typename Offset_t = size_t>
+static __device__ inline void memcpy_kernel_transpose(
+    Realm::Cuda::MemcpyTransposeInfo<Offset_t> info, T* tile) {
+  __restrict__ T *out_base = reinterpret_cast<T *>(info.dst);
+  __restrict__ T *in_base = reinterpret_cast<T *>(info.src);
+
+  const Offset_t tile_size = info.tile_size;
+  const Offset_t tidx = threadIdx.x % tile_size;
+  const Offset_t tidy = (threadIdx.x / tile_size) % tile_size;
+  const Offset_t grid_dimx = ((info.width + tile_size - 1) / tile_size);
+  const Offset_t grid_dimy = ((info.height + tile_size - 1) / tile_size);
+  const Offset_t chunks = info.field_size / sizeof(T);
+
+  for (Offset_t block = blockIdx.x; block < grid_dimx * grid_dimy;
+       block += gridDim.x) {
+    Offset_t block_idx = block % grid_dimx;
+    Offset_t block_idy = block / grid_dimx;
+
+    Offset_t x_base = block_idx * tile_size * chunks + tidx;
+    Offset_t y_base = block_idy * tile_size + tidy;
+
+    __syncthreads();
+
+    for (Offset_t block_offset = 0; block_offset < chunks * tile_size;
+         block_offset += tile_size) {
+      if (x_base + block_offset < info.width * chunks && y_base < info.height) {
+        Offset_t in_tile_idx = tidx + (tile_size + 1) * tidy * chunks;
+        tile[in_tile_idx + block_offset] =
+            in_base[x_base + y_base * info.src_stride * chunks + block_offset];
+      }
+    }
+
+    __syncthreads();
+
+    x_base = block_idy * tile_size * chunks + tidx;
+    y_base = block_idx * tile_size + tidy;
+
+    for (Offset_t block_offset = 0; block_offset < chunks * tile_size;
+         block_offset += tile_size) {
+      if (x_base + block_offset < info.height * chunks && y_base < info.width) {
+        Offset_t out_tile_idx =
+            (tidy + (tile_size + 1) * ((tidx + block_offset) / chunks)) *
+                chunks +
+            (tidx + block_offset) % chunks;
+        out_base[x_base + info.dst_stride * y_base * chunks + block_offset] =
+            tile[out_tile_idx];
+      }
+    }
+  }
+}
+
+>>>>>>> realm: add cuda transpose to realm dma.
 #define MAX_UNROLL (1)
 
 template <typename T, size_t N, typename Offset_t = size_t>

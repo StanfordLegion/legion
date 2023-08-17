@@ -76,6 +76,7 @@ TESTS += machine_config
 
   ifeq ($(strip $(USE_CUDA)),1)
   TESTS += cuda_memcpy_test
+  TESTS += cuda_transpose_test
   endif
 
 ifeq ($(strip $(USE_CUDA)),1)

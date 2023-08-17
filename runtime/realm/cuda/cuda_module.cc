@@ -52,11 +52,13 @@
 #include <valgrind/memcheck.h>
 #endif
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <sstream>
+
 #include <iomanip>
 #include <algorithm>
+#include <sstream>
 
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
@@ -2094,6 +2096,45 @@ namespace Realm {
       CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
                                                  num_threads, 1, 1, 0,
                                                  stream->get_stream(), args, NULL));
+    }
+    void GPU::launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                      size_t elem_size, GPUStream *stream) {
+      size_t log_elem_size = get_log_size(elem_size);
+      size_t num_elems = copy_info.width * copy_info.height;
+      assert((1ULL << log_elem_size) <= elem_size);
+
+      GPUFuncInfo &func_info =
+          transpose_kernels[log_elem_size];
+
+      unsigned int num_blocks = 0, num_threads = 0;
+      // TODO(apryakhin@): Calcuate tile size.
+      /*auto block_to_mem = [](int block_size) -> size_t {
+        int tile_size = sqrt(block_size);
+        return static_cast<size_t>(tile_size * (tile_size + 1) *
+                                   CUDA_MAX_FIELD_BYTES);
+      };*/
+
+      int min_grid_size = func_info.occ_num_blocks;
+      int max_block_size = func_info.occ_num_threads;
+      // TODO(apryakhin@): Calcualte occupacy.
+      /*CHECK_CU(cuOccupancyMaxPotentialBlockSizeWithFlags(
+          &min_grid_size, &max_block_size, func_info.func, block_to_mem, 0, 0,
+          0));*/
+      copy_info.tile_size = sqrt(max_block_size);
+
+      assert(copy_info.field_size <= CUDA_MAX_FIELD_BYTES);
+      size_t shared_mem_bytes =
+          (copy_info.tile_size * (copy_info.tile_size + 1)) *
+          copy_info.field_size;
+      num_threads = copy_info.tile_size * copy_info.tile_size;
+      num_blocks = std::min(static_cast<unsigned int>(
+                                (num_elems + num_threads - 1) / num_threads),
+                            static_cast<unsigned int>(min_grid_size));
+
+      void *args[] = {&copy_info};
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(
+          func_info.func, num_blocks, 1, 1, num_threads, 1, 1,
+          shared_mem_bytes, stream->get_stream(), args, NULL));
     }
 
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,

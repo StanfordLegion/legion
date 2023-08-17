@@ -643,6 +643,8 @@ namespace Realm {
       void launch_batch_affine_kernel(void *copy_info, size_t dim,
                                       size_t elemSize, size_t volume,
                                       GPUStream *stream);
+      void launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                   size_t elemSize, GPUStream *stream);
 
      protected:
       CUmodule load_cuda_module(const void *data);
