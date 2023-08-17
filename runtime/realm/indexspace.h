@@ -1206,5 +1206,3 @@ namespace std {
 #include "realm/indexspace.inl"
 
 #endif // ifndef REALM_INDEXSPACE_H
-
-
