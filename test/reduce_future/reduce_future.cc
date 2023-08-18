@@ -15,14 +15,18 @@
 
 #include "helpers.h"
 #include <legion/legion_c.h>
+#include <legion/legion_mapping.h>
+#include <mappers/default_mapper.h>
 
 enum IDs
 {
   TASK_TOP_LEVEL,
   TASK_MAKE_INTEGER,
+  TASK_MAKE_STRING,
   REDOP_INTEGER_ADD,
   REDOP_STRING_CONCAT,
   SHARDING_FN_CONTIG,
+  MAPPER_CONTIG,
 };
 
 class RedopIntegerAdd
@@ -103,12 +107,57 @@ public:
   }
 };
 
+class MyContigMapper: public Mapping::DefaultMapper
+{
+public:
+  MyContigMapper(Mapping::MapperRuntime *rt, Machine machine, Processor local)
+    :Mapping::DefaultMapper(rt, machine, local) {}
+
+  using Mapping::DefaultMapper::select_sharding_functor;
+
+  void select_sharding_functor(const Mapping::MapperContext       ctx,
+                               const Task&                        task,
+                               const SelectShardingFunctorInput&  input,
+                                     SelectShardingFunctorOutput& output)
+  {
+    output.chosen_functor = SHARDING_FN_CONTIG;
+  }
+};
+
+void register_mapper(Machine machine,
+                     Runtime *rt,
+                     const std::set<Processor> &local_procs)
+{
+  for (auto proc : local_procs)
+    rt->add_mapper(MAPPER_CONTIG,
+                   new MyContigMapper(rt->get_mapper_runtime(), machine, proc),
+                   proc);
+}
+
 int task_make_int(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
                   Context ctx,
                   Runtime *runtime)
 {
   return task->index_point[0] + 1;
+}
+
+struct MyString
+{
+    char str[10];
+};
+
+MyString task_make_string(const Task *task,
+                          const std::vector<PhysicalRegion> &regions,
+                          Context ctx,
+                          Runtime *runtime)
+{
+  MyString str = {{0}};
+  int count = task->index_point[0] + 1;
+  for (int i = 0; i < count; i++)
+    str.str[i] = '0' + (char)count;
+
+  return str;
 }
 
 UntypedBuffer make_string(int i)
@@ -282,6 +331,90 @@ void do_string_concat_test(Context ctx, Runtime *rt)
   assert(reduction.is_expected_string(expected.c_str()));
 }
 
+void do_index_launch_reduce_test(Context ctx, Runtime *rt)
+{
+  size_t task_count = 8;
+  IndexTaskLauncher launcher(TASK_MAKE_INTEGER,
+                             Rect<1>(0, task_count - 1),
+                             UntypedBuffer(),
+                             ArgumentMap());
+
+  int x = 1000;
+  launcher.initial_value = Future::from_value(x);
+
+  Future result = rt->execute_index_space(ctx,
+                                          launcher,
+                                          REDOP_INTEGER_ADD);
+
+  int sum = result.get_result<int>();
+  printf("IndexTask: %d\n", sum);
+  assert(sum == expected_integer(task_count) + x);
+}
+
+void do_index_launch_reduce_c_test(Context ctx, Runtime *rt)
+{
+  legion_runtime_t rt_c = {&rt};
+  legion_context_t ctx_c = {&ctx};
+
+  coord_t task_count = 8;
+  legion_rect_1d_t rect_c;
+  rect_c.lo.x[0] = 0;
+  rect_c.hi.x[0] = task_count - 1;
+  legion_untyped_buffer_t global_arg_c = {0};
+
+  legion_index_launcher_t launcher_c =
+    legion_index_launcher_create(
+      TASK_MAKE_INTEGER,
+      legion_domain_from_rect_1d(rect_c),
+      global_arg_c,
+      legion_argument_map_create(),
+      legion_predicate_true(),
+      false,
+      0,
+      0);
+
+  int x = 1000;
+  legion_future_t initial =
+    legion_future_from_untyped_pointer(rt_c, &x, sizeof x);
+  legion_index_launcher_set_initial_value(launcher_c, initial);
+
+  legion_future_t result =
+    legion_index_launcher_execute_reduction(
+      rt_c, ctx_c, launcher_c, REDOP_INTEGER_ADD);
+
+  int sum = *(int *)legion_future_get_untyped_pointer(result);
+
+  printf("index_launch: %d\n", sum);
+  assert(sum == expected_integer(task_count) + x);
+}
+
+void do_index_launch_serdez_test(Context ctx, Runtime *rt)
+{
+  size_t task_count = 8;
+  IndexTaskLauncher launcher(TASK_MAKE_STRING,
+                             Rect<1>(0, task_count - 1),
+                             UntypedBuffer(),
+                             ArgumentMap());
+
+  const char init[] = "init";
+  launcher.initial_value = Future::from_untyped_pointer(init, sizeof init);
+
+  launcher.map_id = MAPPER_CONTIG;
+
+  Future result =
+    rt->execute_index_space(ctx,
+                            launcher,
+                            REDOP_STRING_CONCAT);
+
+  size_t string_size = 0;
+  const char *string_out = (const char *)result.get_buffer(Memory::SYSTEM_MEM,
+                                                           &string_size);
+
+
+  printf("IndexTask(%zd): %s\n", string_size, string_out);
+  assert(string_out == std::string(init) + expected_string(task_count));
+}
+
 void task_top_level(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx,
@@ -289,6 +422,9 @@ void task_top_level(const Task *task,
 {
   do_integer_add_test(ctx, rt);
   do_string_concat_test(ctx, rt);
+  do_index_launch_reduce_test(ctx, rt);
+  do_index_launch_serdez_test(ctx, rt);
+  do_index_launch_reduce_c_test(ctx, rt);
 }
 
 int main(int argc, char **argv)
@@ -297,6 +433,7 @@ int main(int argc, char **argv)
 
   Runtime::preregister_sharding_functor(SHARDING_FN_CONTIG,
                                         new ContigShardingFunctor());
+  Runtime::add_registration_callback(register_mapper);
 
   ReductionOp *cat = ReductionOp::create_reduction_op<RedopStringConcat>();
   Runtime::register_reduction_op(REDOP_STRING_CONCAT,
@@ -307,6 +444,9 @@ int main(int argc, char **argv)
 
   regLocTask<int, task_make_int>("task_make_integer",
                                  TASK_MAKE_INTEGER);
+
+  regLocTask<MyString, task_make_string>("task_make_string",
+                                         TASK_MAKE_STRING);
 
   regLocTask<task_top_level>("top_level", TASK_TOP_LEVEL);
   Runtime::set_top_level_task_id(TASK_TOP_LEVEL);

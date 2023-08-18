@@ -4380,6 +4380,14 @@ legion_index_launcher_set_concurrent(legion_index_launcher_t launcher_,
   launcher->concurrent = concurrent;
 }
 
+void
+legion_index_launcher_set_initial_value(legion_index_launcher_t launcher,
+                                        legion_future_t initial_value)
+{
+  CObjectWrapper::unwrap(launcher)->initial_value =
+    *CObjectWrapper::unwrap(initial_value);
+}
+
 // -----------------------------------------------------------------------
 // Inline Mapping Operations
 // -----------------------------------------------------------------------

@@ -677,6 +677,7 @@ namespace Legion {
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
+      Future redop_initial_value;
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
       std::vector<OutputOptions> output_region_options;
