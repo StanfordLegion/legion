@@ -2446,6 +2446,7 @@ namespace Legion {
         else
           across_helper->compute_across_offsets(*src_mask, dst_fields);
         PhysicalManager *source_manager = source_view->get_manager();
+        assert(manager->instance.id != source_manager->instance.id);
         source_manager->compute_copy_offsets(*src_mask, src_fields);
         std::vector<Reservation> reservations;
         // If we're doing a reduction operation then set the reduction

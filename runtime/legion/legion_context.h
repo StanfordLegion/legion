@@ -637,10 +637,6 @@ namespace Legion {
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
                                   std::vector<unsigned> &local_field_indexes);
-      void remove_deleted_requirements(const std::vector<unsigned> &indexes,
-                                  std::vector<LogicalRegion> &to_delete);
-      void remove_deleted_fields(const std::set<FieldID> &to_free,
-                                 const std::vector<unsigned> &indexes);
       virtual void remove_deleted_local_fields(FieldSpace space,
                                  const std::vector<FieldID> &to_remove); 
     public:
@@ -723,10 +719,6 @@ namespace Legion {
       // a created field.
       std::map<unsigned,RegionRequirement>      created_requirements;
       std::map<unsigned,bool>                   returnable_privileges;
-      // Number of outstanding deletions using this created requirement
-      // The last one to send the count to zero actually gets to delete
-      // the requirement and the logical region
-      std::map<unsigned,unsigned>               deletion_counts;
       // Equivalence set trees are used for finding the equivalence sets
       // for a given parent region requirement. Note that each of these
       // trees comes with an associated tree lock that guarantees that 
@@ -746,7 +738,7 @@ namespace Legion {
         EqKDTree *tree;
         LocalLock *lock;
       };
-      std::vector<EqKDRoot>                     equivalence_set_trees;
+      std::map<unsigned,EqKDRoot>                       equivalence_set_trees;
       // Pending computations for equivalence set trees
       std::map<unsigned,RtUserEvent>            pending_equivalence_set_trees;
     protected:

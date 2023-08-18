@@ -4350,19 +4350,14 @@ namespace Legion {
             break;
           case LOGICAL_REGION_DELETION:
             {
-              // Only do something here if we don't have any parent req indexes
-              // If we had no deletion requirements then we know there is
-              // nothing to race with and we can just do our deletion
-              if (parent_req_indexes.empty())
-                runtime->forest->destroy_logical_region(logical_region, 
-                                                        applied, &mapping);
+              runtime->forest->destroy_logical_region(logical_region, 
+                                                      applied, &mapping);
               break;
             }
           default:
             assert(false);
         }
       }
-      std::vector<LogicalRegion> regions_to_destroy;
       // If this is a field deletion then everyone does the same thing
       if (kind == FIELD_DELETION)
       {
@@ -4372,16 +4367,9 @@ namespace Legion {
         if (!global_fields.empty())
           runtime->forest->free_fields(field_space, global_fields, applied, 
                                    (repl_ctx->owner_shard->shard_id != 0));
-        parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
         if (!local_fields.empty())
           parent_ctx->remove_deleted_local_fields(field_space, local_fields);
-        if (!deletion_req_indexes.empty())
-          parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                  regions_to_destroy);
       }
-      else if ((kind == LOGICAL_REGION_DELETION) && !parent_req_indexes.empty())
-        parent_ctx->remove_deleted_requirements(parent_req_indexes,
-                                                regions_to_destroy);
       // Remove any references that we added to the equivalence sets
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
       {
@@ -4391,12 +4379,6 @@ namespace Legion {
               eq_sets.begin(); it != eq_sets.end(); it++)
           if (it->first->remove_base_gc_ref(FIELD_ALLOCATOR_REF))
             delete it->first;
-      }
-      if (!regions_to_destroy.empty() && is_first_local_shard)
-      {
-        for (std::vector<LogicalRegion>::const_iterator it =
-             regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
-          runtime->forest->destroy_logical_region(*it, applied, &mapping);
       }
 #ifdef LEGION_SPY
       // Still have to do this for legion spy

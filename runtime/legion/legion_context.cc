@@ -62,9 +62,6 @@ namespace Legion {
     TaskContext::~TaskContext(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(deletion_counts.empty());
-#endif
       // Clean up any local variables that we have
       if (!task_local_variables.empty())
       {
@@ -1354,17 +1351,7 @@ namespace Legion {
               req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
-              // Always put a deletion index on here to mark that 
-              // the requirement is going to be deleted
-              std::map<unsigned,unsigned>::iterator deletion_finder =
-                deletion_counts.find(it->first);
-              if (deletion_finder == deletion_counts.end())
-                deletion_counts[it->first] = 1;
-              else
-                deletion_finder->second++;
             }
-            // Can erase the returnable privileges now
-            returnable_privileges.erase(it->first);
             // Remove the requirement from the created set 
             std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
             created_requirements.erase(to_delete);
@@ -1460,25 +1447,10 @@ namespace Legion {
               req.handle_type = LEGION_SINGULAR_PROJECTION;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
-              // Always put a deletion index on here to mark that 
-              // the requirement is going to be deleted
-              std::map<unsigned,unsigned>::iterator deletion_finder =
-                deletion_counts.find(it->first);
-              if (deletion_finder == deletion_counts.end())
-                deletion_counts[it->first] = 1;
-              else
-                deletion_finder->second++;
-              // Can't delete this yet until it's actually performed
-              // because other deletions might need to depend on it
-              it++;
             }
-            else // Can erase the returnable privileges now
-            {
-              returnable_privileges.erase(it->first);
-              // Remove the requirement from the created set 
-              std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
-              created_requirements.erase(to_delete);
-            }
+            // Remove the requirement from the created set 
+            std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
+            created_requirements.erase(to_delete);
           }
           else
             it++;
@@ -1539,62 +1511,6 @@ namespace Legion {
             }
           }
         }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::remove_deleted_requirements(
-                                          const std::vector<unsigned> &indexes,
-                                          std::vector<LogicalRegion> &to_delete)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-      for (std::vector<unsigned>::const_iterator it = 
-            indexes.begin(); it != indexes.end(); it++) 
-      {
-        std::map<unsigned,unsigned>::iterator finder = 
-          deletion_counts.find(*it);
-#ifdef DEBUG_LEGION
-        assert(finder != deletion_counts.end());
-        assert(finder->second > 0);
-#endif
-        finder->second--;
-        // Check to see if we're the last deletion with this region requirement
-        if (finder->second > 0)
-          continue;
-        deletion_counts.erase(finder); 
-        std::map<unsigned,RegionRequirement>::iterator req_finder = 
-          created_requirements.find(*it);
-#ifdef DEBUG_LEGION
-        assert(req_finder != created_requirements.end());
-        assert(returnable_privileges.find(*it) != returnable_privileges.end());
-#endif
-        to_delete.push_back(req_finder->second.parent);
-        created_requirements.erase(req_finder);
-        returnable_privileges.erase(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::remove_deleted_fields(const std::set<FieldID> &to_free,
-                                           const std::vector<unsigned> &indexes)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-      for (std::vector<unsigned>::const_iterator it = 
-            indexes.begin(); it != indexes.end(); it++) 
-      {
-        std::map<unsigned,RegionRequirement>::iterator req_finder = 
-          created_requirements.find(*it);
-#ifdef DEBUG_LEGION
-        assert(req_finder != created_requirements.end());
-#endif
-        std::set<FieldID> &priv_fields = req_finder->second.privilege_fields;
-        if (priv_fields.empty())
-          continue;
-        for (std::set<FieldID>::const_iterator fit = 
-              to_free.begin(); fit != to_free.end(); fit++)
-          priv_fields.erase(*fit);
       }
     }
 
@@ -4222,13 +4138,14 @@ namespace Legion {
           pending_equivalence_set_trees.find(req_index);
         if (finder != pending_equivalence_set_trees.end())
           wait_on = finder->second;
-        else if (req_index < equivalence_set_trees.size())
+        else
         {
-          EqKDTree *tree = equivalence_set_trees[req_index].tree;
-          if (tree != NULL)
+          std::map<unsigned,EqKDRoot>::const_iterator finder =
+            equivalence_set_trees.find(req_index);
+          if (finder != equivalence_set_trees.end())
           {
-            tree_lock = equivalence_set_trees[req_index].lock;
-            return tree;
+            tree_lock = finder->second.lock;
+            return finder->second.tree;
           }
           else if (return_null_if_doesnt_exist)
             return NULL;
@@ -4250,17 +4167,13 @@ namespace Legion {
         }
         else 
         {
-          if (req_index < equivalence_set_trees.size())
+          std::map<unsigned,EqKDRoot>::const_iterator finder =
+            equivalence_set_trees.find(req_index);
+          if (finder != equivalence_set_trees.end())
           {
-            EqKDTree *tree = equivalence_set_trees[req_index].tree;
-            if (tree != NULL)
-            {
-              tree_lock = equivalence_set_trees[req_index].lock;      
-              return tree;
-            }
+            tree_lock = finder->second.lock;
+            return finder->second.tree;
           }
-          else
-            equivalence_set_trees.resize(req_index+1);
           // save a guard that we're making this
           pending_equivalence_set_trees[req_index] = 
             RtUserEvent::NO_RT_USER_EVENT;
@@ -4283,8 +4196,9 @@ namespace Legion {
         EqKDTree *tree = create_equivalence_set_kd_tree(root);
         // Now we can save it and wake up anyone looking for it
         AutoLock priv_lock(privilege_lock);
-        equivalence_set_trees[req_index] = EqKDRoot(tree);
-        tree_lock = equivalence_set_trees[req_index].lock;
+        std::map<unsigned,EqKDRoot>::const_iterator it =
+          equivalence_set_trees.emplace(req_index, EqKDRoot(tree)).first;
+        tree_lock = it->second.lock;
         std::map<unsigned,RtUserEvent>::iterator finder = 
           pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
@@ -4299,11 +4213,13 @@ namespace Legion {
       {
         wait_on.wait();
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<unsigned,EqKDRoot>::const_iterator finder =
+          equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
-        assert(equivalence_set_trees[req_index].tree != NULL);
+        assert(finder != equivalence_set_trees.end());
 #endif
-        tree_lock = equivalence_set_trees[req_index].lock;
-        return equivalence_set_trees[req_index].tree;
+        tree_lock = finder->second.lock;
+        return finder->second.tree;
       }
     }
 
@@ -4319,30 +4235,25 @@ namespace Legion {
         assert(pending_equivalence_set_trees.find(req_index) !=
             pending_equivalence_set_trees.end());
 #endif
-        if (req_index < equivalence_set_trees.size())
+        std::map<unsigned,EqKDRoot>::const_iterator finder =
+          equivalence_set_trees.find(req_index);
+        if (finder != equivalence_set_trees.end())
         {
-          EqKDTree *tree = equivalence_set_trees[req_index].tree;
-          if (tree != NULL)
-          {
-            tree_lock = equivalence_set_trees[req_index].lock;
-            return tree;
-          }
+          tree_lock = finder->second.lock;
+          return finder->second.tree;
         }
       }
       IndexSpaceNode *root = runtime->forest->get_node(root_space);
       EqKDTree *tree = create_equivalence_set_kd_tree(root);
       AutoLock priv_lock(privilege_lock);
-      if (equivalence_set_trees.size() <= req_index)
-        equivalence_set_trees.resize(req_index+1);
-      if (equivalence_set_trees[req_index].tree != NULL)
-      {
-        delete tree;
-        tree = equivalence_set_trees[req_index].tree;
-      }
+      std::map<unsigned,EqKDRoot>::const_iterator finder =
+        equivalence_set_trees.find(req_index);
+      if (finder == equivalence_set_trees.end())
+        finder = equivalence_set_trees.emplace(req_index, EqKDRoot(tree)).first;
       else
-        equivalence_set_trees[req_index] = EqKDRoot(tree);
-      tree_lock = equivalence_set_trees[req_index].lock;
-      return tree;
+        delete tree;
+      tree_lock = finder->second.lock;
+      return finder->second.tree;
     }
 
     //--------------------------------------------------------------------------
@@ -4352,8 +4263,6 @@ namespace Legion {
     {
       {
         AutoLock priv_lock(privilege_lock);
-        if (equivalence_set_trees.size() <= req_index)
-          equivalence_set_trees.resize(req_index + 1);
         std::map<unsigned,RtUserEvent>::iterator finder =
             pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
@@ -4362,7 +4271,8 @@ namespace Legion {
 #endif
         // If there are no waiters or the equivalence set tree has
         // already been made then we are just done
-        if (equivalence_set_trees[req_index].tree != NULL)
+        if (equivalence_set_trees.find(req_index) != 
+            equivalence_set_trees.end())
         {
           if (finder->second.exists())
             Runtime::trigger_event(finder->second);
@@ -4380,9 +4290,10 @@ namespace Legion {
       AutoLock priv_lock(privilege_lock);
 #ifdef DEBUG_LEGION
       // No one else should have made it in the interim
-      assert(equivalence_set_trees[req_index].tree == NULL);
+      assert(equivalence_set_trees.find(req_index) == 
+              equivalence_set_trees.end());
 #endif
-      equivalence_set_trees[req_index] = EqKDRoot(tree);
+      equivalence_set_trees.emplace(req_index, EqKDRoot(tree));
       std::map<unsigned,RtUserEvent>::iterator finder = 
         pending_equivalence_set_trees.find(req_index);
 #ifdef DEBUG_LEGION
@@ -6842,10 +6753,9 @@ namespace Legion {
         // If this is an output region make sure nobody tries to compute
         // the equivalence sets for it until we know it is ready
         AutoLock priv_lock(privilege_lock);
-        if (equivalence_set_trees.size() <= created_index)
-          equivalence_set_trees.resize(created_index+1);
 #ifdef DEBUG_LEGION
-        assert(equivalence_set_trees[created_index].tree == NULL);
+        assert(equivalence_set_trees.find(created_index) == 
+                equivalence_set_trees.end());
         assert(pending_equivalence_set_trees.find(created_index) ==
             pending_equivalence_set_trees.end());
 #endif
@@ -11003,7 +10913,6 @@ namespace Legion {
       const ContextID ctx = tree_context.get_id();
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
-      equivalence_set_trees.resize(regions.size());
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
 #ifdef DEBUG_LEGION
@@ -11023,7 +10932,7 @@ namespace Legion {
         EqKDTree *tree = 
           region_node->row_source->create_equivalence_set_kd_tree(
                                                 get_total_shards());
-        equivalence_set_trees[idx1] = EqKDRoot(tree);
+        equivalence_set_trees.emplace(idx1, EqKDRoot(tree));
         const FieldMask user_mask = 
           region_node->column_source->get_field_mask(req.privilege_fields);
         // For virtual mappings, there are two approaches here
@@ -11166,7 +11075,9 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context, 
             regions[idx], false/*filter specific fields*/);
-        if (equivalence_set_trees[idx].tree == NULL)
+        std::map<unsigned,EqKDRoot>::iterator finder = 
+          equivalence_set_trees.find(idx);
+        if (finder == equivalence_set_trees.end())
           continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
@@ -11174,9 +11085,9 @@ namespace Legion {
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         std::vector<RtEvent> applied_events;
         node->row_source->invalidate_equivalence_set_kd_tree(
-            equivalence_set_trees[idx].tree, equivalence_set_trees[idx].lock,
+            finder->second.tree, finder->second.lock,
             close_mask, applied_events, false/*move to previous*/);
-        equivalence_set_trees[idx] = EqKDRoot();
+        equivalence_set_trees.erase(finder);
         if (!applied_events.empty())
           applied.insert(applied_events.begin(), applied_events.end());
       }
@@ -11224,21 +11135,23 @@ namespace Legion {
               it->second, false/*filter specific fields*/);
           invalidated_regions.insert(it->second.region);
         }
-        if (equivalence_set_trees.size() <= it->first)
-          equivalence_set_trees.resize(it->first + 1);
         // See if we're a returnable privilege or not
+        std::map<unsigned,EqKDRoot>::iterator finder = 
+          equivalence_set_trees.find(it->first);
         if (returnable_privileges[it->first] && !is_top)
         {
 #ifdef DEBUG_LEGION
           assert(return_regions.find(it->second.region) == 
                   return_regions.end());
 #endif
-          EqKDTree *tree = equivalence_set_trees[it->first].tree;
-          if (tree != NULL)
-            tree->add_reference();
-          return_regions[it->second.region] = tree; 
+          if (finder != equivalence_set_trees.end())
+          {
+            finder->second.tree->add_reference();
+            return_regions[it->second.region] = finder->second.tree;
+            equivalence_set_trees.erase(finder);
+          }
         }
-        else if (equivalence_set_trees[it->first].tree != NULL) 
+        else if (finder != equivalence_set_trees.end())
         {
           // Not returning so invalidate the full thing
 #ifdef DEBUG_LEGION
@@ -11247,13 +11160,12 @@ namespace Legion {
 #endif
           std::vector<RtEvent> applied;
           node->row_source->invalidate_equivalence_set_kd_tree(
-                equivalence_set_trees[it->first].tree, 
-                equivalence_set_trees[it->first].lock,
+                finder->second.tree, finder->second.lock,
                 all_ones_mask, applied, false/*move to previous*/);
           if (!applied.empty())
             applied_events.insert(applied.begin(), applied.end());
+          equivalence_set_trees.erase(finder);
         }
-        equivalence_set_trees[it->first] = EqKDRoot();
       }
       if (!return_regions.empty())
       {
@@ -11295,13 +11207,12 @@ namespace Legion {
       {
         unsigned index = add_created_region(created_nodes[idx]->handle,
                             false/*task local*/, false/*output region*/);
-        if (equivalence_set_trees.size() <= index)
-          equivalence_set_trees.resize(index+1);
         if (created_trees[idx] == NULL)
           continue;
         // Check to see if we're the first one or whether we're merging
-        EqKDTree *current = equivalence_set_trees[index].tree;
-        if (current != NULL)
+        std::map<unsigned,EqKDRoot>::const_iterator finder =
+          equivalence_set_trees.find(index);
+        if (finder != equivalence_set_trees.end())
         {
           // This happens when we're merging multiple trees coming back
           // from a sub-task that was control replicated, so we extract
@@ -11312,18 +11223,19 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             it->first->set_expr->initialize_equivalence_set_kd_tree(
-                current, it->first, it->second, local_shard, true/*current*/);
+                finder->second.tree,it->first, it->second, 
+                local_shard, true/*current*/);
         }
         else
         {
-          current = created_trees[idx];
-          equivalence_set_trees[index] = EqKDRoot(current);
+          finder = equivalence_set_trees.emplace(index, 
+              EqKDRoot(created_trees[idx])).first;
           // Filter all the current equivalence sets on to the previous
           const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
           std::vector<RtEvent> applied;
           created_nodes[idx]->row_source->invalidate_equivalence_set_kd_tree(
-              current, equivalence_set_trees[index].lock,
-              all_ones_mask, applied, true/*move to previous*/);
+              finder->second.tree, finder->second.lock, all_ones_mask, applied,
+              true/*move to previous*/);
           if (!applied.empty())
             applied_events.insert(applied.begin(), applied.end());
         }
@@ -11349,14 +11261,16 @@ namespace Legion {
             invalidate_mask, applied, false/*move to previous*/);
         if (!applied.empty())
           applied_events.insert(applied.begin(), applied.end());
-        // Check to see if we should actually invalidate this tree
-        if (!filter_specific_fields)
-        {
-          // Need the lock before doing this invalidation in case the 
-          // equivalence set trees data structure resizes
-          AutoLock priv_lock(privilege_lock);
-          equivalence_set_trees[req_index] = EqKDRoot();
-        }
+      }
+      // Check to see if we should actually invalidate this tree
+      if (!filter_specific_fields)
+      {
+        // Need the lock before doing this invalidation in case the 
+        // equivalence set trees data structure resizes
+        AutoLock priv_lock(privilege_lock);
+        equivalence_set_trees.erase(req_index);
+        // Alos need to remove the returnable privileges information
+        returnable_privileges.erase(req_index);
       }
     }
 
@@ -18128,10 +18042,9 @@ namespace Legion {
         // If this is an output region make sure nobody tries to compute
         // the equivalence sets for it until we know it is ready
         AutoLock priv_lock(privilege_lock);
-        if (equivalence_set_trees.size() <= created_index)
-          equivalence_set_trees.resize(created_index+1);
 #ifdef DEBUG_LEGION
-        assert(equivalence_set_trees[created_index].tree == NULL);
+        assert(equivalence_set_trees.find(created_index) ==
+                equivalence_set_trees.end());
         assert(pending_equivalence_set_trees.find(created_index) ==
             pending_equivalence_set_trees.end());
 #endif
@@ -21552,16 +21465,17 @@ namespace Legion {
           AutoLock priv_lock(privilege_lock);
           unsigned index = add_created_region(handle,
               false/*task local*/, false/*output region*/);
-          if (equivalence_set_trees.size() <= index)
-            equivalence_set_trees.resize(index+1);
-          current = equivalence_set_trees[index].tree;
-          if (current == NULL)
+          std::map<unsigned,EqKDRoot>::const_iterator finder =
+            equivalence_set_trees.find(index);
+          if (finder == equivalence_set_trees.end())
           {
             // If we're the first make the KD-tree here
             current = 
               node->row_source->create_equivalence_set_kd_tree(total_shards);
-            equivalence_set_trees[index] = EqKDRoot(current);
+            equivalence_set_trees.emplace(index, EqKDRoot(current));
           }
+          else
+            current = finder->second.tree;
         }
         const ShardID local_shard = get_shard_id(); 
         // Put the equivalence sets in the tree but in the previous set

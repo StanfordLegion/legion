@@ -10255,7 +10255,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
-      std::vector<LogicalRegion> regions_to_destroy;
       switch (kind)
       {
         case INDEX_SPACE_DELETION:
@@ -10303,27 +10302,14 @@ namespace Legion {
             if (!global_fields.empty())
               runtime->forest->free_fields(field_space, global_fields, 
                                            preconditions);
-            parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
             if (!local_fields.empty())
               parent_ctx->remove_deleted_local_fields(field_space,local_fields);
-            if (!deletion_req_indexes.empty())
-              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                      regions_to_destroy); 
             break;
           }
         case LOGICAL_REGION_DELETION:
           {
-            // In this case we just remove all our regions since we know
-            // we put a reference on all of them, if we're the last one
-            // to remove the reference on each region then we'll delete them
-            if (!parent_req_indexes.empty())
-              parent_ctx->remove_deleted_requirements(parent_req_indexes,
-                                                      regions_to_destroy);
-            else
-              // If we had no deletion requirements then we know there is
-              // nothing to race with and we can just do our deletion
-              runtime->forest->destroy_logical_region(logical_region,
-                                                      preconditions);
+            runtime->forest->destroy_logical_region(logical_region,
+                                                    preconditions);
             break;
           }
         default:
@@ -10338,12 +10324,6 @@ namespace Legion {
               eq_sets.begin(); it != eq_sets.end(); it++)
           if (it->first->remove_base_gc_ref(FIELD_ALLOCATOR_REF))
             delete it->first;
-      }
-      if (!regions_to_destroy.empty())
-      {
-        for (std::vector<LogicalRegion>::const_iterator it =
-              regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
-          runtime->forest->destroy_logical_region(*it, preconditions);
       }
       if (!preconditions.empty())
         complete_operation(Runtime::merge_events(preconditions));
