@@ -20020,6 +20020,20 @@ namespace Legion {
         return dominator_mask;
     }
 
+    // Instantiate the template for both templates because c++ is stupid
+    template FieldMask 
+      RegionTreeNode::perform_dependence_checks<true>(LogicalRegion root,
+                const LogicalUser &user, OrderedFieldMaskUsers &prev_users,
+                const FieldMask &check_mask, const FieldMask &open_below,
+                const bool arrived, const ProjectionInfo &proj_info,
+                LogicalState &state, LogicalAnalysis &logical_analysis);
+    template FieldMask 
+      RegionTreeNode::perform_dependence_checks<false>(LogicalRegion root,
+                const LogicalUser &user, OrderedFieldMaskUsers &prev_users,
+                const FieldMask &check_mask, const FieldMask &open_below,
+                const bool arrived, const ProjectionInfo &proj_info,
+                LogicalState &state, LogicalAnalysis &logical_analysis);
+
 #if 0
     // This function is a little out of place to make sure we get the 
     // templates instantiated properly
