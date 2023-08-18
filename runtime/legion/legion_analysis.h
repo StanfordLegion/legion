@@ -1695,7 +1695,7 @@ namespace Legion {
       // Note that this list can grow bigger than PROJECTION_CACHE_SIZE
       // but we only keep references on the entries within the size of the
       // cache. This allows us to still hit on projections that are still
-      // alive from othe references, but also allows those entries to
+      // alive from other references, but also allows those entries to
       // be pruned out once they are no longer alive
       std::list<ProjectionSummary*> projection_summary_cache;
       std::unordered_map<ProjectionSummary*,
