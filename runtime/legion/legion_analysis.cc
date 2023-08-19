@@ -6446,11 +6446,14 @@ namespace Legion {
       assert(summary->owner == this);
 #endif
       if (summary->projection->is_functional &&
-          (PROJECTION_CACHE_SIZE < projection_summary_cache.size()))
+          (PROJECTION_CACHE_SIZE <= projection_summary_cache.size()))
       {
         // Only need to filter from things not in the cache so start
         // from the back and only go up to the last element not in the cache
-        unsigned stop = projection_summary_cache.size() - PROJECTION_CACHE_SIZE;
+        // Note: handle the off-by-one case where we're deleting the last
+        // thing in the cache because we're about to add a new summary
+        const unsigned stop = 
+          (projection_summary_cache.size() - PROJECTION_CACHE_SIZE) + 1;
         std::list<ProjectionSummary*>::reverse_iterator finder =
           projection_summary_cache.rbegin();
         for (unsigned idx = 0; idx < stop; idx++)
