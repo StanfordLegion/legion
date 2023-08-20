@@ -3951,6 +3951,11 @@ class LogicalVerificationState(object):
                 if prev_op.kind == DELETION_OP_KIND:
                     continue
                 need_fence = False
+            elif op.kind == REFINEMENT_OP_KIND or prev_op.kind == REFINEMENT_OP_KIND:
+                # Refinement operations are effectively a kind of fence in their
+                # own right so you don't need a fence on dependences to or from
+                # refinement operations from any other kind of operation
+                need_fence = False
             # Now determine whether we need to have a close operation along the
             # path between these two operations due to them being in different shards
             elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_logical:
@@ -4027,28 +4032,6 @@ class LogicalState(object):
                                            arrived, previous_deps):
             return (False,None,None,None,closed)
         if arrived: 
-            # Check to see if we have a refinement operation to handle
-            tree_field = (self.node.tree_id,self.field.fid)
-            refinement = op.has_refinement_operation(req, self.node, self.field)
-            if refinement is not None:
-                # Check to see that the refinement has dependences on
-                # everything that we also depended on
-                if not self.analyze_refinement(refinement, previous_deps, 
-                                               op, req, perform_checks):
-                    return False
-                init_fields.add(tree_field)
-                # Register the refinement user
-                refinement.reqs[0].logical_node.register_refinement_user(refinement,self.field)
-            elif tree_field not in init_fields:
-                # Verify that we have an initial close operation that
-                # would initialize the version information for this field
-                close = op.get_close_operation(req, req.parent, self.field, False)
-                if not self.analyze_initial_close(close, op, req, perform_checks):
-                    return False
-                init_fields.add(tree_field)
-                # Register the refinement user
-                if close is not None:
-                    close.reqs[0].logical_node.register_refinement_user(close, self.field)
             # Add ourselves as the current user
             self.register_logical_user(op, req)
             # Record if we have outstanding reductions
@@ -4676,39 +4659,6 @@ class LogicalState(object):
             dep = MappingDependence(refinement, op, refinement_req.index,
                                     req.index, dep_type)
             refinement.add_outgoing(dep)
-            op.add_incoming(dep)
-        return True
-
-    def analyze_initial_close(self, close, op, req, perform_checks):
-        if close is None:
-            # Check for the case where this is an output region
-            if op.mappings[req.index][self.field.fid].is_virtual():
-                return True
-            if perform_checks:
-                print(("ERROR: %s (UID %s) failed to generate an initial close "+
-                       "operation for field %s of region requirement %s") %
-                       (op, str(op.uid), self.field, req.index))
-            else:
-                print(("ERROR: %s (UID %s) failed to generate an initial close "+
-                       "operation that we normally would have expected for field "+
-                       "%s of region requirement %s. Re-run with detailed Legion "+
-                       "Spy logs to confirm.") % (op, str(op.uid), self.field, req.index))
-            if self.node.state.assert_on_error:
-                assert False
-            return False
-        close_req = close.reqs[0]
-        dep_type = compute_dependence_type(close_req, req)
-        if perform_checks:
-            if not op.has_mapping_dependence(req, close, close_req, dep_type, self.field):
-                print(("ERROR: region requirement %s of operation %s is missing a "+
-                       "mapping dependence on initial close op %s for field %s") %
-                       (req.index, op, close, self.field))
-                if self.node.state.assert_on_error:
-                    assert False
-                return False
-        else:
-            dep = MappingDependence(close, op, close_req.index, req.index, dep_type)
-            close.add_outgoing(dep)
             op.add_incoming(dep)
         return True
 
@@ -6415,6 +6365,8 @@ class Operation(object):
         return self.launch_shape
 
     def add_internal_operation(self, internal):
+        assert self.kind != REFINEMENT_OP_KIND
+        assert self.kind != INTER_CLOSE_OP_KIND
         assert internal.kind == REFINEMENT_OP_KIND or \
                 internal.kind == INTER_CLOSE_OP_KIND
         if self.internal_ops is None:
@@ -6469,28 +6421,6 @@ class Operation(object):
             if not read_only and close.kind != INTER_CLOSE_OP_KIND:
                 continue
             return close
-        return None
-
-    def has_refinement_operation(self, req, node, field):
-        if self.internal_ops is None:
-            return None
-        for refinement in self.internal_ops:
-            if refinement.kind != REFINEMENT_OP_KIND:
-                continue
-            assert len(refinement.reqs) == 1
-            refinement_req = refinement.reqs[0]
-            if refinement_req.logical_node.tree_id != node.tree_id:
-                continue
-            if field not in refinement_req.fields:
-                continue
-            # Lastly check to see if the refinement node is an ancestor
-            if refinement_req.logical_node is node:
-                return refinement
-            ancestor = node.parent
-            while ancestor is not None:
-                if ancestor is refinement_req.logical_node:
-                    return refinement
-                ancestor = ancestor.parent
         return None
 
     def set_pending_partition_info(self, node, kind):
@@ -9060,6 +8990,23 @@ class Task(object):
                         if logical_op.state.assert_on_warning:
                             assert False
                         continue
+                    # Check for any internal operations, if we have a refinement
+                    # operation then we need to analyze them now, they'll be the same
+                    # across the shards so we just need to do this once.
+                    # Note that we don't need to analyze close operations since they
+                    # are what we're implicitly checking when analyzing the individual
+                    # operations themselves
+                    if logical_op.internal_ops:
+                        for internal_op in logical_op.internal_ops:
+                            if internal_op.kind == INTER_CLOSE_OP_KIND:
+                                continue
+                            assert internal_op.kind == REFINEMENT_OP_KIND
+                            previous_deps = dict()
+                            if not internal_op.perform_op_logical_verification(internal_op, previous_deps):
+                                success = False
+                                break
+                        if not success:
+                            break
                     # Check to see if this is an index space operation in which case
                     # we need to run all the points across all the shards, otherwise
                     # we just run the operation like normal in this context
@@ -9121,6 +9068,19 @@ class Task(object):
                 # use them for adding/checking dependences on close operations
                 if self.op.state.verbose:
                     print('Verifying '+str(op))
+                # Check for any internal operations like refinement operations
+                # that need to be analyzed first
+                if op.internal_ops:
+                    for internal_op in op.internal_ops:
+                        if internal_op.kind == INTER_CLOSE_OP_KIND:
+                            continue
+                        assert internal_op.kind == REFINEMENT_OP_KIND
+                        previous_deps = dict()
+                        if not internal_op.perform_op_logical_verification(internal_op, previous_deps):
+                            success = False
+                            break
+                    if not success:
+                        break
                 previous_deps = dict()
                 if not op.perform_op_logical_verification(op, previous_deps):
                     success = False
