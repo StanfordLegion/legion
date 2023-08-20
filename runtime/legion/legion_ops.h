@@ -577,6 +577,7 @@ namespace Legion {
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
           std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy);
+      void finalize_completion(void);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -4305,7 +4306,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_execution(void);
+      virtual void trigger_complete(void);
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);
