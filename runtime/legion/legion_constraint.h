@@ -701,7 +701,10 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      // Should be non-negative integers for offsets
+      // Positive integers mean you must have that much padding
+      // Zero means you may or may not have padding
+      // Any negative integers will be interpreted as meaning that
+      // there should be no padding on a particular dimension
       Domain delta;
     };
 
