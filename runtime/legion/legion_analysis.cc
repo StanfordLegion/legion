@@ -4114,7 +4114,6 @@ namespace Legion {
             assert(refined_projection == NULL);
 #endif
             // If we don't have any refinements, we'll always allow them
-            allow_refinement = true;
             if (child->row_source->is_complete())
               refinement_state = IS_WRITE(usage) ? 
                 COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
@@ -4240,6 +4239,8 @@ namespace Legion {
         default:
           assert(false); // should never hit this
       }
+      // Allow alternative refinements of our current child
+      allow_refinement = (child == refined_child);
       return false;
     }
 
@@ -7257,6 +7258,47 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void LogicalState::promote_next_child(RegionTreeNode *child, FieldMask mask)
+    //--------------------------------------------------------------------------
+    {
+      // This will promote the child up to a read-write field state
+      for (LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC>::iterator it =
+            field_states.begin(); it != field_states.end(); it++)
+      {
+        const FieldMask overlap = mask & it->valid_fields();
+        if (!overlap)
+          continue;
+        FieldState::OrderedFieldMaskChildren::iterator finder =
+          it->open_children.find(child);
+        if (finder == it->open_children.end())
+          continue;
+        if ((it->open_children.size() == 1) && (overlap == finder->second))
+        {
+          // We can just update this state directly
+          it->open_state = OPEN_READ_WRITE;
+          it->redop = 0;
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+        else
+        {
+          // Remove the child from the state
+          finder.filter(overlap);
+          if (!finder->second)
+            it->remove_child(child);
+          it->open_children.tighten_valid_mask();
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      // If we get here we still have fields so we need to introduce a new
+      // field state here for this child in read-write mode
+      field_states.emplace_back(FieldState(OPEN_READ_WRITE, mask, child));
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     bool LogicalState::find_symbolic_elide_close_result(
@@ -8450,7 +8492,7 @@ namespace Legion {
                                             unsigned req_index,
                                             unsigned parent_req_index,
                                             RegionTreeNode *refinement_node,
-                                            FieldMask refinement_mask,
+                                            const FieldMask &refinement_mask,
                                             FieldMaskSet<RefinementOp> &pending)
     //--------------------------------------------------------------------------
     {
@@ -8484,25 +8526,22 @@ namespace Legion {
         if (it->first->get_refinement_node() != refinement_node)
           continue;
         it.merge(refinement_mask);
-        refinement_mask.clear();
-        break;
+        pending.insert(it->first, refinement_mask);
+        return;
       }
-      if (!!refinement_mask)
-      {
 #ifdef DEBUG_LEGION_COLLECTIVES
-        RefinementOp *refinement_op = context->get_refinement_op(op, 
-                                                    refinement_node); 
+      RefinementOp *refinement_op = context->get_refinement_op(op,
+                                                  refinement_node);
 #else
-        RefinementOp *refinement_op = context->get_refinement_op();
+      RefinementOp *refinement_op = context->get_refinement_op();
 #endif
-        refinement_op->initialize(op, req_index, privilege, 
-                                  refinement_node, parent_req_index);
-        // Start the dependence analysis for this refinement now
-        // We'll finish the dependence analysis in the destructor
-        refinement_op->begin_dependence_analysis();
-        pending_refinements.insert(refinement_op, refinement_mask);
-        pending.insert(refinement_op, refinement_mask);
-      }
+      refinement_op->initialize(op, req_index, privilege,
+                                refinement_node, parent_req_index);
+      // Start the dependence analysis for this refinement now
+      // We'll finish the dependence analysis in the destructor
+      refinement_op->begin_dependence_analysis();
+      pending_refinements.insert(refinement_op, refinement_mask);
+      pending.insert(refinement_op, refinement_mask);
     }
 
     //--------------------------------------------------------------------------

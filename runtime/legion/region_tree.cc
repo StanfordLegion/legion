@@ -16495,6 +16495,13 @@ namespace Legion {
           state.record_refinement_dependences(ctx, refinement_user, it->second,
               no_projection_info, next_child, privilege_root, logical_analysis);
         }
+        // A bit of a hairy case: if the user is not read-write and we have
+        // refinements below then we need to promote the state of the child
+        // sub-tree up to exclusive so that later operations will know that
+        // they need to traverse the sub-tree and find the dependence on the
+        // refinement operation
+        if ((next_child != NULL) && !IS_WRITE(user.usage))
+          state.promote_next_child(next_child, refinements.get_valid_mask());
       }
 #if 0
       // Check to see if we have any unversioned fields we need to initialize

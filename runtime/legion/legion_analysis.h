@@ -1648,6 +1648,7 @@ namespace Legion {
                                          RegionTreeNode *previous_child,
                                          LogicalRegion privilege_root,
                                          LogicalAnalysis &logical_analysis);
+      void promote_next_child(RegionTreeNode *child, FieldMask mask);
 #if 0
       void initialize_unrefined_fields(const FieldMask &mask, 
           const unsigned index, LogicalAnalysis &analysis);
@@ -1886,7 +1887,7 @@ namespace Legion {
                                      unsigned req_index,
                                      unsigned parent_req_index,
                                      RegionTreeNode *refinement_node,
-                                     FieldMask refinement_mask,
+                                     const FieldMask &refinement_mask,
                                      FieldMaskSet<RefinementOp> &refinements);
     public:
       // Record a prior operation that we need to depend on with a 
