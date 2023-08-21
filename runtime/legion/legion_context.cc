@@ -3729,7 +3729,7 @@ namespace Legion {
           if (it->operation_index >= return_index)
             continue;
           dependences[it->operation] = it->operation->get_generation();
-          previous_events.insert(it->operation->get_completion_event());
+          it->operation->find_completion_effects(previous_events);
         }
       }
       // Do not check the current execution fence as it may have come after us
@@ -8300,7 +8300,7 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
-        (*it)->complete_operation();
+        (*it)->complete_operation(RtEvent::NO_RT_EVENT, false/*first invoke*/);
       return (next == NULL);
     }
 
@@ -8770,8 +8770,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         else
         {
-          const ApEvent child_complete = op->get_completion_event();
-          cummulative_child_completion_events.push_back(child_complete);
+          op->find_completion_effects(cummulative_child_completion_events);
           // Make sure this vector doesn't grow too large for long-running tasks
           constexpr size_t MAX_SIZE = 32;
           if (cummulative_child_completion_events.size() == MAX_SIZE)
@@ -9284,7 +9283,7 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
-      previous_completion_events.insert(op->get_completion_event());
+      op->find_completion_effects(previous_completion_events);
       // Periodically merge these to keep this data structure from exploding
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
@@ -9399,10 +9398,7 @@ namespace Legion {
             continue;
           if (it->stage == COMMITTED_STAGE)
             continue;
-          if (it->stage == COMPLETED_STAGE)
-            it->operation->find_completion_effects(previous_events);
-          else
-            previous_events.insert(it->operation->get_completion_event());
+          it->operation->find_completion_effects(previous_events);
         }
         // We can update the current execution fence index since it only
         // needs to be referred to here as the previous "upward" facing fence
@@ -9426,12 +9422,7 @@ namespace Legion {
             previous_operations.emplace_back(
                 std::make_pair(it->operation, it->operation->get_generation()));
           if (current_execution_fence_index <= it->operation_index)
-          {
-            if (it->stage == COMPLETED_STAGE)
-              it->operation->find_completion_effects(previous_events);
-            else
-              previous_events.insert(it->operation->get_completion_event());
-          }
+            it->operation->find_completion_effects(previous_events);
         }
         // We can update the current mapping and execution fence indexes since
         // they only need to be referred to here as the previous "upward" 

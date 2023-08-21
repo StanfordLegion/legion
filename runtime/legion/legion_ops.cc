@@ -1159,13 +1159,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
-        outstanding_mapping_references(0), activated(false), hardened(false), 
-        parent_ctx(NULL), mapping_tracker(NULL), commit_tracker(NULL),
-        provenance(NULL)
+        outstanding_mapping_references(0), hardened(false), parent_ctx(NULL),
+        mapping_tracker(NULL), commit_tracker(NULL), provenance(NULL)
     //--------------------------------------------------------------------------
     {
       if (!runtime->resilient_mode)
         commit_event = RtUserEvent::NO_RT_USER_EVENT;
+#ifdef DEBUG_LEGION
+      activated = false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1187,12 +1189,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!activated);
+      activated = true;
 #endif
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
       context_index = 0;
       outstanding_mapping_references = 0;
-      activated = true;
       prepipelined = false;
       mapped = false;
       executed = false;
@@ -1229,8 +1231,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!freeop);
       assert(activated);
-#endif
       activated = false;
+#endif
       // Generation is bumped when we committed
       incoming.clear();
       outgoing.clear();
@@ -2050,11 +2052,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_operation(RtEvent wait_on /*= Event::NO_EVENT*/)
+    void Operation::complete_operation(RtEvent wait_on, bool first_invocation)
     //--------------------------------------------------------------------------
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
+        if (first_invocation)
         {
           AutoLock o_lock(op_lock);
           finalize_completion();
@@ -2075,12 +2078,10 @@ namespace Legion {
         assert(mapped);
         assert(executed);
         assert(resolved);
-        // This checks for double calls to complete_operation since we
-        // now set complete=true in the finalize_completion method which
-        // might have been called earlier before this method was deferred
-        assert(trigger_commit_invoked);
+        // Shouldn't have duplicate first invocations here
+        assert(!completed || !first_invocation);
 #endif
-        if (!completed)
+        if (first_invocation)
           finalize_completion();
         // Now that we have done the completion stage, we can 
         // mark trigger commit to false which will open all the
@@ -2190,8 +2191,46 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      if (!completion_effects.empty())
-        effects.insert(completion_effects.begin(), completion_effects.end());
+      // Check to see if we completed yet
+      if (completed)
+      {
+        // Just dump the current completion effects into the effects as we
+        // know that is all there ever will be
+        if (!completion_effects.empty())
+          effects.insert(completion_effects.begin(), completion_effects.end());
+      }
+      else
+      {
+        // We haven't actually seen all the completion effects yet so we
+        // need to record the summary event for them
+        if (!completion_event.exists())
+          completion_event = Runtime::create_ap_user_event(NULL);
+        effects.insert(completion_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::find_completion_effects(std::vector<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      // Check to see if we completed yet
+      if (completed)
+      {
+        // Just dump the current completion effects into the effects as we
+        // know that is all there ever will be
+        if (!completion_effects.empty())
+          effects.insert(effects.end(),
+              completion_effects.begin(), completion_effects.end());
+      }
+      else
+      {
+        // We haven't actually seen all the completion effects yet so we
+        // need to record the summary event for them
+        if (!completion_event.exists())
+          completion_event = Runtime::create_ap_user_event(NULL);
+        effects.push_back(completion_event);
+      }
     }
 
     //--------------------------------------------------------------------------

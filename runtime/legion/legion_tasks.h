@@ -492,6 +492,7 @@ namespace Legion {
       // From Memoizable
       virtual ApEvent replay_mapping(void);
       virtual void find_completion_effects(std::set<ApEvent> &effects);
+      virtual void find_completion_effects(std::vector<ApEvent> &effects);
     public:
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);

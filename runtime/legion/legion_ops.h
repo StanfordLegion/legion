@@ -573,6 +573,7 @@ namespace Legion {
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       // Allow the parent context to sample any outstanding effects 
       virtual void find_completion_effects(std::set<ApEvent> &effects);
+      virtual void find_completion_effects(std::vector<ApEvent> &effects);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -594,7 +595,9 @@ namespace Legion {
       void resolve_speculation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
-      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      // You should probably never set first_invocation yourself
+      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT,
+                              bool first_invocation = true);
       // Indicate that we are committing this operation
       void commit_operation(bool do_deactivate,
                             RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -747,8 +750,10 @@ namespace Legion {
       // For each of our regions, a map of operations to the regions
       // which we can verify for each operation
       std::map<Operation*,std::set<unsigned> > verify_regions;
+#ifdef DEBUG_LEGION
       // Whether this operation is active or not
       bool activated;
+#endif
       // Whether this operation has executed its prepipeline stage yet
       bool prepipelined;
       // Whether this operation has mapped, once it has mapped then
