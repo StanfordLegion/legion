@@ -1305,7 +1305,6 @@ namespace Realm {
   __op__(cuOccupancyMaxPotentialBlockSize);                                    \
   __op__(cuOccupancyMaxPotentialBlockSizeWithFlags);                           \
   __op__(cuEventSynchronize);                                                  \
-  __op__(cuStreamWaitValue32);                                                 \
   __op__(cuEventElapsedTime);                                                  \
   __op__(cuOccupancyMaxActiveBlocksPerMultiprocessor);                         \
   __op__(cuMemAddressReserve);                                                 \
