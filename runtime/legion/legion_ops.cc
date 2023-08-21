@@ -2252,9 +2252,20 @@ namespace Legion {
         // to ensuring that fence operations are working correctly in the
         // parent context. If not triggered, then defer this until it does.
         // Inner task completion also relies upon this to work correctly
-        if (!completion_event.has_triggered_faultignorant())
+        if (completion_event.exists() && 
+            !completion_event.has_triggered_faultignorant())
         {
           const RtEvent safe = Runtime::protect_event(completion_event);
+          if (safe.exists() && !safe.has_triggered())
+          {
+            parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);
+            return;
+          }
+        }
+        else if (!completion_effects.empty())
+        {
+          const RtEvent safe = 
+            Runtime::protect_merge_events(completion_effects);
           if (safe.exists() && !safe.has_triggered())
           {
             parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);
