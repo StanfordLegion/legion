@@ -1033,7 +1033,7 @@ namespace Legion {
         ready_event.wait();
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) ? 
+          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
@@ -1110,7 +1110,7 @@ namespace Legion {
         ready_event.wait();
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) ? 
+          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string); 
