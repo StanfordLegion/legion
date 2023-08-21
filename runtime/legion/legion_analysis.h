@@ -1880,9 +1880,9 @@ namespace Legion {
           PartitionNode *partition, const FieldMask &refinement_mask,
           LogicalRegion privilege_root);
       bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
-#endif
       void record_unrefined_fields(RegionNode *node, unsigned index,
                                    const FieldMask &unrefined);
+#endif
       void record_pending_refinement(LogicalRegion privilege,
                                      unsigned req_index,
                                      unsigned parent_req_index,
