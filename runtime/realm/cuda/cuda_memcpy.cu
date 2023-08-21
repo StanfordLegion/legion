@@ -33,23 +33,17 @@
   {                                                                                      \
   }
 
-#define FILL_LARGE_TEMPLATE_INST(type, dim, offt, name)                                  \
-  extern "C" __global__ void fill_affine_large##name(                                    \
-      Realm::Cuda::AffineLargeFillInfo<dim, offt> info)                                  \
-  {                                                                                      \
-  }
+#define FILL_LARGE_TEMPLATE_INST(type, dim, offt, name) \
+  extern "C" __global__ void fill_affine_large##name(   \
+      Realm::Cuda::AffineLargeFillInfo<dim, offt> info) {}
 
-#define MEMCPY_TRANSPOSE_TEMPLATE_INST(type, offt, name)                                 \
-  extern "C" __global__ __launch_bounds__(1024) void run_memcpy_transpose##name(         \
-      Realm::Cuda::MemcpyTransposeInfo<offt> info)                                       \
-  {                                                                                      \
-  }
+#define MEMCPY_TRANSPOSE_TEMPLATE_INST(type, offt, name)                     \
+  extern "C" __global__ __launch_bounds__(1024) void memcpy_transpose##name( \
+      Realm::Cuda::MemcpyTransposeInfo<offt> info) {}
 
-#define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                   \
-  extern "C" __global__ __launch_bounds__(256, 8) void                         \
-      run_memcpy_indirect##name(Realm::Cuda::MemcpyUnstructuredInfo<dim> info) \
-  {                                                                            \
-  }
+#define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                  \
+  extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name( \
+      Realm::Cuda::MemcpyUnstructuredInfo<dim> info) {}
 
 #define INST_TEMPLATES(type, sz, dim, off)                                     \
   MEMCPY_TEMPLATE_INST(type, dim, off, dim##D_##sz)                            \
