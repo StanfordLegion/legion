@@ -3313,7 +3313,7 @@ namespace Realm {
         const unsigned int bit_sz = 8U << log_bit_sz;
         GPUFuncInfo func_info;
         char name[30];
-        std::snprintf(name, sizeof(name), "run_memcpy_transpose%u", bit_sz);
+        std::snprintf(name, sizeof(name), "memcpy_transpose%u", bit_sz);
         CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
                                                         device_module, name));
 
