@@ -3361,7 +3361,7 @@ namespace Realm {
               func_info.func, 0, 0, 0));
           batch_fill_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "run_memcpy_indirect%uD_%u", d,
+          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d,
                         bit_sz);
 
           CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
