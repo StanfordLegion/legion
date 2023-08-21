@@ -17,6 +17,7 @@
  * similar to how bin2c works.  The following variables are required:
  * VAR_NAME - name of the exposed variable to use in other source files containing the data
  * FILE_CONTENTS_HEX - hexadecimal character encoding of the binary file to be embedded
+ * DEFINES_HEADER - header that contains all the realm defines
  */
 
 #include "@DEFINES_HEADER@"
