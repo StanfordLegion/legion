@@ -127,6 +127,13 @@ namespace Realm {
     };
 
     static const size_t CUDA_MAX_DIM = REALM_MAX_DIM < 3 ? REALM_MAX_DIM : 3;
+    // The maximum value of log2(type_bytes) that cuda kernels handle.
+    // log2(1 byte)   --> 0
+    // log2(2 bytes)  --> 1
+    // log2(4 bytes)  --> 2
+    // log2(8 bytes)  --> 3
+    // log2(16 bytes) --> 4
+    static const size_t CUDA_MAX_LOG2_BYTES = 5;
 
   } // namespace Cuda
 } // namespace Realm
