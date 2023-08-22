@@ -3309,7 +3309,8 @@ namespace Realm {
 
       CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleLoadDataEx)(
           &device_module, realm_fatbin, 0, NULL, NULL));
-      for(unsigned int log_bit_sz = 0; log_bit_sz < 5; log_bit_sz++) {
+      for (unsigned int log_bit_sz = 0; log_bit_sz < CUDA_MAX_LOG2_BYTES;
+           log_bit_sz++) {
         const unsigned int bit_sz = 8U << log_bit_sz;
         GPUFuncInfo func_info;
         char name[30];
