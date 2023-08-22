@@ -1518,9 +1518,9 @@ REALM_CUDA_SRC += $(LG_RT_DIR)/realm/cuda/cuda_memcpy.cu
 $(REALM_CUDA_SRC) : $(REALM_DEFINES_HEADER)
 
 $(REALM_FATBIN): $(REALM_CUDA_SRC)
-	$(NVCC) $^ -o realm.fatbin --fatbin $(NVCC_FLAGS) $(INC_FLAGS)
+	$(NVCC) $^ -o $(REALM_FATBIN) --fatbin $(NVCC_FLAGS) $(INC_FLAGS)
 
-$(REALM_FATBIN_SRC): realm.fatbin
+$(REALM_FATBIN_SRC): $(REALM_FATBIN)
 	echo '#include "realm_defines.h"' > $@
 	echo '#include <cstdlib>' >> $@
 	echo 'extern const unsigned char realm_fatbin[];' >> $@
