@@ -30384,6 +30384,8 @@ namespace Legion {
 #endif
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = new TopLevelContext(this);
+      // Save the current context if there is one and restore it later
+      TaskContext *previous_implicit = implicit_context;
       // Save the context in the implicit context
       implicit_context = top_context;
       implicit_runtime = this;
@@ -30391,9 +30393,6 @@ namespace Legion {
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Set the executing processor
       top_context->set_executing_processor(target);
-      // Save the current context if there is one and restore it later
-      TaskContext *previous_implicit = implicit_context;
-      implicit_context = top_context;
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       AutoProvenance provenance(launcher.provenance);
