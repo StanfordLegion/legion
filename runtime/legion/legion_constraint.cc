@@ -1742,7 +1742,7 @@ namespace Legion {
         {
           if (delta.lo()[idx] < 0)
           {
-            if (other.delta.lo()[idx] >= 0)
+            if (other.delta.lo()[idx] > 0)
               return false;
           }
           else if (other.delta.lo()[idx] < 0)
@@ -1751,7 +1751,7 @@ namespace Legion {
             return false;
           if (delta.hi()[idx] < 0)
           {
-            if (other.delta.hi()[idx] >= 0)
+            if (other.delta.hi()[idx] > 0)
               return false;
           }
           else if (other.delta.hi()[idx] < 0)
@@ -1775,22 +1775,30 @@ namespace Legion {
         {
           if (delta.lo()[idx] < 0)
           {
-            if (other.delta.lo()[idx] >= 0)
+            if (other.delta.lo()[idx] > 0)
               return true;
           }
-          else if (other.delta.lo()[idx] < 0)
-            return true;
-          else if (delta.lo()[idx] < other.delta.lo()[idx])
-            return true;
+          else if (delta.lo()[idx] > 0)
+          {
+            if (other.delta.lo()[idx] < 0)
+              return true;
+            else if ((other.delta.lo()[idx] > 0) &&
+                (delta.lo()[idx] < other.delta.lo()[idx]))
+              return true;
+          }
           if (delta.hi()[idx] < 0)
           {
-            if (other.delta.hi()[idx] >= 0)
+            if (other.delta.hi()[idx] > 0)
               return true;
           }
-          else if (other.delta.hi()[idx] < 0)
-            return true;
-          else if (delta.hi()[idx] < other.delta.hi()[idx])
-            return true;
+          else if (delta.hi()[idx] > 0)
+          {
+            if (other.delta.hi()[idx] < 0)
+              return true;
+            else if ((other.delta.hi()[idx] > 0) &&
+                (delta.hi()[idx] < other.delta.hi()[idx]))
+              return true;
+          }
         }
       }
       return false;
