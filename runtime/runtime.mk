@@ -1520,7 +1520,7 @@ $(REALM_FATBIN): $(REALM_CUDA_SRC)
 	$(NVCC) $^ -o $(REALM_FATBIN) --fatbin $(NVCC_FLAGS) $(INC_FLAGS)
 
 $(REALM_FATBIN_SRC): $(REALM_FATBIN)
-	echo '#include "realm_defines.h"' > $@
+	echo '#include "realm_config.h"' > $@
 	echo '#include <cstdlib>' >> $@
 	echo 'extern const unsigned char realm_fatbin[];' >> $@
 	echo 'extern const size_t realm_fatbin_len;' >> $@
