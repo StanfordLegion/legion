@@ -3429,10 +3429,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::find_completion_effects(std::set<ApEvent> &effects)
+    void SingleTask::find_completion_effects(std::set<ApEvent> &effects, 
+                                             bool tracing)
     //--------------------------------------------------------------------------
     {
-      Operation::find_completion_effects(effects);
+      Operation::find_completion_effects(effects, tracing);
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
       // If we're completed then we know we have all the completion effects
       // that we're ever going to have so we can just report them back
@@ -3442,10 +3443,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::find_completion_effects(std::vector<ApEvent> &effects)
+    void SingleTask::find_completion_effects(std::vector<ApEvent> &effects,
+                                             bool tracing)
     //--------------------------------------------------------------------------
     {
-      Operation::find_completion_effects(effects);
+      Operation::find_completion_effects(effects, tracing);
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
       // If we're completed then we know we have all the completion effects
       // that we're ever going to have so we can just report them back

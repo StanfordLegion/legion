@@ -572,8 +572,10 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       // Allow the parent context to sample any outstanding effects 
-      virtual void find_completion_effects(std::set<ApEvent> &effects);
-      virtual void find_completion_effects(std::vector<ApEvent> &effects);
+      virtual void find_completion_effects(std::set<ApEvent> &effects,
+                                           bool tracing = false);
+      virtual void find_completion_effects(std::vector<ApEvent> &effects,
+                                           bool tracing = false);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,

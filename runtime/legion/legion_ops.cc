@@ -2187,12 +2187,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::find_completion_effects(std::set<ApEvent> &effects)
+    void Operation::find_completion_effects(std::set<ApEvent> &effects, 
+                                            bool tracing)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
       // Check to see if we completed yet
-      if (completed)
+      if (tracing || completed)
       {
         // Just dump the current completion effects into the effects as we
         // know that is all there ever will be
@@ -2210,12 +2211,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::find_completion_effects(std::vector<ApEvent> &effects)
+    void Operation::find_completion_effects(std::vector<ApEvent> &effects,
+                                            bool tracing)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
       // Check to see if we completed yet
-      if (completed)
+      if (tracing || completed)
       {
         // Just dump the current completion effects into the effects as we
         // know that is all there ever will be
@@ -3924,7 +3926,7 @@ namespace Legion {
         return args.done;
       }
       std::set<ApEvent> effects;
-      this->find_completion_effects(effects);
+      this->find_completion_effects(effects, true/*tracing*/);
       ApEvent postcondition;
       if (!effects.empty())
         postcondition = Runtime::merge_events(&trace_info, effects);
