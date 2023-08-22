@@ -14511,6 +14511,10 @@ namespace Legion {
                               PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND,
                                          NULL/*redop*/,
                                          collective_mapping);
+      // Remove the reference that was returned to us from either finding
+      // or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -14550,7 +14554,10 @@ namespace Legion {
             candidates.begin(); it != candidates.end(); it++)
       {
         if ((*it)->match_layout(constraints, num_dims))
+        {
+          (*it)->add_reference();
           return (*it);
+        }
       }
       return NULL;
     }
@@ -14576,6 +14583,7 @@ namespace Legion {
           continue;
         if ((*it)->allocated_fields != mask)
           continue;
+        (*it)->add_reference();
         return (*it);
       }
       assert(false);
@@ -14596,6 +14604,7 @@ namespace Legion {
       // Make the new field description and then register it
       LayoutDescription *result = new LayoutDescription(this, layout_mask, 
         total_dims, constraints, mask_index_map, fids, field_sizes, serdez);
+      result->add_reference();
       return register_layout_description(result);
     }
 
