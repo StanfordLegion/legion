@@ -5178,6 +5178,7 @@ namespace Legion {
         delete launch_space;
       if ((future_handles != NULL) && future_handles->remove_reference())
         delete future_handles;
+      redop_initial_value = Future();
       // Remove our reference to the future map
       future_map = FutureMap();
       if (reduction_instance != NULL)
@@ -9062,6 +9063,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
+      redop_initial_value = launcher.initial_value;
       deterministic_redop = deterministic;
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
       if (!reduction_op->identity)
@@ -9722,6 +9724,15 @@ namespace Legion {
       }
       else
         serdez_redop_targets.swap(target_mems);
+
+      if (!redop_initial_value.is_empty() &&
+          parent_ctx->get_task()->get_shard_id() == 0)
+      {
+        // Initialize the future to the user-specified initial value
+        FutureImpl *impl = redop_initial_value.impl;
+        FutureInstance *inst = impl->get_canonical_instance();
+        fold_reduction_future(inst, reduction_effects, deterministic_redop);
+      }
     }
 
     //--------------------------------------------------------------------------

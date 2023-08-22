@@ -548,8 +548,11 @@ namespace Realm {
 	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
 	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
 	layout_piece = piece_list.find_piece(cur_point);
-        if(REALM_UNLIKELY(layout_piece == 0)) {
-          log_dma.fatal() << "no piece found for " << cur_point << " in instance " << inst_impl->me << " (list: " << piece_list << ")";
+        log_dma.debug() << "Find piece found for " << cur_point
+                        << " in instance " << inst_impl->me
+                        << " (list: " << piece_list << ")";
+        if (REALM_UNLIKELY(layout_piece == 0)) {
+          log_dma.fatal() << "no piece found for " << cur_point;
           abort();
         }
         if(layout_piece->layout_type != PieceLayoutTypes::AffineLayoutType) {
@@ -613,7 +616,11 @@ namespace Realm {
 	  break;
 	}
       }
-      //log_dma.print() << "step: cr=" << cur_rect << " bounds=" << layout_piece->bounds << " tgt=" << target_subrect << " next=" << cur_point << " (" << have_rect << ")";
+      log_dma.debug() << "step: cur_rect=" << cur_rect
+                      << " layout_bounds=" << layout_piece->bounds
+                      << " target_subrect=" << target_subrect
+                      << " next_point=" << cur_point
+                      << " (have_rect=" << have_rect << ")";
 #ifdef DEBUG_REALM
       assert(layout_piece->bounds.contains(target_subrect));
 #endif
@@ -670,7 +677,10 @@ namespace Realm {
 
 	  addr_data[cur_dim * 2] = total_count;
 	  addr_data[cur_dim * 2 + 1] = stride;
-	  total_bytes *= total_count;
+          log_dma.debug() << "Add addr data dim=" << cur_dim
+                          << " total_count=" << total_count
+                          << " stride=" << stride;
+          total_bytes *= total_count;
 	  cur_dim++;
 	}
 
@@ -678,6 +688,8 @@ namespace Realm {
 	//  record
 	addr_data[0] = (bytes << 4) + cur_dim;
 	addrlist.commit_nd_entry(cur_dim, total_bytes);
+        log_dma.debug() << "Finalize addr data dim=" << cur_dim
+                        << " total_bytes" << total_bytes;
       } else {
 	assert(0 && "no support for non-affine pieces yet");
       }
@@ -1104,6 +1116,7 @@ namespace Realm {
 
 	point_pos = 0;
 	num_points = amt / sizeof(Point<N,T>);
+        log_dma.debug() << "indirect-iterator read num_points=" << num_points;
 	assert(amt == (num_points * sizeof(Point<N,T>)));
 
 	//log_dma.print() << "got points: " << points[0] << "(+" << (num_points - 1) << ")";
@@ -1124,7 +1137,8 @@ namespace Realm {
 	    // we've already chosen which dimension we can merge along
 	    for(int i = 0; i < N; i++)
 	      if(p[i] != (r.hi[i] + ((i == merge_dim) ? 1 : 0))) {
-		// merge fails - return what we have
+                log_dma.debug() << "indirect-iterator merge fails next_rect=" << r;
+                // merge fails - return what we have
 		return true;
 	      }
 	    // if we fall through, merging is ok
@@ -1151,6 +1165,7 @@ namespace Realm {
 	      r.hi = p;
 	      point_pos++;
 	    } else {
+              log_dma.debug() << "indirect-iterator next_rect=" << r;
 	      return true;
 	    }
 	  }
@@ -2760,9 +2775,11 @@ namespace Realm {
       if(best_channel_for_mem_pair(channel_copy_info, serdez_id, serdez_id,
                                    redop_id, total_bytes, src_frags, dst_frags,
                                    best_cost, channel, kind)) {
-        log_xpath.info() << "direct: " << src_mem << "->" << dst_mem
-                         << " cost=" << best_cost;
-	info.path.assign(1, src_mem);
+        log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
+                         << ")->" << dst_mem << " (" << dst_mem.kind()
+                         << ") cost=" << best_cost
+                         << " channel_kind=" << channel->kind;
+        info.path.assign(1, src_mem);
 	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
 	  info.path.push_back(dst_mem);
 	  info.xd_channels.assign(1, channel);
@@ -2817,7 +2834,8 @@ namespace Realm {
                                    total_bytes, src_frags, 0 /*no dst_frags*/,
                                    cost, channel, kind)) {
         log_xpath.info() << "first: " << src_mem << "->" << partials[i].ib_mem
-                         << " cost=" << cost;
+                         << "(" << partials[i].ib_mem.kind()
+                         << ") cost=" << cost;
         // ignore anything that's already worse than the direct path
         if((best_cost == 0) || (cost < best_cost)) {
           active_ibs.insert(i);
@@ -2852,8 +2870,13 @@ namespace Realm {
                                      total_bytes, 0, 0, // no fragmentation also
                                      cost, channel, kind)) {
           size_t total_cost = partials[src_idx].cost + cost;
-          log_xpath.info() << "inter: " << partials[src_idx].ib_mem << "->" << partials[dst_idx].ib_mem
-                           << " cost=" << partials[src_idx].cost << "+" << cost << " = " << total_cost << " <? " << partials[dst_idx].cost;
+          log_xpath.info() << "inter: " << partials[src_idx].ib_mem << "("
+                           << partials[src_idx].ib_mem.kind() << ")->"
+                           << partials[dst_idx].ib_mem << "("
+                           << partials[dst_idx].ib_mem.kind() << ")"
+                           << " cost=" << partials[src_idx].cost << "+" << cost
+                           << " = " << total_cost << " <? "
+                           << partials[dst_idx].cost;
           // also prune any path that already exceeds the cost of the direct path
           if(((partials[dst_idx].cost == 0) ||
               (total_cost < partials[dst_idx].cost)) &&
@@ -2885,8 +2908,10 @@ namespace Realm {
                                    total_bytes, 0 /*no src_frags*/, dst_frags,
                                    cost, channel, kind)) {
         size_t total_cost = partials[i].cost + cost;
-        log_xpath.info() << "last: " << partials[i].ib_mem << "->" << dst_mem
-                         << " cost=" << partials[i].cost << "+" << cost << " = " << total_cost << " <? " << best_cost;
+        log_xpath.info() << "last: " << partials[i].ib_mem << "("
+                         << partials[i].ib_mem.kind() << ")->" << dst_mem
+                         << " cost=" << partials[i].cost << "+" << cost << " = "
+                         << total_cost << " <? " << best_cost;
         if((best_cost == 0) || (total_cost < best_cost)) {
           best_cost = total_cost;
           info.path.swap(partials[i].path);
@@ -2968,7 +2993,7 @@ namespace Realm {
 
     // ... but we need three helpers that will be defined in the typed versions
     virtual size_t num_spaces() const = 0;
-
+    virtual size_t domain_size() const = 0;
     virtual size_t address_size() const = 0;
 
     virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const = 0;
@@ -3092,12 +3117,11 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(insts[i].get_location(),
-				     dst_mem,
-				     serdez_id,
-                                     0 /*redop_id*/,
-				     path_infos[idx]);
-	assert(ok);
+        std::vector<size_t> src_frags{domain_size()}, dst_frags{1};
+        bool ok = find_fastest_path(ChannelCopyInfo{insts[i].get_location(), dst_mem}, serdez_id,
+                                    0, domain_size() * bytes_per_element,
+                                    &src_frags, &dst_frags, path_infos[idx]);
+        assert(ok);
       }
     }
 
@@ -3390,12 +3414,18 @@ namespace Realm {
       if(idx >= path_infos.size()) {
 	// new path to compute
 	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(src_mem,
-				     insts[i].get_location(),
-				     serdez_id,
-                                     0 /*redop_id*/,
-				     path_infos[idx]);
-	assert(ok);
+        // TODO(apryakhin@): Technically this is not a correct number
+        // of destination fragements that we get during scatter.
+        // domain_size() returns just a maximum number of addresses
+        // that we need to scatter and hence this value would be the
+        // worst case. The actual number of consecutive rectangles (e.g
+        // fragments) to handle can be less. Consider finding a
+        // better way to handle this (same for gather op).
+        std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
+        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, insts[i].get_location()}, serdez_id,
+                                    0, domain_size() * bytes_per_element,
+                                    &src_frags, &dst_frags, path_infos[idx]);
+        assert(ok);
       }
     }
 
@@ -3703,7 +3733,7 @@ namespace Realm {
 
   protected:
     virtual size_t num_spaces() const;
-
+    virtual size_t domain_size() const;
     virtual size_t address_size() const;
 
     virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const;
@@ -3749,6 +3779,11 @@ namespace Realm {
   size_t IndirectionInfoTyped<N,T,N2,T2>::num_spaces() const
   {
     return spaces.size();
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  size_t IndirectionInfoTyped<N, T, N2, T2>::domain_size() const {
+    return domain.volume();
   }
 
   template <int N, typename T, int N2, typename T2>

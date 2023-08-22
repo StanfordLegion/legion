@@ -1843,6 +1843,9 @@ namespace Legion {
       bool                               elide_future_return;
     public:
       bool                               silence_warnings;
+    public:
+      // Initial value for reduction
+      Future                             initial_value;
     };
 
     /**

@@ -7080,7 +7080,7 @@ namespace Legion {
         FutureMap result = execute_must_epoch(epoch_launcher);
         return reduce_future_map(result, redop, deterministic,
                                  launcher.map_id, launcher.tag, provenance,
-                                 Future());
+                                 launcher.initial_value);
       }
       AutoRuntimeCall call(this);
       if (launcher.launch_domain.exists() &&
@@ -7089,6 +7089,11 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
+
+        if (!launcher.initial_value.is_empty())
+          return launcher.initial_value;
+
+        // Else return the reduction operation's identity value
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(), provenance);
@@ -13820,6 +13825,8 @@ namespace Legion {
       hash_argument(hasher, safe_level, launcher.map_arg, "map_arg");
       hash_future(hasher, safe_level, launcher.predicate_false_future,
                   "predicate_false_future");
+      hash_future(hasher, safe_level, launcher.initial_value,
+                  "initial_value");
       hash_argument(hasher, safe_level, launcher.predicate_false_result,
                     "predicate_false_result");
       hash_static_dependences(hasher, launcher.static_dependences);
@@ -18695,7 +18702,7 @@ namespace Legion {
         // Reduce the future map down to a future
         return reduce_future_map(result, redop, deterministic,
                                  launcher.map_id, launcher.tag, provenance,
-                                 Future());
+                                 launcher.initial_value);
       }
       AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
@@ -18717,6 +18724,9 @@ namespace Legion {
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
+        if (!launcher.initial_value.is_empty())
+          return launcher.initial_value;
+
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
@@ -18771,6 +18781,10 @@ namespace Legion {
                               i > 0, provenance);
         hasher.hash(REPLICATE_REDUCE_FUTURE_MAP, __func__);
         hash_future_map(hasher, future_map, "future_map");
+        hash_future(hasher,
+                    runtime->safe_control_replication,
+                    initial_value,
+                    "initial_value");
         hasher.hash(redop, "redop");
         hasher.hash(deterministic, "deterministic");
         if (hasher.verify(__func__))

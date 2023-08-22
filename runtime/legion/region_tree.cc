@@ -7973,6 +7973,24 @@ namespace Legion {
       if (is_owner())
       {
         AutoLock n_lock(node_lock);
+        // First check that we haven't recorded any children that don't have
+        // any generated colors as it is illegal to generate colors if the
+        // user has determined that they are specifying all the colors
+        if (remote_colors.find(INVALID_COLOR) == remote_colors.end())
+        {
+          if (!color_map.empty() || !remote_colors.empty() || 
+              (next_uncollected_color > 0))
+            REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+                "Illegal request for Legion to generated a color for index "
+                "space %d after a child was already registered with an "
+                "explicit color. Colors of partitions must either be "
+                "completely specified by the user or completely generated "
+                "by the runtime. Mixing of allocation modes is not allowed.",
+                handle.id)
+          // If we made it here then there are no other children registered
+          // so we record an empty entry to mark that we're generating colors
+          remote_colors[INVALID_COLOR] = IndexPartition::NO_PART;
+        }
         // If the user made a suggestion see if it was right
         if (suggestion != INVALID_COLOR)
         {
@@ -8154,6 +8172,16 @@ namespace Legion {
       assert((color_map.find(child->color) == color_map.end()) ||
              (color_map[child->color] == NULL));
 #endif
+      if (is_owner() && 
+          (remote_colors.find(INVALID_COLOR) != remote_colors.end()) &&
+          (color_map.find(child->color) == color_map.end()))
+        REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+              "Illegal request for Legion to generated a color for index "
+              "space %d after a child was already registered with an "
+              "explicit color. Colors of partitions must either be "
+              "completely specified by the user or completely generated "
+              "by the runtime. Mixing of allocation modes is not allowed.",
+              handle.id)
       color_map[child->color] = child;
       if (!remote_colors.empty())
         remote_colors.erase(child->color);
@@ -8252,6 +8280,15 @@ namespace Legion {
       // should only happen on the owner node
       assert(get_owner_space() == context->runtime->address_space);
 #endif
+      if ((remote_colors.find(INVALID_COLOR) != remote_colors.end()) &&
+          (color_map.find(part_color) == color_map.end()))
+        REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+              "Illegal request for Legion to generated a color for index "
+              "space %d after a child was already registered with an "
+              "explicit color. Colors of partitions must either be "
+              "completely specified by the user or completely generated "
+              "by the runtime. Mixing of allocation modes is not allowed.",
+              handle.id)
       remote_colors[part_color] = pid;
     }
 
@@ -14543,6 +14580,10 @@ namespace Legion {
                               PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND,
                                          NULL/*redop*/,
                                          collective_mapping);
+      // Remove the reference that was returned to us from either finding
+      // or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -14582,7 +14623,10 @@ namespace Legion {
             candidates.begin(); it != candidates.end(); it++)
       {
         if ((*it)->match_layout(constraints, num_dims))
+        {
+          (*it)->add_reference();
           return (*it);
+        }
       }
       return NULL;
     }
@@ -14608,6 +14652,7 @@ namespace Legion {
           continue;
         if ((*it)->allocated_fields != mask)
           continue;
+        (*it)->add_reference();
         return (*it);
       }
       assert(false);
@@ -14628,6 +14673,7 @@ namespace Legion {
       // Make the new field description and then register it
       LayoutDescription *result = new LayoutDescription(this, layout_mask, 
         total_dims, constraints, mask_index_map, fids, field_sizes, serdez);
+      result->add_reference();
       return register_layout_description(result);
     }
 
@@ -14649,13 +14695,16 @@ namespace Legion {
           {
             // Delete the layout we are trying to register
             // and return the matching one
-            delete layout;
+            if (layout->remove_reference())
+              delete layout;
+            (*it)->add_reference();
             return (*it);
           }
         }
       }
       // Otherwise we successfully registered it
       descs.push_back(layout);
+      // Add the reference here for our local data structure
       layout->add_reference();
       return layout;
     }

@@ -36,21 +36,12 @@ set +x # don't spew all the module goop to the console
 source env.sh
 set -x
 
-# download and build Terra
+# download Terra
 (
     pushd language
-    wget -nv https://github.com/terralang/llvm-build/releases/download/llvm-16.0.3/clang+llvm-16.0.3-x86_64-linux-gnu.tar.xz
-    tar xf clang+llvm-16.0.3-x86_64-linux-gnu.tar.xz
-    export CMAKE_PREFIX_PATH="$PWD/clang+llvm-16.0.3-x86_64-linux-gnu:$CMAKE_PREFIX_PATH"
-    git clone https://github.com/terralang/terra.git terra.build
-    ln -s terra.build terra
-    pushd terra.build/build
-    export CC=gcc
-    export CXX=g++
-    cmake -DCMAKE_INSTALL_PREFIX=$PWD/../release ..
-    make install -j${THREADS:-16}
-    popd
-    rm -rf clang+llvm-16.0.3-x86_64-linux-gnu*
+    wget -nv https://github.com/terralang/terra/releases/download/release-1.1.0/terra-Linux-x86_64-be89521.tar.xz
+    tar xf terra-Linux-x86_64-be89521.tar.xz
+    ln -s terra-Linux-x86_64-be89521 terra
     popd
 )
 
