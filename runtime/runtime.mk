@@ -1204,7 +1204,6 @@ INSTALL_HEADERS += legion.h \
 
 ifeq ($(strip $(USE_CUDA)),1)
 INSTALL_HEADERS += realm/cuda/cuda_redop.h \
-		   INSTALL_HEADERS += realm/cuda/cuda_memcpy.h \
                    realm/cuda/cuda_access.h
 endif
 ifeq ($(strip $(USE_HIP)),1)
