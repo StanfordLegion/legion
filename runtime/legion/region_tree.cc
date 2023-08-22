@@ -1621,7 +1621,11 @@ namespace Legion {
         FieldMask refinement_mask;
         // Only check for refinements if we're not a parent of a 
         // non-exlcuisve virtual mapping
-        if (!op->is_parent_nonexclusive_virtual_mapping(idx))
+        // We also disallow refinements for operations that are part of
+        // a must epoch launch because refinements are too hard to 
+        // implement correctly in that case
+        if (!op->is_parent_nonexclusive_virtual_mapping(idx) &&
+            (op->get_must_epoch_op() == NULL))
           refinement_mask = user_mask;
 #if 0
         FieldMask first_touch_refinement = user_mask;
