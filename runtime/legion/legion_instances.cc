@@ -2512,6 +2512,9 @@ namespace Legion {
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
+      // Remove the reference we got back on the layout
+      if (layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------
@@ -3502,6 +3505,9 @@ namespace Legion {
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
+      // Remove the reference we got back on the layout
+      if (layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------
@@ -3968,6 +3974,9 @@ namespace Legion {
         default:
           assert(false); // illegal specialized case
       }
+      // Remove the reference we got back from finding or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef LEGION_MALLOC_INSTANCES
       memory_manager->record_legion_instance(result, base_ptr); 
 #endif
@@ -4090,6 +4099,9 @@ namespace Legion {
         default:
           assert(false);
       }
+      // Remove the reference we got back from finding or creating the layout
+      if (layout->remove_reference())
+        delete layout;
       return result;
     }
 
