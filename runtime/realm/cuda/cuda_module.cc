@@ -2027,7 +2027,7 @@ namespace Realm {
       return NULL;
     }
 
-    bool GPU::can_access_peer(GPU *peer) const {
+    bool GPU::can_access_peer(const GPU *peer) const {
       return (peer != NULL) &&
              (info->peers.find(peer->info->device) != info->peers.end());
     }
