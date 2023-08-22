@@ -97,9 +97,24 @@ namespace Realm {
   #undef DEFINE_FNPTR
 #endif
 
-    // TODO(apryakin@): Consider moving to some helper file.
-    static size_t get_log_size(size_t value) {
-      return value & 1 ? 0 : value & 2 ? 1 : value & 4 ? 2 : value & 8 ? 3 : 4;
+    static unsigned ctz(uint64_t v) {
+#ifdef REALM_ON_WINDOWS
+      unsigned long index;
+#ifdef _WIN64
+      if (_BitScanForward64(&index, v)) return index;
+#else
+      unsigned v_lo = v;
+      unsigned v_hi = v >> 32;
+      if (_BitScanForward(&index, v_lo))
+        return index;
+      else if (_BitScanForward(&index, v_hi))
+        return index + 32;
+#endif
+      else
+        return 0;
+#else
+      return __builtin_ctzll(v);
+#endif
     }
 
 #define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
@@ -2084,7 +2099,7 @@ namespace Realm {
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
                                          size_t elem_size, size_t volume,
                                          GPUStream *stream) {
-      size_t log_elem_size = get_log_size(elem_size);
+      size_t log_elem_size = ctz(elem_size);
 
       assert((1ULL << log_elem_size) == elem_size);
       assert(dim <= REALM_MAX_DIM);
