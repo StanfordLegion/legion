@@ -18015,22 +18015,17 @@ namespace Legion {
           {
             if (filter_next)
             {
-              FieldMask still_open;
+              FieldMask dummy_open;
               next_child->close_logical_node(user, overlap, privilege_root,
-                                             path_node, analysis, still_open);
-              if (!!still_open)
-              {
-                overlap -= still_open;
-                open_below |= still_open;
-              }
+                                             path_node, analysis, dummy_open);
               finder.filter(overlap);
               if (!finder->second)
               {
                 children.erase(finder);
                 if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
                   assert(false); // should never delete the next child
-                children.tighten_valid_mask();
               }
+              children.tighten_valid_mask();
             }
             else
               open_below |= overlap;
