@@ -82,38 +82,63 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class ProcSetModuleConfig
+
+    ProcSetModuleConfig::ProcSetModuleConfig(void)
+      : ModuleConfig("procset")
+    {
+    }
+
+    void ProcSetModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_int("-ll:mp_threads", cfg_num_mp_threads)
+        .add_option_int("-ll:mp_nodes", cfg_num_mp_procs)
+        .add_option_int("-ll:mp_cpu", cfg_num_mp_cpus);
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+        log_procset.fatal() << "error reading ProcSet command line parameters";
+        assert(false);
+      }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class ProcSetModule
 
     ProcSetModule::ProcSetModule(void)
       : Module("procset")
-      , cfg_num_mp_threads(0)
-      , cfg_num_mp_procs(0)
-      , cfg_num_mp_cpus(0)
-      , cfg_stack_size(2 << 20)
+      , config(nullptr)
     {
     }
       
     ProcSetModule::~ProcSetModule(void)
-    {}
+    {
+      assert(config != nullptr);
+      delete config;
+    }
 
-    /*static*/ Module *ProcSetModule::create_module(RuntimeImpl *runtime,
-						 std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *ProcSetModule::create_module_config(RuntimeImpl *runtime)
+    {
+      ProcSetModuleConfig *config = new ProcSetModuleConfig();
+      return config;
+    }
+
+    /*static*/ Module *ProcSetModule::create_module(RuntimeImpl *runtime)
     {
       // create a module to fill in with stuff 
       ProcSetModule *m = new ProcSetModule;
 
-      // read command line parameters
-	  CommandLineParser cp;
+      ProcSetModuleConfig *config = dynamic_cast<ProcSetModuleConfig *>(runtime->get_module_config("procset"));
+      assert(config != NULL);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == NULL);
+      m->config = config;
 
-      cp.add_option_int("-ll:mp_threads", m->cfg_num_mp_threads)
-        .add_option_int("-ll:mp_nodes", m->cfg_num_mp_procs)
-        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus);
-
-      bool ok = cp.parse_command_line(cmdline);
-      if(!ok) {
-	log_procset.fatal() << "error reading ProcSet command line parameters";
-	assert(false);
-      }
       return m;
     }
 
@@ -138,25 +163,25 @@ namespace Realm {
     {
       Module::create_processors(runtime);
       // for simplicity don't allow more that one procset per node for now
-      if (cfg_num_mp_procs > (Network::max_node_id + 1)) {
+      if (config->cfg_num_mp_procs > (Network::max_node_id + 1)) {
 	    log_procset.fatal() << "error num_mp_procs > number of nodes";
 	    assert(false);
       }
-      if (cfg_num_mp_threads) {
+      if (config->cfg_num_mp_threads) {
         // if num_mp_procs is not set then assume one procset on every node
-        if (cfg_num_mp_procs == 0 || Network::my_node_id < cfg_num_mp_procs) { 
+        if (config->cfg_num_mp_procs == 0 || Network::my_node_id < config->cfg_num_mp_procs) { 
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalProcessorSet(p, runtime->core_reservation_set(),
-						    cfg_stack_size, cfg_num_mp_threads,
+						    config->cfg_stack_size, config->cfg_num_mp_threads,
 						    Config::force_kernel_threads);
           runtime->add_processor(pi);
         // if there are not procSets on all nodes and cfg_num_mp_cpus is set
         // then add additional LocalCPUProcessors on these nodes
-        } else if (cfg_num_mp_cpus) {
-          for (int i = 0; i < cfg_num_mp_cpus; i++) {
+        } else if (config->cfg_num_mp_cpus) {
+          for (int i = 0; i < config->cfg_num_mp_cpus; i++) {
             Processor p = runtime->next_local_processor_id();
             ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						      cfg_stack_size,
+						      config->cfg_stack_size,
 						      Config::force_kernel_threads, 0, 0);
             runtime->add_processor(pi);
           }

@@ -875,7 +875,7 @@ namespace Realm {
       src_gpu = _src_gpu;
 
       // switch out of ordered mode if multi-threaded dma is requested
-      if (_src_gpu->module->cfg_multithread_dma)
+      if (_src_gpu->module->config->cfg_multithread_dma)
         xdq.ordered_mode = false;
 
       std::vector<Memory> local_gpu_mems;

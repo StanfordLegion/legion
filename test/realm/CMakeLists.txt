@@ -51,6 +51,7 @@ list(APPEND REALM_TESTS
   extres_alias
   reservations
   multiaffine
+  machine_config
   )
 
 if(Legion_USE_CUDA)

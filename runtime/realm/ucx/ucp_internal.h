@@ -85,10 +85,10 @@ namespace UCP {
     void end_polling();
     void wait_polling();
     bool do_work(TimeLimit work_until);
-    void add_context(UCPContext *ucp_context);
+    void add_worker(UCPWorker *worker);
 
   private:
-    std::vector<UCPContext*> contexts;
+    std::vector<UCPWorker*> workers;
     Mutex shutdown_mutex;
     // set and cleared inside mutex, but tested outside
     atomic<bool> shutdown_flag;
@@ -105,8 +105,10 @@ namespace UCP {
     struct Config {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
-      int prog_boff_max{4}; //progress thread maximum backoff
       int pollers_max{2};
+      int prog_boff_max{4}; //progress thread maximum backoff
+      int prog_itr_max{16};
+      int rdesc_rel_max{16};
       bool mpool_leakcheck{false};
       bool crc_check{false};
       bool hbuf_malloc{false};
@@ -159,23 +161,26 @@ namespace UCP {
         size_t lines, size_t line_stride,
         bool with_congestion, size_t header_size);
 
-    bool get_ucp_ep(const UCPContext *context,
-        NodeID target, const UCPRDMAInfo *rdma_info, ucp_ep_h *ep);
+    bool get_ucp_ep(const UCPWorker *worker,
+        NodeID target, const UCPRDMAInfo *rdma_info, ucp_ep_h *ep) const;
 
-    Request *request_get(UCPContext *context);
+    Request *request_get(UCPWorker *worker);
     void request_release(Request *req);
 
-    void *hbuf_get(UCPContext *context, size_t size);
-    void hbuf_release(UCPContext *context, void *buf);
+    void *hbuf_get(UCPWorker *worker, size_t size);
+    void hbuf_release(UCPWorker *worker, void *buf);
 
-    void *pbuf_get(UCPContext *context, size_t size);
-    void pbuf_release(UCPContext *context, void *buf);
+    void *pbuf_get(UCPWorker *worker, size_t size);
+    void pbuf_release(UCPWorker *worker, void *buf);
 
     void notify_msg_sent(uint64_t count);
 
     const SegmentInfo *find_segment(const void *srcptr) const;
 
-    UCPContext *get_ucp_context(const SegmentInfo *seg_info);
+    const UCPContext *get_context(const SegmentInfo *seg_info) const;
+    UCPWorker *get_worker(const UCPContext *context) const;
+
+    size_t num_eps(const UCPContext &context) const;
 
   protected:
     UCPModule   *module;
@@ -184,7 +189,7 @@ namespace UCP {
   private:
     struct AmHandlersArgs {
       UCPInternal *internal;
-      UCPContext  *context;
+      UCPWorker   *worker;
     };
     struct SegmentInfoSorter;
 
@@ -194,20 +199,20 @@ namespace UCP {
   bool init_ucp_contexts();
 #endif
 
+    bool create_workers();
+    void destroy_workers();
+    bool set_am_handlers();
     bool create_eps();
     bool create_pollers();
-    UCPContext *get_ucp_context_host();
+    const UCPContext *get_context_host() const;
 #if defined(REALM_USE_CUDA)
-    UCPContext *get_ucp_context_device(int dev_index);
+    const UCPContext *get_context_device(int dev_index) const;
 #endif
     bool is_congested();
     bool add_rdma_info(NetworkSegment *segment,
-        UCPContext *context, ucp_mem_h mem_h);
-    bool set_am_handler(unsigned am_id,
-        ucp_am_recv_callback_t cb, AmHandlersArgs *args);
-    bool set_am_handlers(UCPContext *context);
+        const UCPContext *context, ucp_mem_h mem_h);
     bool am_msg_recv_data_ready(UCPInternal *internal,
-        UCPContext *context, ucp_ep_h reply_ep,
+        UCPWorker *worker, ucp_ep_h reply_ep,
         const UCPMsgHdr *ucp_msg_hdr, size_t header_size,
         void *payload, size_t payload_size, int payload_mode);
     static ucs_status_t am_remote_comp_handler(void *arg,
@@ -230,6 +235,9 @@ namespace UCP {
         void *payload, size_t payload_size,
         const ucp_am_recv_param_t *param);
 
+    using WorkersMap = std::unordered_map<const UCPContext*, UCPWorker*>;
+    using AttachMap  = std::unordered_map<const UCPContext*, std::vector<ucp_mem_h>>;
+
     bool                                    initialized_boot{false};
     bool                                    initialized_ucp{false};
     Config                                  config;
@@ -238,8 +246,10 @@ namespace UCP {
 #ifdef REALM_USE_CUDA
     std::unordered_map<int, UCPContext*>    dev_ctx_map;
 #endif
+    WorkersMap                              workers;
     std::list<UCPPoller>                    pollers;
     std::list<AmHandlersArgs>               am_handlers_args;
+    AttachMap                               attach_mem_hs;
     atomic<uint64_t>                        total_msg_sent;
     atomic<uint64_t>                        total_msg_received;
     atomic<uint64_t>                        total_rcomp_sent;
@@ -248,9 +258,8 @@ namespace UCP {
     MPool                                   *rcba_mp;
     Mutex                                   rcba_mp_mutex;
     size_t                                  ib_seg_size;
-
     // this list is sorted by address to enable quick address lookup
-    std::vector<SegmentInfo> segments_by_addr;
+    std::vector<SegmentInfo>                segments_by_addr;
   };
 
   class UCPMessageImpl : public ActiveMessageImpl {
@@ -308,23 +317,21 @@ namespace UCP {
     bool commit_unicast(size_t act_payload_size);
     bool commit_multicast(size_t act_payload_size);
     bool send_fast_path(ucp_ep_h ep, size_t act_payload_size);
-    bool send_slow_path(ucp_ep_h ep, size_t act_payload_size, uint32_t flags);
+    bool send_slow_path(ucp_ep_h ep, size_t act_payload_size,
+        uint32_t flags);
     Request *make_request(size_t act_payload_size);
     static void cleanup_request(Request *req, UCPInternal *internal);
     static bool send_request(Request *req, unsigned am_id);
     static void am_local_failure_handler(Request *req, UCPInternal *internal);
     static void am_local_comp_handler(void *request,
-        ucs_status_t status,
-        void *user_data);
+        ucs_status_t status, void *user_data);
     static void am_put_comp_handler(void *request,
-        ucs_status_t status,
-        void *user_data);
+        ucs_status_t status, void *user_data);
     static void am_put_flush_comp_handler(void *request,
-        ucs_status_t status,
-        void *user_data);
+        ucs_status_t status, void *user_data);
 
     UCPInternal *internal;
-    UCPContext  *context;
+    UCPWorker   *worker;
     NodeID target;
     NodeSet targets;
     const void *src_payload_addr;

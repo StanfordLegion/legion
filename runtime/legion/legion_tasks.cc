@@ -5260,7 +5260,7 @@ namespace Legion {
       Mapper::SliceTaskInput input;
       Mapper::SliceTaskOutput output;
       input.domain_is = internal_space;
-      runtime->forest->find_launch_space_domain(internal_space, input.domain);
+      runtime->forest->find_domain(internal_space, input.domain);
       output.verify_correctness = false;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
@@ -5302,7 +5302,7 @@ namespace Legion {
         // Check to make sure the domain is not empty
         Domain &d = slice.domain;
         if ((d == Domain::NO_DOMAIN) && slice.domain_is.exists())
-          runtime->forest->find_launch_space_domain(slice.domain_is, d);
+          runtime->forest->find_domain(slice.domain_is, d);
         bool empty = false;
 	size_t volume = d.get_volume();
 	if (volume == 0)
@@ -5464,7 +5464,7 @@ namespace Legion {
       assert(internal_space.exists());
 #endif
       Domain result;
-      runtime->forest->find_launch_space_domain(internal_space, result);
+      runtime->forest->find_domain(internal_space, result);
       return result; 
     }
 
@@ -5565,7 +5565,7 @@ namespace Legion {
         // Only pack the IDs for our local points
         IndexSpaceNode *node = runtime->forest->get_node(internal_space);
         Domain local_domain;
-        node->get_launch_space_domain(local_domain);
+        node->get_domain(local_domain);
         size_t local_size = local_domain.get_volume();
         rez.serialize(local_size);
         const std::map<DomainPoint,DistributedID> &handles =
@@ -7635,7 +7635,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -7730,7 +7730,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -7818,7 +7818,7 @@ namespace Legion {
       future_map = epoch->get_future_map();
 #ifdef DEBUG_LEGION
       Domain launch_domain;
-      launch_space->get_launch_space_domain(launch_domain);
+      launch_space->get_domain(launch_domain);
       future_map.impl->add_valid_domain(launch_domain);
 #endif 
       // Enumerate the futures in the future map
@@ -10116,7 +10116,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
       Domain internal_domain;
-      runtime->forest->find_launch_space_domain(internal_space,internal_domain);
+      runtime->forest->find_domain(internal_space, internal_domain);
       size_t num_points = internal_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);

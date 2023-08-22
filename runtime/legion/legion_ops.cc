@@ -6751,7 +6751,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       src_requirements.resize(launcher.src_requirements.size());
@@ -17242,7 +17242,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       if (launcher.region.exists())
