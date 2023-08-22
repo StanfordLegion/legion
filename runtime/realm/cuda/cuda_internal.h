@@ -632,7 +632,7 @@ namespace Realm {
       void fence_within_fb(Realm::Operation *op);
       void fence_to_peer(Realm::Operation *op, GPU *dst);
 
-      bool can_access_peer(GPU *peer) const;
+      bool can_access_peer(const GPU *peer) const;
 
       GPUStream *find_stream(CUstream stream) const;
       GPUStream *get_null_task_stream(void) const;
