@@ -269,46 +269,6 @@ foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
 endforeach()
 
 if (Legion_USE_CUDA)
-  # Fill in the most compatible set of architectures we support
-  if("${Legion_CUDA_ARCH}" STREQUAL "")
-    if (${CUDA_VERSION_STRING} VERSION_LESS "11.5")
-      # Prior to 11.5, we don't have -arch=all and have to list the architectures out manually
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "10.0")
-        list(APPEND Legion_CUDA_ARCH 20)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "11.0")
-        list(APPEND Legion_CUDA_ARCH 30)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 35)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "6.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 50)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "8.0")
-        list(APPEND Legion_CUDA_ARCH 60)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "9.0")
-        list(APPEND Legion_CUDA_ARCH 70)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "11.0")
-        list(APPEND Legion_CUDA_ARCH 80)
-      endif ()
-    else ()
-        # New with 11.5, nvcc supports 'all-major' which does all this for us
-        set(CUDA_GENCODE "-arch all-major")
-    endif ()
-  else ()
-      # If the user specified a specific gencode to use, use that
-      list(SORT Legion_CUDA_ARCH)
-      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
-      # Add all the specified architectures we support
-      string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
-      list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)
-      # For the last architecture we support, add PTX
-      list(APPEND CUDA_GENCODE "-gencode arch=compute_${COMPUTE_ARCH},code=compute_${COMPUTE_ARCH}")
-  endif ()
-
   # starting with NVCC 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
     set(CUDA_WARNINGS "-Werror all-warnings")
