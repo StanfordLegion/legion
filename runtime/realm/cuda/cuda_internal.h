@@ -41,6 +41,7 @@
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
 #include "realm/transfer/ib_memory.h"
+#include "realm/cuda/cuda_memcpy.h"
 
 #if CUDART_VERSION < 11000
 #define CHECK_CUDART(cmd)                                                      \
@@ -659,11 +660,11 @@ namespace Realm {
         int occ_num_blocks;
       };
 
-      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][5];
-      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][5];
-      GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM][5];
-      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM][5];
-      GPUFuncInfo transpose_kernels[5];
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
+      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
+      GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
+      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
+      GPUFuncInfo transpose_kernels[CUDA_MAX_LOG2_BYTES];
 
       CUdeviceptr fbmem_base, fb_ibmem_base;
 
