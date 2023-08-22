@@ -14377,13 +14377,16 @@ namespace Legion {
           {
             // Delete the layout we are trying to register
             // and return the matching one
-            delete layout;
+            if (layout->remove_reference())
+              delete layout;
+            (*it)->add_reference();
             return (*it);
           }
         }
       }
       // Otherwise we successfully registered it
       descs.push_back(layout);
+      // Add the reference here for our local data structure
       layout->add_reference();
       return layout;
     }
