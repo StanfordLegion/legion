@@ -231,7 +231,7 @@ namespace Realm {
     HDF5Module::~HDF5Module(void)
     {
       assert(config != nullptr);
-      delete config;
+      config = nullptr;
     }
 
     /*static*/ ModuleConfig *HDF5Module::create_module_config(RuntimeImpl *runtime)

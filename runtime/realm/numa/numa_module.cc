@@ -125,7 +125,7 @@ namespace Realm {
     NumaModule::~NumaModule(void)
     {
       assert(config != nullptr);
-      delete config;
+      config = nullptr;
     }
 
     /*static*/ ModuleConfig *NumaModule::create_module_config(RuntimeImpl *runtime)
