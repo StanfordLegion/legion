@@ -1282,26 +1282,6 @@ namespace Legion {
       return (parent_ctx->get_depth()+1);
     }
 
-    /* static */
-    IndexTreeNode *Operation::get_req_child_node(RegionTreeForest *forest,
-                                                 const RegionRequirement &req)
-    {
-      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) ||
-          (req.handle_type == LEGION_REGION_PROJECTION))
-      {
-        if (!req.region.exists())
-          return nullptr;
-        return forest->get_node(req.region.get_index_space());
-      }
-
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_PARTITION_PROJECTION);
-#endif
-      if (!req.partition.exists())
-        return nullptr;
-      return forest->get_node(req.partition.get_index_partition());
-    }
-
     //--------------------------------------------------------------------------
     void Operation::set_tracking_parent(size_t index)
     //--------------------------------------------------------------------------

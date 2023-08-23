@@ -427,14 +427,6 @@ namespace Legion {
       // guaranteed to have a parent task.
       unsigned get_operation_depth(void) const; 
     public:
-      static IndexTreeNode *get_req_child_node(RegionTreeForest *forest,
-                                               const RegionRequirement &req);
-      static IndexTreeNode *get_req_parent_node(RegionTreeForest *forest,
-                                                const RegionRequirement &req)
-      {
-        return forest->get_node(req.parent.get_index_space());
-      }
-
       void set_tracking_parent(size_t index);
       void set_trace(LogicalTrace *trace,
                      const std::vector<StaticDependence> *dependences);
