@@ -3679,7 +3679,7 @@ namespace Realm {
     HipModule::~HipModule(void)
     {
       assert(config != nullptr);
-      delete config;
+      config = nullptr;
       delete_container_contents(gpu_info);
       assert(hip_module_singleton == this);
       hip_module_singleton = 0;

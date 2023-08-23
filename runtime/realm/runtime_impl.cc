@@ -900,7 +900,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   CoreModule::~CoreModule(void)
   {
     assert(config != nullptr);
-    delete config;
+    config = nullptr;
   }
 
   /*static*/ ModuleConfig *CoreModule::create_module_config(RuntimeImpl *runtime)
@@ -2580,6 +2580,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 #endif
       cleanup_query_caches();
       {
+        // clean up all the module configs
+        for (std::map<std::string, ModuleConfig*>::iterator it = module_configs.begin();
+             it != module_configs.end(); it++) {
+          delete (it->second);
+          it->second = nullptr;
+        }
+
         // Clean up all the modules before tearing down the runtime state.
         for (std::vector<Module *>::iterator it = modules.begin();
              it != modules.end(); it++) {
