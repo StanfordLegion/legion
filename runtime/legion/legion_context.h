@@ -469,7 +469,8 @@ namespace Legion {
                                              Provenance *provenance) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance) = 0;
+                                   Provenance *provenance,
+                                   bool internal = false) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
@@ -1547,7 +1548,8 @@ namespace Legion {
                                              Provenance *provenance);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   bool internal = false);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -2896,7 +2898,8 @@ namespace Legion {
                                              bool check_space = true);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   bool internal = false);
       // Unmapping region is the same as for an inner context
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
@@ -3928,7 +3931,8 @@ namespace Legion {
                                              Provenance *provenance);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   bool internal = false);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);

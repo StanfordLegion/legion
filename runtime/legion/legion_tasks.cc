@@ -9399,6 +9399,9 @@ namespace Legion {
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
+      // Need a lock here in case this gets called in parallel by multiple
+      // slice tasks returning at the same time
+      AutoLock o_lock(op_lock);
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
     }
 
