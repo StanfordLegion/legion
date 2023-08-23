@@ -645,7 +645,6 @@ namespace Legion {
             analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
-                                                     privilege_paths[idx],
                                                      logical_analysis);
       }
     }
@@ -1283,7 +1282,6 @@ namespace Legion {
             analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
-                                                     privilege_paths[idx],
                                                      logical_analysis);
       }
       // Generate any collective view rendezvous that we will need

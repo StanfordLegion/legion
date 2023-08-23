@@ -10039,9 +10039,10 @@ namespace Legion {
             continue;
           }
           ProjectionInfo proj_info;
-          RegionTreePath privilege_path;
+          // FIXME: is it ok to remove the parameter here?
+          // It's intentionally empty
           runtime->forest->perform_dependence_analysis(this, idx, req,
-              proj_info, privilege_path, logical_analysis);
+              proj_info, logical_analysis);
         }
         // By closing the scope here, we make sure the logical analysis
         // has applied any close operations to the tree so now we can

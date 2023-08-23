@@ -434,12 +434,6 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
                                        LogicalAnalysis &logical_analysis);
-
-      void perform_dependence_analysis(Operation *op, unsigned idx,
-                                       const RegionRequirement &req,
-                                       const ProjectionInfo &projection_info,
-                                       const RegionTreePath &path,
-                                       LogicalAnalysis &logical_analysis);
       bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
                                      const RegionTreePath &path,

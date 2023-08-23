@@ -976,15 +976,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreePath& TaskOp::get_privilege_path(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called
-      assert(false);
-      return (*(new RegionTreePath()));
-    }
-
-    //--------------------------------------------------------------------------
     std::map<PhysicalManager*,unsigned>* 
                                         TaskOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
@@ -1507,7 +1498,6 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       {
-        std::vector<RegionTreePath> privilege_paths(logical_regions.size());
         perform_intra_task_alias_analysis();
       }
 #endif
@@ -5796,7 +5786,6 @@ namespace Legion {
       // Remove our reference on the future
       result = Future();
       predicate_false_future = Future();
-      privilege_paths.clear();
       valid_output_regions.clear();
       if (freeop)
         runtime->free_individual_task(this);
@@ -6022,7 +6011,6 @@ namespace Legion {
         return;
       // First compute the parent indexes
       compute_parent_indexes();
-      privilege_paths.resize(get_region_count());
       update_no_access_regions();
       if (runtime->legion_spy_enabled)
       {
@@ -6042,7 +6030,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      logical_regions[idx], 
                                                      projection_info,
-                                                     privilege_paths[idx],
                                                      logical_analysis);
     }
 
@@ -6052,7 +6039,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(memo_state != MEMO_REQ);
-      assert(privilege_paths.size() == get_region_count());
 #endif
       if (runtime->check_privileges && 
           !is_top_level_task() && !local_function)
@@ -6334,16 +6320,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ((!map_origin) && stealable);
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < privilege_paths.size());
-#endif
-      return privilege_paths[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -8534,7 +8510,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
       reduction_instance = NULL; // we don't own this so clear it
       MultiTask::deactivate(false/*free*/);
-      privilege_paths.clear();
       if (!origin_mapped_slices.empty())
       {
         for (std::set<SliceTask*>::const_iterator it = 
@@ -9182,7 +9157,6 @@ namespace Legion {
       // First compute the parent indexes
       compute_parent_indexes(); 
       // Initialize the privilege paths
-      privilege_paths.resize(get_region_count());
       if (!options_selected)
       {
         const bool inline_task = select_task_options(false/*prioritize*/);
@@ -9216,7 +9190,6 @@ namespace Legion {
         ProjectionInfo projection_info(runtime, req, launch_space);
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
-                                                     privilege_paths[idx],
                                                      logical_analysis);
       }
     }
@@ -9352,7 +9325,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(memo_state != MEMO_REQ);
-      assert(privilege_paths.size() == get_region_count());
 #endif 
       if (runtime->check_privileges)
         perform_privilege_checks();
@@ -9392,16 +9364,6 @@ namespace Legion {
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreePath& IndexTask::get_privilege_path(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < privilege_paths.size());
-#endif
-      return privilege_paths[idx];
     }
 
     //--------------------------------------------------------------------------
