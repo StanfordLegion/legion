@@ -6018,8 +6018,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     copies[idx].
-                                                       src->privilege_path,
                                                      logical_analysis);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -6032,8 +6030,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     copies[idx].
-                                                       dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -6046,8 +6042,6 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  projection_info,
-                                                 copies[idx].
-                                                   gather->privilege_path,
                                                  logical_analysis);
       }
       if (!dst_indirect_requirements.empty())
@@ -6058,8 +6052,6 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
-                                                 copies[idx].
-                                                   scatter->privilege_path,
                                                  logical_analysis);
       }
     }
@@ -8036,8 +8028,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_info,
-                                                     copies[idx].
-                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -8052,8 +8042,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_info,
-                                                     copies[idx].
-                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -8070,8 +8058,6 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 copies[idx].
-                                                   gather->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -8086,8 +8072,6 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 copies[idx].
-                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -10587,7 +10571,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InternalOp::deactivate(freeop);
-      privilege_path.clear();
       version_info.clear();
       if (mapper_data != NULL)
       {
@@ -10933,7 +10916,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -11280,7 +11263,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -12037,7 +12020,6 @@ namespace Legion {
       fields.clear();
       requirements.clear();
       parent_indexes.clear();
-      privilege_paths.clear();
       map_applied_conditions.clear();
       if (freeop)
         runtime->free_advisement_op(this);
@@ -12251,7 +12233,6 @@ namespace Legion {
             RegionRequirement((*it)->handle, 0/*proj id*/,
               LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent));
       parent_indexes.resize(requirements.size());
-      privilege_paths.resize(requirements.size());
       for (unsigned idx = 0; idx < requirements.size(); idx++)
       {
         RegionRequirement &req = requirements[idx];
@@ -12286,7 +12267,6 @@ namespace Legion {
               partition->row_source->color_space, sharding_function);
           runtime->forest->perform_dependence_analysis(this, idx, req,
                                                        projection_info,
-                                                       privilege_paths[idx],
                                                        logical_analysis);
           if (runtime->legion_spy_enabled)
           {
@@ -12311,7 +12291,6 @@ namespace Legion {
           ProjectionInfo projection_info;
           runtime->forest->perform_dependence_analysis(this, 0/*idx*/, req,
                                                        projection_info,
-                                                       privilege_paths[idx],
                                                        logical_analysis);
           if (runtime->legion_spy_enabled)
           {
@@ -12551,7 +12530,6 @@ namespace Legion {
     {
       PredicatedOp::deactivate(false/*free*/);
       restricted_region = PhysicalRegion();
-      privilege_path.clear();
       version_info.clear();
       fields.clear();
       grants.clear();
@@ -12645,7 +12623,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -13381,7 +13359,6 @@ namespace Legion {
     {
       PredicatedOp::deactivate(false/*free*/);
       restricted_region = PhysicalRegion();
-      privilege_path.clear();
       version_info.clear();
       fields.clear();
       grants.clear();
@@ -13479,7 +13456,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -17186,7 +17163,6 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
                                                    logical_analysis);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
@@ -17943,7 +17919,6 @@ namespace Legion {
         delete thunk;
         thunk = NULL;
       }
-      privilege_path = RegionTreePath();
       version_info.clear();
       map_applied_conditions.clear();
       if (!acquired_instances.empty())
@@ -18699,7 +18674,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PredicatedOp::deactivate(false/*free*/);
-      privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
       future = Future();
@@ -18900,7 +18874,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -19470,7 +19444,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -20157,7 +20131,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -20575,7 +20549,6 @@ namespace Legion {
       field_map.clear();
       field_pointers_map.clear();
       region = PhysicalRegion();
-      privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
       external_instances.clear();
@@ -20671,7 +20644,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -21157,7 +21130,6 @@ namespace Legion {
     {
       CollectiveViewCreator<Operation>::deactivate(false/*free*/);
       resources = ExternalResources();
-      privilege_path.clear();
       // We can deactivate all of our point operations
       for (std::vector<PointAttachOp*>::const_iterator it =
             points.begin(); it != points.end(); it++)
@@ -21392,7 +21364,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -22045,7 +22017,6 @@ namespace Legion {
     {
       Operation::deactivate(false/*free*/);
       region = PhysicalRegion();
-      privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
       result = Future(); // clear any references on the future
@@ -22110,7 +22081,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -22366,7 +22337,6 @@ namespace Legion {
     {
       CollectiveViewCreator<Operation>::deactivate(false/*free*/);
       resources = ExternalResources();
-      privilege_path.clear();
       // We can deactivate all of our point operations
       for (std::vector<PointDetachOp*>::const_iterator it =
             points.begin(); it != points.end(); it++)
@@ -22477,7 +22447,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------

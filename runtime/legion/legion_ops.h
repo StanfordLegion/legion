@@ -1478,7 +1478,6 @@ namespace Legion {
         RegionRequirement &requirement;
 
         // calculated in CopyOp
-        RegionTreePath privilege_path;
         unsigned parent_index;
         VersionInfo version;
       };
@@ -2026,7 +2025,6 @@ namespace Legion {
     public:
       virtual void trigger_commit(void);
     protected:
-      RegionTreePath privilege_path;
       VersionInfo    version_info;
     };
 
@@ -2312,7 +2310,6 @@ namespace Legion {
       std::vector<FieldID> fields;
       std::vector<unsigned> parent_indexes;
       std::vector<RegionRequirement> requirements;
-      std::vector<RegionTreePath> privilege_paths;
       std::set<RtEvent> map_applied_conditions;
       ShardingFunction *sharding_function;
     };
@@ -2407,7 +2404,6 @@ namespace Legion {
     protected:
       RegionRequirement requirement;
       PhysicalRegion    restricted_region;
-      RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,unsigned> acquired_instances;
@@ -2524,7 +2520,6 @@ namespace Legion {
     protected:
       RegionRequirement requirement;
       PhysicalRegion    restricted_region;
-      RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,unsigned> acquired_instances;
@@ -3557,7 +3552,6 @@ namespace Legion {
       void handle_point_commit(RtEvent point_committed);
     public:
       VersionInfo version_info;
-      RegionTreePath privilege_path;
       unsigned parent_req_index;
       std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -3729,7 +3723,6 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     public:
-      RegionTreePath privilege_path;
       VersionInfo version_info;
       unsigned parent_req_index;
       FillView *fill_view;
@@ -3877,7 +3870,6 @@ namespace Legion {
       void log_requirement(void);
     public:
       RegionRequirement requirement;
-      RegionTreePath privilege_path;
       VersionInfo version_info;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
@@ -3941,7 +3933,6 @@ namespace Legion {
     public:
       ExternalResource resource;
       RegionRequirement requirement;
-      RegionTreePath privilege_path;
       VersionInfo version_info;
       const char *file_name;
       std::map<FieldID,const char*> field_map;
@@ -4008,7 +3999,6 @@ namespace Legion {
     protected:
       RegionRequirement                             requirement;
       ExternalResources                             resources;
-      RegionTreePath                                privilege_path;
       IndexSpaceNode*                               launch_space;
       std::vector<PointAttachOp*>                   points;
       std::set<RtEvent>                             map_applied_conditions;
@@ -4109,7 +4099,6 @@ namespace Legion {
     public:
       PhysicalRegion region;
       RegionRequirement requirement;
-      RegionTreePath privilege_path;
       VersionInfo version_info;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
@@ -4167,7 +4156,6 @@ namespace Legion {
     protected:
       RegionRequirement                             requirement;
       ExternalResources                             resources;
-      RegionTreePath                                privilege_path;
       IndexSpaceNode*                               launch_space;
       std::vector<PointDetachOp*>                   points;
       std::set<RtEvent>                             map_applied_conditions;
