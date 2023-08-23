@@ -6627,7 +6627,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
       // If this a write requirement then we need to perform syncs on the
       // way in and the way out of the physical analysis across the shards
       // to ensure we don't do any exclusive updates out of order

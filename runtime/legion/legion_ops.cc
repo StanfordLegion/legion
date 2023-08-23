@@ -4103,7 +4103,7 @@ namespace Legion {
       region = PhysicalRegion();
       grants.clear();
       wait_barriers.clear();
-      arrive_barriers.clear(); privilege_path.clear();
+      arrive_barriers.clear();
       version_info.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
@@ -4191,7 +4191,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------

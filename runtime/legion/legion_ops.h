@@ -1243,7 +1243,6 @@ namespace Legion {
       ApUserEvent ready_event;
       ApEvent termination_event;
       PhysicalRegion region;
-      RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
       std::map<PhysicalManager*,unsigned> acquired_instances;

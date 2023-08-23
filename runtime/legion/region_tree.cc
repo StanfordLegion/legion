@@ -1566,12 +1566,22 @@ namespace Legion {
       return node->row_source->get_volume();
     }
 
+    void RegionTreeForest::perform_dependence_analysis(
+                                        Operation *op, unsigned idx,
+                                        const RegionRequirement &req,
+                                        const ProjectionInfo &proj_info,
+                                        const RegionTreePath &not_used,
+                                        LogicalAnalysis &logical_analysis)
+    {
+      perform_dependence_analysis(op, idx, req, proj_info, logical_analysis);
+    }
+
+
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_dependence_analysis(
                                         Operation *op, unsigned idx,
                                         const RegionRequirement &req,
                                         const ProjectionInfo &proj_info,
-                                        const RegionTreePath &pathzzz,
                                         LogicalAnalysis &logical_analysis)
     //--------------------------------------------------------------------------
     {
