@@ -1332,26 +1332,22 @@ namespace Legion {
             assert(returnable_privileges.find(it->first) !=
                     returnable_privileges.end());
 #endif
-            // Only need to record this if there are privilege fields
-            if (!it->second.privilege_fields.empty())
-            {
-              // Do extra logging for legion spy
-              owner_task->log_virtual_mapping(it->first, it->second);
-              // Then do the result of the normal operations
-              delete_reqs.resize(delete_reqs.size()+1);
-              RegionRequirement &req = delete_reqs.back();
-              req.region = it->second.region;
-              req.parent = it->second.region;
-              req.privilege = LEGION_READ_WRITE;
-              req.prop = LEGION_EXCLUSIVE;
-              // Swap the privilege fields so that nothing else tries
-              // to delete those particular fields
-              req.privilege_fields.swap(it->second.privilege_fields);
-              req.handle_type = LEGION_SINGULAR_PROJECTION;
-              req.flags = it->second.flags;
-              parent_req_indexes.push_back(it->first);
-              returnable.push_back(returnable_privileges[it->first]);
-            }
+            // Do extra logging for legion spy
+            owner_task->log_virtual_mapping(it->first, it->second);
+            // Then do the result of the normal operations
+            delete_reqs.resize(delete_reqs.size()+1);
+            RegionRequirement &req = delete_reqs.back();
+            req.region = it->second.region;
+            req.parent = it->second.region;
+            req.privilege = LEGION_READ_WRITE;
+            req.prop = LEGION_EXCLUSIVE;
+            // Swap the privilege fields so that nothing else tries
+            // to delete those particular fields
+            req.privilege_fields.swap(it->second.privilege_fields);
+            req.handle_type = LEGION_SINGULAR_PROJECTION;
+            req.flags = it->second.flags;
+            parent_req_indexes.push_back(it->first);
+            returnable.push_back(returnable_privileges[it->first]);
             // Remove the requirement from the created set 
             std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
             created_requirements.erase(to_delete);
@@ -1432,22 +1428,18 @@ namespace Legion {
             assert(returnable_privileges.find(it->first) !=
                     returnable_privileges.end());
 #endif
-            // Only need to record this if there are privilege fields
-            if (!it->second.privilege_fields.empty())
-            {
-              delete_reqs.resize(delete_reqs.size()+1);
-              RegionRequirement &req = delete_reqs.back();
-              req.region = it->second.region;
-              req.parent = it->second.region;
-              req.privilege = LEGION_READ_WRITE;
-              req.prop = LEGION_EXCLUSIVE;
-              // Swap the privilege fields so that nothing else tries
-              // to delete those particular fields
-              req.privilege_fields.swap(it->second.privilege_fields);
-              req.handle_type = LEGION_SINGULAR_PROJECTION;
-              parent_req_indexes.push_back(it->first);
-              returnable.push_back(returnable_privileges[it->first]);
-            }
+            delete_reqs.resize(delete_reqs.size()+1);
+            RegionRequirement &req = delete_reqs.back();
+            req.region = it->second.region;
+            req.parent = it->second.region;
+            req.privilege = LEGION_READ_WRITE;
+            req.prop = LEGION_EXCLUSIVE;
+            // Swap the privilege fields so that nothing else tries
+            // to delete those particular fields
+            req.privilege_fields.swap(it->second.privilege_fields);
+            req.handle_type = LEGION_SINGULAR_PROJECTION;
+            parent_req_indexes.push_back(it->first);
+            returnable.push_back(returnable_privileges[it->first]);
             // Remove the requirement from the created set 
             std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
             created_requirements.erase(to_delete);
@@ -11258,19 +11250,22 @@ namespace Legion {
                  std::set<RtEvent> &applied_events, bool filter_specific_fields)
     //--------------------------------------------------------------------------
     {
-      LocalLock *tree_lock = NULL;
-      EqKDTree *tree = find_equivalence_set_kd_tree(req_index, 
-          IndexSpace::NO_SPACE, tree_lock, true/*null if doesn't exist*/);
-      if (tree != NULL)
+      if (!req.privilege_fields.empty())
       {
-        std::vector<RtEvent> applied;
-        RegionNode *node = runtime->forest->get_node(req.region);
-        const FieldMask invalidate_mask = 
-          node->column_source->get_field_mask(req.privilege_fields);
-        node->row_source->invalidate_equivalence_set_kd_tree(tree, tree_lock,
-            invalidate_mask, applied, false/*move to previous*/);
-        if (!applied.empty())
-          applied_events.insert(applied.begin(), applied.end());
+        LocalLock *tree_lock = NULL;
+        EqKDTree *tree = find_equivalence_set_kd_tree(req_index,
+            IndexSpace::NO_SPACE, tree_lock, true/*null if doesn't exist*/);
+        if (tree != NULL)
+        {
+          std::vector<RtEvent> applied;
+          RegionNode *node = runtime->forest->get_node(req.region);
+          const FieldMask invalidate_mask =
+            node->column_source->get_field_mask(req.privilege_fields);
+          node->row_source->invalidate_equivalence_set_kd_tree(tree, tree_lock,
+              invalidate_mask, applied, false/*move to previous*/);
+          if (!applied.empty())
+            applied_events.insert(applied.begin(), applied.end());
+        }
       }
       // Check to see if we should actually invalidate this tree
       if (!filter_specific_fields)
@@ -11279,7 +11274,7 @@ namespace Legion {
         // equivalence set trees data structure resizes
         AutoLock priv_lock(privilege_lock);
         equivalence_set_trees.erase(req_index);
-        // Alos need to remove the returnable privileges information
+        // Also need to remove the returnable privileges information
         returnable_privileges.erase(req_index);
       }
     }
