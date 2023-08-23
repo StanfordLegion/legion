@@ -291,7 +291,7 @@ if (REALM_CUDA_SRC)
   # Compile and link all the cuda files into a single fatbin
   cuda_compile_fatbin(REALM_CUDA_FATBIN ${REALM_CUDA_SRC} OPTIONS ${CUDA_COMPILE_OPTIONS})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc
-                     COMMAND ${CMAKE_COMMAND} -DDEFINES_HEADER="realm_config.h" -DIN_FILE=${REALM_CUDA_FATBIN} -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc -DVAR_NAME=realm_fatbin -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
+                     COMMAND ${CMAKE_COMMAND} -DDEFINES_HEADER="realm/realm_config.h" -DIN_FILE=${REALM_CUDA_FATBIN} -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc -DVAR_NAME=realm_fatbin -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
                      MAIN_DEPENDENCY ${REALM_CUDA_FATBIN}
                      DEPENDS ${PROJECT_SOURCE_DIR}/cmake/bin2c.template.in
                      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
