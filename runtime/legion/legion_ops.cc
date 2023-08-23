@@ -10019,8 +10019,6 @@ namespace Legion {
             continue;
           }
           ProjectionInfo proj_info;
-          // FIXME: is it ok to remove the parameter here?
-          // It's intentionally empty
           runtime->forest->perform_dependence_analysis(this, idx, req,
               proj_info, logical_analysis);
         }
