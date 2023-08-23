@@ -1303,32 +1303,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::initialize_mapping_path(RegionTreePath &path,
-                                            const RegionRequirement &req,
-                                            LogicalRegion start_node)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      runtime->forest->initialize_path(req.region.get_index_space(),
-                                       start_node.get_index_space(), path);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::initialize_mapping_path(RegionTreePath &path,
-                                            const RegionRequirement &req,
-                                            LogicalPartition start_node)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      runtime->forest->initialize_path(req.region.get_index_space(),
-                                       start_node.get_index_partition(), path);
-    }
-
-    //--------------------------------------------------------------------------
     void Operation::set_tracking_parent(size_t index)
     //--------------------------------------------------------------------------
     {

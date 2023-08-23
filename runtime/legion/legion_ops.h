@@ -435,12 +435,6 @@ namespace Legion {
         return forest->get_node(req.parent.get_index_space());
       }
 
-      void initialize_mapping_path(RegionTreePath &path,
-                                   const RegionRequirement &req,
-                                   LogicalRegion start_node);
-      void initialize_mapping_path(RegionTreePath &path,
-                                   const RegionRequirement &req,
-                                   LogicalPartition start_node);
       void set_tracking_parent(size_t index);
       void set_trace(LogicalTrace *trace,
                      const std::vector<StaticDependence> *dependences);

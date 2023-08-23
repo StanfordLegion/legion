@@ -4234,8 +4234,6 @@ namespace Legion {
           continue;
         // Don't need to actually traverse very far, but we do need the
         // valid instances for all the regions
-        RegionTreePath path;
-        initialize_mapping_path(path, regions[idx], regions[idx].region);
         if (request_valid_instances)
         {
           InstanceSet postmap_valid;
