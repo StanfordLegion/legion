@@ -3776,25 +3776,25 @@ namespace Legion {
           else
             shard_manager->set_shard_mapping(output.control_replication_map);
           VariantImpl *var_impl = NULL;
-          VariantID chosen_variant = output.task_mappings[0].chosen_variant;
+          selected_variant = output.task_mappings[0].chosen_variant;
           if (!runtime->unsafe_mapper)
           {
             // Check to make sure that they all picked the same variant
             // and that it is a replicable variant
             for (unsigned idx = 1; idx < total_shards; idx++)
             {
-              if (output.task_mappings[idx].chosen_variant != chosen_variant)
+              if (output.task_mappings[idx].chosen_variant != selected_variant)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper picked different variants "
                               "%d and %d for task %s (UID %lld) that was "
                               "designated to be control replicated.", 
                               "map_replicate_task", mapper->get_mapper_name(),
-                              chosen_variant, 
+                              selected_variant, 
                               output.task_mappings[idx].chosen_variant,
                               get_task_name(), get_unique_id())
             }
-            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+            var_impl = runtime->find_variant_impl(task_id, selected_variant,
                                                   true/*can_fail*/);
             // If it's NULL we'll catch it later in the checks
             if ((var_impl != NULL) && !var_impl->is_replicable())
@@ -3807,7 +3807,7 @@ namespace Legion {
                             get_unique_id())
           }
           else
-            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+            var_impl = runtime->find_variant_impl(task_id, selected_variant,
                                                   true/*can_fail*/);
           handle_future_size(var_impl->return_type_size,
               var_impl->has_return_type_size, map_applied_conditions);
