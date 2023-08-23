@@ -1520,6 +1520,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
           it++)
         (*it)->parse_command_line(this, cmdline);
 
+      // configure module configs
+      std::map<std::string, ModuleConfig*>::iterator it;
+      for (it = module_configs.begin(); it != module_configs.end(); it++) {
+        ModuleConfig *module_config = it->second;
+        module_config->configure_from_cmdline(cmdline);
+      }
+
       PartitioningOpQueue::configure_from_cmdline(cmdline);
       config.configure_from_cmdline(cmdline);
 
@@ -1529,13 +1536,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
       bgwork.configure_from_cmdline(cmdline);
-
-      // configure module configs
-      std::map<std::string, ModuleConfig*>::iterator it;
-      for (it = module_configs.begin(); it != module_configs.end(); it++) {
-        ModuleConfig *module_config = it->second;
-        module_config->configure_from_cmdline(cmdline);
-      }
 
       // now that we've done all of our argument parsing, scan through what's
       //  left and see if anything starts with -ll: - probably a misspelled
