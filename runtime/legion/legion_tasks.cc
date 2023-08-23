@@ -1508,8 +1508,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       {
         std::vector<RegionTreePath> privilege_paths(logical_regions.size());
-        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-          initialize_privilege_path(privilege_paths[idx], logical_regions[idx]);
         perform_intra_task_alias_analysis();
       }
 #endif
@@ -6027,8 +6025,6 @@ namespace Legion {
       // First compute the parent indexes
       compute_parent_indexes();
       privilege_paths.resize(get_region_count());
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-        initialize_privilege_path(privilege_paths[idx], logical_regions[idx]);
       update_no_access_regions();
       if (runtime->legion_spy_enabled)
       {
@@ -9189,8 +9185,6 @@ namespace Legion {
       compute_parent_indexes(); 
       // Initialize the privilege paths
       privilege_paths.resize(get_region_count());
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-        initialize_privilege_path(privilege_paths[idx], logical_regions[idx]);
       if (!options_selected)
       {
         const bool inline_task = select_task_options(false/*prioritize*/);

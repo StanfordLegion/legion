@@ -1571,7 +1571,7 @@ namespace Legion {
                                         Operation *op, unsigned idx,
                                         const RegionRequirement &req,
                                         const ProjectionInfo &proj_info,
-                                        const RegionTreePath &path,
+                                        const RegionTreePath &pathzzz,
                                         LogicalAnalysis &logical_analysis)
     //--------------------------------------------------------------------------
     {
@@ -1579,6 +1579,10 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
+
+      RegionTreePath path;
+      initialize_path(req, path);
+
       LogicalTraceInfo trace_info(op, idx, req); 
       // If we've already replayed the analysis we don't need to do it
       if (trace_info.skip_analysis)
@@ -5145,6 +5149,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_path(get_node(child), get_node(parent), path);
+    }
+
+    void RegionTreeForest::initialize_path(const RegionRequirement &req,
+                                           RegionTreePath &path)
+    {
+      path.clear();
+
+      IndexTreeNode *parent = Operation::get_req_parent_node(this, req);
+      IndexTreeNode *child = Operation::get_req_child_node(this, req);
+      if (child == nullptr)
+        return;
+
+      initialize_path(child, parent, path);
     }
 
     //--------------------------------------------------------------------------

@@ -427,8 +427,14 @@ namespace Legion {
       // guaranteed to have a parent task.
       unsigned get_operation_depth(void) const; 
     public:
-      void initialize_privilege_path(RegionTreePath &path,
-                                     const RegionRequirement &req);
+      static IndexTreeNode *get_req_child_node(RegionTreeForest *forest,
+                                               const RegionRequirement &req);
+      static IndexTreeNode *get_req_parent_node(RegionTreeForest *forest,
+                                                const RegionRequirement &req)
+      {
+        return forest->get_node(req.parent.get_index_space());
+      }
+
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalRegion start_node);

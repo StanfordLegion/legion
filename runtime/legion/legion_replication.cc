@@ -4755,7 +4755,6 @@ namespace Legion {
       // operation or a single operation
       select_partition_projection();
       // Do thise now that we've picked our region requirement
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_requirement();
       ProjectionInfo projection_info;

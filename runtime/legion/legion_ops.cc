@@ -1282,29 +1282,24 @@ namespace Legion {
       return (parent_ctx->get_depth()+1);
     }
 
-    //--------------------------------------------------------------------------
-    void Operation::initialize_privilege_path(RegionTreePath &path,
-                                              const RegionRequirement &req)
-    //--------------------------------------------------------------------------
+    /* static */
+    IndexTreeNode *Operation::get_req_child_node(RegionTreeForest *forest,
+                                                 const RegionRequirement &req)
     {
-      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) ||
           (req.handle_type == LEGION_REGION_PROJECTION))
       {
         if (!req.region.exists())
-          return;
-        runtime->forest->initialize_path(req.region.get_index_space(),
-                                         req.parent.get_index_space(), path);
+          return nullptr;
+        return forest->get_node(req.region.get_index_space());
       }
-      else
-      {
+
 #ifdef DEBUG_LEGION
-        assert(req.handle_type == LEGION_PARTITION_PROJECTION);
+      assert(req.handle_type == LEGION_PARTITION_PROJECTION);
 #endif
-        if (!req.partition.exists())
-          return;
-        runtime->forest->initialize_path(req.partition.get_index_partition(),
-                                         req.parent.get_index_space(), path);
-      }
+      if (!req.partition.exists())
+        return nullptr;
+      return forest->get_node(req.partition.get_index_partition());
     }
 
     //--------------------------------------------------------------------------
@@ -4192,7 +4187,6 @@ namespace Legion {
     { 
       // First compute our parent region requirement
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
       { 
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
@@ -6035,32 +6029,6 @@ namespace Legion {
       compute_parent_indexes();
       // Initialize the privilege and mapping paths for all of the
       // region requirements that we have
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        initialize_privilege_path(copies[idx].src->privilege_path,
-                                  src_requirements[idx]);
-      }
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        initialize_privilege_path(copies[idx].dst->privilege_path,
-                                  dst_requirements[idx]);
-      }
-      if (!src_indirect_requirements.empty())
-      {
-        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-        {
-          initialize_privilege_path(copies[idx].gather->privilege_path,
-                                    src_indirect_requirements[idx]);
-        }
-      }
-      if (!dst_indirect_requirements.empty())
-      {
-        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-        {
-          initialize_privilege_path(copies[idx].scatter->privilege_path,
-                                    dst_indirect_requirements[idx]);
-        }
-      } 
       if (runtime->legion_spy_enabled)
         log_copy_requirements();
     }
@@ -7929,7 +7897,6 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
         }
-        initialize_privilege_path(copies[idx].src->privilege_path, req);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -7940,7 +7907,6 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
         }
-        initialize_privilege_path(copies[idx].dst->privilege_path, req);
       }
       if (!src_indirect_requirements.empty())
       {
@@ -7953,7 +7919,6 @@ namespace Legion {
             req.handle_type = LEGION_REGION_PROJECTION;
             req.projection = 0;
           }
-          initialize_privilege_path(copies[idx].gather->privilege_path, req);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -7967,7 +7932,6 @@ namespace Legion {
             req.handle_type = LEGION_REGION_PROJECTION;
             req.projection = 0;
           }
-          initialize_privilege_path(copies[idx].scatter->privilege_path, req);
         }
       } 
       if (runtime->legion_spy_enabled)
@@ -10118,7 +10082,6 @@ namespace Legion {
           }
           ProjectionInfo proj_info;
           RegionTreePath privilege_path;
-          initialize_privilege_path(privilege_path, req);
           runtime->forest->perform_dependence_analysis(this, idx, req,
               proj_info, privilege_path, logical_analysis);
         }
@@ -10590,7 +10553,6 @@ namespace Legion {
       // Never track this so don't get the close index
       parent_task = ctx->get_task();
       requirement = req;
-      initialize_privilege_path(privilege_path, requirement);
     } 
 
     //--------------------------------------------------------------------------
@@ -10603,7 +10565,6 @@ namespace Legion {
       // We always track this so get the close index
       parent_task = parent_ctx->get_task();
       requirement = req;
-      initialize_privilege_path(privilege_path, requirement);
     }
 
     //--------------------------------------------------------------------------
@@ -12332,7 +12293,6 @@ namespace Legion {
               parent.field_space.id, parent.tree_id)
         else
           parent_indexes[idx] = unsigned(parent_index);
-        initialize_privilege_path(privilege_paths[idx], req);
       }
     }
 
@@ -12678,7 +12638,6 @@ namespace Legion {
     { 
       // First compute the parent index
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_acquire_requirement();
     }
@@ -13509,7 +13468,6 @@ namespace Legion {
     { 
       // First compute the parent index
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_release_requirement();
     }
@@ -17245,7 +17203,6 @@ namespace Legion {
       // operation or a single operation
       select_partition_projection();
       // Do thise now that we've picked our region requirement
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_requirement();
       ProjectionInfo projection_info;
@@ -18955,7 +18912,6 @@ namespace Legion {
     { 
       // First compute the parent index
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_fill_requirement();
     }
@@ -19501,7 +19457,6 @@ namespace Legion {
         requirement.handle_type = LEGION_REGION_PROJECTION;
         requirement.projection = 0;
       }
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_index_fill_requirement();
     }
@@ -20196,7 +20151,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_requirement();
     }
@@ -20683,7 +20637,6 @@ namespace Legion {
     { 
       // First compute the parent index
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       create_external_instance();
       if (runtime->legion_spy_enabled)
         log_requirement();
@@ -21430,7 +21383,6 @@ namespace Legion {
         requirement.handle_type = LEGION_REGION_PROJECTION;
         requirement.projection = 0;
       }
-      initialize_privilege_path(privilege_path, requirement);
       // Have each of the point tasks create their external instances
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->create_external_instance();
@@ -22154,7 +22106,6 @@ namespace Legion {
     {
       // First compute the parent index
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_requirement();
     }
@@ -22537,7 +22488,6 @@ namespace Legion {
         requirement.handle_type = LEGION_REGION_PROJECTION;
         requirement.projection = 0;
       }
-      initialize_privilege_path(privilege_path, requirement);
     }
 
     //--------------------------------------------------------------------------
