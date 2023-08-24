@@ -21,8 +21,8 @@
 #include "realm/mem_impl.h"
 #include "realm/logging.h"
 
-#include "ucp_module.h"
-#include "ucp_internal.h"
+#include "realm/ucx/ucp_module.h"
+#include "realm/ucx/ucp_internal.h"
 
 #include <ucp/api/ucp_version.h>
 #define REALM_UCP_API_VERSION_MIN UCP_VERSION(1, 14)

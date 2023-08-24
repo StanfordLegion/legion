@@ -30,9 +30,9 @@
 #include "realm/cuda/cuda_internal.h"
 #endif
 
-#include "ucp_module.h"
-#include "ucp_context.h"
-#include "bootstrap/bootstrap_internal.h"
+#include "realm/ucx/ucp_module.h"
+#include "realm/ucx/ucp_context.h"
+#include "realm/ucx/bootstrap/bootstrap_internal.h"
 
 #include <ucp/api/ucp.h>
 
