@@ -487,7 +487,7 @@ namespace Realm {
       backtrace.capture_backtrace(1); // skip this frame
   }
   
-  ExecutionException::~ExecutionException(void) throw()
+  ExecutionException::~ExecutionException(void) REALM_NOEXCEPT
   {}
 
   void ExecutionException::populate_profiling_measurements(ProfilingMeasurementCollection& pmc) const
@@ -512,7 +512,7 @@ namespace Realm {
     : ExecutionException(Faults::ERROR_CANCELLED, 0, 0)
   {}
 
-  const char *CancellationException::what(void) const throw()
+  const char *CancellationException::what(void) const REALM_NOEXCEPT
   {
     return "CancellationException";
   }
@@ -527,7 +527,7 @@ namespace Realm {
     , event(_event)
   {}
 
-  const char *PoisonedEventException::what(void) const throw()
+  const char *PoisonedEventException::what(void) const REALM_NOEXCEPT
   {
     return "PoisonedEventException";
   }
@@ -542,7 +542,7 @@ namespace Realm {
     : ExecutionException(_error_code, _detail_data, _detail_size)
   {}
 
-  const char *ApplicationException::what(void) const throw()
+  const char *ApplicationException::what(void) const REALM_NOEXCEPT
   {
     return "ApplicationException";
   }

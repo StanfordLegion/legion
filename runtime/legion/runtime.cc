@@ -13388,7 +13388,7 @@ namespace Legion {
       : channels((VirtualChannel*)
                   malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
         runtime(rt), remote_address_space(remote), target(remote_util_group), 
-        always_flush(remote < rt->num_profiling_nodes)
+        always_flush(rt->profiler != NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16620,7 +16620,6 @@ namespace Legion {
 #endif
         check_privileges(config.check_privileges),
         dump_free_ranges(config.dump_free_ranges),
-        num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
         prepared_for_shutdown(false), total_outstanding_tasks(0), 
@@ -16731,7 +16730,7 @@ namespace Legion {
       // We've intentionally switched this to profile all the nodes if we're 
       // profiling any nodes since some information about things like copies
       // usage of instances are now split across multiple log files
-      if (num_profiling_nodes > 0)
+      if (config.num_profiling_nodes > 0)
         initialize_legion_prof(config);
 #ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count.store(0);
@@ -16826,7 +16825,6 @@ namespace Legion {
 #endif
         check_privileges(rhs.check_privileges),
         dump_free_ranges(rhs.dump_free_ranges),
-        num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         mpi_rank_table(NULL), local_procs(rhs.local_procs), 
         local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)

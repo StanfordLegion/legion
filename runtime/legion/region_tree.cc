@@ -50,7 +50,7 @@ namespace Legion {
       fs->get_field_indexes(req.instance_fields, field_indexes);
       instances.resize(field_indexes.size());
       Runtime *runtime = forest->runtime;
-      if ((runtime->num_profiling_nodes > 0) || runtime->legion_spy_enabled)
+      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
         instance_events.resize(field_indexes.size());
       // For each of the fields in the region requirement
       // (importantly in the order they will be copied)
