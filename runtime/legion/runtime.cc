@@ -27094,7 +27094,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      AutoLock d_lock(distributed_collectable_lock);
 #ifdef DEBUG_LEGION
       assert(dist_collectables.find(did) == dist_collectables.end());
 #endif

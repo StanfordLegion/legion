@@ -33,7 +33,9 @@
 namespace Realm {
 namespace UCP {
 
-  class UCPContext {
+  class UCPContext;
+
+  class UCPWorker {
   public:
     enum OpType{
       AM_SEND,
@@ -69,18 +71,18 @@ namespace UCP {
       ~Request() = delete;
     };
 
-    UCPContext(size_t am_alignment, bool use_wakeup,
+    UCPWorker(const UCPContext *context,
+        size_t am_alignment, bool use_wakeup,
         unsigned prog_boff_max /*progress thread maximum backoff*/,
-        int ep_nums_est = -1);
-    ~UCPContext();
-    bool init(size_t user_req_size, size_t user_req_alignment,
+        int prog_itr_max, int rdesc_rel_max,
+        ucs_thread_mode_t thread_mode,
+        size_t user_req_size, size_t user_req_alignment,
         size_t pbuf_max_size, size_t pbuf_max_chunk_size,
         size_t pbuf_max_count, size_t pbuf_init_count,
-        size_t mmp_max_obj_size, bool leak_check,
-        const std::unordered_map<std::string, std::string> &ev_map);
+        size_t mmp_max_obj_size, bool leak_check);
+    ~UCPWorker();
+    bool init();
     void finalize();
-    bool mem_map(const ucp_mem_map_params_t *params, ucp_mem_h *mem_h_ptr);
-    void mem_unmap_all();
     bool ep_add(int target, ucp_address_t *addr, int remote_dev_index);
     bool ep_get(int target, int remote_dev_index, ucp_ep_h *ep) const;
     void *request_get();
@@ -89,8 +91,10 @@ namespace UCP {
     void pbuf_release(void *buf);
     void *mmp_get(size_t size);
     void mmp_release(void *buf);
-    ucp_worker_h get_ucp_worker() { return worker; }
     size_t get_max_am_header() const { return max_am_header; }
+    const UCPContext *get_context() const { return context; }
+    ucp_worker_h get_ucp_worker() const { return worker; }
+    bool set_am_handler(unsigned am_id, ucp_am_recv_callback_t cb, void *args);
     bool progress();
     void return_am_rdesc(void *rdesc);
     bool am_send_fast_path(ucp_ep_h ep, unsigned am_id,
@@ -98,35 +102,30 @@ namespace UCP {
         const void *payload, size_t payload_size,
         ucs_memory_type_t memtype);
     bool submit_req(Request *req);
-    size_t num_eps();
+    size_t num_eps() const;
 
   private:
-    bool open_context(
-        const std::unordered_map<std::string, std::string> &ev_map);
-    bool create_worker();
     bool setup_worker_efd();
     bool ep_close(ucp_ep_h ep);
-    bool needs_progress();
+    bool needs_progress() const;
     bool progress_with_wakeup();
     bool progress_without_wakeup();
     static void *pbuf_chunk_alloc(size_t size, void *arg);
     static void pbuf_chunk_release(void *chunk, void *arg);
 
-  public:
-    ucp_context_h     context;
-    ucp_worker_h      worker;
-#ifdef REALM_USE_CUDA
-    Cuda::GPU         *gpu{nullptr};
-#endif
-  private:
+    const UCPContext *context;
+    ucp_worker_h worker;
     bool initialized{false};
     bool have_residual_events{false};
     int  worker_efd;
+    size_t ucp_req_size;
     size_t am_alignment;
     bool use_wakeup;
     unsigned prog_boff_max;
-    int  ep_nums_est;
-    size_t ucp_req_size;
+    int prog_itr_max;
+    int rdesc_rel_max;
+    ucs_thread_mode_t thread_mode;
+    size_t pbuf_max_size;
     MPool *request_mp;
     MPool *pbuf_mp;
     VMPool *mmp;
@@ -136,13 +135,33 @@ namespace UCP {
     Mutex am_rdesc_q_mutex;
     Mutex mmp_mutex;
     std::unordered_map<void*, ucp_mem_h> pbuf_mp_mem_hs;
-    std::vector<ucp_mem_h> mem_hs;
     std::unordered_map<int, std::unordered_map<int, ucp_ep_h>> eps;
-    size_t pbuf_max_size;
     size_t max_am_header;
     atomic<uint64_t> scount{0};
     atomic<uint64_t> pcount{0};
     unsigned prog_boff_count{0};
+  };
+
+  class UCPContext {
+  public:
+    UCPContext(int ep_nums_est = -1);
+    ~UCPContext();
+    bool init(const std::unordered_map<std::string, std::string> &ev_map);
+    void finalize();
+    bool mem_map(const ucp_mem_map_params_t *params, ucp_mem_h *mem_h_ptr) const;
+    bool mem_unmap(ucp_mem_h mem_h) const;
+    ucp_context_h get_ucp_context() const { return context; }
+    size_t get_ucp_req_size() const { return ucp_req_size; }
+
+#ifdef REALM_USE_CUDA
+    Cuda::GPU *gpu{nullptr};
+#endif
+  private:
+    bool initialized{false};
+    ucp_context_h context;
+    std::unordered_map<int, std::unordered_map<int, ucp_ep_h>> eps;
+    int  ep_nums_est;
+    size_t ucp_req_size;
   };
 
 }; // namespace UCP
