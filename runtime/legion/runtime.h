@@ -1850,8 +1850,6 @@ namespace Legion {
 #endif
       const bool check_privileges;
     public:
-      const unsigned num_profiling_nodes;
-    public:
       const int legion_collective_radix;
       const int legion_collective_log_radix;
       const int legion_collective_stages;
