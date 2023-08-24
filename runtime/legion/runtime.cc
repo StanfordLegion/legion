@@ -27088,8 +27088,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T>
     void* Runtime::find_or_create_pending_collectable_location(
-                                                 DistributedID did, size_t size)
+                                                              DistributedID did)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -27101,7 +27102,7 @@ namespace Legion {
         const_iterator finder = pending_collectables.find(did);
       if (finder == pending_collectables.end())
       {
-        void *result = malloc(size);
+        void *result = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
         pending_collectables[did] = 
           std::pair<DistributedCollectable*,RtUserEvent>(
               (DistributedCollectable*)result, RtUserEvent::NO_RT_USER_EVENT);
@@ -27110,6 +27111,17 @@ namespace Legion {
       else
         return finder->second.first;
     }
+
+    // Instantiate the template for types that use it
+    template void*
+    Runtime::find_or_create_pending_collectable_location<EquivalenceSet>(
+                                                            DistributedID);
+    template void*
+    Runtime::find_or_create_pending_collectable_location<MaterializedView>(
+                                                            DistributedID);
+    template void*
+    Runtime::find_or_create_pending_collectable_location<ReductionView>(
+                                                            DistributedID);
 
     //--------------------------------------------------------------------------
     void Runtime::record_pending_distributed_collectable(DistributedID did)

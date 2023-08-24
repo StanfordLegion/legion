@@ -1175,8 +1175,9 @@ namespace Legion {
         {
           // Handle the case where we already requested this view on this
           // node from an unrelated meta-task execution
-          void *location = runtime->find_or_create_pending_collectable_location(
-              view_did, sizeof(ReductionView));
+          void *location = 
+            runtime->find_or_create_pending_collectable_location<ReductionView>(
+              view_did);
           return new (location) ReductionView(runtime, view_did,
               logical_owner, this, true/*register now*/, mapping);
         }
@@ -1190,8 +1191,8 @@ namespace Legion {
         {
           // Handle the case where we already requested this view on this
           // node from an unrelated meta-task execution
-          void *location = runtime->find_or_create_pending_collectable_location(
-              view_did, sizeof(MaterializedView));
+          void *location = runtime->find_or_create_pending_collectable_location<
+            MaterializedView>(view_did);
           return new (location) MaterializedView(runtime, view_did,
                 logical_owner, this, true/*register now*/, mapping);
         }

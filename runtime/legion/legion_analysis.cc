@@ -25555,8 +25555,9 @@ namespace Legion {
                                           runtime->forest, rectangles);
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
-      void *location = runtime->find_or_create_pending_collectable_location(
-          did, sizeof(EquivalenceSet));
+      void *location = 
+        runtime->find_or_create_pending_collectable_location<EquivalenceSet>(
+          did);
       EquivalenceSet *set = new(location) EquivalenceSet(runtime, did, root, 
           expr, tid, context, false/*register now*/, mapping);
       // Once construction is complete then we do the registration
