@@ -1067,7 +1067,7 @@ namespace Realm {
     PythonModule::~PythonModule(void)
     {
       assert(config != nullptr);
-      delete config;
+      config = nullptr;
     }
 
     /*static*/ void PythonModule::import_python_module(const char *module_name)

@@ -3992,7 +3992,7 @@ namespace Realm {
     CudaModule::~CudaModule(void)
     {
       assert(config != nullptr);
-      delete config;
+      config = nullptr;
       delete_container_contents(gpu_info);
       assert(cuda_module_singleton == this);
       cuda_module_singleton = 0;
