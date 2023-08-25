@@ -10402,7 +10402,7 @@ namespace Legion {
         }
         else
         {
-          original_task->handle_future(result, metadata, metasize,
+          original_task->handle_post_execution(result, metadata, metasize,
               NULL/*functor*/, Processor::NO_PROC, false/*own functor*/);
           // we no longer own this, it got passed through
           metadata = NULL;
@@ -10472,7 +10472,6 @@ namespace Legion {
           RtEvent applied_event;
           if (!applied_events.empty())
             applied_event = Runtime::merge_events(applied_events);
-          original_task->complete_execution(applied_event);
           original_task->trigger_children_complete(all_shard_effects);
           return applied_event;
         }

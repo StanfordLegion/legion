@@ -6420,7 +6420,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_future(FutureInstance *instance,
+    void IndividualTask::handle_post_execution(FutureInstance *instance,
                                        void *metadata, size_t metasize,
                                        FutureFunctor *functor,
                                        Processor future_proc, bool own_functor)
@@ -6469,6 +6469,7 @@ namespace Legion {
                                     metadata, metasize);
         }
       }
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -7411,7 +7412,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_future(FutureInstance *instance,
+    void PointTask::handle_post_execution(FutureInstance *instance,
                                   void *metadata, size_t metasize,
                                   FutureFunctor *functor, 
                                   Processor future_proc, bool own_functor)
@@ -7430,6 +7431,7 @@ namespace Legion {
       else
         slice_owner->handle_future(remote_completion_event, index_point,
             instance, metadata, metasize, functor, future_proc, own_functor); 
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -8010,9 +8012,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_future(FutureInstance *instance, void *metadata,
-                                  size_t metasize, FutureFunctor *functor,
-                                  Processor future_proc, bool own_functor)
+    void ShardTask::handle_post_execution(FutureInstance *instance,
+        void *metadata, size_t metasize, FutureFunctor *functor,
+        Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8020,6 +8022,7 @@ namespace Legion {
 #endif
       shard_manager->handle_post_execution(instance, metadata, 
                                            metasize, true/*local*/);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
