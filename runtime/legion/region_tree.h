@@ -797,10 +797,9 @@ namespace Legion {
       bool compute_partition_path(IndexSpace parent, IndexPartition child,
                                   std::vector<LegionColor> &path); 
    private:
-      RegionTreePath make_privilege_path(IndexTreeNode* child,
-                                         IndexTreeNode *parent);
-      IndexTreeNode *child_node_for_req(const RegionRequirement &req);
-      IndexTreeNode *parent_node_for_req(const RegionRequirement &req);
+      void initialize_path(IndexTreeNode *child,
+                           IndexTreeNode *parent,
+                           RegionTreePath &path);
 #ifdef DEBUG_LEGION
     public:
       unsigned get_projection_depth(LogicalRegion result, LogicalRegion upper);

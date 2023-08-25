@@ -1579,19 +1579,25 @@ namespace Legion {
       if (IS_NO_ACCESS(req))
         return;
 
-      IndexTreeNode *child_node = child_node_for_req(req);
-      if (child_node == NULL) {
-        return;
-      }
+      ProjectionType htype = req.handle_type;
+      bool is_ispace_htype = (htype == LEGION_SINGULAR_PROJECTION ||
+                              htype == LEGION_REGION_PROJECTION);
+#ifdef DEBUG_LEGION
+      assert(is_ispace_htype || htype == LEGION_PARTITION_PROJECTION);
+#endif
+      IndexTreeNode *child_node = is_ispace_htype ?
+        get_node(req.region.get_index_space()) :
+        (IndexTreeNode *)get_node(req.partition.get_index_partition());
 
-      RegionTreePath path = make_privilege_path(child_node,
-                                                parent_node_for_req(req));
+      RegionNode *parent_node = get_node(req.parent);
+
+      RegionTreePath path;
+      initialize_path(child_node, parent_node->row_source, path);
 
       LogicalTraceInfo trace_info(op, idx, req); 
       // If we've already replayed the analysis we don't need to do it
       if (trace_info.skip_analysis)
         return;
-      RegionNode *parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
@@ -5120,37 +5126,12 @@ namespace Legion {
       return compute_index_path(parent, child_node->parent->handle, path);
     }
 
-    IndexTreeNode *
-    RegionTreeForest::child_node_for_req(const RegionRequirement &req)
-    {
-      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) ||
-          (req.handle_type == LEGION_REGION_PROJECTION))
-      {
-        if (!req.region.exists())
-          return nullptr;
-        return get_node(req.region.get_index_space());
-      }
-
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_PARTITION_PROJECTION);
-#endif
-      if (!req.partition.exists())
-        return nullptr;
-      return get_node(req.partition.get_index_partition());
-    }
-
-    IndexTreeNode *
-    RegionTreeForest::parent_node_for_req(const RegionRequirement &req)
-    {
-      return get_node(req.parent.get_index_space());
-    }
-
     //--------------------------------------------------------------------------
-    RegionTreePath RegionTreeForest::make_privilege_path(IndexTreeNode *child,
-                                                         IndexTreeNode *parent)
+    void RegionTreeForest::initialize_path(IndexTreeNode *child,
+                                           IndexTreeNode *parent,
+                                           RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
-      RegionTreePath path;
 #ifdef DEBUG_LEGION
       assert(child->depth >= parent->depth);
 #endif
@@ -5163,7 +5144,6 @@ namespace Legion {
         path.register_child(child->depth-1,child->color);
         child = child->get_parent();
       }
-      return path;
     }
 
 #ifdef DEBUG_LEGION
