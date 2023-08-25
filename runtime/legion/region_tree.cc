@@ -8357,7 +8357,7 @@ namespace Legion {
       if (has_remote_instance(target))
         return;
       // Send our parent first if necessary
-      if (recurse)
+      if (recurse && (parent != NULL))
         parent->send_node(target, true/*recurse*/);
       // Only send it if we're the owner without a collective mapping
       // or the target is not in the collective mapping and we're the
@@ -8391,7 +8391,7 @@ namespace Legion {
       RezCheck z(rez);
       rez.serialize(handle);
       rez.serialize(did);
-      if (recurse)
+      if (recurse && (parent != NULL))
         rez.serialize(parent->handle);
       else
         rez.serialize(IndexPartition::NO_PART);
