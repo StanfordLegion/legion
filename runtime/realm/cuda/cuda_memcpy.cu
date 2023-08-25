@@ -45,13 +45,6 @@ static __device__ inline void index_to_coords(Offset_t *coords, Offset_t index,
   coords[N - 1] = div;
 }
 
-template <>
-inline __device__ void index_to_coords<1, size_t>(size_t *coords, size_t index,
-                                                  size_t *strides)
-{
-  coords[0] = index;
-}
-
 template <size_t N, typename Offset_t = size_t>
 static __device__ inline size_t coords_to_index(Offset_t *coords, Offset_t *strides)
 {
@@ -68,12 +61,6 @@ static __device__ inline size_t coords_to_index(Offset_t *coords, Offset_t *stri
   i += vol * coords[d];
 
   return i;
-}
-
-template <>
-inline __device__ size_t coords_to_index<1, size_t>(size_t *coords, size_t *strides)
-{
-  return coords[0];
 }
 
 #define MAX_UNROLL (1)
