@@ -37,7 +37,7 @@ static __device__ inline void index_to_coords(Offset_t *coords, Offset_t index,
 {
   size_t div = index;
 #pragma unroll
-  for(size_t i = 0; i < N - 1; i++) {
+  for(int i = 0; i < N - 1; i++) {
     size_t div_tmp = div / extents[i];
     coords[i] = div - div_tmp * extents[i];
     div = div_tmp;
@@ -50,7 +50,7 @@ static __device__ inline size_t coords_to_index(Offset_t *coords, Offset_t *stri
 {
   size_t i = 0;
   size_t vol = 1;
-  Offset_t d = 0;
+  int d = 0;
 
 #pragma unroll
   for(; d < N - 1; d++) {

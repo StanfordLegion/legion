@@ -2099,7 +2099,8 @@ namespace Realm {
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
                                          size_t elem_size, size_t volume,
                                          GPUStream *stream) {
-      size_t log_elem_size = ctz(elem_size);
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
 
       assert((1ULL << log_elem_size) == elem_size);
       assert(dim <= REALM_MAX_DIM);
