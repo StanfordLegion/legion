@@ -1000,8 +1000,14 @@ namespace Legion {
                               bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(proc.exists() ||
+          (memkind == runtime->runtime_system_memory.kind()));
+#endif
       // Figure out which memory we are looking for
-      Memory memory = runtime->find_local_memory(proc, memkind);
+      // If the user passed in a NO_PROC, then use the local system memory
+      Memory memory = proc.exists() ? runtime->find_local_memory(proc, memkind)
+        : runtime->runtime_system_memory;
       if (!memory.exists())
       {
         if (memkind != Memory::SYSTEM_MEM)
