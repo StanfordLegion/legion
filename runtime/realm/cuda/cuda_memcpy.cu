@@ -33,13 +33,13 @@
 
 template <size_t N, typename Offset_t = size_t>
 static __device__ inline void index_to_coords(Offset_t *coords, Offset_t index,
-                                              Offset_t *strides)
+                                              Offset_t *extents)
 {
   size_t div = index;
 #pragma unroll
   for(size_t i = 0; i < N - 1; i++) {
-    size_t div_tmp = div / strides[i];
-    coords[i] = div - div_tmp * strides[i];
+    size_t div_tmp = div / extents[i];
+    coords[i] = div - div_tmp * extents[i];
     div = div_tmp;
   }
   coords[N - 1] = div;
