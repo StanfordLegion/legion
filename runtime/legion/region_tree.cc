@@ -50,7 +50,7 @@ namespace Legion {
       fs->get_field_indexes(req.instance_fields, field_indexes);
       instances.resize(field_indexes.size());
       Runtime *runtime = forest->runtime;
-      if ((runtime->num_profiling_nodes > 0) || runtime->legion_spy_enabled)
+      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
         instance_events.resize(field_indexes.size());
       // For each of the fields in the region requirement
       // (importantly in the order they will be copied)
@@ -8357,7 +8357,7 @@ namespace Legion {
       if (has_remote_instance(target))
         return;
       // Send our parent first if necessary
-      if (recurse && (parent != NULL))
+      if (recurse)
         parent->send_node(target, true/*recurse*/);
       // Only send it if we're the owner without a collective mapping
       // or the target is not in the collective mapping and we're the
@@ -8391,7 +8391,7 @@ namespace Legion {
       RezCheck z(rez);
       rez.serialize(handle);
       rez.serialize(did);
-      if (recurse && (parent != NULL))
+      if (recurse)
         rez.serialize(parent->handle);
       else
         rez.serialize(IndexPartition::NO_PART);
@@ -8601,7 +8601,7 @@ namespace Legion {
 #endif
         }
         // See if we're going to be sending the whole tree or not
-        bool recurse = true;
+        bool recurse = false;
         if (target->parent == NULL)
         {
           if (target->check_valid_and_increment(REGION_TREE_REF))
@@ -8611,10 +8611,7 @@ namespace Legion {
             target->remove_base_valid_ref(REGION_TREE_REF);
           }
           else
-          {
             target->pack_global_ref();
-            recurse = false;
-          }
         }
         else
         {
@@ -8623,6 +8620,7 @@ namespace Legion {
           if (target->parent->check_valid_and_increment(REGION_TREE_REF))
           {
             valid = true;
+            recurse = true;
             target->parent->pack_valid_ref();
             target->parent->remove_base_valid_ref(REGION_TREE_REF);
           }
@@ -8638,7 +8636,6 @@ namespace Legion {
             }
             else
               target->pack_global_ref();
-            recurse = false;
           }
         }
         target->send_node(source, recurse, valid);
@@ -8649,6 +8646,7 @@ namespace Legion {
           rez.serialize(to_trigger);
           rez.serialize(handle);
           rez.serialize(valid);
+          rez.serialize(recurse);
         }
         forest->runtime->send_index_space_return(source, rez);
       }
@@ -8670,12 +8668,14 @@ namespace Legion {
       IndexSpaceNode *node = context->get_node(handle);
       bool valid;
       derez.deserialize(valid);
+      bool recurse;
+      derez.deserialize(recurse);
       if (valid)
       {
-        if (node->parent == NULL)
-          node->unpack_valid_ref();
-        else
+        if (recurse)
           node->parent->unpack_valid_ref();
+        else
+          node->unpack_valid_ref();
       }
       else
         node->unpack_global_ref();
@@ -20676,40 +20676,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::pack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = this;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->pack_global_ref();
-      }
-      if (row_source->parent != NULL)
-        row_source->parent->pack_valid_ref();
-      else
-        row_source->pack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::unpack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = this;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->unpack_global_ref();
-      }
-      if (row_source->parent != NULL)
-        row_source->parent->unpack_valid_ref();
-      else
-        row_source->unpack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionNode::is_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -22067,34 +22033,6 @@ namespace Legion {
         }
       }
       return continue_traversal;
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::pack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = parent;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->pack_global_ref();
-      }
-      row_source->pack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::unpack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = parent;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->unpack_global_ref();
-      }
-      row_source->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
