@@ -2242,8 +2242,6 @@ namespace Legion {
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
         release_task_local_instances();
-      // Mark that we are done executing this operation
-      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2392,8 +2390,6 @@ namespace Legion {
                                          const void *metadata, size_t metasize)
     //--------------------------------------------------------------------------
     {
-      // Mark that we are done executing this operation
-      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -11551,8 +11547,8 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, metadata, metasize, callback_functor,
-                                executing_processor, own_callback_functor);
+      owner_task->handle_post_execution(instance, metadata, metasize, 
+          callback_functor, executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -24147,8 +24143,8 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, metadata, metasize, callback_functor,
-                                executing_processor, own_callback_functor);
+      owner_task->handle_post_execution(instance, metadata, metasize,
+          callback_functor, executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;
       {
