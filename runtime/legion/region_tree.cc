@@ -8791,7 +8791,7 @@ namespace Legion {
       else
       {
         RtEvent defer;
-        IndexPartNode *child = forest->get_node(handle, &defer);
+        forest->get_node(handle, &defer);
         // We'll update references and unpack the remote reference on 
         // the requester here so there's no need to block waiting
         target->store(handle.get_id());
