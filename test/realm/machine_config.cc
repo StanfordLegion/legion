@@ -15,13 +15,19 @@ enum {
 };
 
 namespace TestConfig {
+  // core module
   int ncpus = 4;
   int nutils = 2;
   int nios = 1;
-  size_t sysmem = 16*1024*1024;
+  size_t sysmem = 16 * 1024 * 1024;
+  // numa module
+  size_t numamem = 2 * 1024 * 1024;
+  int numacpus = 0;
+  // cuda/hip module
   int ngpus = 1;
-  size_t zcmem = 32*1024*1024;
-  size_t fbmem = 128*1024*1024;
+  size_t zcmem = 32 * 1024 * 1024;
+  size_t fbmem = 128 * 1024 * 1024;
+  // openmp module
 #ifdef REALM_USE_KOKKOS
   int nocpus = 1;
 #else
@@ -55,6 +61,25 @@ void top_level_task(const void *args, size_t arglen,
   assert(ret_value == false);
   log_app.print("cpus %d, utils %d, ios %d, sysmem %zu", 
     ncpus, nutils, nios, sysmem);
+
+  {
+    size_t numamem = 0;
+    int numacpus = 0;
+    ModuleConfig *numa_config = rt.get_module_config("numa");
+    if (numa_config) {
+      ret_value = numa_config->get_property("numamem", numamem);
+      assert(ret_value == true);
+      ret_value = numa_config->get_property("numacpus", numacpus);
+      assert(ret_value == true);
+      // test wrong property
+      ret_value = numa_config->get_property("get_error_numa", wrong_config);
+      assert(ret_value == false);
+      log_app.print("numa numamem %zu, numacpsus %d", 
+        numamem, numacpus);
+    } else {
+      log_app.print("numa is not loaded");
+    }
+  }
 
   {
     int ngpus = 0;
@@ -228,6 +253,19 @@ int main(int argc, char **argv)
   // test wrong config
   ret_value = core_config->set_property("set_error_core", TestConfig::sysmem);
   assert(ret_value == false);
+
+  ModuleConfig* numa_config = rt.get_module_config("numa");
+  if (numa_config) {
+    ret_value = numa_config->set_property<size_t>("numamem", TestConfig::numamem);
+    assert(ret_value == true);
+    ret_value = numa_config->set_property<int>("numacpus", TestConfig::numacpus);
+    assert(ret_value == true);
+    // test wrong config
+    ret_value = numa_config->set_property("set_error_numa", TestConfig::numamem);
+    assert(ret_value == false);
+  } else {
+    log_app.print("numa is not loaded");
+  }
 
   ModuleConfig* cuda_config = rt.get_module_config("cuda");
   if (cuda_config) {
