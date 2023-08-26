@@ -361,7 +361,7 @@ namespace Legion {
     public: 
       ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const;
       inline LgEvent get_unique_event(void) const { return unique_event; }
-      PhysicalInstance get_instance(void) const { return instance; }
+      PhysicalInstance get_instance(void) const;
       inline Memory get_memory(void) const { return memory_manager->memory; }
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);

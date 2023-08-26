@@ -2732,8 +2732,6 @@ namespace Legion {
       const bool check_privileges;
       const bool dump_free_ranges;
     public:
-      const unsigned num_profiling_nodes;
-    public:
       const int legion_collective_radix;
       MPIRankTable *const mpi_rank_table;
     public:

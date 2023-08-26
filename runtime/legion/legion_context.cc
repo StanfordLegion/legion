@@ -2488,7 +2488,8 @@ namespace Legion {
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
-        const ApEvent ready = remap_region(unmapped_regions[idx], provenance);
+        const ApEvent ready = 
+          remap_region(unmapped_regions[idx], provenance, true/*internal*/);
         if (ready.exists())
           mapped_events.insert(ready);
       }
@@ -6649,10 +6650,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent InnerContext::remap_region(const PhysicalRegion &region,
-                                       Provenance *provenance)
+                                       Provenance *provenance, bool internal)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (!internal)
+      {
+        AutoRuntimeCall call(this);
+        return remap_region(region, provenance, true/*internal*/);
+      }
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
@@ -18174,23 +18179,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent ReplicateContext::remap_region(const PhysicalRegion &region,
-                                           Provenance *provenance)
+                                           Provenance *provenance,bool internal)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
-            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      if (!internal)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
-                              i > 0, provenance);
-        hasher.hash(REPLICATE_REMAP_REGION, __func__);
-        Serializer rez;
-        ExternalMappable::pack_region_requirement(
-            region.impl->get_requirement(), rez);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "requirement");
-        hasher.hash<bool>(region.is_mapped(), "is_mapped");
-        if (hasher.verify(__func__))
-          break;
+        AutoRuntimeCall call(this);
+        for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+              ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+        {
+          Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+                                i > 0, provenance);
+          hasher.hash(REPLICATE_REMAP_REGION, __func__);
+          Serializer rez;
+          ExternalMappable::pack_region_requirement(
+              region.impl->get_requirement(), rez);
+          hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "requirement");
+          hasher.hash<bool>(region.is_mapped(), "is_mapped");
+          if (hasher.verify(__func__))
+            break;
+        }
+        return remap_region(region, provenance, true/*internal*/);
       }
       // Check to see if the region is already mapped,
       // if it is then we are done
@@ -23617,7 +23626,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent LeafContext::remap_region(const PhysicalRegion &region,
-                                      Provenance *provenance)
+                                      Provenance *provenance, bool internal)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,

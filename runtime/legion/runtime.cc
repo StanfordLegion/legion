@@ -1000,8 +1000,14 @@ namespace Legion {
                               bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(proc.exists() ||
+          (memkind == runtime->runtime_system_memory.kind()));
+#endif
       // Figure out which memory we are looking for
-      Memory memory = runtime->find_local_memory(proc, memkind);
+      // If the user passed in a NO_PROC, then use the local system memory
+      Memory memory = proc.exists() ? runtime->find_local_memory(proc, memkind)
+        : runtime->runtime_system_memory;
       if (!memory.exists())
       {
         if (memkind != Memory::SYSTEM_MEM)
@@ -1033,7 +1039,7 @@ namespace Legion {
         ready_event.wait();
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) ? 
+          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
@@ -1110,7 +1116,7 @@ namespace Legion {
         ready_event.wait();
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) ? 
+          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string); 
@@ -13388,7 +13394,7 @@ namespace Legion {
       : channels((VirtualChannel*)
                   malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
         runtime(rt), remote_address_space(remote), target(remote_util_group), 
-        always_flush(remote < rt->num_profiling_nodes)
+        always_flush(rt->profiler != NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16620,7 +16626,6 @@ namespace Legion {
 #endif
         check_privileges(config.check_privileges),
         dump_free_ranges(config.dump_free_ranges),
-        num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
         prepared_for_shutdown(false), total_outstanding_tasks(0), 
@@ -16731,7 +16736,7 @@ namespace Legion {
       // We've intentionally switched this to profile all the nodes if we're 
       // profiling any nodes since some information about things like copies
       // usage of instances are now split across multiple log files
-      if (num_profiling_nodes > 0)
+      if (config.num_profiling_nodes > 0)
         initialize_legion_prof(config);
 #ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count.store(0);
@@ -16826,7 +16831,6 @@ namespace Legion {
 #endif
         check_privileges(rhs.check_privileges),
         dump_free_ranges(rhs.dump_free_ranges),
-        num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         mpi_rank_table(NULL), local_procs(rhs.local_procs), 
         local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)
@@ -26726,7 +26730,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      AutoLock d_lock(distributed_collectable_lock);
 #ifdef DEBUG_LEGION
       assert(dist_collectables.find(did) == dist_collectables.end());
 #endif
@@ -30384,6 +30388,8 @@ namespace Legion {
 #endif
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = new TopLevelContext(this);
+      // Save the current context if there is one and restore it later
+      TaskContext *previous_implicit = implicit_context;
       // Save the context in the implicit context
       implicit_context = top_context;
       implicit_runtime = this;
@@ -30391,9 +30397,6 @@ namespace Legion {
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Set the executing processor
       top_context->set_executing_processor(target);
-      // Save the current context if there is one and restore it later
-      TaskContext *previous_implicit = implicit_context;
-      implicit_context = top_context;
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       AutoProvenance provenance(launcher.provenance);

@@ -118,7 +118,7 @@ namespace Realm {
     ProcSetModule::~ProcSetModule(void)
     {
       assert(config != nullptr);
-      delete config;
+      config = nullptr;
     }
 
     /*static*/ ModuleConfig *ProcSetModule::create_module_config(RuntimeImpl *runtime)
