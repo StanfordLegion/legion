@@ -93,6 +93,10 @@ namespace Realm {
     NumaModuleConfig::NumaModuleConfig(void)
       : ModuleConfig("numa")
     {
+      config_map.insert({"numamem", &cfg_numa_mem_size});
+      config_map.insert({"numa_nocpumem", &cfg_numa_nocpu_mem_size});
+      config_map.insert({"numacpus", &cfg_num_numa_cpus});
+      config_map.insert({"pin_memory", &cfg_pin_memory});
     }
 
     void NumaModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
