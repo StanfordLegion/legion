@@ -8743,15 +8743,23 @@ namespace Legion {
        dargs->proxy_this->get_child(dargs->child_color, NULL, true/*can fail*/);
       if (child != NULL)
       {
-        Serializer rez;
+        if (child->check_global_and_increment(REGION_TREE_REF))
         {
-          RezCheck z(rez);
-          rez.serialize(child->handle);
-          rez.serialize(dargs->target);
-          rez.serialize(dargs->to_trigger);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(child->handle);
+            rez.serialize(dargs->target);
+            rez.serialize(dargs->to_trigger);
+            child->pack_global_ref();
+          }
+          Runtime *runtime = dargs->proxy_this->context->runtime;
+          runtime->send_index_space_child_response(dargs->source, rez);
+          if (child->remove_base_gc_ref(REGION_TREE_REF))
+            delete child;
         }
-        Runtime *runtime = dargs->proxy_this->context->runtime;
-        runtime->send_index_space_child_response(dargs->source, rez);
+        else // Unable to get a global reference
+          Runtime::trigger_event(dargs->to_trigger);
         if (child->remove_base_resource_ref(REGION_TREE_REF))
           delete child;
       }
@@ -8773,14 +8781,21 @@ namespace Legion {
       derez.deserialize(to_trigger);
       if (target == NULL)
       {
-        RtEvent defer; 
-        forest->get_node(handle, &defer);
-        Runtime::trigger_event(to_trigger, defer);
+        // In this case we need to block here to make sure we can
+        // unpack the global reference we added on the remote node
+        // since there's nothing on the local node that is going to do it
+        IndexPartNode *child = forest->get_node(handle);
+        child->unpack_global_ref();
+        Runtime::trigger_event(to_trigger);
       }
       else
       {
+        RtEvent defer;
+        IndexPartNode *child = forest->get_node(handle, &defer);
+        // We'll update references and unpack the remote reference on 
+        // the requester here so there's no need to block waiting
         target->store(handle.get_id());
-        Runtime::trigger_event(to_trigger);
+        Runtime::trigger_event(to_trigger, defer);
       }
     }
 
