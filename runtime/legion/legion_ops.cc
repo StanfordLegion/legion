@@ -2257,7 +2257,20 @@ namespace Legion {
         if (completion_event.exists() && 
             !completion_event.has_triggered_faultignorant())
         {
-          const RtEvent safe = Runtime::protect_event(completion_event);
+          if (!completion_event.has_triggered_faultignorant())
+          {
+            const RtEvent safe = Runtime::protect_event(completion_event);
+            if (safe.exists() && !safe.has_triggered())
+            {
+              parent_ctx->add_to_deferred_commit_queue(this,safe,do_deactivate);
+              return;
+            }
+          }
+        }
+        else if (!completion_effects.empty())
+        {
+          const RtEvent safe =
+            Runtime::protect_merge_events(completion_effects);
           if (safe.exists() && !safe.has_triggered())
           {
             parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);

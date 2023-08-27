@@ -29,8 +29,8 @@ namespace Realm {
   class REALM_PUBLIC_API ModuleConfig {
   protected:
     ModuleConfig(const std::string &name);
-    virtual ~ModuleConfig(void);
   public:
+    virtual ~ModuleConfig(void);
     template <typename T>
     bool set_property(const std::string name, T value);
     template <typename T>

@@ -1137,6 +1137,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalManager::get_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::compute_copy_offsets(const FieldMask &copy_mask,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
