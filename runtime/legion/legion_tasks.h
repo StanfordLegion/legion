@@ -480,7 +480,7 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -677,6 +677,7 @@ namespace Legion {
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
+      Future redop_initial_value;
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
       std::vector<OutputOptions> output_region_options;
@@ -780,7 +781,7 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -897,7 +898,7 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -1013,7 +1014,7 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
               const std::deque<InstanceSet> &parent_regions);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,

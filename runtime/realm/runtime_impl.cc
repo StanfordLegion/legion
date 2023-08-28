@@ -47,10 +47,23 @@
 #endif
 
 #include <string.h>
+#include <thread>
+#include <sstream>
+#include <fstream>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
 #include <signal.h>
+#include <sys/types.h>
+#endif
+
+// for cpu resource discovery
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+#include <sys/sysinfo.h>
+#endif
+
+#ifdef REALM_ON_MACOS
+#include <sys/sysctl.h>
 #endif
 
 #ifdef REALM_ON_WINDOWS
@@ -374,6 +387,12 @@ namespace Realm {
       : impl(0)
     {
       // ok to construct extra ones - we will make sure only one calls init() though
+      if (runtime_singleton) {
+        impl = runtime_singleton;
+      } else {
+        impl = new RuntimeImpl;
+        runtime_singleton = static_cast<RuntimeImpl *>(impl);
+      }
     }
 
     /*static*/ Runtime Runtime::get_runtime(void)
@@ -430,14 +449,37 @@ namespace Realm {
       runtime_initialized = true;
 #endif
 
-      if(runtime_singleton != 0) {
-	fprintf(stderr, "ERROR: cannot initialize more than one Realm runtime at a time!\n");
-	return false;
-      }
-
-      impl = new RuntimeImpl;
-      runtime_singleton = static_cast<RuntimeImpl *>(impl);
+      assert(runtime_singleton != 0);
       return static_cast<RuntimeImpl *>(impl)->network_init(argc, argv);
+    }
+
+        void Runtime::parse_command_line(int argc, char **argv)
+    {
+      assert(impl != 0);
+      std::vector<std::string> cmdline;
+      cmdline.reserve(argc);
+      for(int i = 1; i < argc; i++)
+        cmdline.push_back(argv[i]);
+      static_cast<RuntimeImpl *>(impl)->parse_command_line(cmdline);
+    }
+
+    void Runtime::parse_command_line(std::vector<std::string> &cmdline,
+                                                bool remove_realm_args /*= false*/)
+    {
+      assert(impl != 0);
+      if(remove_realm_args) {
+        static_cast<RuntimeImpl *>(impl)->parse_command_line(cmdline);
+      } else {
+        // pass in a copy so we don't mess up the original
+        std::vector<std::string> cmdline_copy(cmdline);
+        static_cast<RuntimeImpl *>(impl)->parse_command_line(cmdline_copy);
+      }
+    }
+
+    void Runtime::finish_configure(void)
+    {
+      assert(impl != 0);
+      static_cast<RuntimeImpl *>(impl)->finish_configure();
     }
 
     // configures the runtime from the provided command line - after this 
@@ -484,6 +526,7 @@ namespace Realm {
       if(!argc) argc = &my_argc;
       if(!argv) argv = &my_argv;
 
+      if(!create_configs(*argc, *argv)) return false;
       if(!network_init(argc, argv)) return false;
       if(!configure_from_command_line(*argc, *argv)) return false;
       start();
@@ -653,6 +696,16 @@ namespace Realm {
       return result;
     }
 
+    bool Runtime::create_configs(int argc, char **argv)
+    {
+      return ((RuntimeImpl *)impl)->create_configs(argc, argv);
+    }
+
+    ModuleConfig* Runtime::get_module_config(const std::string name)
+    {
+      return ((RuntimeImpl *)impl)->get_module_config(name);
+    }
+
     Module *Runtime::get_module_untyped(const char *name)
     {
       if(runtime_singleton) {
@@ -675,38 +728,198 @@ namespace Realm {
     bool force_kernel_threads = false;
   };
 
+  CoreModuleConfig::CoreModuleConfig(void)
+    : ModuleConfig("core")
+  {
+    config_map.insert({"cpu", &num_cpu_procs});
+    config_map.insert({"util", &num_util_procs});
+    config_map.insert({"io", &num_io_procs});
+    config_map.insert({"sysmem", &sysmem_size});
+  }
+
+#ifdef REALM_ON_WINDOWS
+static DWORD CountSetBits(ULONG_PTR bitMask)
+{
+    DWORD LSHIFT = sizeof(ULONG_PTR)*8 - 1;
+    DWORD bitSetCount = 0;
+    ULONG_PTR bitTest = (ULONG_PTR)1 << LSHIFT;    
+    DWORD i;
+    
+    for (i = 0; i <= LSHIFT; ++i)
+    {
+        bitSetCount += ((bitMask & bitTest)?1:0);
+        bitTest/=2;
+    }
+
+    return bitSetCount;
+}
+#endif
+
+  bool CoreModuleConfig::discover_resource(void)
+  {
+#ifdef REALM_ON_LINUX
+    // system memory
+    struct sysinfo memInfo;
+    sysinfo (&memInfo);
+    res_sysmem_size = memInfo.totalram;
+    // phyical cores
+    std::ifstream infile("/proc/cpuinfo");
+    if (infile.fail()) return false;
+    std::string line;
+    int cpu_id = 0;
+    int cpu_cores = 0;
+    std::map<int, int> cpus;
+    while (std::getline(infile, line)) {
+      if (strncmp(line.c_str(), "physical id", 11) == 0) {
+        std::istringstream iss(line);
+        std::string x, y, z;
+        if (!(iss >> x >> y >> z >> cpu_id)) {
+          infile.close();
+          return false;
+        };
+      }
+      if (strncmp(line.c_str(), "cpu cores", 9) == 0) {
+        std::istringstream iss(line);
+        std::string x, y, z;
+        if (!(iss >> x >> y >> z >> cpu_cores)) {
+          infile.close();
+          return false;
+        }
+        std::map<int, int>::iterator it = cpus.find(cpu_id);
+        if (it == cpus.end()) {
+          cpus.insert({cpu_id, cpu_cores});
+        } else {
+          assert(it->second == cpu_cores);
+        }
+      }
+    }
+    for (std::map<int, int>::iterator it = cpus.begin(); it != cpus.end(); it++) {
+      res_num_cpus += it->second;
+    }
+    infile.close();
+#endif
+#ifdef REALM_ON_WINDOWS
+    // system memory
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    GlobalMemoryStatusEx(&memInfo);
+    res_sysmem_size = static_cast<size_t>(memInfo.ullTotalPageFile);
+    // physical cores
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = NULL;
+    DWORD buffer_size = 0;
+
+    // Get the required buffer size
+    if (!GetLogicalProcessorInformationEx(RelationAll, NULL, &buffer_size)) {
+      return false;
+    }
+    buffer = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[buffer_size]);
+    if (!GetLogicalProcessorInformationEx(RelationAll, buffer, &buffer_size)) {
+      delete[] buffer;
+      return false;
+    }
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = buffer;
+    while (reinterpret_cast<LPBYTE>(ptr) < reinterpret_cast<LPBYTE>(buffer) + buffer_size) {
+      if (ptr->Relationship == RelationProcessorCore) {
+        DWORD logical_processor_count = 0;
+        for (DWORD i = 0; i < ptr->Processor.GroupCount; i++) {
+          logical_processor_count += CountSetBits(ptr->Processor.GroupMask[i].Mask);
+        }
+        if (logical_processor_count == 1) {
+          res_num_cpus++;
+        }
+      }
+      ptr = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(reinterpret_cast<LPBYTE>(ptr) + ptr->Size);
+    }
+    delete[] buffer;
+#endif
+#ifdef REALM_ON_FREEBSD
+    // system memory
+    size_t buflen = sizeof(size_t);
+    sysctlbyname("hw.physmem", &res_sysmem_size, &buflen, NULL, 0);
+    // phyical cores
+    buflen = sizeof(int);
+    sysctlbyname("hw.ncpu", &res_num_cpus, &buflen, NULL, 0);
+#endif
+#ifdef REALM_ON_MACOS
+    // system memory
+    size_t buflen = sizeof(size_t);
+    sysctlbyname("hw.memsize", &res_sysmem_size, &buflen, NULL, 0);
+    // phyical cores
+    buflen = sizeof(int);
+    sysctlbyname("hw.physicalcpu", &res_num_cpus, &buflen, NULL, 0);
+#endif
+    log_runtime.info("Discover resource cpu cores %d, sysmem %zu", res_num_cpus, res_sysmem_size);
+    return true;
+  }
+
+  bool CoreModuleConfig::get_resource(const std::string name, int &value) const
+  {
+    if (name == "cpu") {
+      value = res_num_cpus;
+      return true;
+    } else {
+      log_runtime.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
+      return false;
+    }
+  }
+
+  bool CoreModuleConfig::get_resource(const std::string name, size_t &value) const
+  {
+    if (name == "sysmem") {
+      value = res_sysmem_size;
+      return true;
+    } else {
+      log_runtime.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
+      return false;
+    }
+  }
+
+  void CoreModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+  {
+    assert(finish_configured == false);
+    // parse command line arguments
+    CommandLineParser cp;
+    cp.add_option_int("-ll:cpu", num_cpu_procs)
+      .add_option_int("-ll:util", num_util_procs)
+      .add_option_int("-ll:io", num_io_procs)
+      .add_option_int("-ll:concurrent_io", concurrent_io_threads)
+      .add_option_int_units("-ll:csize", sysmem_size, 'm')
+      .add_option_int_units("-ll:stacksize", stack_size, 'm', true /*binary*/, true /*keep*/)
+      .add_option_bool("-ll:pin_util", pin_util_procs)
+      .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
+      .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
+      .add_option_int("-ll:ext_sysmem", use_ext_sysmem)
+      .parse_command_line(cmdline);
+  }
+
   CoreModule::CoreModule(void)
     : Module("core")
-    , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
-    , concurrent_io_threads(1)  // Legion does not support values > 1 right now
-    , sysmem_size(512 << 20), stack_size(2 << 20)
-    , pin_util_procs(false)
-    , cpu_bgwork_timeslice(0)
-    , util_bgwork_timeslice(0)
-    , use_ext_sysmem(true)
+    , config(nullptr)
   {}
 
   CoreModule::~CoreModule(void)
-  {}
+  {
+    assert(config != nullptr);
+    config = nullptr;
+  }
 
-  /*static*/ Module *CoreModule::create_module(RuntimeImpl *runtime,
-					       std::vector<std::string>& cmdline)
+  /*static*/ ModuleConfig *CoreModule::create_module_config(RuntimeImpl *runtime)
+  {
+    CoreModuleConfig *config = new CoreModuleConfig();
+    config->discover_resource();
+    return config;
+  }
+
+  /*static*/ Module *CoreModule::create_module(RuntimeImpl *runtime)
   {
     CoreModule *m = new CoreModule;
 
-    // parse command line arguments
-    CommandLineParser cp;
-    cp.add_option_int("-ll:cpu", m->num_cpu_procs)
-      .add_option_int("-ll:util", m->num_util_procs)
-      .add_option_int("-ll:io", m->num_io_procs)
-      .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
-      .add_option_int_units("-ll:csize", m->sysmem_size, 'm')
-      .add_option_int_units("-ll:stacksize", m->stack_size, 'm', true /*binary*/, true /*keep*/)
-      .add_option_bool("-ll:pin_util", m->pin_util_procs)
-      .add_option_int("-ll:cpu_bgwork", m->cpu_bgwork_timeslice)
-      .add_option_int("-ll:util_bgwork", m->util_bgwork_timeslice)
-      .add_option_int("-ll:ext_sysmem", m->use_ext_sysmem)
-      .parse_command_line(cmdline);
+    CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
+    assert(config != NULL);
+    assert(config->finish_configured);
+    assert(m->name == config->get_name());
+    assert(m->config == NULL);
+    m->config = config;
 
     return m;
   }
@@ -718,9 +931,9 @@ namespace Realm {
     Module::create_memories(runtime);
 
     MemoryImpl *sysmem;
-    if(sysmem_size > 0) {
+    if(config->sysmem_size > 0) {
       Memory m = runtime->next_local_memory_id();
-      sysmem = new LocalCPUMemory(m, sysmem_size,
+      sysmem = new LocalCPUMemory(m, config->sysmem_size,
                                   -1/*don't care numa domain*/,
                                   Memory::SYSTEM_MEM);
       runtime->add_memory(sysmem);
@@ -730,7 +943,7 @@ namespace Realm {
     // create a memory that will hold external instances (the sysmem above
     //  might get registered with network and/or gpus, but external instances
     //  usually won't have those affinities)
-    if(use_ext_sysmem || !sysmem) {
+    if(config->use_ext_sysmem || !sysmem) {
       Memory m = runtime->next_local_memory_id();
       ext_sysmem = new LocalCPUMemory(m, 0 /*size*/,
                                       -1 /*don't care numa domain*/,
@@ -747,32 +960,32 @@ namespace Realm {
   {
     Module::create_processors(runtime);
 
-    for(int i = 0; i < num_util_procs; i++) {
+    for(int i = 0; i < config->num_util_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
-						    stack_size,
+						    config->stack_size,
 						    Config::force_kernel_threads,
-                                                    pin_util_procs,
+                                                    config->pin_util_procs,
 						    &runtime->bgwork,
-						    util_bgwork_timeslice);
+						    config->util_bgwork_timeslice);
       runtime->add_processor(pi);
     }
 
-    for(int i = 0; i < num_io_procs; i++) {
+    for(int i = 0; i < config->num_io_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalIOProcessor(p, runtime->core_reservation_set(),
-					       stack_size,
-					       concurrent_io_threads);
+					       config->stack_size,
+					       config->concurrent_io_threads);
       runtime->add_processor(pi);
     }
 
-    for(int i = 0; i < num_cpu_procs; i++) {
+    for(int i = 0; i < config->num_cpu_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						stack_size,
+						config->stack_size,
 						Config::force_kernel_threads,
 						&runtime->bgwork,
-						cpu_bgwork_timeslice);
+						config->cpu_bgwork_timeslice);
       runtime->add_processor(pi);
     }
   }
@@ -816,6 +1029,91 @@ namespace Realm {
     Module::cleanup();
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RuntimeImplConfig
+  //
+  RuntimeImplConfig::RuntimeImplConfig(void)
+  {}
+
+  void RuntimeImplConfig::configure_from_cmdline(std::vector<std::string> &cmdline)
+  {
+    // low-level runtime parameters
+    if(Network::max_node_id > 0)
+      reg_ib_mem_size = 256 << 20; // for inter-node copies
+    else
+      reg_ib_mem_size = 64 << 20; // for local transposes/serdez
+
+
+    // This dummy network list is actually handled in network_init()
+    // this is just here to help verify low-level arguement
+    std::vector<std::string> dummy_network_list;
+
+    CommandLineParser cp;
+    cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
+      .add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
+      .add_option_int_units("-ll:dsize", disk_mem_size, 'm')
+      .add_option_int_units("-ll:stacksize", stack_size, 'm')
+      .add_option_int("-ll:dma", dma_worker_threads)
+      .add_option_bool("-ll:pin_dma", pin_dma_threads)
+      .add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
+      .add_option_bool("-ll:show_rsrv", show_reservations)
+      .add_option_int("-ll:ht_sharing", hyperthread_sharing)
+      .add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
+      .add_option_int("-ll:bitset_twolevel", bitset_twolevel);
+
+
+    cp.add_option_string("-ll:eventtrace", event_trace_file)
+      .add_option_string("-ll:locktrace", lock_trace_file);
+
+#ifdef NODE_LOGGING
+    cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
+#else
+    std::string dummy_prefix;
+    cp.add_option_string("-ll:prefix", dummy_prefix);
+#endif
+
+    cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
+    cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
+    cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
+    cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
+    cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
+    cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
+    cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
+    cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
+    cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
+    cp.add_option_stringlist("-ll:networks", dummy_network_list);
+    cp.add_option_int_units("-ll:replheap", replheap_size);
+
+    // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
+    cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
+
+    bool cmdline_ok = cp.parse_command_line(cmdline);
+
+    if(!cmdline_ok) {
+      fprintf(stderr, "ERROR: failure parsing command line options\n");
+      exit(1);
+    }
+
+#ifndef EVENT_TRACING
+    if(!event_trace_file.empty()) {
+      fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
+    }
+#endif
+
+#ifndef LOCK_TRACING
+    if(!lock_trace_file.empty()) {
+        fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
+    }
+#endif
+
+#ifndef NODE_LOGGING
+    if(!dummy_prefix.empty()) {
+      fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+    }
+#endif
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -823,16 +1121,11 @@ namespace Realm {
   //
 
     RuntimeImpl *runtime_singleton = 0;
-
-  // these should probably be member variables of RuntimeImpl?
-    static size_t stack_size;
   
     RuntimeImpl::RuntimeImpl(void)
-      : machine(0), 
-#ifdef NODE_LOGGING
-	prefix("."),
-#endif
-  num_untriggered_events(0),
+      : config(),
+        machine(0), 
+        num_untriggered_events(0),
 	nodes(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0),
@@ -850,7 +1143,8 @@ namespace Realm {
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
 	module_registrar(this),
-        modules_created(false)
+        modules_created(false),
+	module_configs_created(false)
     {
       machine = new MachineImpl;
     }
@@ -1189,7 +1483,7 @@ namespace Realm {
         return 0;
     }
 
-    bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
+    void RuntimeImpl::parse_command_line(std::vector<std::string> &cmdline)
     {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
@@ -1220,126 +1514,57 @@ namespace Realm {
       init_nvtx(nvtx_module_list);
 #endif
 
+      // configure network modules
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+          it != network_modules.end();
+          it++)
+        (*it)->parse_command_line(this, cmdline);
+
+      // configure module configs
+      std::map<std::string, ModuleConfig*>::iterator it;
+      for (it = module_configs.begin(); it != module_configs.end(); it++) {
+        ModuleConfig *module_config = it->second;
+        module_config->configure_from_cmdline(cmdline);
+      }
+
+      PartitioningOpQueue::configure_from_cmdline(cmdline);
+      config.configure_from_cmdline(cmdline);
+
+      core_map = CoreMap::discover_core_map(config.hyperthread_sharing);
+      core_reservations = new CoreReservationSet(core_map);
+
+      sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
+
+      bgwork.configure_from_cmdline(cmdline);
+
+      // now that we've done all of our argument parsing, scan through what's
+      //  left and see if anything starts with -ll: - probably a misspelled
+      //  argument
+      for(std::vector<std::string>::const_iterator it = cmdline.begin();
+        it != cmdline.end();
+        it++)
+      if(it->compare(0, 4, "-ll:") == 0) {
+        fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
+        assert(0);
+      }
+    }
+
+    void RuntimeImpl::finish_configure(void)
+    {
+      // mark all module config as finished
+      std::map<std::string, ModuleConfig*>::iterator it;
+      for (it = module_configs.begin(); it != module_configs.end(); it++) {
+        ModuleConfig *module_config = it->second;
+        module_config->finish_configure();
+      }
+
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
 
-      // configure network modules
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->parse_command_line(this, cmdline);
-
       // now load modules
-      module_registrar.create_static_modules(cmdline, modules);
-      module_registrar.create_dynamic_modules(cmdline, modules);
+      module_registrar.create_static_modules(modules);
+      module_registrar.create_dynamic_modules(modules);
       modules_created = true;
-
-      PartitioningOpQueue::configure_from_cmdline(cmdline);
-
-      // low-level runtime parameters
-      size_t reg_ib_mem_size;
-      if(Network::max_node_id > 0)
-	reg_ib_mem_size = 256 << 20; // for inter-node copies
-      else
-	reg_ib_mem_size = 64 << 20; // for local transposes/serdez
-
-      size_t reg_mem_size = 0;
-      size_t disk_mem_size = 0;
-      // Static variable for stack size since we need to 
-      // remember it when we launch threads in run 
-      stack_size = 2 << 20;
-      //unsigned cpu_worker_threads = 1;
-      unsigned dma_worker_threads = 0;  // unused - warning on application use
-#ifdef EVENT_TRACING
-      size_t   event_trace_block_size = 1 << 20;
-      double   event_trace_exp_arrv_rate = 1e3;
-#endif
-#ifdef LOCK_TRACING
-      size_t   lock_trace_block_size = 1 << 20;
-      double   lock_trace_exp_arrv_rate = 1e2;
-#endif
-      // should local proc threads get dedicated cores?
-      bool dummy_reservation_ok = true;
-      bool show_reservations = false;
-      // are hyperthreads considered to share a physical core
-      bool hyperthread_sharing = true;
-      bool pin_dma_threads = false; // unused - silently ignored on cmdline
-      size_t bitset_chunk_size = 32 << 10; // 32KB
-      // based on some empirical measurements, 1024 nodes seems like
-      //  a reasonable cutoff for switching to twolevel nodeset bitmasks
-      //  (measured on an E5-2698 v4)
-      int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
-      int active_msg_handler_threads = 0; // default is none (use bgwork)
-      bool active_msg_handler_bgwork = true;
-      // This dummy network list is actually handled in network_init()
-      // this is just here to help verify low-level arguement
-      std::vector<std::string> dummy_network_list;
-      size_t replheap_size = 16 << 20;
-
-      CommandLineParser cp;
-      cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
-	.add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
-	.add_option_int_units("-ll:dsize", disk_mem_size, 'm')
-	.add_option_int_units("-ll:stacksize", stack_size, 'm')
-	.add_option_int("-ll:dma", dma_worker_threads)
-        .add_option_bool("-ll:pin_dma", pin_dma_threads)
-	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
-	.add_option_bool("-ll:show_rsrv", show_reservations)
-	.add_option_int("-ll:ht_sharing", hyperthread_sharing)
-	.add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
-	.add_option_int("-ll:bitset_twolevel", bitset_twolevel);
-
-      std::string event_trace_file, lock_trace_file;
-
-      cp.add_option_string("-ll:eventtrace", event_trace_file)
-	.add_option_string("-ll:locktrace", lock_trace_file);
-
-#ifdef NODE_LOGGING
-      cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
-#else
-      std::string dummy_prefix;
-      cp.add_option_string("-ll:prefix", dummy_prefix);
-#endif
-
-      cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
-      cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
-      cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
-      cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
-      cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
-      cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
-      cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
-      cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
-      cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
-      cp.add_option_stringlist("-ll:networks", dummy_network_list);
-      cp.add_option_int_units("-ll:replheap", replheap_size);
-
-      // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
-      cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
-
-      bool cmdline_ok = cp.parse_command_line(cmdline);
-
-      if(!cmdline_ok) {
-	fprintf(stderr, "ERROR: failure parsing command line options\n");
-	exit(1);
-      }
-
-#ifndef EVENT_TRACING
-      if(!event_trace_file.empty()) {
-	fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
-      }
-#endif
-
-#ifndef LOCK_TRACING
-      if(!lock_trace_file.empty()) {
-          fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
-      }
-#endif
-
-#ifndef NODE_LOGGING
-      if(!dummy_prefix.empty()) {
-	fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
-      }
-#endif
 
       // Check that we have enough resources for the number of nodes we are using
       if (Network::max_node_id > (NodeID)(ID::MAX_NODE_ID))
@@ -1362,12 +1587,6 @@ namespace Realm {
       }
 #endif
 
-      core_map = CoreMap::discover_core_map(hyperthread_sharing);
-      core_reservations = new CoreReservationSet(core_map);
-
-      sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
-
-      bgwork.configure_from_cmdline(cmdline);
       event_triggerer.add_to_manager(&bgwork);
 
       // initialize barrier timestamp
@@ -1379,16 +1598,16 @@ namespace Realm {
       {
 	// choose a chunk size that's roughly the requested size, but
 	//  clamp to [8,1024]
-	size_t bitsets_per_chunk = ((bitset_chunk_size << 3) /
+	size_t bitsets_per_chunk = ((config.bitset_chunk_size << 3) /
 				    (Network::max_node_id + 1));
 	if(bitsets_per_chunk < 8)
 	  bitsets_per_chunk = 8;
 	if(bitsets_per_chunk > 1024)
 	  bitsets_per_chunk = 1024;
 	// negative values of bitset_twolevel are a threshold
-	bool use_twolevel = ((bitset_twolevel > 0) ||
-			     ((bitset_twolevel < 0) &&
-			      (Network::max_node_id >= -bitset_twolevel)));
+	bool use_twolevel = ((config.bitset_twolevel > 0) ||
+			     ((config.bitset_twolevel < 0) &&
+			      (Network::max_node_id >= -config.bitset_twolevel)));
 	NodeSetBitmask::configure_allocator(Network::max_node_id,
 					    bitsets_per_chunk,
 					    use_twolevel);
@@ -1432,14 +1651,14 @@ namespace Realm {
       }
 
       // form requests for network-registered memory
-      if(reg_ib_mem_size > 0) {
+      if(config.reg_ib_mem_size > 0) {
 	reg_ib_mem_segment.request(NetworkSegmentInfo::HostMem,
-				   reg_ib_mem_size, 64);
+				   config.reg_ib_mem_size, 64);
 	network_segments.push_back(&reg_ib_mem_segment);
       }
-      if(reg_mem_size > 0) {
+      if(config.reg_mem_size > 0) {
 	reg_mem_segment.request(NetworkSegmentInfo::HostMem,
-				reg_mem_size, 64);
+				config.reg_mem_size, 64);
 	network_segments.push_back(&reg_mem_segment);
       }
 
@@ -1448,12 +1667,12 @@ namespace Realm {
 
       // and also our incoming active message manager
       message_manager = new IncomingMessageManager(Network::max_node_id + 1,
-						   active_msg_handler_threads,
+						   config.active_msg_handler_threads,
 						   *core_reservations);
-      if(active_msg_handler_bgwork)
+      if(config.active_msg_handler_bgwork)
 	message_manager->add_to_manager(&bgwork);
       else
-	assert(active_msg_handler_threads > 0);
+	assert(config.active_msg_handler_threads > 0);
 
       // initialize modules and create memories before we do network attach
       //  so that we have a chance to register these other memories for
@@ -1485,17 +1704,6 @@ namespace Realm {
 	  it != network_modules.end();
 	  it++)
 	(*it)->attach(this, network_segments);
-
-      // now that we've done all of our argument parsing, scan through what's
-      //  left and see if anything starts with -ll: - probably a misspelled
-      //  argument
-      for(std::vector<std::string>::const_iterator it = cmdline.begin();
-	  it != cmdline.end();
-	  it++)
-	if(it->compare(0, 4, "-ll:") == 0) {
-	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
-          assert(0);
-	}
 
       {
 	// try to get all nodes to have roughly the same idea of the "zero
@@ -1569,12 +1777,12 @@ namespace Realm {
 	(*it)->create_memories(this);
 
       LocalCPUMemory *regmem;
-      if(reg_mem_size > 0) {
+      if(config.reg_mem_size > 0) {
 	void *regmem_base = reg_mem_segment.base;
 	assert(regmem_base != 0);
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
-				    reg_mem_size,
+				    config.reg_mem_size,
                                     -1/*don't care numa domain*/,
                                     Memory::REGDMA_MEM,
 				    regmem_base,
@@ -1589,12 +1797,12 @@ namespace Realm {
 	(*it)->create_processors(this);
 
       IBMemory *reg_ib_mem;
-      if(reg_ib_mem_size > 0) {
+      if(config.reg_ib_mem_size > 0) {
 	void *reg_ib_mem_base = reg_ib_mem_segment.base;
 	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new IBMemory(m,
-				  reg_ib_mem_size,
+				  config.reg_ib_mem_size,
 				  MemoryImpl::MKIND_SYSMEM,
 				  Memory::REGDMA_MEM,
 				  reg_ib_mem_base,
@@ -1605,12 +1813,12 @@ namespace Realm {
 
       // create local disk memory
       DiskMemory *diskmem;
-      if(disk_mem_size > 0) {
+      if(config.disk_mem_size > 0) {
         char file_name[30];
         snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
-                                 disk_mem_size,
+                                 config.disk_mem_size,
                                  std::string(file_name));
         get_runtime()->add_memory(diskmem);
       } else
@@ -1627,7 +1835,7 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      if(dma_worker_threads > 0) {
+      if(config.dma_worker_threads > 0) {
         // warn about use of old flags
         log_runtime.warning() << "-ll:dma specified on command line no longer has effect - use -ll:bgwork to control background worker threads (which include dma work)";
       }
@@ -1636,9 +1844,9 @@ namespace Realm {
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
-      bool ok = core_reservations->satisfy_reservations(dummy_reservation_ok);
+      bool ok = core_reservations->satisfy_reservations(config.dummy_reservation_ok);
       if(ok) {
-	if(show_reservations) {
+	if(config.show_reservations) {
 	  std::cout << *core_map << std::endl;
 	  core_reservations->report_reservations(std::cout);
 	}
@@ -1649,7 +1857,7 @@ namespace Realm {
 
       // create the "replicated heap" that puts instance layouts and sparsity
       //  maps where non-CPU devices can see them
-      repl_heap.init(replheap_size, 1 /*chunks*/);
+      repl_heap.init(config.replheap_size, 1 /*chunks*/);
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
@@ -1855,7 +2063,12 @@ namespace Realm {
         assert(Config::path_cache_lru_size > 0);
         init_path_cache();
       }
+    }
 
+    bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
+    {
+      parse_command_line(cmdline);
+      finish_configure();
       return true;
     }
 
@@ -2367,6 +2580,13 @@ namespace Realm {
 #endif
       cleanup_query_caches();
       {
+        // clean up all the module configs
+        for (std::map<std::string, ModuleConfig*>::iterator it = module_configs.begin();
+             it != module_configs.end(); it++) {
+          delete (it->second);
+          it->second = nullptr;
+        }
+
         // Clean up all the modules before tearing down the runtime state.
         for (std::vector<Module *>::iterator it = modules.begin();
              it != modules.end(); it++) {
@@ -2441,6 +2661,31 @@ namespace Realm {
 #endif
 
       return shutdown_result_code;
+    }
+
+    bool RuntimeImpl::create_configs(int argc, char **argv)
+    {
+      if (!module_configs_created) {
+        std::vector<std::string> cmdline;
+        cmdline.reserve(argc);
+        for(int i = 1; i < argc; i++)
+          cmdline.push_back(argv[i]);
+        module_registrar.create_static_module_configs(module_configs);
+        module_registrar.create_dynamic_module_configs(cmdline, module_configs);
+        module_configs_created = true;
+      }
+      return true;
+    }
+
+    ModuleConfig* RuntimeImpl::get_module_config(const std::string name)
+    {
+      std::map<std::string, ModuleConfig*>::iterator it;
+      it = module_configs.find(name);
+      if (it == module_configs.end()) {
+        return NULL;
+      } else {
+        return it->second;
+      }
     }
 
     EventImpl *RuntimeImpl::get_event_impl(Event e)
@@ -2743,7 +2988,7 @@ namespace Realm {
         abort();
       }
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-      assert((signal == SIGILL) || (signal == SIGFPE) ||
+      assert((signal == SIGINT) || (signal == SIGFPE) ||
              (signal == SIGABRT) || (signal == SIGSEGV) ||
              (signal == SIGBUS) || (signal == SIGILL));
 #endif

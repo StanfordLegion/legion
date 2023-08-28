@@ -117,9 +117,9 @@ namespace UCP {
   struct Request {
     // UCPContext::Request must be the first field because
     // the space preceding it is used internally by ucp
-    UCPContext::Request       ucp;
+    UCPWorker::Request        ucp;
     UCPInternal               *internal;
-    UCPContext                *context;
+    UCPWorker                 *worker;
     union {
       struct {
         PayloadBaseType       payload_base_type;
@@ -150,7 +150,7 @@ namespace UCP {
 
   struct RealmCallbackArgs {
     UCPInternal    *internal;
-    UCPContext     *context;
+    UCPWorker      *worker;
     RemoteComp     *remote_comp;
     void           *payload; // Payload buffer to release
     int            payload_mode;
@@ -301,8 +301,8 @@ namespace UCP {
   {
     ThreadLocal::ucp_work_until = &work_until;
 
-    for (auto context : contexts) {
-      (void) context->progress();
+    for (auto worker : workers) {
+      (void) worker->progress();
     }
 
     ThreadLocal::ucp_work_until = nullptr;
@@ -325,9 +325,9 @@ namespace UCP {
     return true;
   }
 
-  void UCPPoller::add_context(UCPContext *ucp_context)
+  void UCPPoller::add_worker(UCPWorker *worker)
   {
-    contexts.push_back(ucp_context);
+    workers.push_back(worker);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -354,33 +354,33 @@ namespace UCP {
   {
     int world_size           = boot_handle.pg_size;
     int self_rank            = boot_handle.pg_rank;
-    size_t self_num_contexts = ucp_contexts.size();
-    std::vector<size_t> all_num_contexts(world_size);
+    size_t self_num_workers = workers.size();
+    std::vector<size_t> all_num_workers(world_size);
     std::vector<size_t> all_max_addrlen(world_size);
     std::vector<char>   self_workers_addr;
     std::vector<char>   all_workers_addr;
     std::vector<int>    self_dev_indices;
     std::vector<int>    all_dev_indices;
-    size_t self_max_addrlen = 0, max_addrlen = 0, max_num_contexts = 0;
+    size_t self_max_addrlen = 0, max_addrlen = 0, max_num_workers = 0;
     char *buf;
     ucs_status_t status;
     int rc;
     bool ret = true;
 
     struct WorkerInfo {
-      UCPContext *context;
+      UCPWorker     *worker;
       ucp_address_t *addr;
-      size_t addrlen;
-      int dev_index;
+      size_t        addrlen;
+      int           dev_index;
     };
 
     // get details of all workers of my own contexts
     std::vector<WorkerInfo> self_workers_info;
-    for (UCPContext &context : ucp_contexts) {
+    for (const auto &context : ucp_contexts) {
       WorkerInfo wi;
-      wi.context   = &context;
+      wi.worker    = get_worker(&context);
       wi.dev_index = -1; // implying host context by default
-      status = ucp_worker_get_address(context.get_ucp_worker(),
+      status = ucp_worker_get_address(wi.worker->get_ucp_worker(),
           &wi.addr, &wi.addrlen);
       CHKERR_JUMP(status != UCS_OK, "ucp_worker_get_address failed", log_ucp, err);
 #ifdef REALM_USE_CUDA
@@ -403,58 +403,59 @@ namespace UCP {
     max_addrlen = *std::max_element(all_max_addrlen.begin(),
         all_max_addrlen.end());
 
-    // get the number of contexts created by each rank
-    rc = boot_handle.allgather(&self_num_contexts, all_num_contexts.data(),
-        sizeof(self_num_contexts), &boot_handle);
-    CHKERR_JUMP(rc != 0, "failed to allgather the number of contexts",
+    // get the number of workers created by each rank
+    rc = boot_handle.allgather(&self_num_workers, all_num_workers.data(),
+        sizeof(self_num_workers), &boot_handle);
+    CHKERR_JUMP(rc != 0, "failed to allgather the number of workers",
         log_ucp, err);
 
-    max_num_contexts = *std::max_element(all_num_contexts.begin(),
-        all_num_contexts.end());
+    max_num_workers = *std::max_element(all_num_workers.begin(),
+        all_num_workers.end());
 
-    // gather the device index of all contexts across all ranks
+    // gather the device index of all workers across all ranks
     for (const auto &wi : self_workers_info) {
       self_dev_indices.push_back(wi.dev_index);
     }
-    self_dev_indices.resize(max_num_contexts);
-    all_dev_indices.resize(world_size * max_num_contexts);
+    self_dev_indices.resize(max_num_workers);
+    all_dev_indices.resize(world_size * max_num_workers);
     rc = boot_handle.allgather(self_dev_indices.data(), all_dev_indices.data(),
-        max_num_contexts * sizeof(self_dev_indices[0]), &boot_handle);
-    CHKERR_JUMP(rc != 0, "failed to allgather context device indices",
+        max_num_workers * sizeof(self_dev_indices[0]), &boot_handle);
+    CHKERR_JUMP(rc != 0, "failed to allgather worker device indices",
         log_ucp, err);
 
     // gather the addresses of all workers across all ranks.
     // first copy all self worker addresses into a contiguous buffer
-    self_workers_addr.resize(max_num_contexts * max_addrlen);
+    self_workers_addr.resize(max_num_workers * max_addrlen);
     buf = self_workers_addr.data();
     for (const auto &wi : self_workers_info) {
       std::memcpy(buf, wi.addr, wi.addrlen);
       buf += max_addrlen;
     }
     // do the allgather now
-    all_workers_addr.resize(world_size * max_num_contexts * max_addrlen);
+    all_workers_addr.resize(world_size * max_num_workers * max_addrlen);
     rc = boot_handle.allgather(self_workers_addr.data(), all_workers_addr.data(),
-        max_num_contexts * max_addrlen, &boot_handle);
+        max_num_workers * max_addrlen, &boot_handle);
     CHKERR_JUMP(rc != 0, "failed to allgather worker addresses", log_ucp, err);
 
-    // create an ep from each local context to each remote context
+    // create an ep from each local worker to each remote worker
     for (int peer = 0; peer < world_size; peer++) {
       if (peer == self_rank) continue;
 
-      for (size_t i = 0; i < all_num_contexts[peer]; i++) {
+      for (size_t i = 0; i < all_num_workers[peer]; i++) {
         ucp_address_t *peer_worker_addr = reinterpret_cast<ucp_address_t*>(
-            &all_workers_addr[((peer * max_num_contexts) + i) * max_addrlen]);
-        int peer_dev_index = all_dev_indices[(peer * max_num_contexts) + i];
+            &all_workers_addr[((peer * max_num_workers) + i) * max_addrlen]);
+        int peer_dev_index = all_dev_indices[(peer * max_num_workers) + i];
 
-        for (UCPContext &context : ucp_contexts) {
-          CHKERR_JUMP(!context.ep_add(peer, peer_worker_addr, peer_dev_index),
+        for (const auto &context : ucp_contexts) {
+          UCPWorker *worker = get_worker(&context);
+          CHKERR_JUMP(!worker->ep_add(peer, peer_worker_addr, peer_dev_index),
               "failed to add ep. peer " << peer <<
               " peer_dev_index " << peer_dev_index, log_ucp, err);
 
           log_ucp_ep.debug()
             << "added ep target "   << peer
             << " context "          << &context
-            << " worker "           << context.get_ucp_worker()
+            << " worker "           << worker
             << " remote dev_index " << peer_dev_index;
         }
       }
@@ -462,7 +463,7 @@ namespace UCP {
 
 out:
     for (auto &wi : self_workers_info) {
-      ucp_worker_release_address(wi.context->get_ucp_worker(), wi.addr);
+      ucp_worker_release_address(wi.worker->get_ucp_worker(), wi.addr);
     }
     return ret;
 
@@ -471,27 +472,62 @@ err:
     goto out;
   }
 
-  bool UCPInternal::set_am_handler(unsigned am_id,
-      ucp_am_recv_callback_t cb, AmHandlersArgs* args)
+  bool UCPInternal::create_workers()
   {
-    ucp_worker_h worker = args->context->get_ucp_worker();
-    ucp_am_handler_param_t param;
-    ucs_status_t status;
+    const UCPContext *context;
+    UCPWorker *worker;
 
-    param.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID |
-                       UCP_AM_HANDLER_PARAM_FIELD_CB |
-                       UCP_AM_HANDLER_PARAM_FIELD_ARG;
-    param.id         = am_id;
-    param.cb         = cb;
-    param.arg        = args;
+    context = get_context_host();
+    worker  = new UCPWorker(context, AM_ALIGNMENT,
+        config.use_wakeup, config.prog_boff_max,
+        config.prog_itr_max, config.rdesc_rel_max,
+        UCS_THREAD_MODE_MULTI,
+        sizeof(Request), alignof(Request),
+        config.pbuf_max_size + AM_ALIGNMENT, config.pbuf_max_chunk_size,
+        config.pbuf_max_count, config.pbuf_init_count,
+        config.mmp_max_obj_size, config.mpool_leakcheck);
 
-    status           = ucp_worker_set_am_recv_handler(worker, &param);
-    if (status != UCS_OK) return false;
+    CHKERR_JUMP(!worker->init(),
+        "failed to init worker for host context " << context, log_ucp, err);
+
+    workers[context] = worker;
+
+#ifdef REALM_USE_CUDA
+    for (auto &kv : dev_ctx_map) {
+      context = kv.second;
+      worker  = new UCPWorker(context, AM_ALIGNMENT,
+          config.use_wakeup, config.prog_boff_max,
+          config.prog_itr_max, config.rdesc_rel_max,
+          UCS_THREAD_MODE_MULTI,
+          sizeof(Request), alignof(Request),
+          1, 1, 0, 0, /* we never get payload buffer from GPU contexts */
+          config.mmp_max_obj_size, config.mpool_leakcheck);
+
+      CHKERR_JUMP(!worker->init(),
+          "failed to init worker for device context " << context, log_ucp, err);
+
+      workers[context] = worker;
+    }
+#endif
 
     return true;
+
+err:
+    destroy_workers();
+    return false;
   }
 
-  bool UCPInternal::set_am_handlers(UCPContext *context)
+  void UCPInternal::destroy_workers()
+  {
+    for (auto &kv : workers) {
+      UCPWorker *worker = kv.second;
+      worker->finalize();
+      delete worker;
+    }
+    workers.clear();
+  }
+
+  bool UCPInternal::set_am_handlers()
   {
     struct AmHandler {
       unsigned id;
@@ -505,12 +541,18 @@ err:
       {AM_ID_REPLY, &am_remote_comp_handler, "am reply"}
     };
 
-    am_handlers_args.push_back({this, context});
+    for (auto &context : ucp_contexts) {
+      assert(workers.count(&context));
+      UCPWorker *worker = get_worker(&context);
 
-    for (const auto &ah: am_handlers) {
-      if (!set_am_handler(ah.id, ah.cb, &am_handlers_args.back())) {
-        log_ucp.error() << "failed to set ucp " << ah.name << "handler";
-        return false;
+      am_handlers_args.push_back({this, worker});
+
+      for (const auto &ah: am_handlers) {
+        if (!worker->set_am_handler(ah.id, ah.cb, &am_handlers_args.back())) {
+          log_ucp.error() << "failed to set ucp "  << ah.name
+                          << " handler for worker " << worker;
+          return false;
+        }
       }
     }
 
@@ -519,14 +561,15 @@ err:
 
   bool UCPInternal::create_pollers()
   {
-    size_t ctx_per_poller = (ucp_contexts.size() / config.pollers_max) +
-                            (ucp_contexts.size() % config.pollers_max != 0);
-    // distribute ucp contexts among poller background work items
+    size_t workers_per_poller = (ucp_contexts.size() / config.pollers_max) +
+                                (ucp_contexts.size() % config.pollers_max != 0);
+    // distribute ucp workers among poller background work items
     size_t idx = 0;
     for (UCPContext &context : ucp_contexts) {
+      assert(workers.count(&context));
       if (!idx) pollers.emplace_back();
-      pollers.back().add_context(&context);
-      idx = (idx + 1) % ctx_per_poller;
+      pollers.back().add_worker(get_worker(&context));
+      idx = (idx + 1) % workers_per_poller;
     }
 
     for (auto &poller : pollers) {
@@ -584,13 +627,9 @@ err:
         "failed to read ib_seg_size value", log_ucp, err);
 
     // create the host context
-    ucp_contexts.emplace_back(AM_ALIGNMENT, config.use_wakeup,
-        config.prog_boff_max, ep_nums_est);
+    ucp_contexts.emplace_back(ep_nums_est);
 
-    CHKERR_JUMP(!ucp_contexts.back().init(sizeof(Request), alignof(Request),
-        config.pbuf_max_size + AM_ALIGNMENT, config.pbuf_max_chunk_size,
-        config.pbuf_max_count, config.pbuf_init_count,
-        config.mmp_max_obj_size, config.mpool_leakcheck, ev_map),
+    CHKERR_JUMP(!ucp_contexts.back().init(ev_map),
         "failed to initialize host ucp context", log_ucp, err_fin_contexts);
 
 #ifdef REALM_USE_CUDA
@@ -628,22 +667,20 @@ err:
       if (it != gpu_nics.end()) {
         read_env_var_update_map("UCX_NET_DEVICES", "", &it->second, &ev_map);
       }
-      ucp_contexts.emplace_back(AM_ALIGNMENT, config.use_wakeup,
-          config.prog_boff_max, ep_nums_est);
+      ucp_contexts.emplace_back(ep_nums_est);
 
       ucp_contexts.back().gpu = gpu;
       dev_ctx_map[gpu->info->index] = &ucp_contexts.back();
-      CHKERR_JUMP(!ucp_contexts.back().init(sizeof(Request), alignof(Request),
-            1, 1, 0, 0, /* we never get payload buffer from GPU contexts */
-            config.mmp_max_obj_size, config.mpool_leakcheck, ev_map),
+      CHKERR_JUMP(!ucp_contexts.back().init(ev_map),
           "failed to initialize gpu ucp context", log_ucp, err_fin_contexts);
     }
 #endif
 
-    for (UCPContext &context : ucp_contexts) {
-      CHKERR_JUMP(!set_am_handlers(&context),
-          "failed to set ucp am handlers", log_ucp, err_fin_contexts);
-    }
+    CHKERR_JUMP(!create_workers(),
+        "failed to create workers", log_ucp, err_fin_contexts);
+
+    CHKERR_JUMP(!set_am_handlers(),
+        "failed to set ucp am handlers", log_ucp, err_destroy_workers);
 
     CHKERR_JUMP(!create_eps(),
         "failed to create ucp end points", log_ucp, err_fin_contexts);
@@ -655,15 +692,17 @@ err:
     log_ucp.info() << "initialized " << ucp_contexts.size() << " ucp contexts";
 
     for (UCPContext &context : ucp_contexts) {
-      total_num_eps += context.num_eps();
+      total_num_eps += num_eps(context);
       log_ucp_ep.info() << "context " << &context
-                        << " num_eps " << context.num_eps();
+                        << " num_eps " << num_eps(context);
     }
 
     log_ucp.info() << "total num_eps " << total_num_eps;
 
     return true;
 
+err_destroy_workers:
+    destroy_workers();
 err_fin_contexts:
     while (!ucp_contexts.empty()) {
       ucp_contexts.back().finalize();
@@ -728,6 +767,8 @@ err:
     assert(initialized_boot);
 
     delete rcba_mp;
+
+    destroy_workers();
 
     if (initialized_ucp) {
       for (UCPContext &context : ucp_contexts) {
@@ -805,7 +846,7 @@ err:
       IncomingMessageManager::CallbackData cb_data2)
   {
     RealmCallbackArgs *cb_args = reinterpret_cast<RealmCallbackArgs*>(cb_data1);
-    UCPContext *context        = cb_args->context;
+    UCPWorker *worker          = cb_args->worker;
     UCPInternal *internal      = cb_args->internal;
     Request *req;
 
@@ -817,21 +858,21 @@ err:
     // This comp hanlder is NOT called by the progress thread.
     // So, set the correct GPU context.
 #ifdef REALM_USE_CUDA
-    Cuda::AutoGPUContext agc(context->gpu);
+    Cuda::AutoGPUContext agc(worker->get_context()->gpu);
 #endif
 
     if (cb_args->payload_mode == PAYLOAD_KEEP) {
-      context->return_am_rdesc(cb_args->payload);
+      worker->return_am_rdesc(cb_args->payload);
     } else if (cb_args->payload_mode == PAYLOAD_FREE) {
-      internal->pbuf_release(context, cb_args->payload);
+      internal->pbuf_release(worker, cb_args->payload);
     }
 
     if (cb_args->remote_comp != nullptr) {
       // Send an active message to the sender with remote_comp as the header
-      req = internal->request_get(context);
+      req = internal->request_get(worker);
       CHKERR_JUMP(req == nullptr, "failed to get request", log_ucp, err);
 
-      req->ucp.op_type        = UCPContext::OpType::AM_SEND;
+      req->ucp.op_type        = UCPWorker::OpType::AM_SEND;
       req->ucp.ep             = cb_args->reply_ep;
       req->ucp.flags          = UCP_AM_SEND_FLAG_EAGER;
       req->ucp.args           = req;
@@ -843,7 +884,7 @@ err:
       req->ucp.am.header      = &cb_args->remote_comp;
       req->ucp.am.header_size = sizeof(cb_args->remote_comp);
 
-      CHKERR_JUMP(!context->submit_req(&req->ucp),
+      CHKERR_JUMP(!worker->submit_req(&req->ucp),
           "failed to send am reply", log_ucp, err_rel_req);
       // TODO: Should we notify the source somehow?
 
@@ -865,7 +906,7 @@ err:
   }
 
   bool UCPInternal::am_msg_recv_data_ready(UCPInternal *internal,
-      UCPContext *context, ucp_ep_h reply_ep,
+      UCPWorker *worker, ucp_ep_h reply_ep,
       const UCPMsgHdr *ucp_msg_hdr, size_t header_size,
       void *payload, size_t payload_size, int payload_mode)
   {
@@ -892,7 +933,7 @@ err:
     cb_args->payload      = payload;
     cb_args->payload_mode = payload_mode;
     cb_args->internal     = internal;
-    cb_args->context      = context;
+    cb_args->worker       = worker;
     cb_args->reply_ep     = reply_ep;
 
     IncomingMessageManager::CallbackData cb_data1 =
@@ -920,7 +961,7 @@ err:
   {
     Request *req           = reinterpret_cast<Request*>(request);
     UCPMsgHdr *ucp_msg_hdr = reinterpret_cast<UCPMsgHdr*>(req->am_rndv_recv.header);
-    UCPContext *context    = req->context;
+    UCPWorker *worker      = req->worker;
     UCPInternal *internal  = req->internal;
 
     assert(length == req->am_rndv_recv.payload_size);
@@ -929,18 +970,18 @@ err:
 
     if (status == UCS_OK) {
       (void) internal->am_msg_recv_data_ready(internal,
-          context, req->am_rndv_recv.reply_ep,
+          worker, req->am_rndv_recv.reply_ep,
           ucp_msg_hdr, req->am_rndv_recv.header_size,
           req->am_rndv_recv.payload, req->am_rndv_recv.payload_size,
           req->am_rndv_recv.payload_mode);
     } else {
       log_ucp.error() << "failed to receive am rndv data";
       if (req->am_rndv_recv.payload_mode == PAYLOAD_FREE) {
-        internal->pbuf_release(context, req->am_rndv_recv.payload);
+        internal->pbuf_release(worker, req->am_rndv_recv.payload);
       }
     }
 
-    internal->hbuf_release(context, req->am_rndv_recv.header);
+    internal->hbuf_release(worker, req->am_rndv_recv.header);
 
     internal->request_release(req);
   }
@@ -952,7 +993,7 @@ err:
   {
     const UCPMsgHdr *ucp_msg_hdr = reinterpret_cast<const UCPMsgHdr*>(header);
     AmHandlersArgs *am_args      = reinterpret_cast<AmHandlersArgs*>(arg);
-    UCPContext *context          = am_args->context;
+    UCPWorker *worker            = am_args->worker;
     UCPInternal *internal        = am_args->internal;
 
     assert((header != nullptr) && (header_size >= sizeof(UCPMsgHdr)));
@@ -971,7 +1012,7 @@ err:
 
       log_ucp_am.debug() << "am received with UCP_AM_RECV_ATTR_FLAG_RNDV";
 
-      req = internal->request_get(context);
+      req = internal->request_get(worker);
       if (req == nullptr) {
         log_ucp.error() << "failed to get request";
         return UCS_ERR_NO_MEMORY;
@@ -991,26 +1032,26 @@ err:
         req->am_rndv_recv.payload_mode = PAYLOAD_KEEPREG;
       } else {
         // Allocate buffer to receive the payload
-        req->am_rndv_recv.payload      = internal->pbuf_get(context, payload_size);
+        req->am_rndv_recv.payload      = internal->pbuf_get(worker, payload_size);
         req->am_rndv_recv.payload_mode = PAYLOAD_FREE;
       }
 
-      req->am_rndv_recv.header         = internal->hbuf_get(context, header_size);
+      req->am_rndv_recv.header         = internal->hbuf_get(worker, header_size);
       req->am_rndv_recv.header_size    = header_size;
       req->am_rndv_recv.payload_size   = payload_size;
       req->am_rndv_recv.reply_ep       = reply_ep;
 
       memcpy(req->am_rndv_recv.header, header, header_size);
 
-      status_ptr = ucp_am_recv_data_nbx(context->get_ucp_worker(),
+      status_ptr = ucp_am_recv_data_nbx(worker->get_ucp_worker(),
           data_desc, req->am_rndv_recv.payload,
           req->am_rndv_recv.payload_size, &param);
 
       if (UCS_PTR_IS_ERR(status_ptr)) {
         log_ucp.error() << "ucp_am_recv_data_nbx failed";
-        internal->hbuf_release(context, req->am_rndv_recv.header);
+        internal->hbuf_release(worker, req->am_rndv_recv.header);
         if (req->am_rndv_recv.payload_mode == PAYLOAD_FREE) {
-          internal->pbuf_release(context, req->am_rndv_recv.payload);
+          internal->pbuf_release(worker, req->am_rndv_recv.payload);
         }
         internal->request_release(req);
         status = UCS_PTR_STATUS(status_ptr);
@@ -1038,7 +1079,7 @@ err:
     }
 
     (void) internal->am_msg_recv_data_ready(internal,
-        context, reply_ep, ucp_msg_hdr, header_size,
+        worker, reply_ep, ucp_msg_hdr, header_size,
         payload, payload_size, payload_mode);
 
     /* IMPORTANT: Do NOT return UCS_OK even when we
@@ -1055,8 +1096,8 @@ err:
       const ucp_am_recv_param_t *param)
   {
     const UCPMsgHdr *ucp_msg_hdr = reinterpret_cast<const UCPMsgHdr*>(header);
-    AmHandlersArgs *am_args = reinterpret_cast<AmHandlersArgs*>(arg);
-    UCPContext *context          = am_args->context;
+    AmHandlersArgs *am_args      = reinterpret_cast<AmHandlersArgs*>(arg);
+    UCPWorker *worker            = am_args->worker;
     UCPInternal *internal        = am_args->internal;
 
     assert((header != nullptr) && (header_size >= sizeof(UCPMsgHdr)));
@@ -1072,7 +1113,7 @@ err:
     payload_size = ucp_msg_hdr->rdma_payload_size;
 
     internal->am_msg_recv_data_ready(internal,
-        context, reply_ep, ucp_msg_hdr, header_size,
+        worker, reply_ep, ucp_msg_hdr, header_size,
         payload, payload_size, PAYLOAD_KEEPREG);
 
     return UCS_OK;
@@ -1112,7 +1153,7 @@ err:
   };
 
   bool UCPInternal::add_rdma_info(NetworkSegment *segment,
-      UCPContext *context, ucp_mem_h mem_h)
+      const UCPContext *context, ucp_mem_h mem_h)
   {
     UCPRDMAInfo *rdma_info;
     void *rkey_buf;
@@ -1125,7 +1166,8 @@ err:
     Cuda::AutoGPUContext agc(context->gpu);
 #endif
 
-    status = ucp_rkey_pack(context->context, mem_h, &rkey_buf, &rkey_buf_size);
+    status = ucp_rkey_pack(context->get_ucp_context(),
+        mem_h, &rkey_buf, &rkey_buf_size);
     CHKERR_JUMP(status != UCS_OK, "ucp_rkey_pack failed", log_ucp, err);
 
     rdma_info = reinterpret_cast<UCPRDMAInfo *>(
@@ -1160,7 +1202,7 @@ err:
   void UCPInternal::attach(std::vector<NetworkSegment *>& segments)
   {
     size_t total_alloc_size = 0;
-    UCPContext *context;
+    const UCPContext *context;
     ucp_mem_map_params_t mem_map_params;
     ucp_mem_attr_t mem_attr;
     ucp_mem_h alloc_mem_h, mem_h;
@@ -1221,7 +1263,7 @@ err:
       total_alloc_size += segment->bytes;
     }
 
-    context = get_ucp_context_host();
+    context = get_context_host();
     assert(context);
 
     mem_map_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_LENGTH |
@@ -1231,6 +1273,7 @@ err:
 
     CHKERR_JUMP(!context->mem_map(&mem_map_params, &alloc_mem_h),
         "ucp_mem_map failed for allocation segments", log_ucp, err);
+    attach_mem_hs[context].push_back(alloc_mem_h);
 
     // Now try to register non-allocation requests
     mem_map_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_LENGTH |
@@ -1242,14 +1285,14 @@ err:
       if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
         if (!config.bind_cudamem) continue;
         Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
-        context = get_ucp_context_device(gpu->info->index);
+        context = get_context_device(gpu->info->index);
         log_ucp_seg.info()
           << "attaching pre-allocated segment " << segment
           << " (base " << segment->base << " length " << segment->bytes
           << ") in gpu context " << context
           << " device index " << gpu->info->index;
       } else {
-        context = get_ucp_context_host();
+        context = get_context_host();
         log_ucp_seg.info()
           << "attaching pre-allocated segment " << segment
           << " (base " << segment->base << " length " << segment->bytes
@@ -1270,6 +1313,7 @@ err:
                        << segment;
         continue;
       }
+      attach_mem_hs[context].push_back(mem_h);
 
       if (!add_rdma_info(segment, context, mem_h)) {
         log_ucp.info() << "failed to add rdma info for pre-allocated segment "
@@ -1278,7 +1322,7 @@ err:
     }
 
     // Set address and add RDMA info for allocated segments
-    context = get_ucp_context_host();
+    context = get_context_host();
     mem_attr.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS;
     status = ucp_mem_query(alloc_mem_h, &mem_attr);
     assert(status == UCS_OK);
@@ -1319,7 +1363,7 @@ err:
   {
     // This relies on the fact that Realm calls detach only once
     // during shutdown. Thus, we deregister all ucp memory handles
-    // that were stored in mem_hs vector of each context at attach time.
+    // that were created during attach.
 
     log_ucp.info() << "detaching segments";
 
@@ -1332,9 +1376,15 @@ err:
     log_ucp.info() << "ended ucp pollers";
 
     for (UCPContext &context : ucp_contexts) {
-      context.mem_unmap_all();
+      auto &mem_hs = attach_mem_hs[&context];
+      while (!mem_hs.empty()) {
+        if (!context.mem_unmap(mem_hs.back())) {
+          log_ucp.info() << "failed to unmap segment mem_h " << mem_hs.back();
+        }
+        mem_hs.pop_back();
+      }
     }
-    log_ucp.info() << "unmapped ucp-mapped memory";
+    log_ucp.info() << "unmapped attached segments";
   }
 
   void UCPInternal::barrier()
@@ -1495,13 +1545,13 @@ err:
         with_congestion, header_size);
   }
 
-  UCPContext *UCPInternal::get_ucp_context_host()
+  const UCPContext *UCPInternal::get_context_host() const
   {
     return &ucp_contexts.front();
   }
 
 #if defined(REALM_USE_CUDA)
-  UCPContext *UCPInternal::get_ucp_context_device(int dev_index)
+  const UCPContext *UCPInternal::get_context_device(int dev_index) const
   {
     auto iter = dev_ctx_map.find(dev_index);
     assert(iter != dev_ctx_map.end());
@@ -1509,35 +1559,46 @@ err:
   }
 #endif
 
-  UCPContext *UCPInternal::get_ucp_context(const SegmentInfo *seg_info)
+  const UCPContext *UCPInternal::get_context(const SegmentInfo *seg_info) const
   {
 #if defined(REALM_USE_CUDA)
     // see if we should use the device ucp context
     if (seg_info) {
       Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU*>(seg_info->memextra);
       assert(gpu);
-      return get_ucp_context_device(gpu->info->index);
+      return get_context_device(gpu->info->index);
     }
 #endif
-    return get_ucp_context_host();
+    return get_context_host();
   }
 
-  bool UCPInternal::get_ucp_ep(const UCPContext *context,
-      NodeID target, const UCPRDMAInfo *rdma_info, ucp_ep_h *ep)
+  UCPWorker *UCPInternal::get_worker(const UCPContext *context) const
   {
-    assert(context);
+    WorkersMap::const_iterator itr = workers.find(context);
+    assert(itr != workers.end());
+    return itr->second;
+  }
+
+  bool UCPInternal::get_ucp_ep(const UCPWorker *worker,
+      NodeID target, const UCPRDMAInfo *rdma_info, ucp_ep_h *ep) const
+  {
     int remote_dev_index = rdma_info ? rdma_info->dev_index : -1;
-    return context->ep_get(target, remote_dev_index, ep);
+    return worker->ep_get(target, remote_dev_index, ep);
   }
 
-  Request *UCPInternal::request_get(UCPContext *context)
+  size_t UCPInternal::num_eps(const UCPContext &context) const
   {
-    Request *req = reinterpret_cast<Request*>(context->request_get());
+    return get_worker(&context)->num_eps();
+  }
+
+  Request *UCPInternal::request_get(UCPWorker *worker)
+  {
+    Request *req = reinterpret_cast<Request*>(worker->request_get());
     if (!req) return nullptr;
     memset(req, 0, sizeof(*req));
 
     req->internal = this;
-    req->context  = context;
+    req->worker   = worker;
     (void) outstanding_reqs.fetch_add(1);
     log_ucp_ar.debug() << "acquired request " << req;
 
@@ -1546,42 +1607,42 @@ err:
 
   void UCPInternal::request_release(Request *req)
   {
-    req->context->request_release(req);
+    req->worker->request_release(req);
     (void) outstanding_reqs.fetch_sub(1);
     log_ucp_ar.debug() << "released request " << req;
   }
 
-  void *UCPInternal::hbuf_get(UCPContext *context, size_t size)
+  void *UCPInternal::hbuf_get(UCPWorker *worker, size_t size)
   {
     void *buf;
 
     if (config.hbuf_malloc) {
       buf = malloc(size);
     } else {
-      buf = context->mmp_get(size);
+      buf = worker->mmp_get(size);
     }
 
     log_ucp_ar.debug() << "acquired header buffer " << buf << " size " << size;
     return buf;
   }
 
-  void UCPInternal::hbuf_release(UCPContext *context, void *buf)
+  void UCPInternal::hbuf_release(UCPWorker *worker, void *buf)
   {
     if (config.hbuf_malloc) {
       free(buf);
     } else {
-      context->mmp_release(buf);
+      worker->mmp_release(buf);
     }
     log_ucp_ar.debug() << "released header buffer " << buf;
   }
 
-  void *UCPInternal::pbuf_get(UCPContext *context, size_t size)
+  void *UCPInternal::pbuf_get(UCPWorker *worker, size_t size)
   {
     char *buf;
     assert(size <= ib_seg_size);
 #ifdef REALM_USE_CUDA
     // we should never ask for a payload buffer from a GPU ucp context
-    assert(!context->gpu);
+    assert(!worker->get_context()->gpu);
 #endif
     // use one extra byte at the beginning of the buffer
     // to determine whether the buffer is from context mpool or malloc.
@@ -1592,37 +1653,37 @@ err:
       if (config.pbuf_malloc) {
         buf = reinterpret_cast<char*>(malloc(size));
       } else {
-        buf = reinterpret_cast<char*>(context->mmp_get(size));
+        buf = reinterpret_cast<char*>(worker->mmp_get(size));
       }
       CHKERR_JUMP(!buf, "", log_ucp, err);
       *buf = 0;
     } else {
       // TODO: put an upper bound on the mpool size
       //       context->pbuf_mp->has(size, false /* with_expand */)
-      buf = reinterpret_cast<char*>(context->pbuf_get(size));
+      buf = reinterpret_cast<char*>(worker->pbuf_get(size));
       CHKERR_JUMP(!buf, "", log_ucp, err);
       *buf = 1;
     }
 
     log_ucp_ar.debug() << "acquired payload buffer " << buf + AM_ALIGNMENT
-                    << " size " << size - AM_ALIGNMENT;
+                       << " size " << size - AM_ALIGNMENT;
     return buf + AM_ALIGNMENT;
 
 err:
     return nullptr;
   }
 
-  void UCPInternal::pbuf_release(UCPContext *context, void *buf)
+  void UCPInternal::pbuf_release(UCPWorker *worker, void *buf)
   {
     char *alloc = reinterpret_cast<char*>(buf) - AM_ALIGNMENT;
     if (*alloc == 0) {
       if (config.pbuf_malloc) {
         free(alloc);
       } else {
-        context->mmp_release(alloc);
+        worker->mmp_release(alloc);
       }
     } else {
-      context->pbuf_release(alloc);
+      worker->pbuf_release(alloc);
     }
 
     log_ucp_ar.debug() << "released payload buffer " << buf;
@@ -1743,20 +1804,19 @@ err:
       size_t _storage_size)
   {
     const SegmentInfo *segment_info = internal->find_segment(src_payload_addr);
-    context = internal->get_ucp_context(segment_info);
+    const UCPContext *context       = internal->get_context(segment_info);
     memtype = segment_info ? realm2ucs_memtype(segment_info->memtype)
                            : UCS_MEMORY_TYPE_HOST;
+    worker  = internal->get_worker(context);
 
     size_t max_header_size = _storage_size - sizeof(*this);
-    max_header_size        = std::min(max_header_size,
-        context->get_max_am_header());
+    max_header_size        = std::min(max_header_size, worker->get_max_am_header());
     assert(_header_size   <= max_header_size);
     header_size            = _header_size;
     header_base            = reinterpret_cast<void*>(&ucp_msg_hdr.realm_hdr[0]);
-
-    ucp_msg_hdr.src   = Network::my_node_id;
-    ucp_msg_hdr.msgid = _msgid;
-    payload_size      = _max_payload_size;
+    ucp_msg_hdr.src        = Network::my_node_id;
+    ucp_msg_hdr.msgid      = _msgid;
+    payload_size           = _max_payload_size;
 
     payload_base_type = PAYLOAD_BASE_LAST;
     if (payload_size > 0) {
@@ -1765,7 +1825,7 @@ err:
         payload_base = const_cast<void *>(src_payload_addr);
         payload_base_type = PAYLOAD_BASE_EXTERNAL;
       } else if (!set_inline_payload_base()) {
-        payload_base = internal->pbuf_get(context, payload_size);
+        payload_base = internal->pbuf_get(worker, payload_size);
         assert(payload_base != nullptr);
         payload_base_type = PAYLOAD_BASE_INTERNAL;
       }
@@ -1877,7 +1937,7 @@ err:
 
   bool UCPMessageImpl::send_fast_path(ucp_ep_h ep, size_t act_payload_size)
   {
-    bool ok = context->am_send_fast_path(ep, AM_ID,
+    bool ok = worker->am_send_fast_path(ep, AM_ID,
         &ucp_msg_hdr, sizeof(ucp_msg_hdr) + header_size,
         payload_base, act_payload_size, memtype);
 
@@ -1889,7 +1949,7 @@ err:
         delete local_comp;
       }
       if (payload_base_type == PAYLOAD_BASE_INTERNAL) {
-        internal->pbuf_release(context, payload_base);
+        internal->pbuf_release(worker, payload_base);
       }
       log_ucp_am.info() << "successful send with enforced immediate completion";
       return true;
@@ -1926,18 +1986,18 @@ err:
       req->ucp.flags |= UCP_AM_SEND_FLAG_EAGER;
     }
 
-    req->ucp.op_type = UCPContext::OpType::AM_SEND;
+    req->ucp.op_type = UCPWorker::OpType::AM_SEND;
     req->ucp.args    = req;
     req->ucp.cb      = &UCPMessageImpl::am_local_comp_handler;
     req->ucp.am.id   = am_id;
 
-    return req->context->submit_req(&req->ucp);
+    return req->worker->submit_req(&req->ucp);
   }
 
   Request *UCPMessageImpl::make_request(size_t act_payload_size)
   {
     size_t ucp_msg_hdr_size = sizeof(ucp_msg_hdr) + header_size;
-    Request *req            = internal->request_get(context);
+    Request *req            = internal->request_get(worker);
     CHKERR_JUMP(req == nullptr, "failed to get request", log_ucp, err);
 
     req->ucp.am.header      = &ucp_msg_hdr;
@@ -1945,7 +2005,7 @@ err:
 
     // Copy the payload if we used the inline header buffer for it
     if (payload_base_type == PAYLOAD_BASE_INLINE) {
-      req->ucp.payload = internal->pbuf_get(context, act_payload_size);
+      req->ucp.payload = internal->pbuf_get(worker, act_payload_size);
       CHKERR_JUMP(req->ucp.payload == nullptr,
           "failed to get payload buffer", log_ucp, err_rel_req);
 
@@ -1973,7 +2033,7 @@ err:
 
 err_rel_payload:
     if (payload_base_type == PAYLOAD_BASE_INTERNAL) {
-      internal->pbuf_release(context, payload_base);
+      internal->pbuf_release(worker, payload_base);
     }
 err_rel_req:
     internal->request_release(req);
@@ -1985,7 +2045,7 @@ err:
   void UCPMessageImpl::cleanup_request(Request *req, UCPInternal *internal)
   {
     if (req->am_send.payload_base_type == PAYLOAD_BASE_INTERNAL) {
-      internal->pbuf_release(req->context, req->ucp.payload);
+      internal->pbuf_release(req->worker, req->ucp.payload);
     }
     delete req->am_send.local_comp;
     delete req->am_send.mc_desc;
@@ -2044,14 +2104,14 @@ err:
     req = make_request(ucp_msg_hdr.rdma_payload_size);
     CHKERR_JUMP(req == nullptr, "failed to make am request", log_ucp, err);
 
-    req_put = internal->request_get(context);
+    req_put = internal->request_get(worker);
     CHKERR_JUMP(req_put == nullptr, "failed to get request", log_ucp, err_rel_req);
 
     status = ucp_ep_rkey_unpack(ep, dest_payload_rdma_info->rkey, &rkey);
     CHKERR_JUMP(status != UCS_OK,
         "ucp_ep_rkey_unpack failed", log_ucp, err_rel_req_put);
 
-    req_put->ucp.op_type         = UCPContext::OpType::PUT;
+    req_put->ucp.op_type         = UCPWorker::OpType::PUT;
     req_put->ucp.ep              = ep;
     req_put->ucp.payload         = req->ucp.payload;
     req_put->ucp.payload_size    = req->ucp.payload_size;
@@ -2062,16 +2122,16 @@ err:
     req_put->ucp.rma.rkey        = rkey;
     req_put->ucp.rma.remote_addr = dest_payload_rdma_info->reg_base;
 
-    CHKERR_JUMP(!context->submit_req(&req_put->ucp),
+    CHKERR_JUMP(!worker->submit_req(&req_put->ucp),
         "failed to commit with rma", log_ucp, err_dest_rkey);
 
     // we reuse the same req for both flush and am send after it
-    req->ucp.op_type = UCPContext::OpType::EP_FLUSH;
+    req->ucp.op_type = UCPWorker::OpType::EP_FLUSH;
     req->ucp.ep      = ep;
     req->ucp.args    = req;
     req->ucp.cb      = &UCPMessageImpl::am_put_flush_comp_handler;
 
-    CHKERR_JUMP(!context->submit_req(&req->ucp),
+    CHKERR_JUMP(!worker->submit_req(&req->ucp),
         "failed to commit with rma", log_ucp, err_dest_rkey);
 
     return true;
@@ -2101,14 +2161,14 @@ err:
       //            until all target copies have been created.
       //            Otherwise, it may be released upon completion
       //            which will make furhter copies invalid.
-      req = internal->request_get(context);
+      req = internal->request_get(worker);
       if (req == nullptr) {
         log_ucp.error() << "failed to get additional request for multicast";
         req = req_prim;
         goto err_update_pending;
       }
       *req = *req_prim;
-      CHKERR_JUMP(!internal->get_ucp_ep(context, target,
+      CHKERR_JUMP(!internal->get_ucp_ep(worker, target,
             dest_payload_rdma_info, &req->ucp.ep),
           "failed to get ep", log_ucp, err);
       if (!UCPMessageImpl::send_request(req, AM_ID)) {
@@ -2138,8 +2198,9 @@ err:
     bool ret;
     ucp_ep_h ep;
 
-    CHKERR_JUMP(!internal->get_ucp_ep(context, target,
-          dest_payload_rdma_info, &ep), "failed to get ep", log_ucp, err);
+    CHKERR_JUMP(!internal->get_ucp_ep(worker, target,
+          dest_payload_rdma_info, &ep),
+        "failed to get ep", log_ucp, err);
 
     if (dest_payload_rdma_info == nullptr) {
       if (header_size + act_payload_size <= internal->config.fp_max) {
@@ -2174,6 +2235,7 @@ err:
   void UCPMessageImpl::commit(size_t act_payload_size)
   {
     bool status;
+    const UCPContext *context = worker->get_context();
 
 #ifdef REALM_USE_CUDA
     Cuda::AutoGPUContext agc(context->gpu);
@@ -2215,6 +2277,8 @@ err:
 
     log_ucp_am.info()
        << "msg commit "     << (is_multicast ? "multicast" : "unicast")
+       << "context "        << context
+       << "worker "         << worker
        << " target "        << (is_multicast ? -1 : target)
        << " hsize "         << header_size
        << " psize "         << act_payload_size
@@ -2234,7 +2298,7 @@ err:
     delete remote_comp;
     free(dest_payload_rdma_info);
     if (payload_base_type == PAYLOAD_BASE_INTERNAL) {
-      internal->pbuf_release(context, payload_base);
+      internal->pbuf_release(worker, payload_base);
     }
   }
 

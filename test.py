@@ -75,6 +75,7 @@ legion_cxx_tests = [
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
     ['examples/tiling/tiling', []],
+    ['examples/machine_config/machine_config', []],
     ['examples/future_map_transforms/future_map_transforms', []],
     ['examples/concurrent_tasks/concurrent', ['-ll:cpu', '4']],
     # Comment this test out until it works everywhere

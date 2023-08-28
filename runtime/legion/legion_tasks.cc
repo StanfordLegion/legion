@@ -3776,25 +3776,25 @@ namespace Legion {
           else
             shard_manager->set_shard_mapping(output.control_replication_map);
           VariantImpl *var_impl = NULL;
-          VariantID chosen_variant = output.task_mappings[0].chosen_variant;
+          selected_variant = output.task_mappings[0].chosen_variant;
           if (!runtime->unsafe_mapper)
           {
             // Check to make sure that they all picked the same variant
             // and that it is a replicable variant
             for (unsigned idx = 1; idx < total_shards; idx++)
             {
-              if (output.task_mappings[idx].chosen_variant != chosen_variant)
+              if (output.task_mappings[idx].chosen_variant != selected_variant)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper picked different variants "
                               "%d and %d for task %s (UID %lld) that was "
                               "designated to be control replicated.", 
                               "map_replicate_task", mapper->get_mapper_name(),
-                              chosen_variant, 
+                              selected_variant, 
                               output.task_mappings[idx].chosen_variant,
                               get_task_name(), get_unique_id())
             }
-            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+            var_impl = runtime->find_variant_impl(task_id, selected_variant,
                                                   true/*can_fail*/);
             // If it's NULL we'll catch it later in the checks
             if ((var_impl != NULL) && !var_impl->is_replicable())
@@ -3807,7 +3807,7 @@ namespace Legion {
                             get_unique_id())
           }
           else
-            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+            var_impl = runtime->find_variant_impl(task_id, selected_variant,
                                                   true/*can_fail*/);
           handle_future_size(var_impl->return_type_size,
               var_impl->has_return_type_size, map_applied_conditions);
@@ -5172,6 +5172,7 @@ namespace Legion {
         delete launch_space;
       if ((future_handles != NULL) && future_handles->remove_reference())
         delete future_handles;
+      redop_initial_value = Future();
       // Remove our reference to the future map
       future_map = FutureMap();
       if (reduction_instance != NULL)
@@ -5229,7 +5230,7 @@ namespace Legion {
         input.sharding_is = sharding_space;
       else
         input.sharding_is = launch_space->handle;
-      runtime->forest->find_launch_space_domain(internal_space, input.domain);
+      runtime->forest->find_domain(internal_space, input.domain);
       output.verify_correctness = false;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
@@ -5270,7 +5271,7 @@ namespace Legion {
         // Check to make sure the domain is not empty
         Domain &d = slice.domain;
         if ((d == Domain::NO_DOMAIN) && slice.domain_is.exists())
-          runtime->forest->find_launch_space_domain(slice.domain_is, d);
+          runtime->forest->find_domain(slice.domain_is, d);
         bool empty = false;
 	size_t volume = d.get_volume();
 	if (volume == 0)
@@ -5436,7 +5437,7 @@ namespace Legion {
       assert(internal_space.exists());
 #endif
       Domain result;
-      runtime->forest->find_launch_space_domain(internal_space, result);
+      runtime->forest->find_domain(internal_space, result);
       return result; 
     }
 
@@ -5533,7 +5534,7 @@ namespace Legion {
         // Only pack the IDs for our local points
         IndexSpaceNode *node = runtime->forest->get_node(internal_space);
         Domain local_domain;
-        node->get_launch_space_domain(local_domain);
+        node->get_domain(local_domain);
         size_t local_size = local_domain.get_volume();
         rez.serialize(local_size);
         const std::map<DomainPoint,DistributedID> &handles =
@@ -5718,7 +5719,7 @@ namespace Legion {
           reduction_inst_precondition = 
             reduction_instance->reduce_from(instance, this, redop,
                 reduction_op, true/*exclusive*/, reduction_inst_precondition);
-          return reduction_inst_precondition.has_triggered();
+          return reduction_inst_precondition.exists();
         }
       }
     } 
@@ -6419,7 +6420,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_future(FutureInstance *instance,
+    void IndividualTask::handle_post_execution(FutureInstance *instance,
                                        void *metadata, size_t metasize,
                                        FutureFunctor *functor,
                                        Processor future_proc, bool own_functor)
@@ -6468,6 +6469,7 @@ namespace Legion {
                                     metadata, metasize);
         }
       }
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -7410,7 +7412,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_future(FutureInstance *instance,
+    void PointTask::handle_post_execution(FutureInstance *instance,
                                   void *metadata, size_t metasize,
                                   FutureFunctor *functor, 
                                   Processor future_proc, bool own_functor)
@@ -7429,6 +7431,7 @@ namespace Legion {
       else
         slice_owner->handle_future(remote_completion_event, index_point,
             instance, metadata, metasize, functor, future_proc, own_functor); 
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -8009,9 +8012,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_future(FutureInstance *instance, void *metadata,
-                                  size_t metasize, FutureFunctor *functor,
-                                  Processor future_proc, bool own_functor)
+    void ShardTask::handle_post_execution(FutureInstance *instance,
+        void *metadata, size_t metasize, FutureFunctor *functor,
+        Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8019,6 +8022,7 @@ namespace Legion {
 #endif
       shard_manager->handle_post_execution(instance, metadata, 
                                            metasize, true/*local*/);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -8517,10 +8521,8 @@ namespace Legion {
 
       // First, we collect all the extents of local outputs.
       // While doing this, we also check the alignment.
-      ApEvent ready = ApEvent::NO_AP_EVENT;
-      Domain color_space = part->color_space->get_domain(ready, true);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      Domain color_space;
+      part->color_space->get_domain(color_space);
 #ifdef DEBUG_LEGION
       assert(color_space.dense());
 #endif
@@ -8735,7 +8737,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -8868,7 +8870,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_launch_space_domain(index_domain);
+        launch_space->get_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -8876,6 +8878,7 @@ namespace Legion {
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
+      redop_initial_value = launcher.initial_value;
       deterministic_redop = deterministic;
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
       if (!reduction_op->identity)
@@ -9079,11 +9082,10 @@ namespace Legion {
               idx, get_task_name(), get_unique_op_id(), req.projection);
 
 #ifdef DEBUG_LEGION
-          ApEvent ready = ApEvent::NO_AP_EVENT;
           IndexSpaceNode* node = runtime->forest->get_node(color_space);
-          Domain color_domain = node->get_domain(ready, true);
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
+          Domain color_domain;
+          node->get_domain(color_domain);
+          // No need to wait on the ready event since it is tight
 
           if (req.global_indexing && !color_domain.dense())
             REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
@@ -9228,6 +9230,9 @@ namespace Legion {
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
+      // Need a lock here in case this gets called in parallel by multiple
+      // slice tasks returning at the same time
+      AutoLock o_lock(op_lock);
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
     }
 
@@ -9372,8 +9377,7 @@ namespace Legion {
           {
             // Get the domain that we will have to iterate over
             Domain local_domain;
-            runtime->forest->find_launch_space_domain(internal_space, 
-                                                      local_domain);
+            runtime->forest->find_domain(internal_space, local_domain);
             // Handling the future map case
             if (predicate_false_future.impl != NULL)
             {
@@ -9553,6 +9557,15 @@ namespace Legion {
       }
       else
         serdez_redop_targets.swap(target_mems);
+
+      if (!redop_initial_value.is_empty() &&
+          parent_ctx->get_task()->get_shard_id() == 0)
+      {
+        // Initialize the future to the user-specified initial value
+        FutureImpl *impl = redop_initial_value.impl;
+        FutureInstance *inst = impl->get_canonical_instance();
+        fold_reduction_future(inst, reduction_effects, deterministic_redop);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10469,8 +10482,7 @@ namespace Legion {
       else if (!elide_future_return)
       {
         Domain internal_domain;
-        runtime->forest->find_launch_space_domain(internal_space,
-                                                  internal_domain);
+        runtime->forest->find_domain(internal_space, internal_domain);
         enumerate_futures(internal_domain);
       }
       // Prepare any setup for performing the concurrent analysis
@@ -11522,7 +11534,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
       Domain internal_domain;
-      runtime->forest->find_launch_space_domain(internal_space,internal_domain);
+      runtime->forest->find_domain(internal_space, internal_domain);
       const size_t num_points = internal_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);

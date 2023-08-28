@@ -1137,6 +1137,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalManager::get_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::compute_copy_offsets(const FieldMask &copy_mask,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
@@ -3206,6 +3215,9 @@ namespace Legion {
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime();
+      // Remove the reference we got back on the layout description
+      if (layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------
@@ -3361,8 +3373,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (use_event.exists() && !use_event.has_triggered())
-        use_event.wait();
+      if (use_event.exists() && !use_event.has_triggered_faultignorant())
+        use_event.wait_faultignorant();
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       return uintptr_t(inst_ptr);
     }
@@ -3899,6 +3911,20 @@ namespace Legion {
       constraints.memory_constraint = MemoryConstraint(
                                         memory_manager->memory.kind());
       const unsigned num_dims = instance_domain->get_num_dims();
+#ifdef DEBUG_LEGION
+      assert((constraints.padding_constraint.delta.get_dim() == 0) ||
+             (constraints.padding_constraint.delta.get_dim() == (int)num_dims));
+#endif
+      // If we don't have a padding constraint then record that we 
+      // don't have any padding on this instance
+      if (constraints.padding_constraint.delta.get_dim() == 0)
+      {
+        DomainPoint empty;
+        empty.dim = num_dims;
+        for (unsigned dim = 0; dim < num_dims; dim++)
+          empty[dim] = -1; // no padding
+        constraints.padding_constraint.delta = Domain(empty, empty);
+      }
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = field_space_node->find_layout_description(
                                         instance_mask, num_dims, constraints);
@@ -3956,6 +3982,9 @@ namespace Legion {
       }
       // manager takes ownership of the piece list
       piece_list = NULL;
+      // Remove the reference we got back from finding or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

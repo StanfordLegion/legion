@@ -2732,8 +2732,6 @@ namespace Legion {
       const bool check_privileges;
       const bool dump_free_ranges;
     public:
-      const unsigned num_profiling_nodes;
-    public:
       const int legion_collective_radix;
       MPIRankTable *const mpi_rank_table;
     public:
@@ -3804,7 +3802,6 @@ namespace Legion {
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);
-      void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_replicate_launch(Deserializer &derez,AddressSpaceID source);
@@ -4690,11 +4687,13 @@ namespace Legion {
                                                  RtEvent *wait_for = NULL);
     public:
       // Static methods for start-up and callback phases
-      static int start(int argc, char **argv, bool background, bool def_mapper);
+      static int start(int argc, char **argv, bool background, 
+                       bool def_mapper, bool filter);
       static void register_builtin_reduction_operators(void);
       static const LegionConfiguration& initialize(int *argc, char ***argv, 
-                                                   bool filter);
-      static LegionConfiguration parse_arguments(int argc, char **argv);
+                                                   bool parse, bool filter);
+      static unsigned initialize_outstanding_top_level_tasks(
+          AddressSpaceID local_space, size_t total_spaces, unsigned radix);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_interoperability(bool separate_runtimes);
       static Processor configure_runtime(int argc, char **argv,
@@ -4823,6 +4822,7 @@ namespace Legion {
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool legion_main_set;
       static bool runtime_initialized;
+      static bool runtime_cmdline_parsed;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
@@ -6193,8 +6193,6 @@ namespace Legion {
           return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
         case SEND_CONSTRAINT_RELEASE:
           return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
-        case SEND_TOP_LEVEL_TASK_REQUEST:
-          return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_TOP_LEVEL_TASK_COMPLETE:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_MPI_RANK_EXCHANGE:

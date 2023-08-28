@@ -2429,9 +2429,8 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      Processor proc = Internal::implicit_context->get_executing_processor();
-      return impl->get_buffer(proc, memory, extent_in_bytes, check_size,
-                              silence_warnings, warning_string);
+      return impl->get_buffer(Processor::NO_PROC, memory, extent_in_bytes, 
+                              check_size, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -7669,17 +7668,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool default_mapper)
+                                  bool default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background, default_mapper);
+      return Internal::Runtime::start(argc, argv, background, 
+                                      default_mapper, filter);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, 
+                                        bool filter, bool parse)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv, filter);
+      Internal::Runtime::initialize(argc, argv, parse, filter);
     }
 
     //--------------------------------------------------------------------------

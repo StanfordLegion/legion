@@ -667,7 +667,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         owner_shard = sharding_function->find_owner(index_point, shard_domain);
       }
       else
@@ -781,7 +781,7 @@ namespace Legion {
       // See if we're going to be a local point or not
       Domain shard_domain = index_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
       if (!elide_future_return)
       {
         ShardID owner = sharding_function->find_owner(index_point,shard_domain);
@@ -945,7 +945,7 @@ namespace Legion {
         if (local_space.exists())
         {
           Domain local_domain;
-          runtime->forest->find_launch_space_domain(local_space, local_domain);
+          runtime->forest->find_domain(local_space, local_domain);
           enumerate_futures(local_domain);
         }
       }
@@ -1144,7 +1144,7 @@ namespace Legion {
         if ((redop == 0) && !elide_future_return)
         {
           Domain shard_domain;
-          node->get_launch_space_domain(shard_domain);
+          node->get_domain(shard_domain);
           enumerate_futures(shard_domain);
         }
         // If we still need to slice the task then we can run it 
@@ -1639,9 +1639,9 @@ namespace Legion {
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -1678,9 +1678,9 @@ namespace Legion {
       // going to be coming from a remote shard
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -3364,7 +3364,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         owner_shard = sharding_function->find_owner(index_point, shard_domain);
       }
       else
@@ -4020,9 +4020,9 @@ namespace Legion {
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space,launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -4059,9 +4059,9 @@ namespace Legion {
       // going to be coming from a remote shard
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -4950,8 +4950,8 @@ namespace Legion {
       if (is_index_space)
       {
         IndexSpaceNode *node = runtime->forest->get_node(handle);
-        ApEvent domain_ready;
-        Domain domain = node->get_domain(domain_ready, false/*need tight*/);
+        Domain domain;
+        ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
         bool ready = false;
         {
           AutoLock o_lock(op_lock);
@@ -5132,8 +5132,8 @@ namespace Legion {
           DomainPoint color = 
             node->color_space->delinearize_color_to_point(*itr);
           IndexSpaceNode *child = node->get_child(*itr);
-          ApEvent ready;
-          remote_targets[color] = child->get_domain(ready, false/*need tight*/);
+          ApEvent ready = 
+            child->get_domain(remote_targets[color], false/*need tight*/);
           if (ready.exists())
             preconditions.push_back(ready);
         }
@@ -5343,7 +5343,7 @@ namespace Legion {
       // First find all the tasks that we own on this shard
       Domain shard_domain = launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
       {
@@ -5825,7 +5825,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         return shard_domain;
       }
       else
@@ -7467,15 +7467,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::record_unordered_kind(
-          std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments)
+             std::map<std::pair<LogicalRegion,FieldID>,Operation*> &detachments)
     //--------------------------------------------------------------------------
     {
-      const RegionRequirement &req = region.impl->get_requirement();
 #ifdef DEBUG_LEGION
-      assert(!req.privilege_fields.empty());
+      assert(!requirement.privilege_fields.empty());
 #endif
-      const std::pair<LogicalRegion,FieldID> key(req.region,
-          *(req.privilege_fields.begin()));
+      const std::pair<LogicalRegion,FieldID> key(requirement.region,
+          *(requirement.privilege_fields.begin()));
 #ifdef DEBUG_LEGION
       assert(detachments.find(key) == detachments.end());
 #endif
@@ -7798,6 +7797,35 @@ namespace Legion {
     {
       participants = new ShardParticipantsExchange(ctx, COLLECTIVE_LOC_103);
       participants->exchange(points.size() > 0);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::record_unordered_kind(
+     std::map<std::pair<LogicalRegion,FieldID>,Operation*> &region_detachments,
+     std::map<std::pair<LogicalPartition,FieldID>,Operation*> &part_detachments)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!requirement.privilege_fields.empty());
+#endif
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+      {
+        const std::pair<LogicalPartition,FieldID> key(requirement.partition,
+            *(requirement.privilege_fields.begin()));
+#ifdef DEBUG_LEGION
+        assert(part_detachments.find(key) == part_detachments.end());
+#endif
+        part_detachments[key] = this;
+      }
+      else
+      {
+        const std::pair<LogicalRegion,FieldID> key(requirement.region,
+            *(requirement.privilege_fields.begin()));
+#ifdef DEBUG_LEGION
+        assert(region_detachments.find(key) == region_detachments.end());
+#endif
+        region_detachments[key] = this;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10402,7 +10430,7 @@ namespace Legion {
         }
         else
         {
-          original_task->handle_future(result, metadata, metasize,
+          original_task->handle_post_execution(result, metadata, metasize,
               NULL/*functor*/, Processor::NO_PROC, false/*own functor*/);
           // we no longer own this, it got passed through
           metadata = NULL;
@@ -10472,7 +10500,6 @@ namespace Legion {
           RtEvent applied_event;
           if (!applied_events.empty())
             applied_event = Runtime::merge_events(applied_events);
-          original_task->complete_execution(applied_event);
           original_task->trigger_children_complete(all_shard_effects);
           return applied_event;
         }
@@ -14994,7 +15021,8 @@ namespace Legion {
       pack_counts(rez, field_space_counts);
       pack_field_counts(rez, field_counts);
       pack_counts(rez, logical_region_counts);
-      pack_field_counts(rez, detach_counts);
+      pack_field_counts(rez, region_detach_counts);
+      pack_field_counts(rez, partition_detach_counts);
     }
 
     //--------------------------------------------------------------------------
@@ -15014,14 +15042,16 @@ namespace Legion {
         field_space_counts.clear();
         field_counts.clear();
         logical_region_counts.clear();
-        detach_counts.clear();
+        region_detach_counts.clear();
+        partition_detach_counts.clear();
       }
       unpack_counts(stage, derez, index_space_counts);
       unpack_counts(stage, derez, index_partition_counts);
       unpack_counts(stage, derez, field_space_counts);
       unpack_field_counts(stage, derez, field_counts);
       unpack_counts(stage, derez, logical_region_counts);
-      unpack_field_counts(stage, derez, detach_counts);
+      unpack_field_counts(stage, derez, region_detach_counts);
+      unpack_field_counts(stage, derez, partition_detach_counts);
     }
 
     //--------------------------------------------------------------------------
@@ -15053,13 +15083,22 @@ namespace Legion {
               }
             case Operation::DETACH_OP_KIND:
               {
-#ifdef DEBUG_LEGION
                 ReplDetachOp *op = dynamic_cast<ReplDetachOp*>(*it);
-                assert(op != NULL);
+                if (op == NULL)
+                {
+#ifdef DEBUG_LEGION
+                  ReplIndexDetachOp *index = 
+                    dynamic_cast<ReplIndexDetachOp*>(*it);
+                  assert(index != NULL);
 #else
-                ReplDetachOp *op = static_cast<ReplDetachOp*>(*it);
+                  ReplIndexDetachOp *index = 
+                    static_cast<ReplIndexDetachOp*>(*it);
 #endif
-                op->record_unordered_kind(detachments);
+                  index->record_unordered_kind(region_detachments,
+                                            partition_detachments);
+                }
+                else 
+                  op->record_unordered_kind(region_detachments);
                 break;
               }
             default: // Unimplemented operation kind
@@ -15072,7 +15111,8 @@ namespace Legion {
         initialize_counts(field_space_deletions, field_space_counts);
         initialize_counts(field_deletions, field_counts);
         initialize_counts(logical_region_deletions, logical_region_counts);
-        initialize_counts(detachments, detach_counts);
+        initialize_counts(region_detachments, region_detach_counts);
+        initialize_counts(partition_detachments, partition_detach_counts);
       }
       // Perform the exchange
       perform_collective_sync();
@@ -15092,13 +15132,16 @@ namespace Legion {
                        field_deletions, ready_ops);
         find_ready_ops(total_shards, logical_region_counts,
                        logical_region_deletions, ready_ops);
-        find_ready_ops(total_shards, detach_counts,
-                       detachments, ready_ops);
+        find_ready_ops(total_shards, region_detach_counts,
+                       region_detachments, ready_ops);
+        find_ready_ops(total_shards, partition_detach_counts,
+                       partition_detachments, ready_ops);
       }
       // Return true if anybody anywhere had a non-zero count
       return (!index_space_counts.empty() || !index_partition_counts.empty() ||
           !field_space_counts.empty() || !field_counts.empty() || 
-          !logical_region_counts.empty() || !detach_counts.empty());
+          !logical_region_counts.empty() || !region_detach_counts.empty() ||
+          !partition_detach_counts.empty());
     }
 
     /////////////////////////////////////////////////////////////

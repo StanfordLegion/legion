@@ -1076,8 +1076,8 @@ namespace Realm {
       // and latency.
       for (Channel *channel : src_node.dma_channels) {
         unsigned bandwidth, latency;
-        if (channel->supports_path(src_mem, dst_mem, 0, 0, 0, 1, nullptr,
-                                   nullptr, nullptr, &bandwidth,
+        if (channel->supports_path(ChannelCopyInfo{src_mem, dst_mem}, 0, 0, 0,
+                                   1, nullptr, nullptr, nullptr, &bandwidth,
                                    &latency) != 0) {
           affinity.bandwidth = std::max(bandwidth, affinity.bandwidth);
           affinity.latency = std::min(latency, affinity.latency);

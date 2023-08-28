@@ -1000,8 +1000,14 @@ namespace Legion {
                               bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(proc.exists() ||
+          (memkind == runtime->runtime_system_memory.kind()));
+#endif
       // Figure out which memory we are looking for
-      Memory memory = runtime->find_local_memory(proc, memkind);
+      // If the user passed in a NO_PROC, then use the local system memory
+      Memory memory = proc.exists() ? runtime->find_local_memory(proc, memkind)
+        : runtime->runtime_system_memory;
       if (!memory.exists())
       {
         if (memkind != Memory::SYSTEM_MEM)
@@ -1033,7 +1039,7 @@ namespace Legion {
         ready_event.wait();
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) ? 
+          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string);
@@ -1110,7 +1116,7 @@ namespace Legion {
         ready_event.wait();
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) ? 
+          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
       wait(silence_warnings, warning_string); 
@@ -3356,7 +3362,8 @@ namespace Legion {
       rez.serialize(size);
       // Check to see if we can just pass this future instance by value
       if (is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE) &&
-          ((other_ready && (!ready.exists() || ready.has_triggered())) ||
+          ((other_ready && (!ready.exists() || 
+                            ready.has_triggered_faultignorant())) ||
            (!other_ready && (!ready_event.exists() || 
                               ready_event.has_triggered_faultignorant()))))
       {
@@ -3693,7 +3700,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain result;
-      future_map_domain->get_launch_space_domain(result);
+      future_map_domain->get_domain(result);
       return result;
     }
 
@@ -3820,7 +3827,11 @@ namespace Legion {
             (warning_string == NULL) ? "" : warning_string)
       if ((op != NULL) && (Internal::implicit_context != NULL))
         Internal::implicit_context->record_blocking_call();
-      completion_event.wait();
+      bool poisoned = false;
+      if (!completion_event.has_triggered_faultaware(poisoned))
+        completion_event.wait_faultaware(poisoned);
+      if (poisoned)
+        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -3903,7 +3914,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       Domain domain;
-      future_map_domain->get_launch_space_domain(domain);
+      future_map_domain->get_domain(domain);
       const size_t needed = domain.get_volume();
       AutoLock fm_lock(future_map_lock);
 #ifdef DEBUG_LEGION
@@ -4163,8 +4174,8 @@ namespace Legion {
       assert(future_map_domain->contains_point(point));
 #endif
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4192,8 +4203,8 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_all_futures(previous_futures);
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -4247,8 +4258,8 @@ namespace Legion {
       assert(future_map_domain->contains_point(point));
 #endif
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4276,8 +4287,8 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_shard_local_futures(shard, previous_futures);
       Domain domain, range;
-      future_map_domain->get_launch_space_domain(domain);
-      previous->future_map_domain->get_launch_space_domain(range);
+      future_map_domain->get_domain(domain);
+      previous->future_map_domain->get_domain(range);
       if (is_functor)
       {
         if (transform.functor->is_invertible())
@@ -4408,7 +4419,7 @@ namespace Legion {
           wait_on.wait();
       }
       Domain domain;
-      shard_domain->get_launch_space_domain(domain);
+      shard_domain->get_domain(domain);
       const ShardID owner_shard = 
         sharding_function.load()->find_owner(point, domain);
       // Figure out which node has this future
@@ -4552,7 +4563,11 @@ namespace Legion {
       }
       const ApBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
       Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, completion_event);
-      wait_bar.wait();
+      bool poisoned = false;
+      if (!wait_bar.has_triggered_faultaware(poisoned))
+        wait_bar.wait_faultaware(poisoned);
+      if (poisoned)
+        implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -4561,7 +4576,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain sharding_domain;
-      shard_domain->get_launch_space_domain(sharding_domain);
+      shard_domain->get_domain(sharding_domain);
       if (sharding_function == NULL)
       {
         RtEvent wait_on = get_sharding_function_ready();
@@ -4576,7 +4591,7 @@ namespace Legion {
         return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
       Domain domain;
-      local_points->get_launch_space_domain(domain);
+      local_points->get_domain(domain);
       std::vector<RtEvent> ready_events;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
@@ -5295,7 +5310,7 @@ namespace Legion {
           if (need_padded_bounds)
           {
             Domain domain;
-            bounds->get_launch_space_domain(domain);
+            bounds->get_domain(domain);
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
@@ -5406,9 +5421,8 @@ namespace Legion {
           // If this is a padded instance, then we know that this is an affine
           // instance so we can get it's index space expression and it should
           // be dense so then we can just add the offsets
-          ApEvent dom_ready;
-          Domain bounds = 
-            manager->instance_domain->get_domain(dom_ready,true/*tight*/);
+          Domain bounds;
+          manager->instance_domain->get_domain(bounds);
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
@@ -6120,10 +6134,7 @@ namespace Legion {
             // For a globally indexed output region, the domain has
             // already been initialized once we reach here, so
             // we just retrieve it.
-            ApEvent ready = ApEvent::NO_AP_EVENT;
-            domain = node->get_domain(ready, true);
-            if (ready.exists())
-              ready.wait();
+            node->get_domain(domain);
           }
         }
         else
@@ -6135,7 +6146,7 @@ namespace Legion {
         }
       }
       else
-        node->get_launch_space_domain(domain);
+        node->get_domain(domain);
 
       // Create a Realm instance and update the physical manager
       // for each output field
@@ -13122,11 +13133,6 @@ namespace Legion {
               runtime->handle_constraint_release(derez);
               break;
             }
-          case SEND_TOP_LEVEL_TASK_REQUEST:
-            {
-              runtime->handle_top_level_task_request(derez);
-              break;
-            }
           case SEND_TOP_LEVEL_TASK_COMPLETE:
             {
               runtime->handle_top_level_task_complete(derez);
@@ -13388,7 +13394,7 @@ namespace Legion {
       : channels((VirtualChannel*)
                   malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
         runtime(rt), remote_address_space(remote), target(remote_util_group), 
-        always_flush(remote < rt->num_profiling_nodes)
+        always_flush(rt->profiler != NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15698,7 +15704,7 @@ namespace Legion {
       assert(is_functional);
 #endif
       Domain launch_domain;
-      domain->get_launch_space_domain(launch_domain);
+      domain->get_domain(launch_domain);
       // If we're exclusive, we'll store the handles until after
       // we release the lock to go look them up in the region tree
       std::vector<LogicalRegion> handles;
@@ -16045,7 +16051,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain launch_domain;
-      projection_space->get_launch_space_domain(launch_domain);
+      projection_space->get_domain(launch_domain);
       if (node->is_region())
       {
         RegionNode *region = node->as_region_node();
@@ -16175,8 +16181,8 @@ namespace Legion {
       if (!local_space.exists())
         return result;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
       node_map[row_source] = result;
       if (root->is_region())
@@ -16242,8 +16248,8 @@ namespace Legion {
       if (!local_space.exists())
         return;
       Domain local_domain, launch_domain;
-      forest->find_launch_space_domain(local_space, local_domain);
-      launch_space->get_launch_space_domain(launch_domain);
+      forest->find_domain(local_space, local_domain);
+      launch_space->get_domain(launch_domain);
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
@@ -16620,15 +16626,11 @@ namespace Legion {
 #endif
         check_privileges(config.check_privileges),
         dump_free_ranges(config.dump_free_ranges),
-        num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
         prepared_for_shutdown(false), total_outstanding_tasks(0), 
-        // In the case where the runtime is backgrounded, have node 0 keep
-        // a reference for each node so that we wait until we see all wait
-        // call from each node before we start trying to perform a shutdown
-        outstanding_top_level_tasks(
-            ((unique == 0) && background) ? total_address_spaces : 0),
+        outstanding_top_level_tasks(initialize_outstanding_top_level_tasks(
+              address_space, total_address_spaces, legion_collective_radix)),
         concurrent_reservation(Reservation::NO_RESERVATION),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
@@ -16734,7 +16736,7 @@ namespace Legion {
       // We've intentionally switched this to profile all the nodes if we're 
       // profiling any nodes since some information about things like copies
       // usage of instances are now split across multiple log files
-      if (num_profiling_nodes > 0)
+      if (config.num_profiling_nodes > 0)
         initialize_legion_prof(config);
 #ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count.store(0);
@@ -16829,7 +16831,6 @@ namespace Legion {
 #endif
         check_privileges(rhs.check_privileges),
         dump_free_ranges(rhs.dump_free_ranges),
-        num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         mpi_rank_table(NULL), local_procs(rhs.local_procs), 
         local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)
@@ -25462,25 +25463,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_task_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0); // should only happen on node 0
-#endif
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      increment_outstanding_top_level_tasks();
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_top_level_task_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0); // should only happen on node 0
-#endif
       decrement_outstanding_top_level_tasks();
     }
 
@@ -26745,7 +26730,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      AutoLock d_lock(distributed_collectable_lock);
 #ifdef DEBUG_LEGION
       assert(dist_collectables.find(did) == dist_collectables.end());
 #endif
@@ -27133,47 +27118,35 @@ namespace Legion {
     void Runtime::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we are on node 0 or not
-      if (address_space != 0)
-      {
-        // Send a message to node 0 requesting permission to 
-        // lauch a new top-level task and wait on an event
-        // to signal that permission has been granted
-        RtUserEvent grant_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        rez.serialize(grant_event);
-        find_messenger(0)->send_message<SEND_TOP_LEVEL_TASK_REQUEST>(rez,
-                                                          true/*flush*/);
-        grant_event.wait();
-      }
-      else
-      {
-        outstanding_top_level_tasks.fetch_add(1);
-      }
+      unsigned previous = outstanding_top_level_tasks.fetch_add(1);
+      if (previous == 0)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_TOP_LEVEL_TASK_CREATION,
+            "Illegal attempt to launch a top-level task after "
+            "Runtime::wait_for_shutdown has been called. All top-level tasks "
+            "must be created on a node before signaling to the runtime that "
+            "the client is ready for Legion to shutdown on that node.")
     }
 
     //--------------------------------------------------------------------------
     void Runtime::decrement_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we are on node 0 or not
-      if (address_space != 0)
-      {
-        // Send a message to node 0 indicating that we finished
-        // executing a top-level task
-        Serializer rez;
-        find_messenger(0)->send_message<SEND_TOP_LEVEL_TASK_COMPLETE>(rez,
-                                                            true/*flush*/);
-      }
-      else
-      {
-        unsigned prev = outstanding_top_level_tasks.fetch_sub(1);
+      unsigned previous = outstanding_top_level_tasks.fetch_sub(1);
 #ifdef DEBUG_LEGION
-        assert(prev > 0);
+      assert(previous > 0);
 #endif
-        // Check to see if we have no more outstanding top-level tasks
-        // If we don't launch a task to handle the try to shutdown the runtime 
-        if (prev == 1)
+      if (previous == 1)
+      {
+        if (address_space > 0)
+        {
+          // Send a message to the next node down the tree to remove our
+          // guard reference that we have there
+          AddressSpaceID parent = (address_space - 1) / legion_collective_radix;
+          Serializer rez;
+          find_messenger(parent)->send_message<SEND_TOP_LEVEL_TASK_COMPLETE>(
+                                                          rez, true/*flush*/);
+        }
+        else // We're the owner node so start the quiesence algorithm
           issue_runtime_shutdown_attempt();
       }
     }
@@ -29832,6 +29805,7 @@ namespace Legion {
     /*static*/ MapperID Runtime::legion_main_mapper_id = 0;
     /*static*/ bool Runtime::legion_main_set = false;
     /*static*/ bool Runtime::runtime_initialized = false;
+    /*static*/ bool Runtime::runtime_cmdline_parsed = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
@@ -29843,7 +29817,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool supply_default_mapper)
+                                  bool supply_default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
@@ -29888,8 +29862,12 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      const LegionConfiguration &config = initialize(&argc, &argv, false);
+      const LegionConfiguration &config = 
+        initialize(&argc, &argv, !runtime_cmdline_parsed, filter);
       RealmRuntime realm = RealmRuntime::get_runtime();
+      // Finish configuring the machine so we can start querying the machine
+      // model and setting up our data structures before we start Realm
+      realm.finish_configure();
 
       // Perform any waits that the user requested before starting
       if (config.delay_start > 0)
@@ -29998,23 +29976,36 @@ namespace Legion {
       // for the runtime to shutdown, otherwise we can now return
       if (background)
         return 0;
+      // Decrement the total outstanding top-level tasks to reflect that
+      // this node is ready to shutdown when everything is done
+      the_runtime->decrement_outstanding_top_level_tasks();
+      // Wait for Realm shutdown to be complete
       return realm.wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
     /*static*/ const Runtime::LegionConfiguration& Runtime::initialize(
-                                           int *argc, char ***argv, bool filter)
+                               int *argc, char ***argv, bool parse, bool filter)
     //--------------------------------------------------------------------------
     {
       static LegionConfiguration config;
-      if (runtime_initialized)
-        return config;
-      RealmRuntime realm;
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      if (!runtime_initialized)
+      {
 #ifndef NDEBUG
-      bool ok = 
+        bool ok = 
 #endif
-        realm.network_init(argc, argv);
-      assert(ok);
+          realm.network_init(argc, argv);
+        assert(ok);
+#ifndef NDEBUG
+        ok =
+#endif
+          realm.create_configs(*argc, *argv);
+        assert(ok);
+        runtime_initialized = true;
+      }
+      if (runtime_cmdline_parsed || !parse)
+        return config;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
       std::vector<std::string> cmdline;
@@ -30070,11 +30061,7 @@ namespace Legion {
       cmdline.reserve(cmdline.size() + ((num_args > 0) ? num_args-1 : 0));
       for (unsigned i = 1; i < num_args; i++)
         cmdline.emplace_back((*argv)[i]);
-#ifndef NDEBUG
-      ok = 
-#endif
-        realm.configure_from_command_line(cmdline, filter);
-      assert(ok);
+      realm.parse_command_line(cmdline, filter);
       Realm::CommandLineParser cp; 
       cp.add_option_bool("-lg:warn_backtrace",
                          config.warnings_backtrace, !filter)
@@ -30278,7 +30265,7 @@ namespace Legion {
               "LEVEL_ERROR" :
             (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
               "LEVEL_FATAL" : "LEVEL_NONE")
-      runtime_initialized = true;
+      runtime_cmdline_parsed = true;
       return config;
     }
 
@@ -30353,6 +30340,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ unsigned Runtime::initialize_outstanding_top_level_tasks(
+        AddressSpaceID local_space, size_t total_spaces, unsigned radix)
+    //--------------------------------------------------------------------------
+    {
+      // We always have at least one top-level task in the count as a guard
+      // that will be removed once we know that we aren't launching anymore
+      // new top-level tasks on this node
+      unsigned result = 1;
+      // Now count how many notifications we expect to see and add that to
+      // our count to act as an additional guard. This will allow us to do
+      // a tree reduction down from each node towards node 0 which will
+      // start the shutdown quiescence test
+      AddressSpaceID offset = local_space * radix;
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        AddressSpaceID target = offset + idx;
+        if (target < total_spaces)
+          result++;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::launch_top_level_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -30378,6 +30388,8 @@ namespace Legion {
 #endif
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = new TopLevelContext(this);
+      // Save the current context if there is one and restore it later
+      TaskContext *previous_implicit = implicit_context;
       // Save the context in the implicit context
       implicit_context = top_context;
       implicit_runtime = this;
@@ -30385,9 +30397,6 @@ namespace Legion {
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Set the executing processor
       top_context->set_executing_processor(target);
-      // Save the current context if there is one and restore it later
-      TaskContext *previous_implicit = implicit_context;
-      implicit_context = top_context;
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       AutoProvenance provenance(launcher.provenance);

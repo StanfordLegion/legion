@@ -969,7 +969,6 @@ namespace Legion {
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
       SEND_CONSTRAINT_RELEASE,
-      SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
       SEND_REPLICATE_LAUNCH,
@@ -1234,7 +1233,6 @@ namespace Legion {
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
         "Send Constraint Release",                                    \
-        "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
         "Send Replication Launch",                                    \
@@ -2632,14 +2630,11 @@ namespace Legion {
           return has_triggered_faultaware(poisoned); }
       inline void wait_faultignorant(void) const
         { bool poisoned = false; LgEvent::wait_faultaware(poisoned); }
-      // TODO: enable this to ensure we are always checking for faults
-#if 0
     private:
       // Make these private because we always want to be conscious of faults
       // when testing or waiting on application events
       inline bool has_triggered(void) const { return LgEvent::has_triggered(); }
       inline void wait(void) const { LgEvent::wait(); }
-#endif
     };
 
     class ApUserEvent : public ApEvent {

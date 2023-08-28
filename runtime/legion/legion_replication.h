@@ -1024,7 +1024,9 @@ namespace Legion {
       std::map<std::pair<FieldSpace,FieldID>,unsigned> field_counts;
       std::map<LogicalRegion,unsigned> logical_region_counts;
       // Use the lowest field ID here as the key
-      std::map<std::pair<LogicalRegion,FieldID>,unsigned> detach_counts;
+      std::map<std::pair<LogicalRegion,FieldID>,unsigned> region_detach_counts;
+      std::map<
+        std::pair<LogicalPartition,FieldID>,unsigned> partition_detach_counts;
     protected:
       std::map<IndexSpace,ReplDeletionOp*> index_space_deletions;
       std::map<IndexPartition,ReplDeletionOp*> index_partition_deletions;
@@ -1033,7 +1035,9 @@ namespace Legion {
       std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> field_deletions;
       std::map<LogicalRegion,ReplDeletionOp*> logical_region_deletions;
       // Use the lowest field ID here as the key
-      std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> detachments;
+      std::map<std::pair<LogicalRegion,FieldID>,Operation*> region_detachments;
+      std::map<
+        std::pair<LogicalPartition,FieldID>,Operation*> partition_detachments;
     };
 
     /**
@@ -2386,7 +2390,7 @@ namespace Legion {
     public:
       // Help for unordered detachments
       void record_unordered_kind(
-        std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
+        std::map<std::pair<LogicalRegion,FieldID>,Operation*> &detachments);
     protected:
       RtBarrier collective_map_barrier;
       ApBarrier effects_barrier;
@@ -2417,6 +2421,10 @@ namespace Legion {
       virtual ApEvent get_complete_effects(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
+      void record_unordered_kind(std::map<
+          std::pair<LogicalRegion,FieldID>,Operation*> &region_detachments,
+          std::map<std::pair<
+            LogicalPartition,FieldID>,Operation*> &partition_detachments);
     protected:
       ShardingFunction *sharding_function;
       ShardParticipantsExchange *participants;

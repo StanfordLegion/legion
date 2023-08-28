@@ -6777,7 +6777,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!term_event.exists() || term_event.has_triggered());
+      assert(!term_event.exists() || term_event.has_triggered_faultignorant());
 #endif
       term_event = Runtime::create_ap_user_event(NULL);
     }

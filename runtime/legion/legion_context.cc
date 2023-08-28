@@ -2242,8 +2242,6 @@ namespace Legion {
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
         release_task_local_instances();
-      // Mark that we are done executing this operation
-      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2392,8 +2390,6 @@ namespace Legion {
                                          const void *metadata, size_t metasize)
     //--------------------------------------------------------------------------
     {
-      // Mark that we are done executing this operation
-      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2488,7 +2484,8 @@ namespace Legion {
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
-        const ApEvent ready = remap_region(unmapped_regions[idx], provenance);
+        const ApEvent ready = 
+          remap_region(unmapped_regions[idx], provenance, true/*internal*/);
         if (ready.exists())
           mapped_events.insert(ready);
       }
@@ -2605,7 +2602,7 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launch_domain, provenance);
       if (!launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+        runtime->forest->find_domain(launch_space, launch_domain);
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(), context_index,
@@ -6391,7 +6388,7 @@ namespace Legion {
         FutureMap result = execute_must_epoch(epoch_launcher);
         return reduce_future_map(result, redop, deterministic,
                                  launcher.map_id, launcher.tag, provenance,
-                                 Future());
+                                 launcher.initial_value);
       }
       AutoRuntimeCall call(this);
       if (launcher.launch_domain.exists() &&
@@ -6400,6 +6397,11 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
+
+        if (!launcher.initial_value.is_empty())
+          return launcher.initial_value;
+
+        // Else return the reduction operation's identity value
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(), provenance);
@@ -6466,7 +6468,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       Domain domain;
-      runtime->forest->find_launch_space_domain(space, domain);
+      runtime->forest->find_domain(space, domain);
       if (data.size() != domain.get_volume())
         REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
           "The number of buffers passed into a future map construction (%zd) "
@@ -6644,10 +6646,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent InnerContext::remap_region(const PhysicalRegion &region,
-                                       Provenance *provenance)
+                                       Provenance *provenance, bool internal)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (!internal)
+      {
+        AutoRuntimeCall call(this);
+        return remap_region(region, provenance, true/*internal*/);
+      }
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
@@ -11541,8 +11547,8 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, metadata, metasize, callback_functor,
-                                executing_processor, own_callback_functor);
+      owner_task->handle_post_execution(instance, metadata, metasize, 
+          callback_functor, executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -13018,6 +13024,8 @@ namespace Legion {
       hash_argument(hasher, safe_level, launcher.map_arg, "map_arg");
       hash_future(hasher, safe_level, launcher.predicate_false_future,
                   "predicate_false_future");
+      hash_future(hasher, safe_level, launcher.initial_value,
+                  "initial_value");
       hash_argument(hasher, safe_level, launcher.predicate_false_result,
                     "predicate_false_result");
       hash_static_dependences(hasher, launcher.static_dependences);
@@ -17702,7 +17710,7 @@ namespace Legion {
         // Reduce the future map down to a future
         return reduce_future_map(result, redop, deterministic,
                                  launcher.map_id, launcher.tag, provenance,
-                                 Future());
+                                 launcher.initial_value);
       }
       AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
@@ -17724,6 +17732,9 @@ namespace Legion {
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
+        if (!launcher.initial_value.is_empty())
+          return launcher.initial_value;
+
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
@@ -17778,6 +17789,10 @@ namespace Legion {
                               i > 0, provenance);
         hasher.hash(REPLICATE_REDUCE_FUTURE_MAP, __func__);
         hash_future_map(hasher, future_map, "future_map");
+        hash_future(hasher,
+                    runtime->safe_control_replication,
+                    initial_value,
+                    "initial_value");
         hasher.hash(redop, "redop");
         hasher.hash(deterministic, "deterministic");
         if (hasher.verify(__func__))
@@ -17919,7 +17934,7 @@ namespace Legion {
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
       Domain domain;
-      domain_node->get_launch_space_domain(domain);
+      domain_node->get_domain(domain);
       FutureMap result;
       if (collective)
       {
@@ -18059,7 +18074,7 @@ namespace Legion {
         }
         // Check that all the points abide by the sharding function
         Domain domain;
-        domain_node->get_launch_space_domain(domain);
+        domain_node->get_domain(domain);
         for (std::map<DomainPoint,Future>::const_iterator it =
               futures.begin(); it != futures.end(); it++)
           if (function->find_owner(it->first, domain) != owner_shard->shard_id)
@@ -18169,23 +18184,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent ReplicateContext::remap_region(const PhysicalRegion &region,
-                                           Provenance *provenance)
+                                           Provenance *provenance,bool internal)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
-            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      if (!internal)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
-                              i > 0, provenance);
-        hasher.hash(REPLICATE_REMAP_REGION, __func__);
-        Serializer rez;
-        ExternalMappable::pack_region_requirement(
-            region.impl->get_requirement(), rez);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "requirement");
-        hasher.hash<bool>(region.is_mapped(), "is_mapped");
-        if (hasher.verify(__func__))
-          break;
+        AutoRuntimeCall call(this);
+        for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+              ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+        {
+          Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+                                i > 0, provenance);
+          hasher.hash(REPLICATE_REMAP_REGION, __func__);
+          Serializer rez;
+          ExternalMappable::pack_region_requirement(
+              region.impl->get_requirement(), rez);
+          hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "requirement");
+          hasher.hash<bool>(region.is_mapped(), "is_mapped");
+          if (hasher.verify(__func__))
+            break;
+        }
+        return remap_region(region, provenance, true/*internal*/);
       }
       // Check to see if the region is already mapped,
       // if it is then we are done
@@ -19583,7 +19602,12 @@ namespace Legion {
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
         term_event = inorder_bar;
         if (outermost)
-          term_event.wait();
+        {
+          bool poisoned = false;
+          term_event.wait_faultaware(poisoned);
+          if (poisoned)
+            raise_poison_exception(); 
+        }
         // Not unordered so it must have succeeded
         return true;
       }
@@ -23607,7 +23631,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent LeafContext::remap_region(const PhysicalRegion &region,
-                                      Provenance *provenance)
+                                      Provenance *provenance, bool internal)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,
@@ -24119,8 +24143,8 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, metadata, metasize, callback_functor,
-                                executing_processor, own_callback_functor);
+      owner_task->handle_post_execution(instance, metadata, metasize,
+          callback_functor, executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;
       {

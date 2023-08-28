@@ -1843,6 +1843,9 @@ namespace Legion {
       bool                               elide_future_return;
     public:
       bool                               silence_warnings;
+    public:
+      // Initial value for reduction
+      Future                             initial_value;
     };
 
     /**
@@ -9563,10 +9566,11 @@ namespace Legion {
        * @param background whether to execute the runtime in the background
        * @param supply_default_mapper whether the runtime should initialize
        *              the default mapper for use by the application
+       * @param filter filter legion and realm command line arguments
        * @return only if running in background, otherwise never
        */
       static int start(int argc, char **argv, bool background = false,
-                       bool supply_default_mapper = true);
+                       bool supply_default_mapper = true, bool filter = false);
 
       /**
        * This 'initialize' method is an optional method that provides
@@ -9579,9 +9583,12 @@ namespace Legion {
        * be passed into the 'start' method or undefined behavior will occur.
        * @param argc pointer to an integer in which to store the argument count 
        * @param argv pointer to array of strings for storing command line args
-       * @param filter remove any runtime command line arguments
+       * @param filter remove any legion and realm command line arguments
+       * @param parse parse any runtime command line arguments during this call
+       *              (if set to false parsing happens during start method)
        */
-      static void initialize(int *argc, char ***argv, bool filter = false);
+      static void initialize(int *argc, char ***argv, 
+                             bool filter = false, bool parse = true);
 
       /**
        * Blocking call to wait for the runtime to shutdown when

@@ -189,11 +189,37 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class OpenMPModuleConfig
+
+    HDF5ModuleConfig::HDF5ModuleConfig(void)
+      : ModuleConfig("hdf5")
+    {
+    }
+
+    void HDF5ModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // first order of business - read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_bool("-hdf5:showerrors", cfg_showerrors)
+        .add_option_int("-hdf5:openfiles", Config::max_open_files)
+        .add_option_bool("-hdf5:forcerw", Config::force_read_write);
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+        log_hdf5.fatal() << "error reading HDF5 command line parameters";
+        assert(false);
+      }
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class HDF5Module
 
     HDF5Module::HDF5Module(void)
       : Module("hdf5")
-      , cfg_showerrors(true)
+      , config(nullptr)
       , version_major(0)
       , version_minor(0)
       , version_rel(0)
@@ -203,29 +229,29 @@ namespace Realm {
     }
       
     HDF5Module::~HDF5Module(void)
-    {}
+    {
+      assert(config != nullptr);
+      config = nullptr;
+    }
 
-    /*static*/ Module *HDF5Module::create_module(RuntimeImpl *runtime,
-						 std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *HDF5Module::create_module_config(RuntimeImpl *runtime)
+    {
+      HDF5ModuleConfig *config = new HDF5ModuleConfig();
+      return config;
+    }
+
+    /*static*/ Module *HDF5Module::create_module(RuntimeImpl *runtime)
     {
       // create a module to fill in with stuff - we'll delete it if HDF5 is
       //  disabled
       HDF5Module *m = new HDF5Module;
 
-      // first order of business - read command line parameters
-      {
-	CommandLineParser cp;
-
-	cp.add_option_bool("-hdf5:showerrors", m->cfg_showerrors)
-	  .add_option_int("-hdf5:openfiles", Config::max_open_files)
-	  .add_option_bool("-hdf5:forcerw", Config::force_read_write);
-	
-	bool ok = cp.parse_command_line(cmdline);
-	if(!ok) {
-	  log_hdf5.fatal() << "error reading HDF5 command line parameters";
-	  assert(false);
-	}
-      }
+      HDF5ModuleConfig *config = dynamic_cast<HDF5ModuleConfig *>(runtime->get_module_config("hdf5"));
+      assert(config != NULL);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == NULL);
+      m->config = config;
 
       {
 	herr_t err = H5open();

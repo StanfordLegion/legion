@@ -41,10 +41,7 @@ namespace Legion {
       if (privilege_node != NULL)
       {
         Realm::IndexSpace<DIM,T> privilege_space;
-        const ApEvent ready = 
-          privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
+        privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
         for (unsigned idx = 0; idx < num_pieces; idx++)
         {
           const Rect<DIM,T> &rect = rects[idx];
@@ -1103,12 +1100,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceOperationT<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    ApEvent IndexSpaceOperationT<DIM,T>::get_domain(Domain &domain, bool tight)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result;
-      ready = get_realm_index_space(result, tight);
-      return DomainT<DIM,T>(result);
+      ApEvent ready = get_realm_index_space(result, tight);
+      domain = result;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -1173,9 +1171,7 @@ namespace Legion {
       if (has_volume.load())
         return volume;
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      get_realm_index_space(temp, true/*tight*/);
       volume = temp.volume();
       has_volume.store(true);
       return volume;
@@ -1386,9 +1382,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
-      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
-      if (space_ready.exists())
-        space_ready.wait();
+      get_realm_index_space(local_is, true/*tight*/);
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                               compact, piece_list, piece_list_size, num_pieces);
     }
@@ -1487,11 +1481,11 @@ namespace Legion {
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
       // See if both the events needed for the tighten call are done
-      if (!this->realm_index_space_ready.has_triggered() || 
+      if (this->realm_index_space_ready.exists() || 
           !valid_event.has_triggered())
       {
         IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-        if (!this->realm_index_space_ready.has_triggered())
+        if (this->realm_index_space_ready.exists())
         {
           if (!valid_event.has_triggered())
             this->tight_index_space_ready = 
@@ -1637,11 +1631,11 @@ namespace Legion {
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
       // See if both the events needed for the tighten call are done
-      if (!this->realm_index_space_ready.has_triggered() || 
+      if (this->realm_index_space_ready.exists() ||
           !valid_event.has_triggered())
       {
         IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-        if (!this->realm_index_space_ready.has_triggered())
+        if (this->realm_index_space_ready.exists())
         {
           if (!valid_event.has_triggered())
             this->tight_index_space_ready = 
@@ -1797,11 +1791,11 @@ namespace Legion {
         // going to want this eventually
         const RtEvent valid_event(this->realm_index_space.make_valid());
         // See if both the events needed for the tighten call are done
-        if (!this->realm_index_space_ready.has_triggered() || 
+        if (this->realm_index_space_ready.exists() ||
             !valid_event.has_triggered())
         {
           IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-          if (!this->realm_index_space_ready.has_triggered())
+          if (this->realm_index_space_ready.exists())
           {
             if (!valid_event.has_triggered())
               this->tight_index_space_ready = 
@@ -2364,12 +2358,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceNodeT<DIM,T>::get_domain(ApEvent &ready, bool need_tight)
+    ApEvent IndexSpaceNodeT<DIM,T>::get_domain(Domain &domain, bool need_tight)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result;
-      ready = get_realm_index_space(result, need_tight);
-      return DomainT<DIM,T>(result);
+      ApEvent ready = get_realm_index_space(result, need_tight);
+      domain = result;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -4905,9 +4900,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
-      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
-      if (space_ready.exists())
-        space_ready.wait();
+      get_realm_index_space(local_is, true/*tight*/);
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                               compact, piece_list, piece_list_size, num_pieces);
     }
@@ -4965,16 +4958,6 @@ namespace Legion {
       return get_sparsity_map_kd_tree_internal<DIM,T>();
     }
     
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)
-    //--------------------------------------------------------------------------
-    {
-      DomainT<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      launch_domain = local_space;
-    }
-
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::validate_slicing(
@@ -5048,7 +5031,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
       if (shard_space != handle)
-        context->find_launch_space_domain(shard_space, sharding_domain);
+        context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
       std::vector<Realm::Point<DIM,T> > index_points; 
@@ -5103,7 +5086,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
       if (shard_space.exists() && shard_space != handle)
-        context->find_launch_space_domain(shard_space, sharding_domain);
+        context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
       if (!func->functor->is_invertible())
@@ -7070,10 +7053,7 @@ namespace Legion {
           {
             IndexSpaceNode *child = get_child(*itr);
             DomainT<DIM,T> space;
-            const ApEvent space_ready = 
-              child->get_expr_index_space(&space, type_tag, true/*tight*/);
-            if (space_ready.exists() && !space_ready.has_triggered())
-              space_ready.wait();
+            child->get_expr_index_space(&space, type_tag, true/*tight*/);
             if (space.empty())
               continue;
             for (RectInDomainIterator<DIM,T> it(space); it(); it++)
@@ -7158,10 +7138,7 @@ namespace Legion {
         }
       }
       DomainT<DIM,T> space;
-      const ApEvent space_ready =
-        expr->get_expr_index_space(&space, handle.get_type_tag(),true/*tight*/);
-      if (space_ready.exists() && !space_ready.has_triggered())
-        space_ready.wait();
+      expr->get_expr_index_space(&space, handle.get_type_tag(), true/*tight*/);
       // If we have a remote kd tree then we need to query that to see if 
       // we have any remote colors to include
       std::set<LegionColor> color_set;

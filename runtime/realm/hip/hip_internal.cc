@@ -526,7 +526,7 @@ namespace Realm {
       src_gpu = _src_gpu;
         
       // switch out of ordered mode if multi-threaded dma is requested
-      if(_src_gpu->module->cfg_multithread_dma)
+      if(_src_gpu->module->config->cfg_multithread_dma)
         xdq.ordered_mode = false;
 
       std::vector<Memory> local_gpu_mems;
@@ -1503,16 +1503,16 @@ namespace Realm {
         return true;
       }
 
-      uint64_t GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                                   CustomSerdezID src_serdez_id,
-                                                   CustomSerdezID dst_serdez_id,
-                                                   ReductionOpID redop_id,
-                                                   size_t total_bytes,
-                                                   const std::vector<size_t> *src_frags,
-                                                   const std::vector<size_t> *dst_frags,
-                                                   XferDesKind *kind_ret /*= 0*/,
-                                                   unsigned *bw_ret /*= 0*/,
-                                                   unsigned *lat_ret /*= 0*/)
+      uint64_t GPUreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
+                                               CustomSerdezID src_serdez_id,
+                                               CustomSerdezID dst_serdez_id,
+                                               ReductionOpID redop_id,
+                                               size_t total_bytes,
+                                               const std::vector<size_t> *src_frags,
+                                               const std::vector<size_t> *dst_frags,
+                                               XferDesKind *kind_ret /*= 0*/,
+                                               unsigned *bw_ret /*= 0*/,
+                                               unsigned *lat_ret /*= 0*/)
       {
         // first check that we have a reduction op (if not, we want the cudamemcpy
         //   path to pick this up instead) and that it has cuda kernels available
@@ -1520,7 +1520,7 @@ namespace Realm {
           return 0;
 
         // then delegate to the normal supports_path logic
-        return Channel::supports_path(src_mem, dst_mem,
+        return Channel::supports_path(channel_copy_info,
                                       src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
                                       kind_ret, bw_ret, lat_ret);
@@ -1619,16 +1619,16 @@ namespace Realm {
         : RemoteChannel(_remote_ptr)
       {}
 
-      uint64_t GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                                         CustomSerdezID src_serdez_id,
-                                                         CustomSerdezID dst_serdez_id,
-                                                         ReductionOpID redop_id,
-                                                         size_t total_bytes,
-                                                         const std::vector<size_t> *src_frags,
-                                                         const std::vector<size_t> *dst_frags,
-                                                         XferDesKind *kind_ret /*= 0*/,
-                                                         unsigned *bw_ret /*= 0*/,
-                                                         unsigned *lat_ret /*= 0*/)
+      uint64_t GPUreduceRemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
+                                                     CustomSerdezID src_serdez_id,
+                                                     CustomSerdezID dst_serdez_id,
+                                                     ReductionOpID redop_id,
+                                                     size_t total_bytes,
+                                                     const std::vector<size_t> *src_frags,
+                                                     const std::vector<size_t> *dst_frags,
+                                                     XferDesKind *kind_ret /*= 0*/,
+                                                     unsigned *bw_ret /*= 0*/,
+                                                     unsigned *lat_ret /*= 0*/)
       {
         // check first that we have a reduction op (if not, we want the cudamemcpy
         //   path to pick this up instead) and that it has cuda kernels available
@@ -1636,7 +1636,7 @@ namespace Realm {
           return 0;
 
         // then delegate to the normal supports_path logic
-        return Channel::supports_path(src_mem, dst_mem,
+        return Channel::supports_path(channel_copy_info,
                                       src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
                                       kind_ret, bw_ret, lat_ret);
