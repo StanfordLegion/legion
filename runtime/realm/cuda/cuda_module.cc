@@ -4134,11 +4134,10 @@ namespace Realm {
       CudaModule *m = new CudaModule(runtime);
 
       CudaModuleConfig *config = dynamic_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
-      assert(config != NULL);
+      assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
-      assert(m->config == NULL);
-      assert(config->finish_configured);
+      assert(m->config == nullptr);
       m->config = config;
 
       // if we know gpus have been requested, correct loading of libraries
