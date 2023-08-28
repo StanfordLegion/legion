@@ -4954,14 +4954,10 @@ namespace Legion {
       assert(manager->is_physical_manager());
 #endif
       PhysicalManager *inst_manager = manager->as_physical_manager();
-      void *location;
-      MaterializedView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) MaterializedView(runtime, did, logical_owner,
-                                      inst_manager, false/*register now*/);
-      else
-        view = new MaterializedView(runtime, did, logical_owner,
-                                    inst_manager, false/*register now*/);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                      MaterializedView>(did);
+      MaterializedView *view = new(location) MaterializedView(runtime, did, 
+          logical_owner, inst_manager, false/*register now*/);
       // Register only after construction
       view->register_with_runtime();
     }
@@ -5125,46 +5121,25 @@ namespace Legion {
       size_t value_size;
       derez.deserialize(value_size);
       
-      void *location;
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                              FillView>(did);
       FillView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
+      if (value_size > 0)
       {
-        if (value_size > 0)
-        {
-          const void *value = derez.get_current_pointer();
-          view = new(location) FillView(runtime, did,
+        const void *value = derez.get_current_pointer();
+        view = new(location) FillView(runtime, did,
 #ifdef LEGION_SPY
-                                        op_uid,
+                                      op_uid,
 #endif
-                                        value,value_size,false/*register now*/);
-          derez.advance_pointer(value_size);
-        }
-        else
-          view = new(location) FillView(runtime, did,
-#ifdef LEGION_SPY
-                                        op_uid,
-#endif
-                                        false/*register now*/);
+                                      value, value_size, false/*register now*/);
+        derez.advance_pointer(value_size);
       }
       else
-      {
-        if (value_size > 0)
-        {
-          const void *value = derez.get_current_pointer();
-          view = new FillView(runtime, did,
+        view = new(location) FillView(runtime, did,
 #ifdef LEGION_SPY
-                              op_uid,
+                                      op_uid,
 #endif
-                              value, value_size, false/*register now*/);
-          derez.advance_pointer(value_size);
-        }
-        else
-          view = new FillView(runtime, did,
-#ifdef LEGION_SPY
-                              op_uid,
-#endif
-                              false/*register now*/);
-      }
+                                      false/*register now*/);
       view->register_with_runtime();
     }
 
@@ -5557,18 +5532,13 @@ namespace Legion {
           ready_events.insert(ready);
       }
       // Make the phi view but don't register it yet
-      void *location;
-      PhiView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) PhiView(runtime, did,
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                                PhiView>(did);
+      PhiView *view = new(location) PhiView(runtime, did,
                                      true_guard, false_guard,
                                      std::move(true_views),
                                      std::move(false_views),
                                      false/*register_now*/);
-      else
-        view = new PhiView(runtime, did, true_guard, 
-                           false_guard, std::move(true_views),
-                           std::move(false_views), false/*register now*/);
       if (!ready_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -6307,14 +6277,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_reduction_manager());
 #endif
-      void *location;
-      ReductionView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReductionView(runtime, did, logical_owner,
-                                           manager, false/*register now*/);
-      else
-        view = new ReductionView(runtime, did, logical_owner, manager,
-                                 false/*register now*/);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                          ReductionView>(did);
+      ReductionView *view = new(location) ReductionView(runtime, did, 
+          logical_owner, manager, false/*register now*/);
       // Only register after construction
       view->register_with_runtime();
     }
@@ -6506,7 +6472,7 @@ namespace Legion {
       derez.deserialize(did);
 
       CollectiveView *view = static_cast<CollectiveView*>(
-          runtime->find_distributed_collectable(did, true/*wait*/));
+          runtime->find_distributed_collectable(did));
       view->make_valid(true/*need lock*/);
     }
 
@@ -6665,7 +6631,7 @@ namespace Legion {
       derez.deserialize(generation);
 
       CollectiveView *view = static_cast<CollectiveView*>(
-          runtime->find_distributed_collectable(did, true/*wait*/));
+          runtime->find_distributed_collectable(did));
       if (view->perform_invalidate_request(generation, true/*need lock*/))
         delete view;
     }
@@ -6764,7 +6730,7 @@ namespace Legion {
       derez.deserialize(did);
 
       CollectiveView *view = static_cast<CollectiveView*>(
-          runtime->find_distributed_collectable(did, true/*wait*/));
+          runtime->find_distributed_collectable(did));
       view->add_base_valid_ref(REMOTE_DID_REF);
     }
 
@@ -11589,15 +11555,11 @@ namespace Legion {
         mapping = new CollectiveMapping(derez, num_spaces);
         mapping->add_reference();
       }
-      void *location;
-      ReplicatedView *view = NULL;
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                        ReplicatedView>(did);
       std::vector<IndividualView*> no_views;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReplicatedView(runtime, did, ctx_did, no_views,
-                                  instances, false/*register now*/, mapping);
-      else
-        view = new ReplicatedView(runtime, did, ctx_did, no_views, instances,
-                                  false/*register now*/, mapping);
+      ReplicatedView *view = new(location) ReplicatedView(runtime, did, ctx_did,
+          no_views, instances, false/*register now*/, mapping);
       // Register only after construction
       view->register_with_runtime();
       if ((mapping != NULL) && mapping->remove_reference())
@@ -11691,16 +11653,11 @@ namespace Legion {
       }
       ReductionOpID redop;
       derez.deserialize(redop);
-      void *location;
-      AllreduceView *view = NULL;
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                          AllreduceView>(did);
       std::vector<IndividualView*> no_views;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) AllreduceView(runtime, did, ctx_did, no_views,
-                                           instances, false/*register now*/,
-                                           mapping, redop);
-      else
-        view = new AllreduceView(runtime, did, ctx_did, no_views, instances,
-                                 false/*register now*/, mapping, redop);
+      AllreduceView *view = new(location) AllreduceView(runtime, did, ctx_did,
+          no_views, instances, false/*register now*/, mapping, redop);
       // Register only after construction
       view->register_with_runtime();
       if ((mapping != NULL) && mapping->remove_reference())

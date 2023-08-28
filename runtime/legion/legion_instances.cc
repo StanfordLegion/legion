@@ -3197,22 +3197,15 @@ namespace Legion {
       MemoryManager *memory = runtime->find_memory_manager(mem);
       const ReductionOp *op = 
         (redop == 0) ? NULL : runtime->get_reduction(redop);
-      void *location;
-      PhysicalManager *man = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        man = new(location) PhysicalManager(runtime->forest, did,
-                                            memory, inst, inst_domain, 
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                        PhysicalManager>(did);
+      PhysicalManager *man = new(location) PhysicalManager(runtime->forest,
+                                            did, memory, inst, inst_domain, 
                                             piece_list, piece_list_size, 
                                             space_node, tree_id, layout, 
                                             redop, false/*reg now*/, 
                                             inst_footprint, use_event, 
                                             unique_event, kind, op);
-      else
-        man = new PhysicalManager(runtime->forest, did, memory, 
-                              inst, inst_domain, piece_list, piece_list_size,
-                              space_node, tree_id, layout, redop,
-                              false/*reg now*/, inst_footprint, use_event,
-                              unique_event, kind, op);
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime();

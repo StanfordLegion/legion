@@ -4004,20 +4004,11 @@ namespace Legion {
                                             DistributedCollectable *dc);
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
-      DistributedCollectable* find_distributed_collectable(DistributedID did, 
-                                                           bool wait = false);
-      DistributedCollectable* find_distributed_collectable(DistributedID did,
-                                                           RtEvent &ready, 
-                                                           bool wait = false);
+      DistributedCollectable* find_distributed_collectable(DistributedID did);
       DistributedCollectable* weak_find_distributed_collectable(
                                                            DistributedID did);
-      bool find_pending_collectable_location(DistributedID did,void *&location);
       template<typename T>
       void* find_or_create_pending_collectable_location(DistributedID did); 
-      void record_pending_distributed_collectable(DistributedID did);
-      void revoke_pending_distributed_collectable(DistributedID did);
-      bool find_or_create_distributed_collectable(DistributedID did,
-          DistributedCollectable *&collectable, RtEvent &ready, void *buffer);
     public:
       LogicalView* find_or_request_logical_view(DistributedID did,
                                                 RtEvent &ready);

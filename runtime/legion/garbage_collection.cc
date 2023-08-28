@@ -1072,8 +1072,7 @@ namespace Legion {
 
       // It's possible for this to race with the creation of this
       // distributed collectable so wait until it is ready
-      DistributedCollectable *dc = 
-        runtime->find_distributed_collectable(did, true/*wait*/);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
       dc->process_downgrade_request(downgrade_owner, to_check);
     }
 
@@ -1312,8 +1311,7 @@ namespace Legion {
 
       // It's possible for this to race with the creation and registration
       // of this distributed collectable so wait for it to be ready
-      DistributedCollectable *dc =
-        runtime->find_distributed_collectable(did, true/*wait*/);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
       AutoLock gc(dc->gc_lock);
       dc->process_downgrade_update(gc, state);
     }

@@ -14307,7 +14307,6 @@ namespace Legion {
             ApEvent::NO_AP_EVENT, creation_bar);
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -14384,7 +14383,6 @@ namespace Legion {
           const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_index_space(space_id);
-          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<ISBroadcast> *collective = 
             new ValueBroadcast<ISBroadcast>(this, COLLECTIVE_LOC_3);
@@ -14456,7 +14454,6 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -14642,7 +14639,6 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -14744,7 +14740,6 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -14836,7 +14831,6 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -15152,7 +15146,6 @@ namespace Legion {
           const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_partition(pid);
-          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<IPBroadcast> *collective = 
             new ValueBroadcast<IPBroadcast>(this, COLLECTIVE_LOC_7);
@@ -15222,7 +15215,6 @@ namespace Legion {
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
         runtime->forest->revoke_pending_partition(value.pid);
-        runtime->revoke_pending_distributed_collectable(value.did);
       }
       else
       {
@@ -16946,7 +16938,6 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
                         space.id, get_task_name(), get_unique_id());
@@ -17228,7 +17219,6 @@ namespace Legion {
           const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_field_space(space);
-          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<FSBroadcast> *collective = 
             new ValueBroadcast<FSBroadcast>(this, COLLECTIVE_LOC_31);
@@ -18825,7 +18815,6 @@ namespace Legion {
         if (owner_shard->shard_id == distributed_id_allocator_shard)
         {
           const DistributedID did = runtime->get_available_distributed_id();
-          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<DIDBroadcast> *collective = 
             new ValueBroadcast<DIDBroadcast>(this, COLLECTIVE_LOC_2);
@@ -20466,7 +20455,6 @@ namespace Legion {
         {
           const ISBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_index_space(value.space_id);
-          runtime->revoke_pending_distributed_collectable(value.did);
           // Throw away distributed ID
         }
         else
@@ -20487,7 +20475,6 @@ namespace Legion {
         {
           const IPBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_partition(value.pid);
-          runtime->revoke_pending_distributed_collectable(value.did);
           // Throw away distributed ID
         }
         else
@@ -20508,7 +20495,6 @@ namespace Legion {
         {
           const FSBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_field_space(value.space_id);
-          runtime->revoke_pending_distributed_collectable(value.did);
           // Throw away distributed ID
         }
         else
@@ -20562,7 +20548,6 @@ namespace Legion {
         if (collective.second)
         {
           const DIDBroadcast value = collective.first->get_value(false);
-          runtime->revoke_pending_distributed_collectable(value.did);
         }
         else
         {
@@ -24359,12 +24344,9 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      void *location;
-      RemoteContext *context = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        context = new(location) RemoteContext(did, runtime);
-      else
-        context = new RemoteContext(did, runtime);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                          RemoteContext>(did);
+      RemoteContext *context = new(location) RemoteContext(did, runtime);
       context->unpack_remote_context(derez);
       context->register_with_runtime();
     }

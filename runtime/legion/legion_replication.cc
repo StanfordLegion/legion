@@ -16456,19 +16456,6 @@ namespace Legion {
       assert(fresh_did > 0);
 #endif
       selected_views.insert(did);
-      // Preregister the fresh did with the runtime in case we end up
-      // needing to use it, note this has to be done before we do the
-      // rendezvous so we can guarantee that all the participants have
-      // done it before we start
-      
-      if (manager->is_first_local_shard(ctx->owner_shard))
-      {
-        Runtime *runtime = context->runtime;
-        // Note that where we got the fresh_did from already did the pending
-        // registration for us so we don't need to do that on this node
-        if (runtime->determine_owner(fresh_did) != runtime->address_space)
-          runtime->record_pending_distributed_collectable(fresh_did);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -16516,8 +16503,6 @@ namespace Legion {
         // Pass the MAPPING_ACQUIRE_REF into the registration
         fill_op->register_fill_view_creation(fill_view, set_view);
       }
-      else // Didn't use the fresh did so we can revoke it
-        context->runtime->revoke_pending_distributed_collectable(fresh_did);
       return RtEvent::NO_RT_EVENT;
     }
 

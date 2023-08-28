@@ -22299,14 +22299,10 @@ namespace Legion {
         if (ctx_ready.exists() && !ctx_ready.has_triggered())
           ctx_ready.wait();
       }
-      void *location;
-      EquivalenceSet *set = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        set = new(location) EquivalenceSet(runtime, did, logical_owner, expr,
-                                           tid, context,false/*register now*/);
-      else
-        set = new EquivalenceSet(runtime, did, logical_owner, expr,
-                                 tid, context, false/*register now*/);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                        EquivalenceSet>(did);
+      EquivalenceSet *set = new(location) EquivalenceSet(runtime, did, 
+          logical_owner, expr, tid, context,false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime();
     }
