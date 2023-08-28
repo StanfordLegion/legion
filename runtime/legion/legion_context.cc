@@ -20455,7 +20455,6 @@ namespace Legion {
         {
           const ISBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_index_space(value.space_id);
-          // Throw away distributed ID
         }
         else
         {
@@ -20475,7 +20474,6 @@ namespace Legion {
         {
           const IPBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_partition(value.pid);
-          // Throw away distributed ID
         }
         else
         {
@@ -20495,7 +20493,6 @@ namespace Legion {
         {
           const FSBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_field_space(value.space_id);
-          // Throw away distributed ID
         }
         else
         {
@@ -20529,7 +20526,6 @@ namespace Legion {
         {
           const LRBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_region_tree(value.tid);
-          // Throw away distributed ID
         }
         else
         {
@@ -20545,11 +20541,7 @@ namespace Legion {
       {
         std::pair<ValueBroadcast<DIDBroadcast>*,bool> &collective = 
           release_distributed_ids.front();
-        if (collective.second)
-        {
-          const DIDBroadcast value = collective.first->get_value(false);
-        }
-        else
+        if (!collective.second)
         {
           // Make sure this collective is done before we delete it
           const RtEvent done = collective.first->get_done_event();
