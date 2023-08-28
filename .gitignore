@@ -24,6 +24,7 @@ legion_defines.h
 realm_defines.h
 
 .cache
+build
 tmp-build
 compile_commands.json
 mem_trace_csv
