@@ -450,13 +450,11 @@ namespace Realm {
 
       const size_t planes = std::min(std::min(icount, ocount),
                                      (bytes_left / (contig_bytes * lines)));
-      std::cout << "in_pstride=" << in_pstride << " out_lstride=" << out_lstride << std::endl;
       if ((in_gpu != NULL) &&
           in_gpu->can_access_peer(out_gpu) &&  // If this is a gpu->gpu copy
           (in_pstride ==
            out_lstride) &&  // And this is a transpose compatible stride
           (contig_bytes <= CUDA_MAX_FIELD_BYTES)) {
-        std::cout << "FOUND TRANSPOSE COPY" << std::endl;
         transpose_info.src = reinterpret_cast<void *>(in_base + in_offset);
         transpose_info.dst = reinterpret_cast<void *>(out_base + out_offset);
         transpose_info.src_stride = in_lstride / contig_bytes;
