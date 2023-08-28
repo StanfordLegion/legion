@@ -66,6 +66,7 @@ TESTS += memmodel
 TESTS += extres_alias
 TESTS += reservations
 TESTS += multiaffine
+TESTS += machine_config
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream

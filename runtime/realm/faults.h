@@ -111,9 +111,9 @@ namespace Realm {
     ExecutionException(int _error_code,
 		       const void *_detail_data, size_t _detail_size,
 		       bool capture_backtrace = true);
-    virtual ~ExecutionException(void) throw();
+    virtual ~ExecutionException(void) REALM_NOEXCEPT;
 
-    virtual const char *what(void) const throw() = 0;
+    virtual const char *what(void) const REALM_NOEXCEPT = 0;
 
     virtual void populate_profiling_measurements(ProfilingMeasurementCollection& pmc) const;
 
@@ -127,7 +127,7 @@ namespace Realm {
   public:
     CancellationException(void);
 
-    virtual const char *what(void) const throw();
+    virtual const char *what(void) const REALM_NOEXCEPT;
   };
 
   // the result of testing a poisoned event
@@ -135,7 +135,7 @@ namespace Realm {
   public:
     PoisonedEventException(Event _event);
 
-    virtual const char *what(void) const throw();
+    virtual const char *what(void) const REALM_NOEXCEPT;
 
   protected:
     Event event;
@@ -147,7 +147,7 @@ namespace Realm {
     ApplicationException(int _error_code,
 			 const void *_detail_data, size_t _detail_size);
 
-    virtual const char *what(void) const throw();
+    virtual const char *what(void) const REALM_NOEXCEPT;
   };
 
 }; // namespace Realm

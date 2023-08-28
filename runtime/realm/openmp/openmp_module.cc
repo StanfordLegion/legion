@@ -157,23 +157,57 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class OpenMPModuleConfig
+
+    OpenMPModuleConfig::OpenMPModuleConfig(void)
+      : ModuleConfig("openmp")
+    {
+      config_map.insert({"ocpu", &cfg_num_openmp_cpus});
+      config_map.insert({"othr", &cfg_num_threads_per_cpu});
+    }
+
+    void OpenMPModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // first order of business - read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_int("-ll:ocpu", cfg_num_openmp_cpus)
+        .add_option_int("-ll:othr", cfg_num_threads_per_cpu)
+        .add_option_int("-ll:onuma", cfg_use_numa)
+        .add_option_int_units("-ll:ostack", cfg_stack_size, 'm')
+        .add_option_bool("-ll:okindhack", cfg_fake_cpukind);
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+        log_omp.fatal() << "error reading OpenMP command line parameters";
+        assert(false);
+      }
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class OpenMPModule
 
     OpenMPModule::OpenMPModule(void)
       : Module("openmp")
-      , cfg_num_openmp_cpus(0)
-      , cfg_num_threads_per_cpu(1)
-      , cfg_use_numa(true)
-      , cfg_fake_cpukind(false)
-      , cfg_stack_size(2 << 20)
+      , config(nullptr)
     {
     }
       
     OpenMPModule::~OpenMPModule(void)
-    {}
+    {
+      assert(config != nullptr);
+      config = nullptr;
+    }
 
-    /*static*/ Module *OpenMPModule::create_module(RuntimeImpl *runtime,
-						 std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *OpenMPModule::create_module_config(RuntimeImpl *runtime)
+    {
+      OpenMPModuleConfig *config = new OpenMPModuleConfig();
+      return config;
+    }
+
+    /*static*/ Module *OpenMPModule::create_module(RuntimeImpl *runtime)
     {
       // create a module to fill in with stuff - we'll delete it if numa is
       //  disabled
@@ -183,25 +217,15 @@ namespace Realm {
       openmp_api_force_linkage();
 #endif
 
-      // first order of business - read command line parameters
-      {
-	CommandLineParser cp;
-
-	cp.add_option_int("-ll:ocpu", m->cfg_num_openmp_cpus)
-	  .add_option_int("-ll:othr", m->cfg_num_threads_per_cpu)
-	  .add_option_int("-ll:onuma", m->cfg_use_numa)
-	  .add_option_int_units("-ll:ostack", m->cfg_stack_size, 'm')
-	  .add_option_bool("-ll:okindhack", m->cfg_fake_cpukind);
-	
-	bool ok = cp.parse_command_line(cmdline);
-	if(!ok) {
-	  log_omp.fatal() << "error reading OpenMP command line parameters";
-	  assert(false);
-	}
-      }
+      OpenMPModuleConfig *config = dynamic_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
+      assert(config != NULL);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == NULL);
+      m->config = config;
 
       // if no cpus were requested, there's no point
-      if(m->cfg_num_openmp_cpus == 0) {
+      if(m->config->cfg_num_openmp_cpus == 0) {
 	log_omp.debug() << "no OpenMP cpus requested";
 	delete m;
 	return 0;
@@ -216,16 +240,16 @@ namespace Realm {
 
       // get number/sizes of NUMA nodes -
       //   disable (with a warning) numa binding if support not found
-      if(m->cfg_use_numa) {
+      if(m->config->cfg_use_numa) {
 	std::map<int, NumaNodeCpuInfo> cpuinfo;
 	if(numasysif_numa_available() &&
 	   numasysif_get_cpu_info(cpuinfo) &&
 	   !cpuinfo.empty()) {
           // Figure out how many OpenMP processors we need per NUMA domain
           int openmp_cpus_per_numa_node = 
-            (m->cfg_num_openmp_cpus + cpuinfo.size() - 1) / cpuinfo.size();
+            (m->config->cfg_num_openmp_cpus + cpuinfo.size() - 1) / cpuinfo.size();
 	  int cores_needed = (openmp_cpus_per_numa_node *
-			      m->cfg_num_threads_per_cpu);
+			      m->config->cfg_num_threads_per_cpu);
 	  // filter out any numa domains with insufficient core counts
 	  for(std::map<int, NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
 	      it != cpuinfo.end();
@@ -239,7 +263,7 @@ namespace Realm {
 	  }
 	} else {
 	  log_omp.warning() << "numa support not found (or not working)";
-	  m->cfg_use_numa = false;
+	  m->config->cfg_use_numa = false;
 	}
       }
 
@@ -256,6 +280,7 @@ namespace Realm {
     //  complete
     void OpenMPModule::initialize(RuntimeImpl *runtime)
     {
+      assert(config != NULL);
       Module::initialize(runtime);
     }
 
@@ -267,20 +292,20 @@ namespace Realm {
       Module::create_processors(runtime);
 
       assert(!active_numa_domains.empty());
-      for(int i = 0; i < cfg_num_openmp_cpus; i++) {
+      for(int i = 0; i < config->cfg_num_openmp_cpus; i++) {
         int cpu_node = active_numa_domains[i % active_numa_domains.size()];
         Processor p = runtime->next_local_processor_id();
         ProcessorImpl *pi = new LocalOpenMPProcessor(p, cpu_node,
-                                                     cfg_num_threads_per_cpu,
-                                                     cfg_fake_cpukind,
+                                                     config->cfg_num_threads_per_cpu,
+                                                     config->cfg_fake_cpukind,
                                                      runtime->core_reservation_set(),
-                                                     cfg_stack_size,
+                                                     config->cfg_stack_size,
                                                      Config::force_kernel_threads);
         runtime->add_processor(pi);
 
         // FIXME: once the stuff in runtime_impl.cc is removed, remove
         //  this 'continue' so that we create affinities here
-        if(cfg_fake_cpukind) continue;
+        if(config->cfg_fake_cpukind) continue;
 
         // create affinities between this processor and system/reg memories
         // if the memory is one we created, use the kernel-reported distance
@@ -311,7 +336,7 @@ namespace Realm {
             pma.latency = 10;     // "small"
           } else {
             // This is a numa domain, see if it is the same as ours or not
-            if (cfg_use_numa) {
+            if (config->cfg_use_numa) {
               // Figure out which numa node the memory is in
               LocalCPUMemory *cpu_mem = static_cast<LocalCPUMemory*>(*it2);
               int mem_node = cpu_mem->numa_node;

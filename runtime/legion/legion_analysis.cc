@@ -3266,11 +3266,9 @@ namespace Legion {
     /*static*/ Rect<DIM> KDNode<DIM>::get_bounds(IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
-      ApEvent wait_on;
-      const Domain d = expr->get_domain(wait_on, true/*tight*/);
-      if (wait_on.exists())
-        wait_on.wait_faultignorant();
-      return d.bounds<DIM,coord_t>();
+      Domain domain;
+      expr->get_domain(domain);
+      return domain.bounds<DIM,coord_t>();
     }
 
     //--------------------------------------------------------------------------

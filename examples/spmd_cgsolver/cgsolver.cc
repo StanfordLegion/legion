@@ -449,8 +449,7 @@ void top_level_task(const Task *task,
   // define the main grid index space and its partition into blocks
   IndexSpaceT<3> is_grid = runtime->create_index_space(ctx,
       Rect<3>(Point<3>(0,0,0), grid_dim - Point<3>(1,1,1)));
-  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, 
-                                                        block_dim, 0/*color*/);
+  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, block_dim);
 
   // we also use an index space with an element per block to record things like which shard owns each block
   IndexSpace is_blks = runtime->create_index_space(ctx,
@@ -832,8 +831,7 @@ bool spmd_main_task(const Task *task,
                                                               color_space,
                                                               transform,
                                                               r_subset,
-                                                              COMPUTE_KIND,
-                                                              dir*2+side);
+                                                              COMPUTE_KIND);
 	  IndexSpace is_subset = runtime->get_index_subspace(ctx, ip, 0);
 	  assert(runtime->get_index_space_domain(ctx, is_subset) == r_subset);
 	  g.ispace = is_subset;

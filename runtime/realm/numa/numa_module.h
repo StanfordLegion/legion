@@ -24,6 +24,22 @@ namespace Realm {
 
   namespace Numa {
 
+    class NumaModuleConfig : public ModuleConfig {
+      friend class NumaModule;
+    protected:
+      NumaModuleConfig(void);
+
+    public:
+      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+
+    protected:
+      size_t cfg_numa_mem_size = 0;
+      ssize_t cfg_numa_nocpu_mem_size = -1;
+      int cfg_num_numa_cpus = 0;
+      bool cfg_pin_memory = false;
+      size_t cfg_stack_size = 2 << 20;
+    };
+
     // our interface to the rest of the runtime
     class NumaModule : public Module {
     protected:
@@ -32,7 +48,9 @@ namespace Realm {
     public:
       virtual ~NumaModule(void);
 
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete
@@ -58,11 +76,7 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
-      size_t cfg_numa_mem_size;
-      ssize_t cfg_numa_nocpu_mem_size;
-      int cfg_num_numa_cpus;
-      bool cfg_pin_memory;
-      size_t cfg_stack_size;
+      NumaModuleConfig *config;
 
       // "global" variables live here too
       std::map<int, void *> numa_mem_bases;
