@@ -24496,7 +24496,10 @@ namespace Legion {
                 creation_requests->erase(to_delete);
               }
               else
+              {
+                cit->second.tighten_valid_mask();
                 cit++;
+              }
             }
           }
           if (creation_requests->empty())
