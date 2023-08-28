@@ -114,7 +114,6 @@ static __device__ inline void memcpy_kernel_transpose(
   }
 }
 
->>>>>>> realm: add cuda transpose to realm dma.
 #define MAX_UNROLL (1)
 
 template <typename T, size_t N, typename Offset_t = size_t>
