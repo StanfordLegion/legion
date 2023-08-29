@@ -20,6 +20,7 @@ namespace TestConfig {
   int nutils = 2;
   int nios = 1;
   size_t sysmem = 16 * 1024 * 1024;
+  size_t regmem = 4 * 1024 * 1024;
   // numa module
   size_t numamem = 2 * 1024 * 1024;
   int numacpus = 0;
@@ -48,6 +49,7 @@ void top_level_task(const void *args, size_t arglen,
   int nutils = 0;
   int nios = 0;
   size_t sysmem = 0;
+  size_t regmem = 0;
   ret_value = core_config->get_property<int>("cpu", ncpus);
   assert(ret_value == true);
   ret_value = core_config->get_property<int>("util", nutils);
@@ -56,11 +58,13 @@ void top_level_task(const void *args, size_t arglen,
   assert(ret_value == true);
   ret_value = core_config->get_property<size_t>("sysmem", sysmem);
   assert(ret_value == true);
+  ret_value = core_config->get_property<size_t>("regmem", regmem);
+  assert(ret_value == true);
   // test wrong property
   ret_value = core_config->get_property<int>("get_error_core", wrong_config);
   assert(ret_value == false);
-  log_app.print("cpus %d, utils %d, ios %d, sysmem %zu", 
-    ncpus, nutils, nios, sysmem);
+  log_app.print("cpus %d, utils %d, ios %d, sysmem %zu, regmem %zu", 
+    ncpus, nutils, nios, sysmem, regmem);
 
   {
     size_t numamem = 0;
@@ -249,6 +253,8 @@ int main(int argc, char **argv)
   ret_value = core_config->set_property<int>("io", TestConfig::nios);
   assert(ret_value == true);
   ret_value = core_config->set_property<size_t>("sysmem", TestConfig::sysmem);
+  assert(ret_value == true);
+  ret_value = core_config->set_property<size_t>("regmem", TestConfig::regmem);
   assert(ret_value == true);
   // test wrong config
   ret_value = core_config->set_property("set_error_core", TestConfig::sysmem);

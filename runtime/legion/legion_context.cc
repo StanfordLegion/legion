@@ -2170,11 +2170,6 @@ namespace Legion {
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
         release_task_local_instances();
-      // Mark that we are done executing this operation
-      if (!executed_events.empty())
-        owner_task->complete_execution(Runtime::merge_events(executed_events));
-      else
-        owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2185,18 +2180,16 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       InnerContext *parent_ctx = owner_task->get_context();
       const bool internal_task = Processor::get_executing_processor().exists();
-      RtEvent effects_done(internal_task && !inline_task ?
-          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
+      if (internal_task && !inline_task)
+        executed_events.push_back(
+            RtEvent(Processor::get_current_finish_event()));
       if (last_registration.exists() && !last_registration.has_triggered())
-      {
-        if (copy_future.exists() && !copy_future.has_triggered())
-          effects_done = 
-            Runtime::merge_events(effects_done, last_registration, copy_future);
-        else
-          effects_done = Runtime::merge_events(effects_done, last_registration);
-      }
-      else if (copy_future.exists() && !copy_future.has_triggered())
-        effects_done = Runtime::merge_events(effects_done, copy_future);
+        executed_events.push_back(last_registration);
+      if (copy_future.exists() && !copy_future.has_triggered())
+        executed_events.push_back(copy_future);
+      RtEvent effects_done;
+      if (!executed_events.empty())
+        effects_done = Runtime::merge_events(executed_events);
       if (release_callback)
         parent_ctx->add_to_post_task_queue(this, effects_done, instance,
               NULL/*no functor here*/, owned, metadataptr, metadatasize);
@@ -2323,8 +2316,6 @@ namespace Legion {
                                          const void *metadata, size_t metasize)
     //--------------------------------------------------------------------------
     {
-      // Mark that we are done executing this operation
-      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -12335,8 +12326,8 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, metadata, metasize, callback_functor,
-                                executing_processor, own_callback_functor);
+      owner_task->handle_post_execution(instance, metadata, metasize, 
+          callback_functor, executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -26074,8 +26065,8 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, metadata, metasize, callback_functor,
-                                executing_processor, own_callback_functor);
+      owner_task->handle_post_execution(instance, metadata, metasize,
+          callback_functor, executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;
       {

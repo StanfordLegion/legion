@@ -927,17 +927,7 @@ namespace Legion {
         PhysicalTemplate *const tpl;
         const unsigned slice_index;
         const bool recurrent_replay;
-      };
-      struct TransitiveReductionArgs :
-        public LgTaskArgs<TransitiveReductionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_TRANSITIVE_REDUCTION_TASK_ID;
-      public:
-        TransitiveReductionArgs(PhysicalTemplate *t)
-          : LgTaskArgs<TransitiveReductionArgs>(implicit_provenance), tpl(t) { }
-      public:
-        PhysicalTemplate *const tpl;
-      };
+      }; 
       struct DeleteTemplateArgs : public LgTaskArgs<DeleteTemplateArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DELETE_TEMPLATE_TASK_ID;
@@ -963,7 +953,7 @@ namespace Legion {
         std::vector<size_t>     future_size_bounds;
         std::deque<InstanceSet> physical_instances;
       };
-      typedef LegionMap<TraceLocalID,CachedMapping>             CachedMappings;
+      typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
     protected:
       struct InstanceUser {
       public:
@@ -1000,6 +990,37 @@ namespace Legion {
         const InstanceUser &user;
         std::set<ApEvent> events;
         std::vector<unsigned> frontiers;
+      };
+    private:
+      // State for deferring the transitive reduction into time-slices since
+      // it is really expensive and we don't want it monopolizing a processor
+      struct TransitiveReductionState {
+      public:
+        TransitiveReductionState(RtUserEvent d)
+          : stage(0), iteration(0), num_chains(0), pos(-1), done(d) { }
+      public:
+        std::vector<unsigned> topo_order, inv_topo_order; 
+        std::vector<unsigned> remaining_edges, chain_indices;
+        std::vector<std::vector<unsigned> > incoming, outgoing;
+        std::vector<std::vector<unsigned> > incoming_reduced;
+        std::vector<std::vector<int> > all_chain_frontiers;
+        std::map<TraceLocalID, GetTermEvent*> term_insts;
+        std::map<TraceLocalID, ReplayMapping*> replay_insts;
+        unsigned stage, iteration, num_chains;
+        int pos;
+        const RtUserEvent done;
+      };
+      struct TransitiveReductionArgs :
+        public LgTaskArgs<TransitiveReductionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRANSITIVE_REDUCTION_TASK_ID;
+      public:
+        TransitiveReductionArgs(PhysicalTemplate *t,TransitiveReductionState *s)
+          : LgTaskArgs<TransitiveReductionArgs>(implicit_provenance),
+            tpl(t), state(s) { }
+      public:
+        PhysicalTemplate *const tpl;
+        TransitiveReductionState *const state;
       };
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
@@ -1054,7 +1075,7 @@ namespace Legion {
       void elide_fences(std::vector<unsigned> &gen,
                         std::vector<RtEvent> &ready_events);
       void propagate_merges(std::vector<unsigned> &gen);
-      void transitive_reduction(bool deferred);
+      void transitive_reduction(TransitiveReductionState *state, bool deferred);
       void finalize_transitive_reduction(
           const std::vector<unsigned> &inv_topo_order,
           const std::vector<std::vector<unsigned> > &incoming_reduced);
@@ -1371,9 +1392,7 @@ namespace Legion {
       std::map<UniqueInst,std::deque<LastUserResult> > instance_last_users;
     protected:
       RtEvent transitive_reduction_done;
-      std::atomic<std::vector<unsigned>*> pending_inv_topo_order;
-      std::atomic<
-        std::vector<std::vector<unsigned> >*> pending_transitive_reduction;
+      std::atomic<TransitiveReductionState*> finished_transitive_reduction;
     private:
       std::map<TraceLocalID,InstUsers> op_insts;
       std::map<unsigned,InstUsers>     copy_insts;

@@ -2952,6 +2952,7 @@ namespace Legion {
 #endif
           // First local arrival
           finder->second.remaining_local_arrivals = local_collective_arrivals;
+          finder->second.local_initialized = true;
           finder->second.ready_event =
             Runtime::create_ap_user_event(&trace_info);
           finder->second.trace_info = new PhysicalTraceInfo(trace_info);

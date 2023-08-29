@@ -731,9 +731,9 @@ namespace Legion {
       void deserialize(Deserializer &derez);
     public:
       // Positive integers mean you must have that much padding
-      // Zero means you may or may not have padding
+      // Zero means that there should never be any padding
       // Any negative integers will be interpreted as meaning that
-      // there should be no padding on a particular dimension
+      // you don't care whether there is any padding or not
       Domain delta;
     };
 

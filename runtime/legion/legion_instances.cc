@@ -3916,8 +3916,21 @@ namespace Legion {
         DomainPoint empty;
         empty.dim = num_dims;
         for (unsigned dim = 0; dim < num_dims; dim++)
-          empty[dim] = -1; // no padding
+          empty[dim] = 0; // no padding
         constraints.padding_constraint.delta = Domain(empty, empty);
+      }
+      else
+      {
+        DomainPoint lo = constraints.padding_constraint.delta.lo();
+        DomainPoint hi = constraints.padding_constraint.delta.hi();
+        for (unsigned dim = 0; dim < num_dims; dim++)
+        {
+          if (lo[dim] < 0)
+            lo[dim] = 0;
+          if (hi[dim] < 0)
+            hi[dim] = 0;
+        }
+        constraints.padding_constraint.delta = Domain(lo, hi);
       }
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = field_space_node->find_layout_description(

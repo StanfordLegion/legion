@@ -145,10 +145,10 @@ namespace Realm {
       NumaModule *m = new NumaModule;
 
       NumaModuleConfig *config = dynamic_cast<NumaModuleConfig *>(runtime->get_module_config("numa"));
-      assert(config != NULL);
+      assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
-      assert(m->config == NULL);
+      assert(m->config == nullptr);
       m->config = config;
 
       // if neither NUMA memory nor cpus was requested, there's no point

@@ -218,10 +218,10 @@ namespace Realm {
 #endif
 
       OpenMPModuleConfig *config = dynamic_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
-      assert(config != NULL);
+      assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
-      assert(m->config == NULL);
+      assert(m->config == nullptr);
       m->config = config;
 
       // if no cpus were requested, there's no point
