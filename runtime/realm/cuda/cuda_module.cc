@@ -3294,12 +3294,6 @@ namespace Realm {
       host_to_device_stream = new GPUStream(this, worker);
       device_to_host_stream = new GPUStream(this, worker);
 
-      device_to_device_streams.resize(module->config->cfg_d2d_streams, 0);
-      for(unsigned i = 0; i < module->config->cfg_d2d_streams; i++) {
-        device_to_device_streams[i] = new GPUStream(this, worker,
-                                                    module->config->cfg_d2d_stream_priority);
-      }
-
       CUdevice dev;
       int numSMs;
 
@@ -3309,8 +3303,8 @@ namespace Realm {
 
       CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleLoadDataEx)(
           &device_module, realm_fatbin, 0, NULL, NULL));
-      for (unsigned int log_bit_sz = 0; log_bit_sz < CUDA_MAX_LOG2_BYTES;
-           log_bit_sz++) {
+      for(unsigned int log_bit_sz = 0; log_bit_sz < CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES;
+          log_bit_sz++) {
         const unsigned int bit_sz = 8U << log_bit_sz;
         GPUFuncInfo func_info;
         char name[30];
@@ -3374,6 +3368,12 @@ namespace Realm {
 
           indirect_copy_kernels[d - 1][log_bit_sz] = func_info;
         }
+      }
+
+      device_to_device_streams.resize(module->config->cfg_d2d_streams, 0);
+      for(unsigned i = 0; i < module->config->cfg_d2d_streams; i++) {
+        device_to_device_streams[i] =
+            new GPUStream(this, worker, module->config->cfg_d2d_stream_priority);
       }
 
       // only create p2p streams for devices we can talk to

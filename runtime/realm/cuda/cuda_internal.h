@@ -660,11 +660,22 @@ namespace Realm {
         int occ_num_blocks;
       };
 
-      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
-      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
-      GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
-      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM][CUDA_MAX_LOG2_BYTES];
-      GPUFuncInfo transpose_kernels[CUDA_MAX_LOG2_BYTES];
+      // The maximum value of log2(type_bytes) that cuda kernels handle.
+      // log2(1 byte)   --> 0
+      // log2(2 bytes)  --> 1
+      // log2(4 bytes)  --> 2
+      // log2(8 bytes)  --> 3
+      // log2(16 bytes) --> 4
+      static const size_t CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES = 5;
+
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM]
+                                       [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM]
+                                           [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM]
+                                           [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo transpose_kernels[CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
 
       CUdeviceptr fbmem_base, fb_ibmem_base;
 
