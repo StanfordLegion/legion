@@ -24,6 +24,7 @@ endif()
 
 add_executable(dynamic_registration dynamic_registration.cc)
 target_link_libraries(dynamic_registration Legion::Legion)
+target_compile_options(dynamic_registration PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME dynamic_registration COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:dynamic_registration> ${Legion_TEST_ARGS})
 endif()

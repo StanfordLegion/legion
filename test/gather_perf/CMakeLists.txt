@@ -24,6 +24,7 @@ endif()
 
 add_executable(gather_perf gather_perf.cc)
 target_link_libraries(gather_perf Legion::Legion)
+target_compile_options(gather_perf PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME gather_perf_0 COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:gather_perf> ${Legion_TEST_ARGS} -m 0)

@@ -24,6 +24,7 @@ endif()
 
 add_executable(backpressure backpressure.cc)
 target_link_libraries(backpressure Legion::Legion)
+target_compile_options(backpressure PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 # TODO (rohany): Not sure yet how this should be tested.
 # if(Legion_ENABLE_TESTING)
 #   add_test(NAME mapper_backpressure COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:backpressure> ${Legion_TEST_ARGS})

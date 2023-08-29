@@ -24,6 +24,7 @@ endif()
 
 add_executable(predication predication.cc)
 target_link_libraries(predication Legion::Legion)
+target_compile_options(predication PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME predication COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:predication> ${Legion_TEST_ARGS})
 endif()

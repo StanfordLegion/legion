@@ -24,6 +24,7 @@ endif()
 
 add_executable(ghost ghost.cc)
 target_link_libraries(ghost Legion::Legion)
+target_compile_options(ghost PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME ghost COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:ghost> ${Legion_TEST_ARGS} -ll:cpu 4)
 endif()

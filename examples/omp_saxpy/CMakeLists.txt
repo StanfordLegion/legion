@@ -28,6 +28,7 @@ add_executable(omp_saxpy omp_saxpy.cc
                          simple_blas.h simple_blas.inl simple_blas.cc)
 
 target_link_libraries(omp_saxpy Legion::Legion)
+target_compile_options(omp_saxpy PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 # NOTE: we need the '-fopenmp' (or however it's spelled) in the compile options,
 #  but do NOT want it in the link_libraries - Realm is providing the OMP runtime
