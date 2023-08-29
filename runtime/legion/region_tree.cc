@@ -1571,7 +1571,6 @@ namespace Legion {
                                         Operation *op, unsigned idx,
                                         const RegionRequirement &req,
                                         const ProjectionInfo &proj_info,
-                                        const RegionTreePath &path,
                                         LogicalAnalysis &logical_analysis)
     //--------------------------------------------------------------------------
     {
@@ -1579,11 +1578,26 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
+
+      ProjectionType htype = req.handle_type;
+      bool is_ispace_htype = (htype == LEGION_SINGULAR_PROJECTION ||
+                              htype == LEGION_REGION_PROJECTION);
+#ifdef DEBUG_LEGION
+      assert(is_ispace_htype || htype == LEGION_PARTITION_PROJECTION);
+#endif
+      IndexTreeNode *child_node = is_ispace_htype ?
+        get_node(req.region.get_index_space()) :
+        (IndexTreeNode *)get_node(req.partition.get_index_partition());
+
+      RegionNode *parent_node = get_node(req.parent);
+
+      RegionTreePath path;
+      initialize_path(child_node, parent_node->row_source, path);
+
       LogicalTraceInfo trace_info(op, idx, req); 
       // If we've already replayed the analysis we don't need to do it
       if (trace_info.skip_analysis)
         return;
-      RegionNode *parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
@@ -5110,41 +5124,6 @@ namespace Legion {
         return false;
       }
       return compute_index_path(parent, child_node->parent->handle, path);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_path(IndexSpace child, IndexSpace parent,
-                                           RegionTreePath &path)
-    //--------------------------------------------------------------------------
-    {
-      initialize_path(get_node(child), get_node(parent), path);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_path(IndexPartition child, 
-                                           IndexSpace parent, 
-                                           RegionTreePath &path)
-    //--------------------------------------------------------------------------
-    {
-      initialize_path(get_node(child), get_node(parent), path);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_path(IndexSpace child,
-                                           IndexPartition parent,
-                                           RegionTreePath &path)
-    //--------------------------------------------------------------------------
-    {
-      initialize_path(get_node(child), get_node(parent), path);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_path(IndexPartition child,
-                                           IndexPartition parent,
-                                           RegionTreePath &path)
-    //--------------------------------------------------------------------------
-    {
-      initialize_path(get_node(child), get_node(parent), path);
     }
 
     //--------------------------------------------------------------------------

@@ -200,7 +200,6 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-      virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual std::map<PhysicalManager*,unsigned>*
                                             get_acquired_instances_ref(void);
     public:
@@ -792,7 +791,6 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
-      virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual bool is_output_valid(unsigned idx) const;
     public:
@@ -840,7 +838,6 @@ namespace Legion {
       static void handle_remote_output_registration(Deserializer &derez);
     protected: 
       Future result; 
-      std::vector<RegionTreePath> privilege_paths;
     protected:
       std::vector<bool> valid_output_regions;
       // Event for when the output regions are registered with the context
@@ -1174,7 +1171,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void trigger_ready(void);
       virtual void predicate_false(void);
@@ -1269,7 +1265,6 @@ namespace Legion {
       unsigned complete_points;
       unsigned committed_points;
     protected:
-      std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
       std::vector<ApUserEvent> reduction_instances_ready;

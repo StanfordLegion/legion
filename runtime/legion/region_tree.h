@@ -433,7 +433,6 @@ namespace Legion {
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
-                                       const RegionTreePath &path,
                                        LogicalAnalysis &logical_analysis);
       bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
@@ -797,16 +796,9 @@ namespace Legion {
                               std::vector<LegionColor> &path);
       bool compute_partition_path(IndexSpace parent, IndexPartition child,
                                   std::vector<LegionColor> &path); 
-    public:
-      void initialize_path(IndexSpace child, IndexSpace parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexPartition child, IndexSpace parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexSpace child, IndexPartition parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexPartition child, IndexPartition parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
+   private:
+      void initialize_path(IndexTreeNode *child,
+                           IndexTreeNode *parent,
                            RegionTreePath &path);
 #ifdef DEBUG_LEGION
     public:

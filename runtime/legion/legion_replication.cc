@@ -645,7 +645,6 @@ namespace Legion {
             analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
-                                                     privilege_paths[idx],
                                                      logical_analysis);
       }
     }
@@ -1283,7 +1282,6 @@ namespace Legion {
             analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
-                                                     privilege_paths[idx],
                                                      logical_analysis);
       }
       // Generate any collective view rendezvous that we will need
@@ -2881,7 +2879,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -3286,8 +3284,6 @@ namespace Legion {
                                        sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
-                                                     copies[idx].
-                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3303,8 +3299,6 @@ namespace Legion {
           req.privilege = LEGION_READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, req, 
                                                      projection_info,
-                                                     copies[idx].
-                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3320,8 +3314,6 @@ namespace Legion {
                                          sharding_function, sharding_space); 
           runtime->forest->perform_dependence_analysis(this, offset + idx, req,
                                                  projection_info,
-                                                 copies[idx].
-                                                  gather->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3336,8 +3328,6 @@ namespace Legion {
                                          sharding_function, sharding_space);
           runtime->forest->perform_dependence_analysis(this, offset + idx, req,
                                                  projection_info,
-                                                 copies[idx].
-                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3551,8 +3541,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     copies[idx].
-                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3568,8 +3556,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     copies[idx].
-                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3586,8 +3572,6 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 copies[idx].
-                                                  gather->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3602,8 +3586,6 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 copies[idx].
-                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -4755,7 +4737,6 @@ namespace Legion {
       // operation or a single operation
       select_partition_projection();
       // Do thise now that we've picked our region requirement
-      initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_requirement();
       ProjectionInfo projection_info;
@@ -4805,7 +4786,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit_creation(this);
@@ -6628,7 +6609,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
       // If this a write requirement then we need to perform syncs on the
       // way in and the way out of the physical analysis across the shards
       // to ensure we don't do any exclusive updates out of order
@@ -6911,7 +6892,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -7360,7 +7341,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -7622,7 +7603,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
       // Always perform a collective rendezvous for these points
       create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
     }
@@ -7847,7 +7828,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, analysis);
+                                                   analysis);
       create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
       // If we're flushing we need a second analysis rendezvous
       if (flush)
