@@ -288,14 +288,30 @@ if (Legion_USE_CUDA)
 endif()
 
 if (REALM_CUDA_SRC)
-  # Compile and link all the cuda files into a single fatbin
-  cuda_compile_fatbin(REALM_CUDA_FATBIN ${REALM_CUDA_SRC} OPTIONS ${CUDA_COMPILE_OPTIONS})
+  #TODO(apryakhin): Fix
+  # add_library(REALM_CUDA_FATBIN OBJECT ${REALM_CUDA_SRC})
+  # target_compile_options(REALM_CUDA_FATBIN PRIVATE ${CUDA_COMPILE_OPTIONS})
+  # set_property(TARGET REALM_CUDA_FATBIN PROPERTY CUDA_FATBIN_COMPILATION ON)
+  add_custom_command(
+    OUTPUT REALM_CUDA_FATBIN
+    COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -fatbin -o ${CMAKE_CURRENT_BINARY_DIR}/realm.fatbin
+    ${PROJECT_SOURCE_DIR}/runtime/${REALM_CUDA_SRC}
+      -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
+      ${CUDA_WARNINGS}
+      ${CUDA_GENCODE}
+      -I ${CMAKE_CURRENT_SOURCE_DIR}
+      -I ${PROJECT_BINARY_DIR}/runtime)
+
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc
-                     COMMAND ${CMAKE_COMMAND} -DDEFINES_HEADER="realm/realm_config.h" -DIN_FILE=${REALM_CUDA_FATBIN} -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc -DVAR_NAME=realm_fatbin -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
-                     MAIN_DEPENDENCY ${REALM_CUDA_FATBIN}
+                     COMMAND ${CMAKE_COMMAND} -DDEFINES_HEADER="realm/realm_config.h"
+                     -DIN_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm.fatbin
+                     -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc
+                     -DVAR_NAME=realm_fatbin -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
+                     MAIN_DEPENDENCY REALM_CUDA_FATBIN
                      DEPENDS ${PROJECT_SOURCE_DIR}/cmake/bin2c.template.in
                      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
                      COMMENT "Embedding binary object ${REALM_CUDA_FATBIN} -> ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc")
+
   # Add a direct dependency on realm_fatbin.h in order to force a rebuild as realm_fatbin.h changes
   list(APPEND REALM_SRC ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc)
 endif()

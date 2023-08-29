@@ -3294,10 +3294,10 @@ namespace Realm {
       host_to_device_stream = new GPUStream(this, worker);
       device_to_host_stream = new GPUStream(this, worker);
 
-      device_to_device_streams.resize(module->cfg_d2d_streams, 0);
-      for(unsigned i = 0; i < module->cfg_d2d_streams; i++) {
+      device_to_device_streams.resize(module->config->cfg_d2d_streams, 0);
+      for(unsigned i = 0; i < module->config->cfg_d2d_streams; i++) {
         device_to_device_streams[i] = new GPUStream(this, worker,
-                                                    module->cfg_d2d_stream_priority);
+                                                    module->config->cfg_d2d_stream_priority);
       }
 
       CUdevice dev;
