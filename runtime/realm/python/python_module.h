@@ -45,7 +45,7 @@ namespace Realm {
     };
 
     // our interface to the rest of the runtime
-    class PythonModule : public Module {
+    class REALM_PUBLIC_API PythonModule : public Module {
     protected:
       PythonModule(void);
 

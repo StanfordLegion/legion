@@ -24,6 +24,7 @@ endif()
 
 add_executable(rendering rendering.cc)
 target_link_libraries(rendering Legion::Legion)
+target_compile_options(rendering PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME rendering COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:rendering> ${Legion_TEST_ARGS} -i 2 -n 64 -ll:cpu 4) 
+  add_test(NAME rendering COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:rendering> ${Legion_TEST_ARGS} -i 2 -n 64 -ll:cpu 4)
 endif()
