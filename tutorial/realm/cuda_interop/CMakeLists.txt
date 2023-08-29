@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(RealmExample_cuda_interop)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -27,10 +27,13 @@ if (NOT REALM_USE_CUDA AND NOT REALM_USE_HIP)
 endif()
 
 if (REALM_USE_CUDA)
-  cuda_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+  add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+  set_target_cuda_standard(realm_cuda_interop STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(realm_cuda_interop ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(realm_cuda_interop WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
 elseif(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
-    cuda_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
+    add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
     target_compile_definitions(realm_cuda_interop PRIVATE __HIP_PLATFORM_NVIDIA__)
   elseif(Legion_HIP_TARGET STREQUAL "ROCM")
     hip_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
@@ -39,6 +42,7 @@ elseif(Legion_USE_HIP)
 endif()
 
 target_link_libraries(realm_cuda_interop Legion::Realm)
+target_compile_options(realm_cuda_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_cuda_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_cuda_interop> ${Legion_TEST_ARGS} -ll:gpu 1)

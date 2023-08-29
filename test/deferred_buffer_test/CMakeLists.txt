@@ -24,6 +24,7 @@ endif()
 
 add_executable(deferred_buffer_test deferred_buffer_test.cc)
 target_link_libraries(deferred_buffer_test Legion::Legion)
+target_compile_options(deferred_buffer_test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME deferred_buffer_test COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:deferred_buffer_test> ${Legion_TEST_ARGS})
 endif()

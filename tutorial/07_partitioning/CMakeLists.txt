@@ -24,6 +24,7 @@ endif()
 
 add_executable(partitioning partitioning.cc)
 target_link_libraries(partitioning Legion::Legion)
+target_compile_options(partitioning PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME partitioning COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:partitioning> ${Legion_TEST_ARGS})
 endif()

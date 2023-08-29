@@ -1159,13 +1159,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
-        outstanding_mapping_references(0), activated(false), hardened(false), 
-        parent_ctx(NULL), mapping_tracker(NULL), commit_tracker(NULL),
-        provenance(NULL)
+        outstanding_mapping_references(0), hardened(false), parent_ctx(NULL),
+        mapping_tracker(NULL), commit_tracker(NULL), provenance(NULL)
     //--------------------------------------------------------------------------
     {
       if (!runtime->resilient_mode)
         commit_event = RtUserEvent::NO_RT_USER_EVENT;
+#ifdef DEBUG_LEGION
+      activated = false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1187,12 +1189,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!activated);
+      activated = true;
 #endif
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
       context_index = 0;
       outstanding_mapping_references = 0;
-      activated = true;
       prepipelined = false;
       mapped = false;
       executed = false;
@@ -1229,8 +1231,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!freeop);
       assert(activated);
-#endif
       activated = false;
+#endif
       // Generation is bumped when we committed
       incoming.clear();
       outgoing.clear();
@@ -1957,57 +1959,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_operation(RtEvent wait_on /*= Event::NO_EVENT*/)
+    void Operation::finalize_completion(void)
     //--------------------------------------------------------------------------
     {
-      if (wait_on.exists() && !wait_on.has_triggered())
-      {
-        parent_ctx->add_to_deferred_completion_queue(this, wait_on);
-        return;
-      }
-      bool need_trigger = false;
-      // Tell our parent that we are complete
-      // It's important that we do this before we mark ourselves
-      // completed in order to avoid race conditions
-      if (track_parent)
-        parent_ctx->register_child_complete(this);
-      {
-        AutoLock o_lock(op_lock);
+      // Lock held from caller
 #ifdef DEBUG_LEGION
-        assert(mapped);
-        assert(executed);
-        assert(resolved);
-        assert(!completed);
+      assert(!completed);
 #endif
-        completed = true;
-        // Now that we have done the completion stage, we can 
-        // mark trigger commit to false which will open all the
-        // different path ways for doing commit, this also
-        // means we need to check all the ways here because they
-        // have been disable previously
-        trigger_commit_invoked = false;
-        // Check to see if we need to trigger commit
-        if ((!runtime->resilient_mode) || early_commit_request ||
-            ((hardened && unverified_regions.empty())))
-        {
-          trigger_commit_invoked = true;
-          need_trigger = true;
-        }
-        else if (outstanding_mapping_references == 0)
-        {
-          if (commit_tracker != NULL)
-          {
-            CommitDependenceTracker *tracker = commit_tracker;
-            commit_tracker = NULL;
-            need_trigger = tracker->issue_commit_trigger(this, runtime);
-            delete tracker;
-          }
-          else
-            need_trigger = true;
-          if (need_trigger)
-            trigger_commit_invoked = true;
-        }
-      }
+      completed = true;
 #ifdef LEGION_SPY
       // Operations with regions and tasks do their own logging
       const OpKind op_kind = get_operation_kind();
@@ -2037,20 +1996,82 @@ namespace Legion {
           else
             Runtime::trigger_event(NULL, completion_event);
         }
-      }
+      } 
+    }
 
+    //--------------------------------------------------------------------------
+    void Operation::complete_operation(RtEvent wait_on, bool first_invocation)
+    //--------------------------------------------------------------------------
+    {
+      if (wait_on.exists() && !wait_on.has_triggered())
+      {
+        if (first_invocation)
+        {
+          AutoLock o_lock(op_lock);
+          finalize_completion();
+        }
+        parent_ctx->add_to_deferred_completion_queue(this, wait_on);
+        return;
+      }
+      bool need_trigger = false;
+      std::map<Operation*,std::set<unsigned> > to_verify;
+      // Tell our parent that we are complete
+      // It's important that we do this before we mark ourselves
+      // completed in order to avoid race conditions
+      if (track_parent)
+        parent_ctx->register_child_complete(this);
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(mapped);
+        assert(executed);
+        assert(resolved);
+        // Shouldn't have duplicate first invocations here
+        assert(!completed || !first_invocation);
+#endif
+        if (first_invocation)
+          finalize_completion();
+        // Now that we have done the completion stage, we can 
+        // mark trigger commit to false which will open all the
+        // different path ways for doing commit, this also
+        // means we need to check all the ways here because they
+        // have been disable previously
+        trigger_commit_invoked = false;
+        // Check to see if we need to trigger commit
+        if ((!runtime->resilient_mode) || early_commit_request ||
+            ((hardened && unverified_regions.empty())))
+        {
+          trigger_commit_invoked = true;
+          need_trigger = true;
+        }
+        else if (outstanding_mapping_references == 0)
+        {
+          if (commit_tracker != NULL)
+          {
+            CommitDependenceTracker *tracker = commit_tracker;
+            commit_tracker = NULL;
+            need_trigger = tracker->issue_commit_trigger(this, runtime);
+            delete tracker;
+          }
+          else
+            need_trigger = true;
+          if (need_trigger)
+            trigger_commit_invoked = true;
+        }
+        to_verify.swap(verify_regions);
+      } 
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
       for (std::map<Operation*,std::set<unsigned> >::const_iterator it =
-            verify_regions.begin(); it != verify_regions.end(); it++)
+            to_verify.begin(); it != to_verify.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(incoming.find(it->first) != incoming.end());
 #endif
         GenerationID ver_gen = incoming[it->first];
         it->first->notify_regions_verified(it->second, ver_gen);
-      } 
+      }
       // If we're not in resilient mode, then we can now
       // commit this operation
       if (need_trigger)
@@ -2114,12 +2135,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::find_completion_effects(std::set<ApEvent> &effects)
+    void Operation::find_completion_effects(std::set<ApEvent> &effects, 
+                                            bool tracing)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      if (!completion_effects.empty())
-        effects.insert(completion_effects.begin(), completion_effects.end());
+      // Check to see if we completed yet
+      if (tracing || completed)
+      {
+        // Just dump the current completion effects into the effects as we
+        // know that is all there ever will be
+        if (!completion_effects.empty())
+          effects.insert(completion_effects.begin(), completion_effects.end());
+      }
+      else
+      {
+        // We haven't actually seen all the completion effects yet so we
+        // need to record the summary event for them
+        if (!completion_event.exists())
+          completion_event = Runtime::create_ap_user_event(NULL);
+        effects.insert(completion_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::find_completion_effects(std::vector<ApEvent> &effects,
+                                            bool tracing)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      // Check to see if we completed yet
+      if (tracing || completed)
+      {
+        // Just dump the current completion effects into the effects as we
+        // know that is all there ever will be
+        if (!completion_effects.empty())
+          effects.insert(effects.end(),
+              completion_effects.begin(), completion_effects.end());
+      }
+      else
+      {
+        // We haven't actually seen all the completion effects yet so we
+        // need to record the summary event for them
+        if (!completion_event.exists())
+          completion_event = Runtime::create_ap_user_event(NULL);
+        effects.push_back(completion_event);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2141,7 +2202,8 @@ namespace Legion {
         // to ensuring that fence operations are working correctly in the
         // parent context. If not triggered, then defer this until it does.
         // Inner task completion also relies upon this to work correctly
-        if (completion_event.exists())
+        if (completion_event.exists() && 
+            !completion_event.has_triggered_faultignorant())
         {
           if (!completion_event.has_triggered_faultignorant())
           {
@@ -2156,6 +2218,16 @@ namespace Legion {
         else if (!completion_effects.empty())
         {
           const RtEvent safe =
+            Runtime::protect_merge_events(completion_effects);
+          if (safe.exists() && !safe.has_triggered())
+          {
+            parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);
+            return;
+          }
+        }
+        else if (!completion_effects.empty())
+        {
+          const RtEvent safe = 
             Runtime::protect_merge_events(completion_effects);
           if (safe.exists() && !safe.has_triggered())
           {
@@ -3768,7 +3840,7 @@ namespace Legion {
         return args.done;
       }
       std::set<ApEvent> effects;
-      this->find_completion_effects(effects);
+      this->find_completion_effects(effects, true/*tracing*/);
       ApEvent postcondition;
       if (!effects.empty())
         postcondition = Runtime::merge_events(&trace_info, effects);
@@ -23435,19 +23507,13 @@ namespace Legion {
           ready_events.push_back(ready);
       }
       if (!ready_events.empty())
-      {
-        const RtEvent ready = Runtime::merge_events(ready_events);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          parent_ctx->add_to_trigger_execution_queue(this, ready);
-          return;
-        }
-      }
-      trigger_execution(); 
+        complete_execution(Runtime::merge_events(ready_events));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::trigger_execution(void)
+    void AllReduceOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
       RtEvent executed;
@@ -23482,7 +23548,7 @@ namespace Legion {
           record_completion_effect(done);
       }
       result.impl->set_results(done, targets);
-      complete_execution(executed);
+      complete_operation(executed);
     }
 
     //--------------------------------------------------------------------------

@@ -24,6 +24,7 @@ endif()
 
 add_executable(inline_tasks inline_tasks.cc)
 target_link_libraries(inline_tasks Legion::Legion)
+target_compile_options(inline_tasks PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME inline_tasks COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:inline_tasks> ${Legion_TEST_ARGS})
 endif()

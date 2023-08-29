@@ -77,11 +77,13 @@ namespace Realm {
       // top 24 bits of data is jump delta
       CudaArrayPiece(unsigned next_delta);
 
+      REALM_CUDA_HD
       unsigned delta() const;
 
       CUarray_st *array;
       int offset[3];
 
+      REALM_CUDA_HD
       const Instruction *next() const;
     };
 
