@@ -25,6 +25,7 @@ endif()
 add_executable(python_interop python_interop.cc)
 target_compile_definitions(python_interop PRIVATE PYTHON_MODULES_PATH="${CMAKE_INSTALL_FULL_DATADIR}/Legion/python:${CMAKE_INSTALL_FULL_DATADIR}/Legion/python/tests")
 target_link_libraries(python_interop Legion::Legion)
+target_compile_options(python_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python_interop.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/tests
 )

@@ -24,6 +24,7 @@ endif()
 
 add_executable(padded_instances padded.cc)
 target_link_libraries(padded_instances Legion::Legion)
+target_compile_options(padded_instances PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME padded_instances COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:padded_instances> ${Legion_TEST_ARGS})
 endif()

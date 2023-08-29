@@ -24,6 +24,7 @@ endif()
 
 add_executable(machine_config machine_config.cc)
 target_link_libraries(machine_config Legion::Legion)
+target_compile_options(machine_config PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME machine_config COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${Legion_TEST_ARGS}) 
+  add_test(NAME machine_config COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${Legion_TEST_ARGS})
 endif()

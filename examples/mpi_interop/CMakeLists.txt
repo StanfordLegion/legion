@@ -27,6 +27,7 @@ find_package(MPI REQUIRED)
 add_executable(mpi_interop mpi_interop.cc)
 target_link_libraries(mpi_interop Legion::Legion ${MPI_CXX_LIBRARIES})
 target_include_directories(mpi_interop PRIVATE ${MPI_C_INCLUDE_PATH})
+target_compile_options(mpi_interop PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME mpi_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:mpi_interop> ${Legion_TEST_ARGS})

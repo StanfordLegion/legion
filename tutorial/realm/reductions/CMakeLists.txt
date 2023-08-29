@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(RealmExample_reductions)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -24,6 +24,7 @@ endif()
 
 add_executable(realm_reductions reductions.cc)
 target_link_libraries(realm_reductions Legion::Realm)
+target_compile_options(realm_reductions PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 if(Legion_ENABLE_TESTING)
   add_test(NAME realm_reductions COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_reductions> ${Legion_TEST_ARGS})

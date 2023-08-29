@@ -28,6 +28,7 @@ add_executable(spmd_cgsolver
   cgtasks.h   cgtasks.cc
 )
 target_link_libraries(spmd_cgsolver Legion::Legion)
+target_compile_options(spmd_cgsolver PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME spmd_cgsolver COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:spmd_cgsolver> ${Legion_TEST_ARGS})
 endif()
