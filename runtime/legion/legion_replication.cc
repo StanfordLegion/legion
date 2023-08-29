@@ -9981,7 +9981,9 @@ namespace Legion {
             result->add_base_valid_ref(MAPPING_ACQUIRE_REF);
           return result;
         }
-        result = new FillView(runtime, fill_did,
+        void *location = runtime->find_or_create_pending_collectable_location<
+                                                            FillView>(fill_did);
+        result = new(location) FillView(runtime, fill_did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
@@ -9999,7 +10001,9 @@ namespace Legion {
       }
       else
       {
-        FillView *fill_view = new FillView(runtime, fill_did,
+        void *location = runtime->find_or_create_pending_collectable_location<
+                                                            FillView>(fill_did);
+        FillView *fill_view = new(location) FillView(runtime, fill_did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
