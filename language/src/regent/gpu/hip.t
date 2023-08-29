@@ -228,17 +228,36 @@ function hiphelper.jit_compile_kernels_and_register(kernels)
   os.remove(bundle_o)
 
   local register = quote
-    var module : RuntimeAPI.hipModule_t
-    check(RuntimeAPI.hipModuleLoadData(&module, bundle_contents), "hipModuleLoadData")
+    var num_devices: int = -1
+    check(RuntimeAPI.hipGetDeviceCount(num_devices))
     escape
       for _, k in ipairs(kernels) do
         local kernel = k.kernel
 
         local func = kernel.hip_func
         assert(func) -- Hopefully this is always true. If not, then it means we're generating kernels that we don't call anywhere.
-
         emit quote
-          check(RuntimeAPI.hipModuleGetFunction(&func, module, k.name), "hipModuleGetFunction")
+          -- FIXME (Elliott): leaks
+          func = c.malloc(sizeof(RuntimeAPI.hipFunction_t) * num_devices)
+          base.assert(func ~= nil, "allocating space for HIP functions failed")
+        end
+      end
+    end
+
+    for dev_id = 0, num_devices do
+      check(RuntimeAPI.hipSetDevice(dev_id))
+      var module : RuntimeAPI.hipModule_t
+      check(RuntimeAPI.hipModuleLoadData(&module, bundle_contents), "hipModuleLoadData")
+      escape
+        for _, k in ipairs(kernels) do
+          local kernel = k.kernel
+
+          local func = kernel.hip_func
+          assert(func) -- Hopefully this is always true. If not, then it means we're generating kernels that we don't call anywhere.
+
+          emit quote
+            check(RuntimeAPI.hipModuleGetFunction(&(func[dev_id]), module, k.name), "hipModuleGetFunction")
+          end
         end
       end
     end
@@ -432,7 +451,7 @@ function hiphelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size,
   local stream = terralib.newsymbol(RuntimeAPI.hipStream_t, "stream")
 
   if not kernel.hip_func then
-    kernel.hip_func = terralib.global(RuntimeAPI.hipFunction_t, nil, kernel.name .. "_func")
+    kernel.hip_func = terralib.global(&RuntimeAPI.hipFunction_t, nil, kernel.name .. "_func")
   end
   local func = kernel.hip_func
 
@@ -479,11 +498,13 @@ function hiphelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size,
     if [count] > 0 then
       var [grid], [block]
       var [stream] = RuntimeAPI.hipGetTaskStream()
+      var dev_id : int
+      check(RuntimeAPI.hipGetDevice(&dev_id))
       [launch_domain_init]
       [setupArguments]
       [check](
         [RuntimeAPI.hipModuleLaunchKernel](
-          [func],
+          [func][dev_id],
           [grid].x, [grid].y, [grid].z,
           [block].x, [block].y, [block].z,
           -- Static shared memory is calculated separately in HIP,
