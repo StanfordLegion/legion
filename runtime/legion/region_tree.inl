@@ -468,10 +468,22 @@ namespace Legion {
         // then we might have valid points in multiple pieces and its 
         // undefined which pieces Realm might copy to
         if (constraints.padding_constraint.delta.get_dim() > 0)
-          REPORT_LEGION_FATAL(LEGION_FATAL_COMPACT_SPARSE_PADDING,
-              "Legion does not currently support additional padding "
-              "on compact sparse instances. Please open a github "
-              "issue to request support.")
+        {
+          for (int dim = 0; dim < 
+                constraints.padding_constraint.delta.get_dim(); dim++)
+          {
+#ifdef DEBUG_LEGION
+            assert(constraints.padding_constraint.delta.lo()[dim] >= 0);
+            assert(constraints.padding_constraint.delta.hi()[dim] >= 0);
+#endif
+            if ((constraints.padding_constraint.delta.lo()[dim] > 0) ||
+                (constraints.padding_constraint.delta.hi()[dim] > 0))
+              REPORT_LEGION_FATAL(LEGION_FATAL_COMPACT_SPARSE_PADDING,
+                  "Legion does not currently support additional padding "
+                  "on compact sparse instances. Please open a github "
+                  "issue to request support.")
+          }
+        }
         *num_pieces = piece_bounds.size();
         *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
         *piece_list = malloc(*piece_list_size);
