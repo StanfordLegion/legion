@@ -3911,33 +3911,6 @@ namespace Legion {
       constraints.memory_constraint = MemoryConstraint(
                                         memory_manager->memory.kind());
       const unsigned num_dims = instance_domain->get_num_dims();
-#ifdef DEBUG_LEGION
-      assert((constraints.padding_constraint.delta.get_dim() == 0) ||
-             (constraints.padding_constraint.delta.get_dim() == (int)num_dims));
-#endif
-      // If we don't have a padding constraint then record that we 
-      // don't have any padding on this instance
-      if (constraints.padding_constraint.delta.get_dim() == 0)
-      {
-        DomainPoint empty;
-        empty.dim = num_dims;
-        for (unsigned dim = 0; dim < num_dims; dim++)
-          empty[dim] = 0; // no padding
-        constraints.padding_constraint.delta = Domain(empty, empty);
-      }
-      else
-      {
-        DomainPoint lo = constraints.padding_constraint.delta.lo();
-        DomainPoint hi = constraints.padding_constraint.delta.hi();
-        for (unsigned dim = 0; dim < num_dims; dim++)
-        {
-          if (lo[dim] < 0)
-            lo[dim] = 0;
-          if (hi[dim] < 0)
-            hi[dim] = 0;
-        }
-        constraints.padding_constraint.delta = Domain(lo, hi);
-      }
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = field_space_node->find_layout_description(
                                         instance_mask, num_dims, constraints);
@@ -4294,6 +4267,33 @@ namespace Legion {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
                         "Illegal request to create instance of type %d", 
                         constraints.specialized_constraint.get_kind())
+      }
+#ifdef DEBUG_LEGION
+      assert((constraints.padding_constraint.delta.get_dim() == 0) ||
+             (constraints.padding_constraint.delta.get_dim() == (int)num_dims));
+#endif
+      // If we don't have a padding constraint then record that we 
+      // don't have any padding on this instance
+      if (constraints.padding_constraint.delta.get_dim() == 0)
+      {
+        DomainPoint empty;
+        empty.dim = num_dims;
+        for (unsigned dim = 0; dim < num_dims; dim++)
+          empty[dim] = 0; // no padding
+        constraints.padding_constraint.delta = Domain(empty, empty);
+      }
+      else
+      {
+        DomainPoint lo = constraints.padding_constraint.delta.lo();
+        DomainPoint hi = constraints.padding_constraint.delta.hi();
+        for (unsigned dim = 0; dim < num_dims; dim++)
+        {
+          if (lo[dim] < 0)
+            lo[dim] = 0;
+          if (hi[dim] < 0)
+            hi[dim] = 0;
+        }
+        constraints.padding_constraint.delta = Domain(lo, hi);
       }
     }
 
