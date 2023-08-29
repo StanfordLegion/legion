@@ -15,10 +15,10 @@
 # This script can be called as a custom cmake command to generate a C
 # file based on a generated file in a platform agnostic way such that
 # the platform doesn't need bin2c to be available.
-cmake_minimum_required (VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 # Read the input file as raw hex values
 file(READ "${IN_FILE}" FILE_CONTENTS_HEX HEX)
-# Replace the hex values with 
+# Replace the hex values with
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," FILE_CONTENTS_HEX ${FILE_CONTENTS_HEX})
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/bin2c.template.in ${OUT_FILE} @ONLY)

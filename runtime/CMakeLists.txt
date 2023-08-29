@@ -83,7 +83,6 @@ if(Legion_USE_CUDA)
     realm/cuda/cuda_module.inl
     realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
     realm/cuda/cuda_access.h    realm/cuda/cuda_access.cc
-    realm/cuda/cuda_memcpy.h    realm/cuda/cuda_memcpy.cu
   )
   list(APPEND REALM_CUDA_SRC
     realm/cuda/cuda_memcpy.cu
@@ -268,57 +267,51 @@ foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
   endforeach()
 endforeach()
 
-if (Legion_USE_CUDA)
-  # starting with NVCC 10.2, we can error out on all warnings
-  if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
-    set(CUDA_WARNINGS "-Werror all-warnings")
-  else()
-    set(CUDA_WARNINGS "")
-  endif()
+if(Legion_USE_CUDA)
 
-  set(CUDA_COMPILE_OPTIONS
-      -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
-      ${CUDA_WARNINGS}
-      ${CUDA_GENCODE}
-      -I ${CMAKE_CURRENT_SOURCE_DIR}
-      -I ${PROJECT_BINARY_DIR}/runtime
-      DEBUG -g
-      RELEASE -O2
-      RELWITHDEBINFO -g -O2)
-endif()
+  add_library(realm_cuda_fatbin OBJECT ${REALM_CUDA_SRC})
+  set_property(TARGET realm_cuda_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
+  target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
 
-if (REALM_CUDA_SRC)
-  #TODO(apryakhin): Fix
-  # add_library(REALM_CUDA_FATBIN OBJECT ${REALM_CUDA_SRC})
-  # target_compile_options(REALM_CUDA_FATBIN PRIVATE ${CUDA_COMPILE_OPTIONS})
-  # set_property(TARGET REALM_CUDA_FATBIN PROPERTY CUDA_FATBIN_COMPILATION ON)
+  target_compile_options(realm_cuda_fatbin PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
+                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
+
+  target_include_directories(realm_cuda_fatbin
+                     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                             ${PROJECT_BINARY_DIR}/runtime)
+
+  set_target_cuda_standard(realm_cuda_fatbin STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(realm_cuda_fatbin ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(realm_cuda_fatbin WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+
+  set(realm_fatbin_cc "${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc")
+
   add_custom_command(
-    OUTPUT REALM_CUDA_FATBIN
-    COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -fatbin -o ${CMAKE_CURRENT_BINARY_DIR}/realm.fatbin
-    ${PROJECT_SOURCE_DIR}/runtime/${REALM_CUDA_SRC}
-      -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
-      ${CUDA_WARNINGS}
-      ${CUDA_GENCODE}
-      -I ${CMAKE_CURRENT_SOURCE_DIR}
-      -I ${PROJECT_BINARY_DIR}/runtime)
+    OUTPUT "${realm_fatbin_cc}"
+    COMMAND ${CMAKE_COMMAND}
+      "-DVAR_NAME=realm_fatbin"
+      "-DDEFINES_HEADER=realm/realm_config.h"
+      "-DIN_FILE=$<TARGET_OBJECTS:realm_cuda_fatbin>"
+      "-DOUT_FILE=${realm_fatbin_cc}"
+      -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
+    VERBATIM
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    DEPENDS $<TARGET_OBJECTS:realm_cuda_fatbin>
+    COMMENT "Embedding binary objects $<TARGET_OBJECTS:realm_cuda_fatbin> -> ${realm_fatbin_cc}"
+  )
 
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc
-                     COMMAND ${CMAKE_COMMAND} -DDEFINES_HEADER="realm/realm_config.h"
-                     -DIN_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm.fatbin
-                     -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc
-                     -DVAR_NAME=realm_fatbin -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
-                     MAIN_DEPENDENCY REALM_CUDA_FATBIN
-                     DEPENDS ${PROJECT_SOURCE_DIR}/cmake/bin2c.template.in
-                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-                     COMMENT "Embedding binary object ${REALM_CUDA_FATBIN} -> ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc")
-
-  # Add a direct dependency on realm_fatbin.h in order to force a rebuild as realm_fatbin.h changes
-  list(APPEND REALM_SRC ${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc)
+  # Add a direct dependency on realm_fatbin.cc in order to force a rebuild as realm_fatbin.cc changes
+  list(APPEND REALM_SRC ${realm_fatbin_cc})
 endif()
 
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
+
+if(TARGET realm_cuda_fatbin)
+  add_dependencies(RealmRuntime realm_cuda_fatbin)
+endif()
+
 add_library(Legion::RealmRuntime ALIAS RealmRuntime)
 target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
