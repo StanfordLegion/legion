@@ -1088,10 +1088,10 @@ namespace Realm {
       PythonModule *m = new PythonModule;
 
       PythonModuleConfig *config = dynamic_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
-      assert(config != NULL);
+      assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
-      assert(m->config == NULL);
+      assert(m->config == nullptr);
       m->config = config;
 
       // add extra module imports requested by the application

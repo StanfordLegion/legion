@@ -735,6 +735,7 @@ namespace Realm {
     config_map.insert({"util", &num_util_procs});
     config_map.insert({"io", &num_io_procs});
     config_map.insert({"sysmem", &sysmem_size});
+    config_map.insert({"regmem", &reg_mem_size});
   }
 
 #ifdef REALM_ON_WINDOWS
@@ -879,17 +880,85 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     assert(finish_configured == false);
     // parse command line arguments
     CommandLineParser cp;
+
+    // config for CoreModule
     cp.add_option_int("-ll:cpu", num_cpu_procs)
       .add_option_int("-ll:util", num_util_procs)
       .add_option_int("-ll:io", num_io_procs)
       .add_option_int("-ll:concurrent_io", concurrent_io_threads)
       .add_option_int_units("-ll:csize", sysmem_size, 'm')
-      .add_option_int_units("-ll:stacksize", stack_size, 'm', true /*binary*/, true /*keep*/)
+      .add_option_int_units("-ll:stacksize", stack_size, 'm')
       .add_option_bool("-ll:pin_util", pin_util_procs)
       .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
       .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
-      .add_option_int("-ll:ext_sysmem", use_ext_sysmem)
-      .parse_command_line(cmdline);
+      .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
+
+    // config for RuntimeImpl
+    // low-level runtime parameters
+    if(Network::max_node_id > 0)
+      reg_ib_mem_size = 256 << 20; // for inter-node copies
+    else
+      reg_ib_mem_size = 64 << 20; // for local transposes/serdez
+
+
+    // This dummy network list is actually handled in network_init()
+    // this is just here to help verify low-level arguement
+    std::vector<std::string> dummy_network_list;
+
+    cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
+      .add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
+      .add_option_int_units("-ll:dsize", disk_mem_size, 'm')
+      .add_option_int("-ll:dma", dma_worker_threads)
+      .add_option_bool("-ll:pin_dma", pin_dma_threads)
+      .add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
+      .add_option_bool("-ll:show_rsrv", show_reservations)
+      .add_option_int("-ll:ht_sharing", hyperthread_sharing)
+      .add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
+      .add_option_int("-ll:bitset_twolevel", bitset_twolevel);
+
+
+    cp.add_option_string("-ll:eventtrace", event_trace_file)
+      .add_option_string("-ll:locktrace", lock_trace_file);
+
+#ifdef NODE_LOGGING
+    cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
+#else
+    std::string dummy_prefix;
+    cp.add_option_string("-ll:prefix", dummy_prefix);
+#endif
+
+    cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
+    cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
+    cp.add_option_stringlist("-ll:networks", dummy_network_list);
+    cp.add_option_int_units("-ll:replheap", replheap_size);
+
+    // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
+    cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
+
+    bool cmdline_ok = cp.parse_command_line(cmdline);
+
+    if(!cmdline_ok) {
+      fprintf(stderr, "ERROR: failure parsing command line options\n");
+      exit(1);
+    }
+
+#ifndef EVENT_TRACING
+    if(!event_trace_file.empty()) {
+      fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
+    }
+#endif
+
+#ifndef LOCK_TRACING
+    if(!lock_trace_file.empty()) {
+        fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
+    }
+#endif
+
+#ifndef NODE_LOGGING
+    if(!dummy_prefix.empty()) {
+      fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+    }
+#endif
   }
 
   CoreModule::CoreModule(void)
@@ -915,10 +984,10 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     CoreModule *m = new CoreModule;
 
     CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
-    assert(config != NULL);
+    assert(config != nullptr);
     assert(config->finish_configured);
     assert(m->name == config->get_name());
-    assert(m->config == NULL);
+    assert(m->config == nullptr);
     m->config = config;
 
     return m;
@@ -1029,91 +1098,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     Module::cleanup();
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RuntimeImplConfig
-  //
-  RuntimeImplConfig::RuntimeImplConfig(void)
-  {}
-
-  void RuntimeImplConfig::configure_from_cmdline(std::vector<std::string> &cmdline)
-  {
-    // low-level runtime parameters
-    if(Network::max_node_id > 0)
-      reg_ib_mem_size = 256 << 20; // for inter-node copies
-    else
-      reg_ib_mem_size = 64 << 20; // for local transposes/serdez
-
-
-    // This dummy network list is actually handled in network_init()
-    // this is just here to help verify low-level arguement
-    std::vector<std::string> dummy_network_list;
-
-    CommandLineParser cp;
-    cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
-      .add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
-      .add_option_int_units("-ll:dsize", disk_mem_size, 'm')
-      .add_option_int_units("-ll:stacksize", stack_size, 'm')
-      .add_option_int("-ll:dma", dma_worker_threads)
-      .add_option_bool("-ll:pin_dma", pin_dma_threads)
-      .add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
-      .add_option_bool("-ll:show_rsrv", show_reservations)
-      .add_option_int("-ll:ht_sharing", hyperthread_sharing)
-      .add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
-      .add_option_int("-ll:bitset_twolevel", bitset_twolevel);
-
-
-    cp.add_option_string("-ll:eventtrace", event_trace_file)
-      .add_option_string("-ll:locktrace", lock_trace_file);
-
-#ifdef NODE_LOGGING
-    cp.add_option_string("-ll:prefix", RuntimeImpl::prefix);
-#else
-    std::string dummy_prefix;
-    cp.add_option_string("-ll:prefix", dummy_prefix);
-#endif
-
-    cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
-    cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
-    cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
-    cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
-    cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
-    cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
-    cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
-    cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
-    cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
-    cp.add_option_stringlist("-ll:networks", dummy_network_list);
-    cp.add_option_int_units("-ll:replheap", replheap_size);
-
-    // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
-    cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
-
-    bool cmdline_ok = cp.parse_command_line(cmdline);
-
-    if(!cmdline_ok) {
-      fprintf(stderr, "ERROR: failure parsing command line options\n");
-      exit(1);
-    }
-
-#ifndef EVENT_TRACING
-    if(!event_trace_file.empty()) {
-      fprintf(stderr, "WARNING: event tracing requested, but not enabled at compile time!\n");
-    }
-#endif
-
-#ifndef LOCK_TRACING
-    if(!lock_trace_file.empty()) {
-        fprintf(stderr, "WARNING: lock tracing requested, but not enabled at compile time!\n");
-    }
-#endif
-
-#ifndef NODE_LOGGING
-    if(!dummy_prefix.empty()) {
-      fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
-    }
-#endif
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1123,8 +1107,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     RuntimeImpl *runtime_singleton = 0;
   
     RuntimeImpl::RuntimeImpl(void)
-      : config(),
-        machine(0), 
+      : machine(0), 
         num_untriggered_events(0),
 	nodes(0),
 	local_event_free_list(0), local_barrier_free_list(0),
@@ -1528,9 +1511,29 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       PartitioningOpQueue::configure_from_cmdline(cmdline);
-      config.configure_from_cmdline(cmdline);
 
-      core_map = CoreMap::discover_core_map(config.hyperthread_sharing);
+      // parse the global Config
+      {
+        CommandLineParser cp;
+        cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
+        cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
+        cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
+        cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
+        cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
+        cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
+        cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
+        bool cmdline_ok = cp.parse_command_line(cmdline);
+        if(!cmdline_ok) {
+          fprintf(stderr, "ERROR: failure parsing command line options for Config\n");
+          exit(1);
+        }
+      }
+
+      // load the CoreModuleConfig
+      CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(get_module_config("core"));
+      assert(config != nullptr);
+
+      core_map = CoreMap::discover_core_map(config->hyperthread_sharing);
       core_reservations = new CoreReservationSet(core_map);
 
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
@@ -1566,6 +1569,11 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       module_registrar.create_dynamic_modules(modules);
       modules_created = true;
 
+      // load the CoreModuleConfig
+      CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(get_module_config("core"));
+      assert(config != nullptr);
+      assert(config->finish_configured);
+
       // Check that we have enough resources for the number of nodes we are using
       if (Network::max_node_id > (NodeID)(ID::MAX_NODE_ID))
       {
@@ -1598,16 +1606,16 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       {
 	// choose a chunk size that's roughly the requested size, but
 	//  clamp to [8,1024]
-	size_t bitsets_per_chunk = ((config.bitset_chunk_size << 3) /
+	size_t bitsets_per_chunk = ((config->bitset_chunk_size << 3) /
 				    (Network::max_node_id + 1));
 	if(bitsets_per_chunk < 8)
 	  bitsets_per_chunk = 8;
 	if(bitsets_per_chunk > 1024)
 	  bitsets_per_chunk = 1024;
 	// negative values of bitset_twolevel are a threshold
-	bool use_twolevel = ((config.bitset_twolevel > 0) ||
-			     ((config.bitset_twolevel < 0) &&
-			      (Network::max_node_id >= -config.bitset_twolevel)));
+	bool use_twolevel = ((config->bitset_twolevel > 0) ||
+			     ((config->bitset_twolevel < 0) &&
+			      (Network::max_node_id >= -config->bitset_twolevel)));
 	NodeSetBitmask::configure_allocator(Network::max_node_id,
 					    bitsets_per_chunk,
 					    use_twolevel);
@@ -1651,14 +1659,14 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       // form requests for network-registered memory
-      if(config.reg_ib_mem_size > 0) {
+      if(config->reg_ib_mem_size > 0) {
 	reg_ib_mem_segment.request(NetworkSegmentInfo::HostMem,
-				   config.reg_ib_mem_size, 64);
+				   config->reg_ib_mem_size, 64);
 	network_segments.push_back(&reg_ib_mem_segment);
       }
-      if(config.reg_mem_size > 0) {
+      if(config->reg_mem_size > 0) {
 	reg_mem_segment.request(NetworkSegmentInfo::HostMem,
-				config.reg_mem_size, 64);
+				config->reg_mem_size, 64);
 	network_segments.push_back(&reg_mem_segment);
       }
 
@@ -1667,12 +1675,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       // and also our incoming active message manager
       message_manager = new IncomingMessageManager(Network::max_node_id + 1,
-						   config.active_msg_handler_threads,
+						   config->active_msg_handler_threads,
 						   *core_reservations);
-      if(config.active_msg_handler_bgwork)
+      if(config->active_msg_handler_bgwork)
 	message_manager->add_to_manager(&bgwork);
       else
-	assert(config.active_msg_handler_threads > 0);
+	assert(config->active_msg_handler_threads > 0);
 
       // initialize modules and create memories before we do network attach
       //  so that we have a chance to register these other memories for
@@ -1777,12 +1785,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	(*it)->create_memories(this);
 
       LocalCPUMemory *regmem;
-      if(config.reg_mem_size > 0) {
+      if(config->reg_mem_size > 0) {
 	void *regmem_base = reg_mem_segment.base;
 	assert(regmem_base != 0);
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
-				    config.reg_mem_size,
+				    config->reg_mem_size,
                                     -1/*don't care numa domain*/,
                                     Memory::REGDMA_MEM,
 				    regmem_base,
@@ -1797,12 +1805,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	(*it)->create_processors(this);
 
       IBMemory *reg_ib_mem;
-      if(config.reg_ib_mem_size > 0) {
+      if(config->reg_ib_mem_size > 0) {
 	void *reg_ib_mem_base = reg_ib_mem_segment.base;
 	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new IBMemory(m,
-				  config.reg_ib_mem_size,
+				  config->reg_ib_mem_size,
 				  MemoryImpl::MKIND_SYSMEM,
 				  Memory::REGDMA_MEM,
 				  reg_ib_mem_base,
@@ -1813,12 +1821,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       // create local disk memory
       DiskMemory *diskmem;
-      if(config.disk_mem_size > 0) {
+      if(config->disk_mem_size > 0) {
         char file_name[30];
         snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
-                                 config.disk_mem_size,
+                                 config->disk_mem_size,
                                  std::string(file_name));
         get_runtime()->add_memory(diskmem);
       } else
@@ -1835,7 +1843,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      if(config.dma_worker_threads > 0) {
+      if(config->dma_worker_threads > 0) {
         // warn about use of old flags
         log_runtime.warning() << "-ll:dma specified on command line no longer has effect - use -ll:bgwork to control background worker threads (which include dma work)";
       }
@@ -1844,9 +1852,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
-      bool ok = core_reservations->satisfy_reservations(config.dummy_reservation_ok);
+      bool ok = core_reservations->satisfy_reservations(config->dummy_reservation_ok);
       if(ok) {
-	if(config.show_reservations) {
+	if(config->show_reservations) {
 	  std::cout << *core_map << std::endl;
 	  core_reservations->report_reservations(std::cout);
 	}
@@ -1857,7 +1865,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       // create the "replicated heap" that puts instance layouts and sparsity
       //  maps where non-CPU devices can see them
-      repl_heap.init(config.replheap_size, 1 /*chunks*/);
+      repl_heap.init(config->replheap_size, 1 /*chunks*/);
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();

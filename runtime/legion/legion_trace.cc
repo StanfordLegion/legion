@@ -1866,10 +1866,18 @@ namespace Legion {
     PhysicalTrace::~PhysicalTrace()
     //--------------------------------------------------------------------------
     {
+      std::set<RtEvent> deleted_events;
+      ApEvent pending_deletion = ApEvent::NO_AP_EVENT;
       for (std::vector<PhysicalTemplate*>::iterator it =
            templates.begin(); it != templates.end(); ++it)
-        delete (*it);
+        if (!(*it)->defer_template_deletion(pending_deletion, deleted_events))
+          delete (*it);
       templates.clear();
+      if (!deleted_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(deleted_events);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4426,8 +4434,7 @@ namespace Legion {
       recording.store(true);
       events.push_back(fence_event);
       event_map[fence_event] = fence_completion_id;
-      pending_inv_topo_order.store(NULL);
-      pending_transitive_reduction.store(NULL);
+      finished_transitive_reduction.store(NULL);
       instructions.push_back(
          new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
     }
@@ -4467,13 +4474,9 @@ namespace Legion {
         }
         cached_mappings.clear();
       }
-      std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
-      if (inv_topo_order != NULL)
-        delete inv_topo_order;
-      std::vector<std::vector<unsigned> > *transitive_reduction =
-        pending_transitive_reduction.load();
-      if (transitive_reduction != NULL)
-        delete transitive_reduction;
+      TransitiveReductionState *state = finished_transitive_reduction.load();
+      if (state != NULL)
+        delete state;
     }
 
     //--------------------------------------------------------------------------
@@ -4775,12 +4778,17 @@ namespace Legion {
       std::fill(events.begin(), events.end(), ApEvent::NO_AP_EVENT);
       event_map.clear();
       // Defer performing the transitive reduction because it might
-      // be expensive (see comment above)
+      // be expensive (see comment above). Note you can only kick off
+      // the transitive reduction in the background once all the other
+      // optimizations are done so that they don't race on mutating
+      // the instruction and event data structures
       if (!trace->runtime->no_trace_optimization)
       {
-        TransitiveReductionArgs args(this);
-        transitive_reduction_done = trace->runtime->issue_runtime_meta_task(
-                                          args, LG_THROUGHPUT_WORK_PRIORITY);
+        TransitiveReductionState *state = 
+          new TransitiveReductionState(Runtime::create_rt_user_event());
+        transitive_reduction_done = state->done;
+        TransitiveReductionArgs args(this, state);
+        trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
       }
       // Can dump now if we're not deferring the transitive reduction
       else if (trace->runtime->dump_physical_traces)
@@ -4836,7 +4844,10 @@ namespace Legion {
       {
         propagate_merges(gen);
         if (do_transitive_reduction)
-          transitive_reduction(false/*deferred*/);
+        {
+          TransitiveReductionState state(RtUserEvent::NO_RT_USER_EVENT);
+          transitive_reduction(&state, false/*deferred*/);
+        }
         propagate_copies(&gen);
         eliminate_dead_code(gen);
       }
@@ -5708,302 +5719,424 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::transitive_reduction(bool deferred)
+    void PhysicalTemplate::transitive_reduction(
+                                 TransitiveReductionState *state, bool deferred)
     //--------------------------------------------------------------------------
     {
       // Transitive reduction inspired by Klaus Simon,
       // "An improved algorithm for transitive closure on acyclic digraphs"
 
-      // First, build a DAG and find nodes with no incoming edges
-      std::vector<unsigned> topo_order;
-      topo_order.reserve(instructions.size());
-      std::vector<unsigned> inv_topo_order(events.size(), -1U);
-      std::vector<std::vector<unsigned> > incoming(events.size());
-      std::vector<std::vector<unsigned> > outgoing(events.size());
-
-      initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
-
-      std::map<TraceLocalID, GetTermEvent*> term_insts;
-      std::map<TraceLocalID, ReplayMapping*> replay_insts;
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      // The transitive reduction can be a really long computation and we
+      // don't want it monopolizing an entire processor while it's running
+      // so we time-slice as background tasks until it is done. We pick the
+      // somewhat arbitrary timeslice of 2ms since that's around the right
+      // order of magnitude for other meta-tasks on most machines while still
+      // being large enough to warm-up caches and make forward progress
+      constexpr long long TIMEOUT = 2000; // in microseconds
+      unsigned long long running_time = 0;
+      unsigned long long previous_time = 
+        Realm::Clock::current_time_in_microseconds();
+      std::vector<unsigned> &topo_order = state->topo_order;
+      std::vector<unsigned> &inv_topo_order = state->inv_topo_order;
+      std::vector<std::vector<unsigned> > &incoming = state->incoming;
+      std::vector<std::vector<unsigned> > &outgoing = state->outgoing;
+      if (state->stage == 0)
       {
-        Instruction *inst = instructions[idx];
-        switch (inst->get_kind())
-        {
-          // Pass these instructions as their events will be added later
-          case GET_TERM_EVENT :
-            {
-              GetTermEvent *term = inst->as_get_term_event();
-              term_insts[term->owner] = term; 
-              break;
-            }
-          case REPLAY_MAPPING:
-            {
-              ReplayMapping *replay = inst->as_replay_mapping();
-              replay_insts[inst->owner] = replay;
-              break;
-            }
-          case CREATE_AP_USER_EVENT :
-            {
-              break;
-            }
-          case TRIGGER_EVENT :
-            {
-              TriggerEvent *trigger = inst->as_trigger_event();
-              incoming[trigger->lhs].push_back(trigger->rhs);
-              outgoing[trigger->rhs].push_back(trigger->lhs);
-              break;
-            }
-          case BARRIER_ARRIVAL:
-            {
-              BarrierArrival *arrival = inst->as_barrier_arrival();
-              incoming[arrival->lhs].push_back(arrival->rhs);
-              outgoing[arrival->rhs].push_back(arrival->lhs);
-              break;
-            }
-          case MERGE_EVENT :
-            {
-              MergeEvent *merge = inst->as_merge_event();
-              for (std::set<unsigned>::iterator it = merge->rhs.begin();
-                   it != merge->rhs.end(); ++it)
-              {
-                incoming[merge->lhs].push_back(*it);
-                outgoing[*it].push_back(merge->lhs);
-              }
-              break;
-            }
-          case ISSUE_COPY :
-            {
-              IssueCopy *copy = inst->as_issue_copy();
-              incoming[copy->lhs].push_back(copy->precondition_idx);
-              outgoing[copy->precondition_idx].push_back(copy->lhs);
-              break;
-            }
-          case ISSUE_FILL :
-            {
-              IssueFill *fill = inst->as_issue_fill();
-              incoming[fill->lhs].push_back(fill->precondition_idx);
-              outgoing[fill->precondition_idx].push_back(fill->lhs);
-              break;
-            }
-          case ISSUE_ACROSS:
-            {
-              IssueAcross *across = inst->as_issue_across();
-              incoming[across->lhs].push_back(across->copy_precondition);
-              outgoing[across->copy_precondition].push_back(across->lhs);
-              if (across->collective_precondition != 0)
-              {
-                incoming[across->lhs].push_back(
-                    across->collective_precondition);
-                outgoing[across->collective_precondition].push_back(
-                    across->lhs);
-              }
-              if (across->src_indirect_precondition != 0)
-              {
-                incoming[across->lhs].push_back(
-                    across->src_indirect_precondition);
-                outgoing[across->src_indirect_precondition].push_back(
-                    across->lhs);
-              }
-              if (across->dst_indirect_precondition != 0)
-              {
-                incoming[across->lhs].push_back(
-                    across->dst_indirect_precondition);
-                outgoing[across->dst_indirect_precondition].push_back(
-                    across->lhs);
-              }
-              break;
-            }
-          case SET_OP_SYNC_EVENT :
-            {
-              SetOpSyncEvent *sync = inst->as_set_op_sync_event();
-              inv_topo_order[sync->lhs] = topo_order.size();
-              topo_order.push_back(sync->lhs);
-              break;
-            }
-          case BARRIER_ADVANCE:
-            {
-              BarrierAdvance *advance = inst->as_barrier_advance();
-              inv_topo_order[advance->lhs] = topo_order.size();
-              topo_order.push_back(advance->lhs);
-              break;
-            }
-          case ASSIGN_FENCE_COMPLETION :
-            {
-              inv_topo_order[fence_completion_id] = topo_order.size();
-              topo_order.push_back(fence_completion_id);
-              break;
-            }
-          case COMPLETE_REPLAY :
-            {
-              CompleteReplay *replay = inst->as_complete_replay();
-              // Check to see if we can find a replay instruction to match 
-              std::map<TraceLocalID,ReplayMapping*>::iterator replay_finder =
-                replay_insts.find(replay->owner);
-              if (replay_finder != replay_insts.end())
-              {
-                incoming[replay_finder->second->lhs].push_back(replay->pre);
-                outgoing[replay->pre].push_back(replay_finder->second->lhs);
-                replay_insts.erase(replay_finder);
-              }
-              // Lastly check to see if we can find a term inst to match
-              std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
-                term_insts.find(replay->owner);
-              if (term_finder != term_insts.end())
-              {
-                if (replay->post != 0)
-                {
-                  incoming[term_finder->second->lhs].push_back(replay->post);
-                  outgoing[replay->post].push_back(term_finder->second->lhs);
-                  term_insts.erase(term_finder);
-                }
-                else if (replay->pre != 0)
-                {
-                  incoming[term_finder->second->lhs].push_back(replay->pre);
-                  outgoing[replay->pre].push_back(term_finder->second->lhs);
-                  term_insts.erase(term_finder);
-                }
-              }
-              break;
-            }
-          default:
-            {
-              assert(false);
-              break;
-            }
-        }
+        topo_order.reserve(instructions.size());
+        inv_topo_order.resize(events.size(), -1U);
+        incoming.resize(events.size());
+        outgoing.resize(events.size());
+
+        initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
+        state->stage++;
       }
-#ifdef DEBUG_LEGION
-      // should have seen a complete replay instruction for every replay mapping
-      assert(replay_insts.empty());
-#endif
-      if (!term_insts.empty())
-      {
-        // Any term instructions that don't match with a complete replay
-        // need to be recorded as sources for the BFS
-        for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
-              term_insts.begin(); it != term_insts.end(); it++)
+
+      // First, build a DAG and find nodes with no incoming edges
+      if (state->stage == 1)
+      {  
+        std::map<TraceLocalID, GetTermEvent*> &term_insts = state->term_insts;
+        std::map<TraceLocalID, ReplayMapping*> &replay_insts = 
+          state->replay_insts;
+        for (unsigned idx = state->iteration; idx < instructions.size(); ++idx)
         {
-          inv_topo_order[it->second->lhs] = topo_order.size();
-          topo_order.push_back(it->second->lhs);
+          // Check for timeout
+          if (deferred)
+          {
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
+            {
+              // Hit the timeout so launch a continuation
+              state->iteration = idx;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+              return;
+            }
+            else
+              previous_time = current_time;
+          }
+          Instruction *inst = instructions[idx];
+          switch (inst->get_kind())
+          {
+            // Pass these instructions as their events will be added later
+            case GET_TERM_EVENT :
+              {
+                GetTermEvent *term = inst->as_get_term_event();
+                term_insts[term->owner] = term; 
+                break;
+              }
+            case REPLAY_MAPPING:
+              {
+                ReplayMapping *replay = inst->as_replay_mapping();
+                replay_insts[inst->owner] = replay;
+                break;
+              }
+            case CREATE_AP_USER_EVENT :
+              {
+                break;
+              }
+            case TRIGGER_EVENT :
+              {
+                TriggerEvent *trigger = inst->as_trigger_event();
+                incoming[trigger->lhs].push_back(trigger->rhs);
+                outgoing[trigger->rhs].push_back(trigger->lhs);
+                break;
+              }
+            case BARRIER_ARRIVAL:
+              {
+                BarrierArrival *arrival = inst->as_barrier_arrival();
+                incoming[arrival->lhs].push_back(arrival->rhs);
+                outgoing[arrival->rhs].push_back(arrival->lhs);
+                break;
+              }
+            case MERGE_EVENT :
+              {
+                MergeEvent *merge = inst->as_merge_event();
+                for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                     it != merge->rhs.end(); ++it)
+                {
+                  incoming[merge->lhs].push_back(*it);
+                  outgoing[*it].push_back(merge->lhs);
+                }
+                break;
+              }
+            case ISSUE_COPY :
+              {
+                IssueCopy *copy = inst->as_issue_copy();
+                incoming[copy->lhs].push_back(copy->precondition_idx);
+                outgoing[copy->precondition_idx].push_back(copy->lhs);
+                break;
+              }
+            case ISSUE_FILL :
+              {
+                IssueFill *fill = inst->as_issue_fill();
+                incoming[fill->lhs].push_back(fill->precondition_idx);
+                outgoing[fill->precondition_idx].push_back(fill->lhs);
+                break;
+              }
+            case ISSUE_ACROSS:
+              {
+                IssueAcross *across = inst->as_issue_across();
+                incoming[across->lhs].push_back(across->copy_precondition);
+                outgoing[across->copy_precondition].push_back(across->lhs);
+                if (across->collective_precondition != 0)
+                {
+                  incoming[across->lhs].push_back(
+                      across->collective_precondition);
+                  outgoing[across->collective_precondition].push_back(
+                      across->lhs);
+                }
+                if (across->src_indirect_precondition != 0)
+                {
+                  incoming[across->lhs].push_back(
+                      across->src_indirect_precondition);
+                  outgoing[across->src_indirect_precondition].push_back(
+                      across->lhs);
+                }
+                if (across->dst_indirect_precondition != 0)
+                {
+                  incoming[across->lhs].push_back(
+                      across->dst_indirect_precondition);
+                  outgoing[across->dst_indirect_precondition].push_back(
+                      across->lhs);
+                }
+                break;
+              }
+            case SET_OP_SYNC_EVENT :
+              {
+                SetOpSyncEvent *sync = inst->as_set_op_sync_event();
+                inv_topo_order[sync->lhs] = topo_order.size();
+                topo_order.push_back(sync->lhs);
+                break;
+              }
+            case BARRIER_ADVANCE:
+              {
+                BarrierAdvance *advance = inst->as_barrier_advance();
+                inv_topo_order[advance->lhs] = topo_order.size();
+                topo_order.push_back(advance->lhs);
+                break;
+              }
+            case ASSIGN_FENCE_COMPLETION :
+              {
+                inv_topo_order[fence_completion_id] = topo_order.size();
+                topo_order.push_back(fence_completion_id);
+                break;
+              }
+            case COMPLETE_REPLAY :
+              {
+                CompleteReplay *replay = inst->as_complete_replay();
+                // Check to see if we can find a replay instruction to match 
+                std::map<TraceLocalID,ReplayMapping*>::iterator replay_finder =
+                  replay_insts.find(replay->owner);
+                if (replay_finder != replay_insts.end())
+                {
+                  incoming[replay_finder->second->lhs].push_back(replay->pre);
+                  outgoing[replay->pre].push_back(replay_finder->second->lhs);
+                  replay_insts.erase(replay_finder);
+                }
+                // Lastly check to see if we can find a term inst to match
+                std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
+                  term_insts.find(replay->owner);
+                if (term_finder != term_insts.end())
+                {
+                  if (replay->post != 0)
+                  {
+                    incoming[term_finder->second->lhs].push_back(replay->post);
+                    outgoing[replay->post].push_back(term_finder->second->lhs);
+                    term_insts.erase(term_finder);
+                  }
+                  else if (replay->pre != 0)
+                  {
+                    incoming[term_finder->second->lhs].push_back(replay->pre);
+                    outgoing[replay->pre].push_back(term_finder->second->lhs);
+                    term_insts.erase(term_finder);
+                  }
+                }
+                break;
+              }
+            default:
+              {
+                assert(false);
+                break;
+              }
+          }
         }
+#ifdef DEBUG_LEGION
+        // should have seen a complete replay instruction for every replay mapping
+        assert(replay_insts.empty());
+#endif
+        if (!term_insts.empty())
+        {
+          // Any term instructions that don't match with a complete replay
+          // need to be recorded as sources for the BFS
+          for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
+                term_insts.begin(); it != term_insts.end(); it++)
+          {
+            inv_topo_order[it->second->lhs] = topo_order.size();
+            topo_order.push_back(it->second->lhs);
+          }
+        }
+        state->stage++;
+        state->iteration = 0;
+        term_insts.clear();
+        replay_insts.clear();
       }
 
       // Second, do a toposort on nodes via BFS
-      std::vector<unsigned> remaining_edges(incoming.size());
-      for (unsigned idx = 0; idx < incoming.size(); ++idx)
-        remaining_edges[idx] = incoming[idx].size();
-
-      unsigned idx = 0;
-      while (idx < topo_order.size())
+      if (state->stage == 2)
       {
-        unsigned node = topo_order[idx];
-#ifdef DEBUG_LEGION
-        assert(remaining_edges[node] == 0);
-#endif
-        const std::vector<unsigned> &out = outgoing[node];
-        for (unsigned oidx = 0; oidx < out.size(); ++oidx)
+        std::vector<unsigned> &remaining_edges = state->remaining_edges;
+        if (remaining_edges.empty())
         {
-          unsigned next = out[oidx];
-          if (--remaining_edges[next] == 0)
-          {
-            inv_topo_order[next] = topo_order.size();
-            topo_order.push_back(next);
-          }
+          remaining_edges.resize(incoming.size());
+          for (unsigned idx = 0; idx < incoming.size(); ++idx)
+            remaining_edges[idx] = incoming[idx].size();
         }
-        ++idx;
-      }
-#ifdef DEBUG_LEGION
-      for (unsigned idx = 0; idx < incoming.size(); idx++)
-        assert(remaining_edges[idx] == 0);
-#endif
 
-      // Third, construct a chain decomposition
-      unsigned num_chains = 0;
-      std::vector<unsigned> chain_indices(topo_order.size(), -1U);
-
-      int pos = chain_indices.size() - 1;
-      while (true)
-      {
-        while (pos >= 0 && chain_indices[pos] != -1U)
-          --pos;
-        if (pos < 0) break;
-        unsigned curr = topo_order[pos];
-        while (incoming[curr].size() > 0)
+        unsigned idx = state->iteration;
+        while (idx < topo_order.size())
         {
-          chain_indices[inv_topo_order[curr]] = num_chains;
-          const std::vector<unsigned> &in = incoming[curr];
-          bool found = false;
-          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          // Check for timeout
+          if (deferred)
           {
-            unsigned next = in[iidx];
-            if (chain_indices[inv_topo_order[next]] == -1U)
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
             {
-              found = true;
-              curr = next;
-              chain_indices[inv_topo_order[curr]] = num_chains;
-              break;
+              // Hit the timeout so launch a continuation
+              state->iteration = idx;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
+              return;
+            }
+            else
+              previous_time = current_time;
+          }
+          unsigned node = topo_order[idx];
+#ifdef DEBUG_LEGION
+          assert(remaining_edges[node] == 0);
+#endif
+          const std::vector<unsigned> &out = outgoing[node];
+          for (unsigned oidx = 0; oidx < out.size(); ++oidx)
+          {
+            unsigned next = out[oidx];
+            if (--remaining_edges[next] == 0)
+            {
+              inv_topo_order[next] = topo_order.size();
+              topo_order.push_back(next);
             }
           }
-          if (!found) break;
+          ++idx;
         }
-        chain_indices[inv_topo_order[curr]] = num_chains;
-        ++num_chains;
+#ifdef DEBUG_LEGION
+        for (unsigned idx = 0; idx < incoming.size(); idx++)
+          assert(remaining_edges[idx] == 0);
+#endif
+        state->stage++;
+        state->iteration = 0;
+        remaining_edges.clear();
+      }
+
+      // Third, construct a chain decomposition
+      if (state->stage == 3)
+      {
+        std::vector<unsigned> &chain_indices = state->chain_indices;
+        if (chain_indices.empty())
+        {
+          chain_indices.resize(topo_order.size(), -1U);
+          state->pos = chain_indices.size() - 1;
+        }
+
+        int pos = state->pos;
+        unsigned num_chains = state->num_chains;
+        while (true)
+        {
+          // Check for timeout
+          if (deferred)
+          {
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
+            {
+              // Hit the timeout so launch a continuation
+              state->pos = pos;
+              state->num_chains = num_chains;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
+              return;
+            }
+            else
+              previous_time = current_time;
+          }
+          while (pos >= 0 && chain_indices[pos] != -1U)
+            --pos;
+          if (pos < 0) break;
+          unsigned curr = topo_order[pos];
+          while (incoming[curr].size() > 0)
+          {
+            chain_indices[inv_topo_order[curr]] = num_chains;
+            const std::vector<unsigned> &in = incoming[curr];
+            bool found = false;
+            for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+            {
+              unsigned next = in[iidx];
+              if (chain_indices[inv_topo_order[next]] == -1U)
+              {
+                found = true;
+                curr = next;
+                chain_indices[inv_topo_order[curr]] = num_chains;
+                break;
+              }
+            }
+            if (!found) break;
+          }
+          chain_indices[inv_topo_order[curr]] = num_chains;
+          ++num_chains;
+        }
+        state->stage++;
+        state->num_chains = num_chains;
       }
 
       // Fourth, find the frontiers of chains that are connected to each node
-      std::vector<std::vector<int> > all_chain_frontiers(topo_order.size());
-      std::vector<std::vector<unsigned> > incoming_reduced(topo_order.size());
-      for (unsigned idx = 0; idx < topo_order.size(); ++idx)
+      if (state->stage == 4)
       {
-        std::vector<int> chain_frontiers(num_chains, -1);
-        const std::vector<unsigned> &in = incoming[topo_order[idx]];
-        std::vector<unsigned> &in_reduced = incoming_reduced[idx];
-        for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+        const unsigned num_chains = state->num_chains;
+        const std::vector<unsigned> &chain_indices = state->chain_indices;
+        std::vector<std::vector<int> > &all_chain_frontiers = 
+          state->all_chain_frontiers;
+        if (all_chain_frontiers.empty())
+          all_chain_frontiers.resize(topo_order.size());
+        std::vector<std::vector<unsigned> > &incoming_reduced = 
+          state->incoming_reduced;
+        if (incoming_reduced.empty())
+          incoming_reduced.resize(topo_order.size());
+        for (unsigned idx = state->iteration; idx < topo_order.size(); idx++)
         {
-          int rank = inv_topo_order[in[iidx]];
-#ifdef DEBUG_LEGION
-          assert((unsigned)rank < idx);
-#endif
-          const std::vector<int> &pred_chain_frontiers =
-            all_chain_frontiers[rank];
-          for (unsigned k = 0; k < num_chains; ++k)
-            chain_frontiers[k] =
-              std::max(chain_frontiers[k], pred_chain_frontiers[k]);
-        }
-        for (unsigned iidx = 0; iidx < in.size(); ++iidx)
-        {
-          int rank = inv_topo_order[in[iidx]];
-          unsigned chain_idx = chain_indices[rank];
-          if (chain_frontiers[chain_idx] < rank)
+          // Check for timeout
+          if (deferred)
           {
-            in_reduced.push_back(in[iidx]);
-            chain_frontiers[chain_idx] = rank;
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
+            {
+              // Hit the timeout so launch a continuation
+              state->iteration = idx;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
+              return;
+            }
+            else
+              previous_time = current_time;
           }
-        }
+          std::vector<int> chain_frontiers(num_chains, -1);
+          const std::vector<unsigned> &in = incoming[topo_order[idx]];
+          std::vector<unsigned> &in_reduced = incoming_reduced[idx];
+          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          {
+            int rank = inv_topo_order[in[iidx]];
 #ifdef DEBUG_LEGION
-        assert(in.size() == 0 || in_reduced.size() > 0);
+            assert((unsigned)rank < idx);
 #endif
-        all_chain_frontiers[idx].swap(chain_frontiers);
+            const std::vector<int> &pred_chain_frontiers =
+              all_chain_frontiers[rank];
+            for (unsigned k = 0; k < num_chains; ++k)
+              chain_frontiers[k] =
+                std::max(chain_frontiers[k], pred_chain_frontiers[k]);
+          }
+          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          {
+            int rank = inv_topo_order[in[iidx]];
+            unsigned chain_idx = chain_indices[rank];
+            if (chain_frontiers[chain_idx] < rank)
+            {
+              in_reduced.push_back(in[iidx]);
+              chain_frontiers[chain_idx] = rank;
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(in.size() == 0 || in_reduced.size() > 0);
+#endif
+          all_chain_frontiers[idx].swap(chain_frontiers);
+        }
+        state->stage++;
+        state->iteration = 0;
+        all_chain_frontiers.clear();
       }
 
       // Lastly, suppress transitive dependences using chains
       if (deferred)
       {
-        // Save the data structures for finalizing the transitive
-        // reduction for later, the next replay will incorporate them
-        std::vector<unsigned> *inv_topo_order_copy = 
-          new std::vector<unsigned>();
-        inv_topo_order_copy->swap(inv_topo_order);
-        std::vector<std::vector<unsigned> > *in_reduced_copy = 
-          new std::vector<std::vector<unsigned> >();
-        in_reduced_copy->swap(incoming_reduced);
-        // Write them to the members (in this order)
-        pending_inv_topo_order.store(inv_topo_order_copy);
-        pending_transitive_reduction.store(in_reduced_copy);
+        const RtUserEvent to_trigger = state->done;
+        finished_transitive_reduction.store(state);
+        Runtime::trigger_event(to_trigger);
       }
       else
-        finalize_transitive_reduction(inv_topo_order, incoming_reduced);
+        finalize_transitive_reduction(state->inv_topo_order, 
+                                      state->incoming_reduced);
     }
 
     //--------------------------------------------------------------------------
@@ -7457,24 +7590,17 @@ namespace Legion {
         recurrent = pending_replays.front().second;
         pending_replays.pop_front();
       }
-      // Check to see if we have a pending transitive reduction result
-      std::vector<std::vector<unsigned> > *transitive_reduction = 
-        pending_transitive_reduction.load();
-      if (transitive_reduction != NULL)
+      // Check to see if we have a finished transitive reduction result
+      TransitiveReductionState *state = finished_transitive_reduction.load();
+      if (state != NULL)
       {
-        std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
-#ifdef DEBUG_LEGION
-        assert(inv_topo_order != NULL);
-#endif
-        finalize_transitive_reduction(*inv_topo_order, *transitive_reduction);
-        delete inv_topo_order;
-        pending_inv_topo_order.store(NULL);
-        delete transitive_reduction;
-        pending_transitive_reduction.store(NULL);
+        finished_transitive_reduction.store(NULL);
+        finalize_transitive_reduction(state->inv_topo_order, 
+                                      state->incoming_reduced);
+        delete state;
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);
-        // If it was requested that we dump the traces do that now
         if (runtime->dump_physical_traces)
           dump_template();
       }
@@ -7578,7 +7704,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pending_deletion = get_completion_for_deletion();
-      if (!pending_deletion.exists())
+      if (!pending_deletion.exists() && 
+          transitive_reduction_done.has_triggered())
         return false;
       RtEvent precondition = Runtime::protect_event(pending_deletion);
       if (transitive_reduction_done.exists() && 
@@ -7616,7 +7743,7 @@ namespace Legion {
     {
       const TransitiveReductionArgs *targs =
         (const TransitiveReductionArgs*)args;
-      targs->tpl->transitive_reduction(true/*deferred*/); 
+      targs->tpl->transitive_reduction(targs->state, true/*deferred*/); 
     }
 
     //--------------------------------------------------------------------------
