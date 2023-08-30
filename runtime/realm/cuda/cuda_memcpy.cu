@@ -68,7 +68,6 @@ static __device__ inline void memcpy_kernel_transpose(
     Realm::Cuda::MemcpyTransposeInfo<Offset_t> info, T* tile) {
   __restrict__ T *out_base = reinterpret_cast<T *>(info.dst);
   __restrict__ T *in_base = reinterpret_cast<T *>(info.src);
-
   const Offset_t tile_size = info.tile_size;
   const Offset_t tidx = threadIdx.x % tile_size;
   const Offset_t tidy = (threadIdx.x / tile_size) % tile_size;
@@ -183,9 +182,13 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
   extern "C" __global__ void fill_affine_large##name(   \
       Realm::Cuda::AffineLargeFillInfo<dim, offt> info) {}
 
-#define MEMCPY_TRANSPOSE_TEMPLATE_INST(type, offt, name)                     \
-  extern "C" __global__ __launch_bounds__(1024) void memcpy_transpose##name( \
-      Realm::Cuda::MemcpyTransposeInfo<offt> info) {}
+#define MEMCPY_TRANSPOSE_TEMPLATE_INST(type, offt, name)                                 \
+  extern "C" __global__ __launch_bounds__(1024) void memcpy_transpose##name(             \
+      Realm::Cuda::MemcpyTransposeInfo<offt> info)                                       \
+  {                                                                                      \
+    extern __shared__ type tile_shared_##name[];                                         \
+    memcpy_kernel_transpose<type, offt>(info, tile_shared_##name);                       \
+  }
 
 #define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                  \
   extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name( \

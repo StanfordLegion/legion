@@ -111,7 +111,6 @@ void dump_and_verify(RegionInstance inst, FieldID fid,
                      const IndexSpace<N, T> &is, size_t row_size,
                      std::vector<DT> test_data, bool verbose = false,
                      bool verify = true) {
-  return;
   if (verify || verbose) {
     GenericAccessor<DT, N, T> acc(inst, fid);
     size_t i = 0;
