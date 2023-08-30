@@ -17,8 +17,8 @@
 #ifndef UCP_CONTEXT_H
 #define UCP_CONTEXT_H
 
-#include "ucp_utils.h"
-#include "mpool.h"
+#include "realm/ucx/ucp_utils.h"
+#include "realm/ucx/mpool.h"
 
 #include "realm/atomics.h"
 #include "realm/mutex.h"
