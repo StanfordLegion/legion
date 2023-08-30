@@ -976,7 +976,6 @@ namespace Legion {
       SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
-      SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE,
       SEND_LIBRARY_MAPPER_REQUEST,
       SEND_LIBRARY_MAPPER_RESPONSE,
       SEND_LIBRARY_TRACE_REQUEST,
@@ -1004,6 +1003,47 @@ namespace Legion {
       SEND_REMOTE_DISTRIBUTED_ID_RESPONSE,
       SEND_CONCURRENT_RESERVATION_CREATION,
       SEND_CONCURRENT_EXECUTION_ANALYSIS,
+      SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE,
+      SEND_CONTROL_REPLICATION_FUTURE_BROADCAST,
+      SEND_CONTROL_REPLICATION_FUTURE_REDUCTION,
+      SEND_CONTROL_REPLICATION_VALUE_ALLREDUCE,
+      SEND_CONTROL_REPLICATION_VALUE_BROADCAST,
+      SEND_CONTROL_REPLICATION_VALUE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_BUFFER_BROADCAST,
+      SEND_CONTROL_REPLICATION_SHARD_SYNC_TREE,
+      SEND_CONTROL_REPLICATION_SHARD_EVENT_TREE,
+      SEND_CONTROL_REPLICATION_SINGLE_TASK_TREE,
+      SEND_CONTROL_REPLICATION_CROSS_PRODUCT_PARTITION,
+      SEND_CONTROL_REPLICATION_SHARDING_GATHER_COLLECTIVE,
+      SEND_CONTROL_REPLICATION_INDIRECT_COPY_EXCHANGE,
+      SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_EXCHANGE,
+      SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_GATHER,
+      SEND_CONTROL_REPLICATION_DEPPART_RESULT_SCATTER,
+      SEND_CONTROL_REPLICATION_BUFFER_EXCHANGE,
+      SEND_CONTROL_REPLICATION_FUTURE_NAME_EXCHANGE,
+      SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_BROADCAST,
+      SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_EXCHANGE,
+      SEND_CONTROL_REPLICATION_MUST_EPOCH_DEPENDENCE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_MUST_EPOCH_COMPLETION_EXCHANGE,
+      SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_MAPPING,
+      SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_SOURCES,
+      SEND_CONTROL_REPLICATION_TEMPLATE_INDEX_EXCHANGE,
+      SEND_CONTROL_REPLICATION_UNORDERED_EXCHANGE,
+      SEND_CONTROL_REPLICATION_CONSENSUS_MATCH,
+      SEND_CONTROL_REPLICATION_VERIFY_CONTROL_REPLICATION_EXCHANGE,
+      SEND_CONTROL_REPLICATION_OUTPUT_SIZE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_INDEX_ATTACH_LAUNCH_SPACE,
+      SEND_CONTROL_REPLICATION_INDEX_ATTACH_UPPER_BOUND,
+      SEND_CONTROL_REPLICATION_INDEX_ATTACH_EXCHANGE,
+      SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE,
+      SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR,
+      SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW,
+      SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS,
+      SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION,
+      SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
+      SEND_CONTROL_REPLICATION_SLOW_BARRIER,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1240,7 +1280,6 @@ namespace Legion {
         "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
-        "Send Control Replication Collective Message",                \
         "Send Library Mapper Request",                                \
         "Send Library Mapper Response",                               \
         "Send Library Trace Request",                                 \
@@ -1268,6 +1307,47 @@ namespace Legion {
         "Send Remote Distributed ID Response",                        \
         "Send Concurrent Reservation Creation",                       \
         "Send Concurrent Execution Analysis",                         \
+        "Control Replication Collective Future All-Reduce",           \
+        "Control Replication Collective Future Broadcast",            \
+        "Control Replication Collective Future Reduction",            \
+        "Control Replication Collective Value All-Reduce",            \
+        "Control Replication Collective Value Broadcast",             \
+        "Control Replication Collective Value Exchange",              \
+        "Control Replication Collective Buffer Broadcast",            \
+        "Control Replication Collective Shard Sync Tree",             \
+        "Control Replication Collective Shard Event Tree",            \
+        "Control Replication Collective Single Task Tree",            \
+        "Control Replication Collective Cross Product Partition",     \
+        "Control Replication Collective Sharding Gather Collective",  \
+        "Control Replication Collective Indirect Copy Exchange",      \
+        "Control Replication Collective Field Descriptor Exchange",   \
+        "Control Replication Collective Field Descriptor Gather",     \
+        "Control Replication Collective Deppart Result Scatter",      \
+        "Control Replication Collective Buffer Exchange",             \
+        "Control Replication Collective Future Name Exchange",        \
+        "Control Replication Collective Must Epoch Mapping Broadcast",\
+        "Control Replication Collective Must Epoch Mapping Exchange", \
+        "Control Replication Collective Must Epoch Dependence Exchange",\
+        "Control Replication Collective Must Epoch Completion Exchange",\
+        "Control Replication Collective Check Mapping",               \
+        "Control Replication Collective Check Sources",               \
+        "Control Replication Collective Template Index Exchange",     \
+        "Control Replication Collective Unordered Exchange",          \
+        "Control Replication Collective Consensus Match",             \
+        "Control Replication Collective Verify Control Replication Exchange",\
+        "Control Replication Collective Output Size Exchange",        \
+        "Control Replication Collective Index Attach Launch Space",   \
+        "Control Replication Collective Index Attach Upper Bound",    \
+        "Control Replication Collective Index Attach Exchange",       \
+        "Control Replication Collective Shard Participants Exchange", \
+        "Control Replication Collective Implicit Sharding Functor",   \
+        "Control Replication Collective Create Fill View",            \
+        "Control Replication Collective View Rendezvous",             \
+        "Control Replication Collective Concurrent Execution Validation",\
+        "Control Replication Collective Elide Close Exchange",        \
+        "Control Replication Collective Predicate Exchange",          \
+        "Control Replication Collective Cross Product Exchange",      \
+        "Control Replication Collective Slow Barrier",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

@@ -1886,8 +1886,7 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      template<MessageKind M>
-      inline void send_message(Serializer &rez, bool flush, 
+      inline void send_message(MessageKind message, Serializer &rez, bool flush,
                         bool response = false, bool shutdown = false,
                         RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
@@ -3091,6 +3090,8 @@ namespace Legion {
                                     const void *message, size_t message_size, 
                                     unsigned message_kind, int radix,int index);
     public:
+      void send_message(MessageKind message, AddressSpaceID space,
+          Serializer &rez, bool flush = true, bool response = false);
       void send_startup_barrier(AddressSpaceID target, Serializer &rez);
       void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
@@ -3464,8 +3465,6 @@ namespace Legion {
                                            Serializer &rez);
       void send_replicate_trigger_commit(AddressSpaceID target,
                                          Serializer &rez);
-      void send_control_replicate_collective_message(AddressSpaceID target,
-                                                     Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
       void send_library_trace_request(AddressSpaceID target, Serializer &rez);
@@ -3809,7 +3808,6 @@ namespace Legion {
       void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
-      void handle_control_replicate_collective_message(Deserializer &derez);
       void handle_control_replicate_disjoint_complete_request(
                                                            Deserializer &derez);
       void handle_control_replicate_disjoint_complete_response(
@@ -6207,8 +6205,6 @@ namespace Legion {
           break;
         case SEND_REPLICATE_TRIGGER_COMMIT:
           break;
-        case SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE:
-          break;
         case SEND_LIBRARY_MAPPER_REQUEST:
           break;
         case SEND_LIBRARY_MAPPER_RESPONSE:
@@ -6262,6 +6258,48 @@ namespace Legion {
         case SEND_CONCURRENT_RESERVATION_CREATION:
           break;
         case SEND_CONCURRENT_EXECUTION_ANALYSIS:
+          break;
+        case SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE:
+        case SEND_CONTROL_REPLICATION_FUTURE_BROADCAST:
+        case SEND_CONTROL_REPLICATION_FUTURE_REDUCTION:
+        case SEND_CONTROL_REPLICATION_VALUE_ALLREDUCE:
+        case SEND_CONTROL_REPLICATION_VALUE_BROADCAST:
+        case SEND_CONTROL_REPLICATION_VALUE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_BUFFER_BROADCAST:
+        case SEND_CONTROL_REPLICATION_SHARD_SYNC_TREE:
+        case SEND_CONTROL_REPLICATION_SHARD_EVENT_TREE:
+        case SEND_CONTROL_REPLICATION_SINGLE_TASK_TREE:
+        case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_PARTITION:
+        case SEND_CONTROL_REPLICATION_SHARDING_GATHER_COLLECTIVE:
+        case SEND_CONTROL_REPLICATION_INDIRECT_COPY_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_GATHER:
+        case SEND_CONTROL_REPLICATION_DEPPART_RESULT_SCATTER:
+        case SEND_CONTROL_REPLICATION_BUFFER_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_FUTURE_NAME_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_BROADCAST:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_DEPENDENCE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_COMPLETION_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_MAPPING:
+        case SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_SOURCES:
+        case SEND_CONTROL_REPLICATION_TEMPLATE_INDEX_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_UNORDERED_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_CONSENSUS_MATCH:
+        case SEND_CONTROL_REPLICATION_VERIFY_CONTROL_REPLICATION_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_OUTPUT_SIZE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_INDEX_ATTACH_LAUNCH_SPACE:
+        case SEND_CONTROL_REPLICATION_INDEX_ATTACH_UPPER_BOUND:
+        case SEND_CONTROL_REPLICATION_INDEX_ATTACH_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR:
+        case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
+        case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
+        case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
+        case SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
           break;
         case SEND_SHUTDOWN_NOTIFICATION:
           return THROUGHPUT_VIRTUAL_CHANNEL;

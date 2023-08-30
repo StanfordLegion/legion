@@ -138,6 +138,7 @@ namespace Legion {
                           CollectiveID id, ShardID origin); 
       virtual ~BroadcastCollective(void);
     public:
+      virtual MessageKind get_message_kind(void) const = 0;
       // We guarantee that these methods will be called atomically
       virtual void pack_collective(Serializer &rez) const = 0;
       virtual void unpack_collective(Deserializer &derez) = 0;
@@ -175,6 +176,7 @@ namespace Legion {
                        CollectiveID id, ShardID origin);
       virtual ~GatherCollective(void);
     public:
+      virtual MessageKind get_message_kind(void) const = 0;
       // We guarantee that these methods will be called atomically
       virtual void pack_collective(Serializer &rez) const = 0;
       virtual void unpack_collective(Deserializer &derez) = 0;
@@ -215,6 +217,7 @@ namespace Legion {
       AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~AllGatherCollective(void);
     public:
+      virtual MessageKind get_message_kind(void) const = 0;
       // We guarantee that these methods will be called atomically
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage) = 0;
@@ -274,6 +277,8 @@ namespace Legion {
           CollectiveID id, ReductionOpID redop_id, const ReductionOp *redop);
       virtual ~FutureAllReduceCollective(void);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -315,6 +320,8 @@ namespace Legion {
       FutureBroadcastCollective& operator=(
                                 const FutureBroadcastCollective &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual void elide_collective(void);
@@ -348,6 +355,8 @@ namespace Legion {
       FutureReductionCollective& operator=(
                                 const FutureReductionCollective &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_FUTURE_REDUCTION; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual RtEvent post_gather(void);
@@ -381,6 +390,8 @@ namespace Legion {
       AllReduceCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~AllReduceCollective(void);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VALUE_ALLREDUCE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -421,6 +432,8 @@ namespace Legion {
       inline T get_value(bool wait = true)
         { if (wait) perform_collective_wait(); return value; }
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VALUE_BROADCAST; }
       virtual void pack_collective(Serializer &rez) const 
         { rez.serialize(value); }
       virtual void unpack_collective(Deserializer &derez)
@@ -443,6 +456,8 @@ namespace Legion {
         : AllGatherCollective(ctx, id) { }
       virtual ~ValueExchange(void) { }
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VALUE_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage)
       {
@@ -502,6 +517,8 @@ namespace Legion {
       void broadcast(void *buffer, size_t size, bool copy = true);
       const void* get_buffer(size_t &size, bool wait = true);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_BUFFER_BROADCAST; }
       virtual void pack_collective(Serializer &rez) const; 
       virtual void unpack_collective(Deserializer &derez);
     protected:
@@ -525,6 +542,8 @@ namespace Legion {
     public:
       ShardSyncTree& operator=(const ShardSyncTree &rhs) = delete; 
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_SHARD_SYNC_TREE; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual RtEvent post_gather(void);
@@ -550,6 +569,8 @@ namespace Legion {
       void signal_tree(RtEvent precondition); // origin
       RtEvent get_local_event(void);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_SHARD_EVENT_TREE; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual RtEvent post_broadcast(void) { return postcondition; }
@@ -574,6 +595,8 @@ namespace Legion {
       void broadcast_future_size(RtEvent precondition, 
           size_t future_size, bool has_size);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_SINGLE_TASK_TREE; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     protected:
@@ -598,6 +621,8 @@ namespace Legion {
     public:
       void exchange_partitions(std::map<IndexSpace,IndexPartition> &handles);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CROSS_PRODUCT_PARTITION; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -620,6 +645,8 @@ namespace Legion {
     public:
       ShardingGatherCollective& operator=(const ShardingGatherCollective &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_SHARDING_GATHER_COLLECTIVE; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
@@ -647,6 +674,8 @@ namespace Legion {
           std::vector<std::vector<IndirectRecord>*> &targets,
           std::vector<IndirectRecord> &local_records);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_INDIRECT_COPY_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -674,6 +703,8 @@ namespace Legion {
       FieldDescriptorExchange& operator=(
                               const FieldDescriptorExchange &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -697,6 +728,8 @@ namespace Legion {
       FieldDescriptorGather& operator=(
                             const FieldDescriptorGather &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_GATHER; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
@@ -722,6 +755,8 @@ namespace Legion {
     public:
       DeppartResultScatter& operator=(const DeppartResultScatter &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_DEPPART_RESULT_SCATTER; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
@@ -745,6 +780,8 @@ namespace Legion {
     public:
       BufferExchange& operator=(const BufferExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_BUFFER_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -770,6 +807,8 @@ namespace Legion {
     public:
       FutureNameExchange& operator=(const FutureNameExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_FUTURE_NAME_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -794,6 +833,8 @@ namespace Legion {
       MustEpochMappingBroadcast& operator=(
                                   const MustEpochMappingBroadcast &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_BROADCAST; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
@@ -832,6 +873,8 @@ namespace Legion {
     public:
       MustEpochMappingExchange& operator=(const MustEpochMappingExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -870,6 +913,8 @@ namespace Legion {
       MustEpochDependenceExchange& operator=(
                                   const MustEpochDependenceExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_MUST_EPOCH_DEPENDENCE_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -895,6 +940,8 @@ namespace Legion {
       MustEpochCompletionExchange& operator=(
                                     const MustEpochCompletionExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_MUST_EPOCH_COMPLETION_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -919,6 +966,8 @@ namespace Legion {
     public:
       CheckCollectiveMapping& operator=(const CheckCollectiveMapping&) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_MAPPING; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -942,6 +991,8 @@ namespace Legion {
     public:
       CheckCollectiveSources& operator=(const CheckCollectiveSources&) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_SOURCES; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
@@ -962,6 +1013,8 @@ namespace Legion {
     public:
       TemplateIndexExchange& operator=(const TemplateIndexExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_TEMPLATE_INDEX_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -987,6 +1040,8 @@ namespace Legion {
     public:
       UnorderedExchange& operator=(const UnorderedExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_UNORDERED_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1080,6 +1135,8 @@ namespace Legion {
     public:
       ConsensusMatchExchange& operator=(const ConsensusMatchExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CONSENSUS_MATCH; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1110,6 +1167,8 @@ namespace Legion {
     public:
       VerifyReplicableExchange& operator=(const VerifyReplicableExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VERIFY_CONTROL_REPLICATION_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1137,6 +1196,8 @@ namespace Legion {
     public:
       OutputSizeExchange& operator=(const OutputSizeExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_OUTPUT_SIZE_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1161,6 +1222,8 @@ namespace Legion {
     public:
       IndexAttachLaunchSpace& operator=(const IndexAttachLaunchSpace &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_INDEX_ATTACH_LAUNCH_SPACE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1187,6 +1250,8 @@ namespace Legion {
     public:
       IndexAttachUpperBound& operator=(const IndexAttachUpperBound &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_INDEX_ATTACH_UPPER_BOUND; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1212,6 +1277,8 @@ namespace Legion {
     public:
       IndexAttachExchange& operator=(const IndexAttachExchange &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_INDEX_ATTACH_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1237,6 +1304,8 @@ namespace Legion {
       ShardParticipantsExchange& operator=(
                                 const ShardParticipantsExchange &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1263,6 +1332,8 @@ namespace Legion {
     public:
       ImplicitShardingFunctor& operator=(const ImplicitShardingFunctor &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1304,6 +1375,8 @@ namespace Legion {
       CreateCollectiveFillView& operator=(
                                const CreateCollectiveFillView &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1336,6 +1409,8 @@ namespace Legion {
           const RendezvousKey &key, RegionTreeID tid);
       virtual ~CollectiveViewRendezvous(void);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual RtEvent post_gather(void);
@@ -1362,6 +1437,8 @@ namespace Legion {
           CollectiveIndexLocation loc, ReplicateContext *ctx, ShardID target);
       virtual ~ConcurrentExecutionValidator(void) { }
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION; }
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual RtEvent post_gather(void);
@@ -1386,6 +1463,8 @@ namespace Legion {
         : AllGatherCollective<false>(ctx, 
             ctx->get_next_collective_index(loc, true/*logical*/)), tree(t) { }
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage) 
         { tree->serialize(rez); }
@@ -1410,6 +1489,8 @@ namespace Legion {
     public:
       PredicateCollective& operator=(const PredicateCollective &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE; }
       virtual RtEvent post_complete_exchange(void);
     public:
       ReplPredicateImpl *const predicate;
@@ -1428,6 +1509,8 @@ namespace Legion {
     public:
       CrossProductExchange& operator=(const CrossProductExchange &rhs) = delete;
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
@@ -1456,6 +1539,8 @@ namespace Legion {
     public:
       SlowBarrier& operator=(const SlowBarrier &rhs);
     public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_SLOW_BARRIER; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage) { }
       virtual void unpack_collective_stage(Deserializer &derez, int stage) { }
@@ -2842,7 +2927,8 @@ namespace Legion {
       RtEvent trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:
-      void send_collective_message(ShardID target, Serializer &rez);
+      void send_collective_message(MessageKind message, ShardID target, 
+                                   Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
       void send_disjoint_complete_request(ShardID target, Serializer &rez);
