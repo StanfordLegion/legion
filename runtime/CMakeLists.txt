@@ -270,11 +270,12 @@ endforeach()
 if(Legion_USE_CUDA)
 
   add_library(realm_cuda_fatbin OBJECT ${REALM_CUDA_SRC})
-  set_property(TARGET realm_cuda_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
-  target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
-
+  #TODO(apryakhin): Enable with cmake 3.27
+  #set_property(TARGET realm_cuda_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
   target_compile_options(realm_cuda_fatbin PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
-                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
+                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant
+                         --fatbin>)
+  target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
 
   target_include_directories(realm_cuda_fatbin
                      PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
