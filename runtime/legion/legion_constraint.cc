@@ -1761,7 +1761,7 @@ namespace Legion {
     bool PaddingConstraint::conflicts(const PaddingConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      if (other.delta.get_dim() > 0)
+      if ((delta.get_dim() > 0) && (other.delta.get_dim() > 0))
       {
         if (delta.get_dim() != other.delta.get_dim())
           return true;

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "mpool.h"
-#include "ucp_utils.h"
+#include "realm/ucx/mpool.h"
+#include "realm/ucx/ucp_utils.h"
 #include "realm/logging.h"
 
 #include <string>

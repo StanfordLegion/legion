@@ -20,7 +20,7 @@
 #define BOOTSTRAP_INTERNAL_H
 
 #include <cstddef>
-#include "bootstrap.h"
+#include "realm/ucx/bootstrap/bootstrap.h"
 
 #define BOOTSTRAP_MPI_PLUGIN "realm_ucp_bootstrap_mpi.so"
 

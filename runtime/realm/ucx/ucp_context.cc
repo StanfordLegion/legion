@@ -21,8 +21,8 @@
 #include "realm/cuda/cuda_internal.h"
 #endif
 
-#include "ucp_context.h"
-#include "ucp_utils.h"
+#include "realm/ucx/ucp_context.h"
+#include "realm/ucx/ucp_utils.h"
 
 #include <ucp/api/ucp.h>
 #include <unordered_map>

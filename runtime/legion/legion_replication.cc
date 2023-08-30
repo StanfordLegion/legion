@@ -10656,7 +10656,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::send_collective_message(ShardID target, Serializer &rez)
+    void ShardManager::send_collective_message(MessageKind message,
+                                               ShardID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10673,7 +10674,7 @@ namespace Legion {
         handle_collective_message(derez);
       }
       else
-        runtime->send_control_replicate_collective_message(target_space, rez);
+        runtime->send_message(message, target_space, rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12171,6 +12172,7 @@ namespace Legion {
     void BroadcastCollective::send_messages(void) const
     //--------------------------------------------------------------------------
     {
+      const MessageKind message = get_message_kind();
       const int local_index = convert_to_index(local_shard, origin);
       for (int idx = 1; idx <= shard_collective_radix; idx++)
       {
@@ -12185,7 +12187,7 @@ namespace Legion {
           rez.serialize(collective_index);
           pack_collective(rez);
         }
-        manager->send_collective_message(target, rez);
+        manager->send_collective_message(message, target, rez);
       }
     }
 
@@ -12323,7 +12325,8 @@ namespace Legion {
         AutoLock c_lock(collective_lock,1,false/*exclusive*/);
         pack_collective(rez);
       }
-      manager->send_collective_message(next, rez);
+      const MessageKind message = get_message_kind();
+      manager->send_collective_message(message, next, rez);
     } 
 
     //--------------------------------------------------------------------------
@@ -12580,6 +12583,7 @@ namespace Legion {
     void AllGatherCollective<INORDER>::send_remainder_stage(void)
     //--------------------------------------------------------------------------
     {
+      const MessageKind message = get_message_kind();
       if (participating)
       {
         // Send back to the shards that are not participating
@@ -12589,7 +12593,7 @@ namespace Legion {
 #endif
         Serializer rez;
         construct_message(target, -1/*stage*/, rez);
-        manager->send_collective_message(target, rez);
+        manager->send_collective_message(message, target, rez);
       }
       else
       {
@@ -12597,7 +12601,7 @@ namespace Legion {
         ShardID target = local_shard % shard_collective_participating_shards;
         Serializer rez;
         construct_message(target, -1/*stage*/, rez);
-        manager->send_collective_message(target, rez);
+        manager->send_collective_message(message, target, rez);
       }
     }
 
@@ -12612,6 +12616,7 @@ namespace Legion {
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
       bool sent_previous_stage = false;
+      const MessageKind message = get_message_kind();
       for (int stage = start_stage; stage < shard_collective_stages; stage++)
       {
         {
@@ -12680,7 +12685,7 @@ namespace Legion {
 #endif
             Serializer rez;
             construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
+            manager->send_collective_message(message, target, rez);
           }
         }
         else
@@ -12694,7 +12699,7 @@ namespace Legion {
 #endif
             Serializer rez;
             construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
+            manager->send_collective_message(message, target, rez);
           }
         }
         sent_previous_stage = true;

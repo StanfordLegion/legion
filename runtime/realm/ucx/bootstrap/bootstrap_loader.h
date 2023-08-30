@@ -19,7 +19,7 @@
 #ifndef BOOTSTRAP_LOADER_H
 #define BOOTSTRAP_LOADER_H
 
-#include "bootstrap.h"
+#include "realm/ucx/bootstrap/bootstrap.h"
 
 namespace Realm {
 namespace UCP {
