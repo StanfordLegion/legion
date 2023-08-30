@@ -12353,7 +12353,7 @@ namespace Legion {
           assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
           ProjectionInfo projection_info;
-          runtime->forest->perform_dependence_analysis(this, 0/*idx*/, req,
+          runtime->forest->perform_dependence_analysis(this, idx, req,
                                                        projection_info,
                                                        logical_analysis);
           if (runtime->legion_spy_enabled)
