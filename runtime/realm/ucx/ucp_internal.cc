@@ -25,8 +25,8 @@
 #include "realm/cuda/cuda_internal.h"
 #endif
 
-#include "ucp_internal.h"
-#include "ucp_utils.h"
+#include "realm/ucx/ucp_internal.h"
+#include "realm/ucx/ucp_utils.h"
 
 #include <cstring>
 #include <string>
