@@ -69,7 +69,7 @@ namespace TestConfig {
   size_t chunks = 2;            // number of sparse chunks in each rect
   size_t rects = 1;             // number of rects for the kernel
   size_t rect_increasement = 0; // width increasement between rects
-  bool verify = false;          // wether to verify the result of kernel
+  bool verify = true;          // wether to verify the result of kernel
   bool verbose = false;         // wether to print the result of kernel
   bool test_sparse = false;     // if true, dst will also be sparse
 }; // namespace TestConfig
@@ -97,7 +97,6 @@ void dump_and_verify(RegionInstance inst, RegionInstance proxy_inst, FieldID fid
     for(PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
       DT v = acc[it2.p];
       if(value != DT(-1) && v != value) {
-        std::cerr << it2.p << ' ' << std::hex << +v << "!=" << std::hex << +value << std::endl;
         fail = true;
       }
       if(verbose) {
@@ -308,7 +307,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   run_test<uint16_t>(p);
   run_test<uint32_t>(p);
   run_test<uint64_t>(p);
-  //run_test<Integer128>(p);
+  run_test<Integer128>(p);
 
   usleep(100000);
 }
