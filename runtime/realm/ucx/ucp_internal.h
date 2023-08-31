@@ -32,6 +32,7 @@
 
 #include "realm/ucx/ucp_module.h"
 #include "realm/ucx/ucp_context.h"
+#include "realm/ucx/spinlock.h"
 #include "realm/ucx/bootstrap/bootstrap_internal.h"
 
 #include <ucp/api/ucp.h>
@@ -68,6 +69,9 @@ namespace UCP {
     RemoteComp     *remote_comp;
     void           *rdma_payload_addr;
     size_t         rdma_payload_size;
+#ifdef REALM_USE_CUDA
+    int            src_dev_index;
+#endif
     char           realm_hdr[0];
   } __attribute__ ((packed)); // gcc-specific
 
@@ -106,6 +110,7 @@ namespace UCP {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
       int pollers_max{2};
+      int num_priorities{1};
       int prog_boff_max{4}; //progress thread maximum backoff
       int prog_itr_max{16};
       int rdesc_rel_max{16};
@@ -114,6 +119,7 @@ namespace UCP {
       bool hbuf_malloc{false};
       bool pbuf_malloc{false};
       bool use_wakeup{false};
+      size_t priority_size_max{64};
       size_t fp_max{2 << 10 /* 2K */}; //fast path max message size
       size_t pbuf_max_size{8 << 10 /* 8K */};
       size_t pbuf_max_chunk_size{4 << 20 /* 4M */};
@@ -178,7 +184,8 @@ namespace UCP {
     const SegmentInfo *find_segment(const void *srcptr) const;
 
     const UCPContext *get_context(const SegmentInfo *seg_info) const;
-    UCPWorker *get_worker(const UCPContext *context) const;
+    // the public interface exposes the tx worker only
+    UCPWorker *get_tx_worker(const UCPContext *context, uint8_t priority) const;
 
     size_t num_eps(const UCPContext &context) const;
 
@@ -187,11 +194,17 @@ namespace UCP {
     RuntimeImpl *runtime;
 
   private:
+    struct SegmentInfoSorter;
+
     struct AmHandlersArgs {
       UCPInternal *internal;
       UCPWorker   *worker;
     };
-    struct SegmentInfoSorter;
+
+    struct Workers {
+      std::vector<UCPWorker*> tx_workers;
+      std::vector<UCPWorker*> rx_workers;
+    };
 
 #ifdef REALM_USE_CUDA
   bool init_ucp_contexts(const std::unordered_set<Realm::Cuda::GPU*> &gpus);
@@ -201,19 +214,25 @@ namespace UCP {
 
     bool create_workers();
     void destroy_workers();
+    size_t get_num_workers();
     bool set_am_handlers();
+    bool create_eps(uint8_t priority);
     bool create_eps();
     bool create_pollers();
     const UCPContext *get_context_host() const;
 #if defined(REALM_USE_CUDA)
     const UCPContext *get_context_device(int dev_index) const;
 #endif
+    const std::vector<UCPWorker*>
+      &get_tx_workers(const UCPContext *context) const;
+    const std::vector<UCPWorker*>
+      &get_rx_workers(const UCPContext *context) const;
+    UCPWorker *get_rx_worker(const UCPContext *context, uint8_t priority) const;
     bool is_congested();
     bool add_rdma_info(NetworkSegment *segment,
         const UCPContext *context, ucp_mem_h mem_h);
     bool am_msg_recv_data_ready(UCPInternal *internal,
-        UCPWorker *worker, ucp_ep_h reply_ep,
-        const UCPMsgHdr *ucp_msg_hdr, size_t header_size,
+        UCPWorker *worker, const UCPMsgHdr *ucp_msg_hdr, size_t header_size,
         void *payload, size_t payload_size, int payload_mode);
     static ucs_status_t am_remote_comp_handler(void *arg,
         const void *header, size_t header_size,
@@ -235,7 +254,7 @@ namespace UCP {
         void *payload, size_t payload_size,
         const ucp_am_recv_param_t *param);
 
-    using WorkersMap = std::unordered_map<const UCPContext*, UCPWorker*>;
+    using WorkersMap = std::unordered_map<const UCPContext*, Workers>;
     using AttachMap  = std::unordered_map<const UCPContext*, std::vector<ucp_mem_h>>;
 
     bool                                    initialized_boot{false};
@@ -256,7 +275,7 @@ namespace UCP {
     atomic<uint64_t>                        total_rcomp_received;
     atomic<uint64_t>                        outstanding_reqs;
     MPool                                   *rcba_mp;
-    Mutex                                   rcba_mp_mutex;
+    SpinLock                                rcba_mp_spinlock;
     size_t                                  ib_seg_size;
     // this list is sorted by address to enable quick address lookup
     std::vector<SegmentInfo>                segments_by_addr;

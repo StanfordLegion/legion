@@ -197,6 +197,7 @@ if(REALM_USE_UCX)
     realm/ucx/ucp_context.cc
     realm/ucx/mpool.h
     realm/ucx/mpool.cc
+    realm/ucx/spinlock.h
     realm/ucx/bootstrap/bootstrap.h
     realm/ucx/bootstrap/bootstrap.cc
     realm/ucx/bootstrap/bootstrap_loader.h
