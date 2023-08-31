@@ -1872,7 +1872,6 @@ namespace Legion {
     protected: // Queues for fusing together small meta-tasks
       mutable LocalLock                               prepipeline_lock;
       std::deque<std::pair<Operation*,GenerationID> > prepipeline_queue;
-      unsigned                                        outstanding_prepipeline;
     protected:
       mutable LocalLock                               dependence_lock;
       std::deque<Operation*>                          dependence_queue;

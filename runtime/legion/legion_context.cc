@@ -2786,7 +2786,7 @@ namespace Legion {
         total_children_count(0), executing_children_count(0),
         executed_children_count(0), total_close_count(0), 
         total_summary_count(0), outstanding_children_count(0),
-        outstanding_prepipeline(0), outstanding_dependence(false),
+        outstanding_dependence(false),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -7746,20 +7746,8 @@ namespace Legion {
       const GenerationID gen = op->get_generation();
       {
         AutoLock p_lock(prepipeline_lock);
+        issue_task = prepipeline_queue.empty();
         prepipeline_queue.push_back(std::pair<Operation*,GenerationID>(op,gen));
-        // No need to have more outstanding tasks than there are processors
-        if (outstanding_prepipeline < runtime->num_utility_procs)
-        {
-          const size_t needed_in_flight = 
-            (prepipeline_queue.size() + 
-             context_configuration.meta_task_vector_width - 1) / 
-              context_configuration.meta_task_vector_width;
-          if (outstanding_prepipeline < needed_in_flight)
-          {
-            outstanding_prepipeline++;
-            issue_task = true;
-          }
-        }
       }
       if (issue_task)
       {
@@ -7786,23 +7774,8 @@ namespace Legion {
           to_perform.push_back(prepipeline_queue.front());
           prepipeline_queue.pop_front();
         }
-#ifdef DEBUG_LEGION
-        assert(outstanding_prepipeline > 0);
-        assert(outstanding_prepipeline <= runtime->num_utility_procs);
-#endif
         if (!prepipeline_queue.empty())
-        {
-          const size_t needed_in_flight = 
-            (prepipeline_queue.size() + 
-             context_configuration.meta_task_vector_width - 1) / 
-              context_configuration.meta_task_vector_width;
-          if (outstanding_prepipeline <= needed_in_flight)
-            launch_next_op = prepipeline_queue.back().first; 
-          else
-            outstanding_prepipeline--;
-        }
-        else
-          outstanding_prepipeline--;
+          launch_next_op = prepipeline_queue.back().first;
       }
       // Perform our prepipeline tasks
       for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
