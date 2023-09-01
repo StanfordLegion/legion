@@ -2429,8 +2429,13 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      return impl->get_buffer(Processor::NO_PROC, memory, extent_in_bytes, 
-                              check_size, silence_warnings, warning_string);
+      if (Internal::implicit_context == NULL)
+        return impl->get_buffer(Processor::NO_PROC, memory, extent_in_bytes, 
+                                check_size, silence_warnings, warning_string);
+      else
+        return impl->get_buffer(
+            Internal::implicit_context->get_executing_processor(), memory,
+            extent_in_bytes, check_size, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
