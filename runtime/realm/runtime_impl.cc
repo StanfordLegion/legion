@@ -735,6 +735,9 @@ namespace Realm {
     config_map.insert({"util", &num_util_procs});
     config_map.insert({"io", &num_io_procs});
     config_map.insert({"sysmem", &sysmem_size});
+    config_map.insert({"stack_size", &stack_size});
+    config_map.insert({"pin_util_procs", &pin_util_procs});
+    config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
   }
 

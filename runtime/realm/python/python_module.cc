@@ -1029,6 +1029,8 @@ namespace Realm {
     PythonModuleConfig::PythonModuleConfig(void)
       : ModuleConfig("python")
     {
+      config_map.insert({"pyproc", &cfg_num_python_cpus});
+      config_map.insert({"pystack", &cfg_stack_size});
     }
 
     void PythonModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)

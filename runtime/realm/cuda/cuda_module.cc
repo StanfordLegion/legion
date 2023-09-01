@@ -3938,6 +3938,13 @@ namespace Realm {
       config_map.insert({"gpu", &cfg_num_gpus});
       config_map.insert({"zcmem", &cfg_zc_mem_size});
       config_map.insert({"fbmem", &cfg_fb_mem_size});
+      config_map.insert({"ib_fbmem", &cfg_fb_ib_size});
+      config_map.insert({"ib_zcmem", &cfg_zc_ib_size});
+      config_map.insert({"uvmem", &cfg_uvm_mem_size});
+      config_map.insert({"use_dynamic_fb", &cfg_use_dynamic_fb});
+      config_map.insert({"dynfb_max_size", &cfg_dynfb_max_size});
+      config_map.insert({"task_streams", &cfg_task_streams});
+      config_map.insert({"d2d_streams", &cfg_d2d_streams});
       res_fbmem_sizes.push_back(0);
     }
 

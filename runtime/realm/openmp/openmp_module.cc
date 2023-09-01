@@ -164,6 +164,8 @@ namespace Realm {
     {
       config_map.insert({"ocpu", &cfg_num_openmp_cpus});
       config_map.insert({"othr", &cfg_num_threads_per_cpu});
+      config_map.insert({"onuma", &cfg_use_numa});
+      config_map.insert({"ostack", &cfg_stack_size});
     }
 
     void OpenMPModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
