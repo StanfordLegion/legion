@@ -84,6 +84,9 @@ if(Legion_USE_CUDA)
     realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
     realm/cuda/cuda_access.h    realm/cuda/cuda_access.cc
   )
+  list(APPEND REALM_CUDA_SRC
+    realm/cuda/cuda_memcpy.cu
+  )
   if(REALM_USE_CUDART_HIJACK)
     list(APPEND REALM_SRC
       realm/cuda/cudart_hijack.h
@@ -194,6 +197,7 @@ if(REALM_USE_UCX)
     realm/ucx/ucp_context.cc
     realm/ucx/mpool.h
     realm/ucx/mpool.cc
+    realm/ucx/spinlock.h
     realm/ucx/bootstrap/bootstrap.h
     realm/ucx/bootstrap/bootstrap.cc
     realm/ucx/bootstrap/bootstrap_loader.h
@@ -264,9 +268,52 @@ foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
   endforeach()
 endforeach()
 
+if(Legion_USE_CUDA)
+
+  add_library(realm_cuda_fatbin OBJECT ${REALM_CUDA_SRC})
+  #TODO(apryakhin): Enable with cmake 3.27
+  #set_property(TARGET realm_cuda_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
+  target_compile_options(realm_cuda_fatbin PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
+                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant
+                         --fatbin>)
+  target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
+
+  target_include_directories(realm_cuda_fatbin
+                     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                             ${PROJECT_BINARY_DIR}/runtime)
+
+  set_target_cuda_standard(realm_cuda_fatbin STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(realm_cuda_fatbin ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_warnings_and_errors(realm_cuda_fatbin WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+
+  set(realm_fatbin_cc "${CMAKE_CURRENT_BINARY_DIR}/realm_fatbin.cc")
+
+  add_custom_command(
+    OUTPUT "${realm_fatbin_cc}"
+    COMMAND ${CMAKE_COMMAND}
+      "-DVAR_NAME=realm_fatbin"
+      "-DDEFINES_HEADER=realm/realm_config.h"
+      "-DIN_FILE=$<TARGET_OBJECTS:realm_cuda_fatbin>"
+      "-DOUT_FILE=${realm_fatbin_cc}"
+      -P ${PROJECT_SOURCE_DIR}/cmake/bin2c.cmake
+    VERBATIM
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    DEPENDS $<TARGET_OBJECTS:realm_cuda_fatbin>
+    COMMENT "Embedding binary objects $<TARGET_OBJECTS:realm_cuda_fatbin> -> ${realm_fatbin_cc}"
+  )
+
+  # Add a direct dependency on realm_fatbin.cc in order to force a rebuild as realm_fatbin.cc changes
+  list(APPEND REALM_SRC ${realm_fatbin_cc})
+endif()
+
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
+
+if(TARGET realm_cuda_fatbin)
+  add_dependencies(RealmRuntime realm_cuda_fatbin)
+endif()
+
 add_library(Legion::RealmRuntime ALIAS RealmRuntime)
 target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
@@ -299,6 +346,15 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "@loader_path")
   set_property(TARGET RealmRuntime APPEND PROPERTY INSTALL_RPATH "@loader_path")
+endif ()
+
+if(Legion_USE_Python)
+  # Realm dlopens libpython.so, so we need to add the directory that contains it
+  # to BUILD_RPATH, otherwise build/lib/librealm.so's dlopen will not find it.
+  # We're assuming that libpython.so will be found in the same dir as librealm.so
+  # after installation, so no need to update INSTALL_RPATH.
+  get_filename_component(PYTHON_LIB_DIR "${PYTHON_LIBRARIES}" DIRECTORY)
+  set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "${PYTHON_LIB_DIR}")
 endif ()
 
 if(REALM_LIMIT_SYMBOL_VISIBILITY)

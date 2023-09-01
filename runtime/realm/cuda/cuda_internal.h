@@ -41,6 +41,7 @@
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
 #include "realm/transfer/ib_memory.h"
+#include "realm/cuda/cuda_memcpy.h"
 
 #if CUDART_VERSION < 11000
 #define CHECK_CUDART(cmd)                                                      \
@@ -637,7 +638,8 @@ namespace Realm {
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
       GPUStream *get_next_d2d_stream();
-    protected:
+
+     protected:
       CUmodule load_cuda_module(const void *data);
 
     public:
@@ -649,6 +651,32 @@ namespace Realm {
       GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
+
+      CUmodule device_module;
+
+      struct GPUFuncInfo {
+        CUfunction func;
+        int occ_num_threads;
+        int occ_num_blocks;
+      };
+
+      // The maximum value of log2(type_bytes) that cuda kernels handle.
+      // log2(1 byte)   --> 0
+      // log2(2 bytes)  --> 1
+      // log2(4 bytes)  --> 2
+      // log2(8 bytes)  --> 3
+      // log2(16 bytes) --> 4
+      static const size_t CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES = 5;
+
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM]
+                                       [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM]
+                                           [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM]
+                                           [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo transpose_kernels[CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+
       CUdeviceptr fbmem_base, fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
@@ -1229,6 +1257,7 @@ namespace Realm {
 
 #define CUDA_DRIVER_APIS(__op__)                                               \
   __op__(cuModuleGetFunction);                                                 \
+  __op__(cuCtxGetDevice);                                                      \
   __op__(cuCtxEnablePeerAccess);                                               \
   __op__(cuCtxGetFlags);                                                       \
   __op__(cuCtxGetStreamPriorityRange);                                         \
@@ -1285,6 +1314,11 @@ namespace Realm {
   __op__(cuStreamCreateWithPriority);                                          \
   __op__(cuStreamDestroy);                                                     \
   __op__(cuStreamSynchronize);                                                 \
+  __op__(cuOccupancyMaxPotentialBlockSize);                                    \
+  __op__(cuOccupancyMaxPotentialBlockSizeWithFlags);                           \
+  __op__(cuEventSynchronize);                                                  \
+  __op__(cuEventElapsedTime);                                                  \
+  __op__(cuOccupancyMaxActiveBlocksPerMultiprocessor);                         \
   __op__(cuMemAddressReserve);                                                 \
   __op__(cuMemAddressFree);                                                    \
   __op__(cuMemCreate);                                                         \
