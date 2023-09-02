@@ -4012,6 +4012,8 @@ namespace Legion {
     // RegionRefinementTracker
     /////////////////////////////////////////////////////////////
 
+    /*static*/ constexpr uint64_t RefinementTracker::MAX_INCOMPLETE_WRITES;
+
     //--------------------------------------------------------------------------
     RegionRefinementTracker::RegionRefinementTracker(RegionNode *node)
       : region(node), refinement_state(UNREFINED_STATE), refined_child(NULL),
@@ -4224,11 +4226,20 @@ namespace Legion {
           {
             if (IS_WRITE(usage))
             {
-              if (child != refined_child)
+              if (child->row_source->is_complete())
               {
-                // Always switch to a new writing refinement
-                // Delete this to allow for field coalescing
+                // Swith over to write complete
+                // We can delete this tracker and make a new one to
+                // get any kind of field coalescing happening
                 return true;
+              }
+              else
+              {
+                // Always allow refinements down writing incomplete children
+                allow_refinement = true;
+                // Don't both deleting this, we can stay in this mode as long
+                // as there are more incomplete writes
+                return false;
               }
             }
             break;
@@ -4370,11 +4381,54 @@ namespace Legion {
           {
             if (IS_WRITE(usage))
             {
-              if (summary->result != refined_projection)
+              if (summary->complete)
               {
-                // Always switch to a new writing refinement
-                // Delete this to allow for field coalescing
+                // If this is a complete write then we're going to switch to it
                 return true;
+              }
+              // Otherwise we're only going to do a refinement for this 
+              // projection if it is the "first" time we've seen it. In 
+              // practice it's unreasonable to keep a memory of all prior
+              // disjoint and complete partitions, so we track a set of 
+              // the most recent MAX_INCOMPLETE_WRITES
+              ProjectionRegion *projection = 
+                summary->result->as_region_projection();
+              std::unordered_map<ProjectionRegion*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_projections.find(projection);
+              if (finder == candidate_projections.end())
+              {
+                // Didn't find it so decrement all the prior entries TTLs 
+                for (std::unordered_map<ProjectionRegion*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); /*nothing*/)
+                {
+                  if (--it->second.second == 0)
+                  {
+                    std::unordered_map<ProjectionRegion*,
+                      std::pair<double,uint64_t> >::iterator delete_it = it++;
+                    candidate_projections.erase(delete_it);
+                  }
+                  else
+                    it++;
+                }
+                projection->add_reference();
+                candidate_projections.emplace(std::make_pair(projection,
+                  std::pair<double,uint64_t>(0.0, MAX_INCOMPLETE_WRITES)));
+                allow_refinement = true;
+              }
+              else
+              {
+                // We already had it, so decrement all TTLs of everything that
+                // came before it and then add it back with a new TTL
+                for (std::unordered_map<ProjectionRegion*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); it++)
+                  if (finder->second.second < it->second.second)
+                    it->second.second--;
+                finder->second.second = MAX_INCOMPLETE_WRITES;
               }
             }
             break;
@@ -5431,16 +5485,49 @@ namespace Legion {
                 // swtich to that
                 return true; 
               }
-              // Only allow switching to incomplete writes if we're
-              // not tracking any children below
-              if (children.empty() && (summary->result != refined_projection))
+              // Otherwise we're only going to do a refinement for this 
+              // projection if it is the "first" time we've seen it. In 
+              // practice it's unreasonable to keep a memory of all prior
+              // disjoint and complete partitions, so we track a set of 
+              // the most recent MAX_INCOMPLETE_WRITES
+              ProjectionPartition *projection = 
+                summary->result->as_partition_projection();
+              std::unordered_map<ProjectionPartition*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_projections.find(projection);
+              if (finder == candidate_projections.end())
               {
+                // Didn't find it so decrement all the prior entries TTLs 
+                for (std::unordered_map<ProjectionPartition*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); /*nothing*/)
+                {
+                  if (--it->second.second == 0)
+                  {
+                    std::unordered_map<ProjectionPartition*,
+                      std::pair<double,uint64_t> >::iterator delete_it = it++;
+                    candidate_projections.erase(delete_it);
+                  }
+                  else
+                    it++;
+                }
+                projection->add_reference();
+                candidate_projections.emplace(std::make_pair(projection,
+                  std::pair<double,uint64_t>(0.0, MAX_INCOMPLETE_WRITES)));
                 allow_refinement = true;
-                if ((refined_projection != NULL) && 
-                    refined_projection->remove_reference())
-                  delete refined_projection;
-                refined_projection = summary->result->as_partition_projection();
-                refined_projection->add_reference();
+              }
+              else
+              {
+                // We already had it, so decrement all TTLs of everything that
+                // came before it and then add it back with a new TTL
+                for (std::unordered_map<ProjectionPartition*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); it++)
+                  if (finder->second.second < it->second.second)
+                    it->second.second--;
+                finder->second.second = MAX_INCOMPLETE_WRITES;
               }
             }
             break;

@@ -1391,6 +1391,9 @@ namespace Legion {
       // This is the timeout for refinements where we will clear out all
       // candidate refinements and reset the state to look again
       static constexpr uint64_t CHANGE_REFINEMENT_TIMEOUT = 4096;
+      // The maximum number of incomplete projection writes that we're
+      // willing to remember at any particular node in the tree
+      static constexpr uint64_t MAX_INCOMPLETE_WRITES = 32;
     protected:
       enum RefinementState {
         UNREFINED_STATE,
