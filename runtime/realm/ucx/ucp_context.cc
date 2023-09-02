@@ -135,28 +135,23 @@ err:
 
   bool UCPWorker::progress()
   {
-    // first release some rdesc (persistent UCX buffers) if there are any
-    std::vector<void*> am_rdesc;
-    int c = rdesc_rel_max;
-    am_rdesc.reserve(c);
-    if (am_rdesc_q_mutex.trylock()) {
-      while (c-- && !am_rdesc_q.empty()) {
-        am_rdesc.push_back(am_rdesc_q.front());
-        am_rdesc_q.pop();
+    if (type == WORKER_RX) {
+      // rx workers should first release some rdesc (persistent UCX buffers)
+      if (am_rdesc_q_spinlock.trylock()) {
+        int c = rdesc_rel_max;
+        while (c-- && !am_rdesc_q.empty()) {
+          ucp_am_data_release(worker, am_rdesc_q.front());
+          am_rdesc_q.pop();
+        }
+        am_rdesc_q_spinlock.unlock();
       }
-      am_rdesc_q_mutex.unlock();
+    } else {
+      // tx workers should yield to submitters for a few tries
+      if (scount.load() > pcount.load() && prog_boff_count++ < prog_boff_max) {
+        return true;
+      }
+      prog_boff_count = 0;
     }
-    while (!am_rdesc.empty()) {
-      ucp_am_data_release(worker, am_rdesc.back());
-      am_rdesc.pop_back();
-    }
-
-    // yield to submitters for a few tries
-    if (scount.load() > pcount.load() && prog_boff_count++ < prog_boff_max) {
-      return true;
-    }
-
-    prog_boff_count = 0;
 
     return use_wakeup ? progress_with_wakeup()
                       : progress_without_wakeup();
@@ -167,6 +162,8 @@ err:
   {
     ucp_am_handler_param_t param;
     ucs_status_t status;
+
+    assert(type == WORKER_RX);
 
     param.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID |
                        UCP_AM_HANDLER_PARAM_FIELD_CB |
@@ -183,7 +180,8 @@ err:
 
   void UCPWorker::return_am_rdesc(void *rdesc)
   {
-    AutoLock<> al(am_rdesc_q_mutex);
+    assert(type == WORKER_RX);
+    AutoLock<SpinLock> al(am_rdesc_q_spinlock);
     am_rdesc_q.push(rdesc);
   }
 
@@ -195,13 +193,14 @@ err:
     ucp_request_param_t param;
     ucs_status_ptr_t status_ptr;
 
+    assert(type == WORKER_TX);
+
     param.op_attr_mask = UCP_OP_ATTR_FLAG_FORCE_IMM_CMPL |
                          UCP_OP_ATTR_FIELD_MEMORY_TYPE   |
                          UCP_OP_ATTR_FIELD_FLAGS;
 
     param.memory_type  = memtype;
-    param.flags        = UCP_AM_SEND_FLAG_COPY_HEADER |
-                         UCP_AM_SEND_FLAG_REPLY;
+    param.flags        = UCP_AM_SEND_FLAG_COPY_HEADER;
 
     scount.fetch_add_acqrel(1);
     status_ptr = ucp_am_send_nbx(ep, am_id,
@@ -216,6 +215,8 @@ err:
     ucp_request_param_t param;
     ucs_status_ptr_t status_ptr;
 
+    assert(type == WORKER_TX);
+
     param.op_attr_mask = UCP_OP_ATTR_FIELD_REQUEST     |
                          UCP_OP_ATTR_FIELD_CALLBACK    |
                          UCP_OP_ATTR_FIELD_USER_DATA   |
@@ -225,14 +226,13 @@ err:
     param.cb.send      = req->cb,
     param.user_data    = req->args,
     param.memory_type  = req->memtype,
-    param.flags        = req->flags |
-                         UCP_AM_SEND_FLAG_COPY_HEADER |
-                         UCP_AM_SEND_FLAG_REPLY;
+    param.flags        = req->flags;
 
     scount.fetch_add_acqrel(1);
 
     switch (req->op_type) {
       case AM_SEND:
+        param.flags |= UCP_AM_SEND_FLAG_COPY_HEADER;
         status_ptr = ucp_am_send_nbx(req->ep, req->am.id,
             req->am.header, req->am.header_size,
             req->payload, req->payload_size, &param);
@@ -269,7 +269,7 @@ err:
     return false;
   }
 
-  UCPWorker::UCPWorker(const UCPContext *context_,
+  UCPWorker::UCPWorker(const UCPContext *context_, Type type_,
       size_t am_alignment_, bool use_wakeup_,
       unsigned prog_boff_max_, int prog_itr_max_, int rdesc_rel_max_,
       ucs_thread_mode_t thread_mode_,
@@ -278,6 +278,7 @@ err:
       size_t pbuf_max_count_, size_t pbuf_init_count_,
       size_t mmp_max_obj_size_, bool leak_check_)
     : context(context_)
+    , type(type_)
     , ucp_req_size(context->get_ucp_req_size())
     , am_alignment(am_alignment_)
     , use_wakeup(use_wakeup_)
@@ -500,7 +501,7 @@ err:
     char *buf;
 
     {
-      AutoLock<> al(req_mp_mutex);
+      AutoLock<SpinLock> al(req_mp_spinlock);
       buf = reinterpret_cast<char*>(request_mp->get());
     }
     if (!buf) return nullptr;
@@ -511,7 +512,7 @@ err:
   void UCPWorker::request_release(void *req)
   {
     char *buf = reinterpret_cast<char*>(req) - ucp_req_size;
-    AutoLock<> al(req_mp_mutex);
+    AutoLock<SpinLock> al(req_mp_spinlock);
     MPool::put(buf);
   }
 
@@ -519,25 +520,25 @@ err:
   {
     assert(size <= pbuf_max_size);
 
-    AutoLock<> al(pbuf_mp_mutex);
+    AutoLock<SpinLock> al(pbuf_mp_spinlock);
     return pbuf_mp->get();
   }
 
   void UCPWorker::pbuf_release(void *buf)
   {
-    AutoLock<> al(pbuf_mp_mutex);
+    AutoLock<SpinLock> al(pbuf_mp_spinlock);
     MPool::put(buf);
   }
 
   void *UCPWorker::mmp_get(size_t size)
   {
-    AutoLock<> al(mmp_mutex);
+    AutoLock<SpinLock> al(mmp_spinlock);
     return mmp->get(size);
   }
 
   void UCPWorker::mmp_release(void *buf)
   {
-    AutoLock<> al(mmp_mutex);
+    AutoLock<SpinLock> al(mmp_spinlock);
     VMPool::put(buf);
   }
 
@@ -591,7 +592,7 @@ err:
     ucp_params.features          = UCP_FEATURE_AM  |
                                    UCP_FEATURE_RMA |
                                    UCP_FEATURE_WAKEUP;
-    ucp_params.mt_workers_shared = 0; // We use only one worker for now.
+    ucp_params.mt_workers_shared = 1;
 
     if (ep_nums_est != -1) {
       ucp_params.field_mask |= UCP_PARAM_FIELD_ESTIMATED_NUM_EPS;

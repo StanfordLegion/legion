@@ -11664,6 +11664,8 @@ class GraphPrinter(object):
             for i in xrange(len(requirements)):
                 req = requirements[i]
                 region_name = req.logical_node.html_safe_name
+                if req.projection_function:
+                    region_name += " - Proj "+str(req.projection_function.pid)
                 line = [str(i), region_name, req.get_privilege_and_coherence()]
                 lines.append(line)
                 if detailed:
