@@ -12530,7 +12530,7 @@ namespace Legion {
         // tree from us to do the shutdown
         Realm::ProfilingRequestSet empty_requests;
         AddressSpaceID start = address_space * legion_collective_radix + 1;
-        for (unsigned idx = 0; idx < legion_collective_radix; idx++)
+        for (int idx = 0; idx < legion_collective_radix; idx++)
         {
           AddressSpaceID next = start + idx;
           if (total_address_spaces <= next)
