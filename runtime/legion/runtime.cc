@@ -8788,9 +8788,9 @@ namespace Legion {
         {
           log_shutdown.info("SHUTDOWN SUCCEEDED!");
           std::vector<RtEvent> shutdown_events;
+          Realm::ProfilingRequestSet empty_requests;
           if (runtime->separate_runtime_instances)
           {
-            Realm::ProfilingRequestSet empty_requests;
             Machine::ProcessorQuery all_procs(Machine::get_machine());
             for (Machine::ProcessorQuery::iterator it = all_procs.begin();
                   it != all_procs.end(); it++)
@@ -8799,8 +8799,9 @@ namespace Legion {
           }
           else
           {
-            runtime->finalize_runtime(shutdown_events);
-            delete runtime;
+            const Processor utility_group = runtime->find_utility_group();
+            shutdown_events.push_back(RtEvent(utility_group.spawn(
+                    LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
           }
           // One last really crazy precondition on shutdown, we actually need to
           // make sure that this task itself is done executing before trying to
