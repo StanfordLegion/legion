@@ -2755,7 +2755,7 @@ namespace Legion {
           size_t size, bool withargs, bool global, bool preregistered,
           bool deduplicate, size_t dedup_tag);
       void broadcast_startup_barrier(RtBarrier startup_barrier);
-      void finalize_runtime(void);
+      void finalize_runtime(std::vector<RtEvent> &shutdown_events);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
                                  const UntypedBuffer &arg, MapperID map_id);
@@ -4017,7 +4017,6 @@ namespace Legion {
       void confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
                                     bool phase_one);
       void prepare_runtime_shutdown(void);
-      void finalize_runtime_shutdown(int exit_code);
     public:
       bool has_outstanding_tasks(void);
 #ifdef DEBUG_LEGION
