@@ -84,6 +84,23 @@ namespace Realm {
 					   const void *user_data, size_t user_data_len,
 					   Processor proc, CUstream_st *stream);
 
+    // basic information about a CUDA-capable processor can be queried by
+    //  processor ID
+    struct CudaDeviceInfo {
+      static const size_t UUID_SIZE = 16; // bytes
+      static const size_t MAX_NAME_LENGTH = 64;
+
+      uint8_t uuid[UUID_SIZE];
+      char name[MAX_NAME_LENGTH];  // always null-terminated
+      int driver_version; // (1000 * major + 10 * minor), just like CUDA
+      int compute_capability; // (10 * major + minor)
+    };
+
+    // fill in `info` according to CUDA-capable device associated with processor
+    //  `p` if available and returns true, or returns false if processor is unknown,
+    //  not associated with a CUDA-capable device, or information is unavailable
+    bool get_cuda_device_info(Processor p, CudaDeviceInfo *info);
+
     class GPU;
     class GPUWorker;
     struct GPUInfo;

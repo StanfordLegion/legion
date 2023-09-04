@@ -73,6 +73,21 @@ namespace Realm {
 
       size_t get_address_space_count(void) const;
 
+      // get information about the OS process in which tasks for a given
+      //  processor run - note that the uniqueness of any/all of the provided
+      //  information depends on the underlying OS and any container runtimes
+      struct ProcessInfo {
+	static const size_t MAX_HOSTNAME_LENGTH = 64;
+	char hostname[MAX_HOSTNAME_LENGTH];  // always null-terminated
+	uint64_t hostid;  // gethostid on posix, ??? on windows
+	uint32_t processid;
+      };
+
+      // populates the `info` struct with information about the processor `p`'s
+      //  containing process, returning true if successful, false if the
+      //  processor is unknown or the information is unavailable
+      bool get_process_info(Processor p, ProcessInfo *info) const;
+
     public:
       struct ProcessorMemoryAffinity {
         Processor p;        // accessing processor

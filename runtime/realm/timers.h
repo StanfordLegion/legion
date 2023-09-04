@@ -71,6 +71,10 @@ namespace Realm {
     static void calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
                           uint64_t force_cpu_tsc_freq);
 
+    // return the accumulated realm timer error since calibration (in nanoseconds,
+    //  positive indicates realm timer is faster) relative to system clock
+    static long long get_calibration_error();
+
     class TimescaleConverter {
     public:
       // defaults to identity conversion
