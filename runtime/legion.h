@@ -4812,6 +4812,40 @@ namespace Legion {
                                     const Domain &launch_domain);
 
       /**
+       * This method will be invoked on functional projection functors
+       * for projecting from an upper bound logical region when the
+       * the corresponding region requirement has projection arguments
+       * associated with it.
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @param args pointer to the buffer of arguments
+       * @param size size of the buffer of arguments in bytes
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain,
+                                    const void *args, size_t size);
+
+      /**
+       * This method will be invoked on functional projection functors
+       * for projecting from an upper bound logical partition when the
+       * the corresponding region requirement has projection arguments
+       * associated with it.
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @param args pointer to the buffer of arguments
+       * @param size size of the buffer of arguments in bytes
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain,
+                                    const void *args, size_t size);
+
+      /**
        * @deprecated
        * Compute the projection for a logical region projection
        * requirement down to a specific logical region.

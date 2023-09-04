@@ -2318,9 +2318,11 @@ namespace Legion {
                           const RegionRequirement &req, 
                           Runtime *runtime, const Domain &launch_domain,
                           const std::vector<ProjectionPoint*> &points);
+#if 0
       // Projection for refinements
       void project_refinement(IndexSpaceNode *domain, RegionTreeNode *node,
                               std::vector<RegionNode*> &regions) const;
+#endif
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(LogicalRegion upper_bound,

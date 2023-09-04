@@ -3909,9 +3909,8 @@ namespace Legion {
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
     }
 
@@ -3920,10 +3919,27 @@ namespace Legion {
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
     }
 
     //--------------------------------------------------------------------------
