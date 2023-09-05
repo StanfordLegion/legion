@@ -4,9 +4,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "osdep.h"
 #include "realm.h"
 #include "realm/cmdline.h"
-#include "osdep.h"
 
 #ifdef ENABLE_DIRECT_TEST
 #include "realm/cuda/cuda_internal.h"
@@ -21,15 +21,13 @@ using namespace Realm::Cuda;
 Logger log_app("app");
 
 // Task IDs, some IDs are reserved so start at first available number
-enum
-{
+enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   COPYPROF_TASK,
   DYNAMIC_TASK_START,
 };
 
-enum
-{
+enum {
   FID_PTR1 = 100,
   FID_DATA1 = 200,
   FID_DATA2,
@@ -37,8 +35,7 @@ enum
   FID_RANGE2,
 };
 
-enum
-{
+enum {
   SERDEZ_WRAP_FLOAT = 444,
 };
 
@@ -54,16 +51,14 @@ struct WrappingSerdez {
 
   static size_t serialized_size(const T &val) { return MAX_SERIALIZED_SIZE; }
 
-  static size_t serialize(const T &val, void *buffer)
-  {
+  static size_t serialize(const T &val, void *buffer) {
     size_t size = sizeof(T);
     memcpy(buffer, &size, sizeof(size_t));
     memcpy(static_cast<char *>(buffer) + sizeof(size_t), &val, sizeof(T));
     return MAX_SERIALIZED_SIZE;
   }
 
-  static size_t deserialize(T &val, const void *buffer)
-  {
+  static size_t deserialize(T &val, const void *buffer) {
     size_t size;
     memcpy(&size, buffer, sizeof(size_t));
     assert(size == sizeof(T));
@@ -80,14 +75,14 @@ struct CopyProfResult {
 };
 
 void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
-                         size_t userlen, Processor p)
-{
+                         size_t userlen, Processor p) {
   ProfilingResponse resp(args, arglen);
   assert(resp.user_data_size() == sizeof(CopyProfResult));
-  const CopyProfResult *result = static_cast<const CopyProfResult *>(resp.user_data());
+  const CopyProfResult *result =
+      static_cast<const CopyProfResult *>(resp.user_data());
 
   ProfilingMeasurements::OperationTimeline timeline;
-  if(resp.get_measurement(timeline)) {
+  if (resp.get_measurement(timeline)) {
     *(result->nanoseconds) = timeline.complete_time - timeline.start_time;
     result->done.trigger();
   } else {
@@ -99,22 +94,22 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
 static const size_t MAX_TEST_DIM = 3;
 
 namespace TestConfig {
-  size_t cuda_grid_x = 1;
-  size_t sizes1[MAX_TEST_DIM];
-  size_t sizes2[MAX_TEST_DIM];
-  // size_t size1 = 64 << 1;
-  // size_t size2 = 64 << 1;
-  size_t pieces1 = 1;
-  size_t pieces2 = 1;
-  bool skipfirst = false;
-  bool splitcopies = false;
-  bool do_scatter = true;
-  bool do_direct = false;
-  bool verbose = false;
-  bool verify = true;
-  bool ind_on_gpu = true;
-  bool remote_gather = false;
-}; // namespace TestConfig
+size_t cuda_grid_x = 1;
+size_t sizes1[MAX_TEST_DIM];
+size_t sizes2[MAX_TEST_DIM];
+// size_t size1 = 64 << 1;
+// size_t size2 = 64 << 1;
+size_t pieces1 = 1;
+size_t pieces2 = 1;
+bool skipfirst = false;
+bool splitcopies = false;
+bool do_scatter = true;
+bool do_direct = false;
+bool verbose = false;
+bool verify = true;
+bool ind_on_gpu = true;
+bool remote_gather = false;
+};  // namespace TestConfig
 
 struct SpeedTestArgs {
   Memory mem;
@@ -130,40 +125,31 @@ typedef std::map<FieldID, size_t> FieldMap;
 //  (e.g. due to aliased scatters)
 template <typename T>
 class Maybe {
-public:
-  Maybe()
-    : valid(false)
-  {}
-  Maybe(T _val)
-    : valid(true)
-    , value(_val)
-  {}
+ public:
+  Maybe() : valid(false) {}
+  Maybe(T _val) : valid(true), value(_val) {}
   bool has_value() const { return valid; }
-  T get_value() const
-  {
+  T get_value() const {
     assert(valid);
     return value;
   }
 
-protected:
+ protected:
   bool valid;
   T value;
 };
 
 template <int N, typename T, typename DT>
 void dump_instance(RegionInstance inst, FieldID fid, const IndexSpace<N, T> &is,
-                   size_t row_size)
-{
-  if(!TestConfig::verbose)
-    return;
+                   size_t row_size) {
+  if (!TestConfig::verbose) return;
   size_t i = 0;
   GenericAccessor<DT, N, T> acc(inst, fid);
-  for(IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
-    for(PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
+  for (IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
+    for (PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
       DT v = acc[it2.p];
 
-      if((i++) % (row_size + 1) == 0)
-        std::cout << std::endl;
+      if ((i++) % (row_size + 1) == 0) std::cout << std::endl;
       std::cout << it2.p << ": " << v << " ";
     }
     std::cout << "\n";
@@ -172,13 +158,14 @@ void dump_instance(RegionInstance inst, FieldID fid, const IndexSpace<N, T> &is,
 
 template <int N, typename T>
 class DistributedData {
-public:
+ public:
   static const int _N = N;
   typedef T _T;
 
   ~DistributedData();
 
-  void add_subspaces(IndexSpace<N, T> is, size_t count, size_t num_subrects = 1);
+  void add_subspaces(IndexSpace<N, T> is, size_t count,
+                     size_t num_subrects = 1);
   void add_subspaces(const std::vector<IndexSpace<N, T>> &subspaces);
 
   template <typename LAMBDA>
@@ -192,20 +179,22 @@ public:
 
   template <typename FT, typename SRC>
   Event gather(IndexSpace<N, T> is, FieldID ptr_id, DistributedData<N, T> &ind,
-               const SRC &src, FieldID src_id, FieldID dst_id, bool oor_possible,
-               bool aliasing_possible, CustomSerdezID serdez_id, Event wait_on,
-               Processor p, TransposeExperiment<N> *exp);
+               const SRC &src, FieldID src_id, FieldID dst_id,
+               bool oor_possible, bool aliasing_possible,
+               CustomSerdezID serdez_id, Event wait_on, Processor p,
+               TransposeExperiment<N> *exp);
 
   template <typename FT, typename DST>
-  Event scatter(IndexSpace<N, T> is, FieldID ptr_id, DistributedData<N, T> &ind, DST &dst,
-                FieldID src_id, FieldID dst_id, bool oor_possible, bool aliasing_possible,
-                CustomSerdezID serdez_id, Event wait_on, Processor p,
-                TransposeExperiment<N> *exp) const;
+  Event scatter(IndexSpace<N, T> is, FieldID ptr_id, DistributedData<N, T> &ind,
+                DST &dst, FieldID src_id, FieldID dst_id, bool oor_possible,
+                bool aliasing_possible, CustomSerdezID serdez_id, Event wait_on,
+                Processor p, TransposeExperiment<N> *exp) const;
 
 #ifdef ENABLE_DIRECT_TEST
   template <typename FT, typename DST>
-  Event direct_scatter(IndexSpace<N, T> is, FieldID ptr_id, DistributedData<N, T> &ind,
-                       DST &dst, FieldID src_id, FieldID dst_id, bool oor_possible,
+  Event direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
+                       DistributedData<N, T> &ind, DST &dst, FieldID src_id,
+                       FieldID dst_id, bool oor_possible,
                        bool aliasing_possible, CustomSerdezID serdez_id,
                        Event wait_on) const;
 #endif
@@ -213,7 +202,7 @@ public:
   template <typename FT>
   bool verify(IndexSpace<N, T> is, FieldID fid, Event wait_on);
 
-protected:
+ protected:
   template <int N2, typename T2>
   friend class DistributedData;
 
@@ -237,19 +226,18 @@ protected:
 };
 
 template <int N, typename T>
-DistributedData<N, T>::~DistributedData()
-{
-  for(typename std::map<FieldID, RefDataEntry>::const_iterator it = ref_data.begin();
-      it != ref_data.end(); ++it)
+DistributedData<N, T>::~DistributedData() {
+  for (typename std::map<FieldID, RefDataEntry>::const_iterator it =
+           ref_data.begin();
+       it != ref_data.end(); ++it)
     (it->second.deleter)(it->second.data);
   ref_data.clear();
 }
 
 template <int N, typename T>
 void DistributedData<N, T>::add_subspaces(IndexSpace<N, T> is, size_t count,
-                                          size_t num_subrects)
-{
-  if(count == 1) {
+                                          size_t num_subrects) {
+  if (count == 1) {
     size_t idx = pieces.size();
     pieces.resize(idx + 1);
     pieces[idx].space = is;
@@ -261,24 +249,25 @@ void DistributedData<N, T>::add_subspaces(IndexSpace<N, T> is, size_t count,
                               index_spaces, ProfilingRequestSet())
         .wait();
     std::vector<Rect<N, T>> subrects;
-    for(size_t i = 0; i < num_subrects; i++) {
+    for (size_t i = 0; i < num_subrects; i++) {
       subrects.push_back(index_spaces[i].bounds);
     }
     pieces[idx].subrects = subrects;
 
   } else {
     std::vector<IndexSpace<N, T>> subspaces;
-    is.create_equal_subspaces(count, 1, subspaces, ProfilingRequestSet()).wait();
+    is.create_equal_subspaces(count, 1, subspaces, ProfilingRequestSet())
+        .wait();
     add_subspaces(subspaces);
   }
 }
 
 template <int N, typename T>
-void DistributedData<N, T>::add_subspaces(const std::vector<IndexSpace<N, T>> &subspaces)
-{
+void DistributedData<N, T>::add_subspaces(
+    const std::vector<IndexSpace<N, T>> &subspaces) {
   size_t base = pieces.size();
   pieces.resize(base + subspaces.size());
-  for(size_t i = 0; i < subspaces.size(); i++) {
+  for (size_t i = 0; i < subspaces.size(); i++) {
     pieces[base + i].space = subspaces[i];
     pieces[base + i].proc = Processor::NO_PROC;
     pieces[base + i].inst = RegionInstance::NO_INST;
@@ -289,10 +278,9 @@ template <int N, typename T>
 template <typename LAMBDA>
 Event DistributedData<N, T>::create_instances(const FieldMap &fields,
                                               LAMBDA mem_picker, int offset,
-                                              bool inverse)
-{
+                                              bool inverse) {
   std::vector<Event> events;
-  for(size_t i = 0; i < pieces.size(); i++) {
+  for (size_t i = 0; i < pieces.size(); i++) {
     Memory m = mem_picker(i + offset, pieces[i].space);
     Processor p = Machine::ProcessorQuery(Machine::get_machine())
                       .only_kind(Processor::LOC_PROC)
@@ -301,7 +289,7 @@ Event DistributedData<N, T>::create_instances(const FieldMap &fields,
 
     // if no processor has affinity, at least pick one in same address space
     Memory cpu_mem = Memory::NO_MEMORY;
-    if(!p.exists()) {
+    if (!p.exists()) {
       p = Machine::ProcessorQuery(Machine::get_machine())
               .only_kind(Processor::LOC_PROC)
               .same_address_space_as(m)
@@ -319,23 +307,24 @@ Event DistributedData<N, T>::create_instances(const FieldMap &fields,
 
     {
       int dim_order[N];
-      for(int i = 0; i < N; i++) {
+      for (int i = 0; i < N; i++) {
         dim_order[i] = i;
         // dim_order[inverse ? i : N - i - 1] = i;
       }
       InstanceLayoutConstraints ilc(fields, 1);
-      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
-          pieces[i].space, pieces[i].subrects, ilc, dim_order);
+      InstanceLayoutGeneric *ilg =
+          InstanceLayoutGeneric::choose_instance_layout<N, T>(
+              pieces[i].space, pieces[i].subrects, ilc, dim_order);
 
-      Event e =
-          RegionInstance::create_instance(pieces[i].inst, m, ilg, ProfilingRequestSet());
+      Event e = RegionInstance::create_instance(pieces[i].inst, m, ilg,
+                                                ProfilingRequestSet());
       events.push_back(e);
     }
 
-    if(cpu_mem.exists()) {
-      Event e =
-          RegionInstance::create_instance(pieces[i].cpu_inst, cpu_mem, pieces[i].space,
-                                          fields, 0 /* SOA */, ProfilingRequestSet());
+    if (cpu_mem.exists()) {
+      Event e = RegionInstance::create_instance(
+          pieces[i].cpu_inst, cpu_mem, pieces[i].space, fields, 0 /* SOA */,
+          ProfilingRequestSet());
       events.push_back(e);
     } else
       pieces[i].cpu_inst = RegionInstance::NO_INST;
@@ -344,13 +333,12 @@ Event DistributedData<N, T>::create_instances(const FieldMap &fields,
 }
 
 template <int N, typename T>
-void DistributedData<N, T>::destroy_instances(Event wait_on)
-{
-  for(typename std::vector<Piece>::iterator it = pieces.begin(); it != pieces.end();
-      ++it) {
+void DistributedData<N, T>::destroy_instances(Event wait_on) {
+  for (typename std::vector<Piece>::iterator it = pieces.begin();
+       it != pieces.end(); ++it) {
     it->inst.destroy(wait_on);
     it->inst = RegionInstance::NO_INST;
-    if(it->cpu_inst.exists()) {
+    if (it->cpu_inst.exists()) {
       it->cpu_inst.destroy(wait_on);
       it->cpu_inst = RegionInstance::NO_INST;
     }
@@ -359,20 +347,22 @@ void DistributedData<N, T>::destroy_instances(Event wait_on)
 }
 
 template <typename T>
-static void delete_object(void *obj)
-{
+static void delete_object(void *obj) {
   delete reinterpret_cast<T *>(obj);
 }
 
 template <int N, typename T>
 template <typename FT>
-std::map<Point<N, T>, Maybe<FT>> &DistributedData<N, T>::get_ref_data(FieldID field_id)
-{
-  typename std::map<FieldID, RefDataEntry>::const_iterator it = ref_data.find(field_id);
-  if(it != ref_data.end()) {
-    return *reinterpret_cast<std::map<Point<N, T>, Maybe<FT>> *>(it->second.data);
+std::map<Point<N, T>, Maybe<FT>> &DistributedData<N, T>::get_ref_data(
+    FieldID field_id) {
+  typename std::map<FieldID, RefDataEntry>::const_iterator it =
+      ref_data.find(field_id);
+  if (it != ref_data.end()) {
+    return *reinterpret_cast<std::map<Point<N, T>, Maybe<FT>> *>(
+        it->second.data);
   } else {
-    std::map<Point<N, T>, Maybe<FT>> *newmap = new std::map<Point<N, T>, Maybe<FT>>;
+    std::map<Point<N, T>, Maybe<FT>> *newmap =
+        new std::map<Point<N, T>, Maybe<FT>>;
     RefDataEntry &e = ref_data[field_id];
     e.data = reinterpret_cast<void *>(newmap);
     e.deleter = &delete_object<std::map<Point<N, T>, Maybe<FT>>>;
@@ -382,40 +372,38 @@ std::map<Point<N, T>, Maybe<FT>> &DistributedData<N, T>::get_ref_data(FieldID fi
 
 template <int N, typename T>
 template <typename FT>
-const std::map<Point<N, T>, Maybe<FT>> &
-DistributedData<N, T>::get_ref_data(FieldID field_id) const
-{
-  typename std::map<FieldID, RefDataEntry>::const_iterator it = ref_data.find(field_id);
+const std::map<Point<N, T>, Maybe<FT>> &DistributedData<N, T>::get_ref_data(
+    FieldID field_id) const {
+  typename std::map<FieldID, RefDataEntry>::const_iterator it =
+      ref_data.find(field_id);
   assert(it != ref_data.end());
-  return *reinterpret_cast<const std::map<Point<N, T>, Maybe<FT>> *>(it->second.data);
+  return *reinterpret_cast<const std::map<Point<N, T>, Maybe<FT>> *>(
+      it->second.data);
 }
 
 template <int N, typename T, typename FT, typename LAMBDA>
 class FillerTask {
-public:
+ public:
   struct Args {
-    Args(LAMBDA _filler)
-      : filler(_filler)
-    {}
+    Args(LAMBDA _filler) : filler(_filler) {}
     IndexSpace<N, T> space;
     RegionInstance inst;
     FieldID field_id;
     LAMBDA filler;
   };
 
-  static void task_body(const void *argdata, size_t arglen, const void *userdata,
-                        size_t userlen, Processor p)
-  {
+  static void task_body(const void *argdata, size_t arglen,
+                        const void *userdata, size_t userlen, Processor p) {
     assert(sizeof(Args) == arglen);
     const Args &args = *reinterpret_cast<const Args *>(argdata);
-    //log_app.info() << "filler: is=" << args.space << " inst=" << args.inst;
+    // log_app.info() << "filler: is=" << args.space << " inst=" << args.inst;
 
     args.inst.fetch_metadata(p).wait();
     AffineAccessor<FT, N, T> acc(args.inst, args.field_id);
     IndexSpaceIterator<N, T> it(args.space);
-    while(it.valid) {
+    while (it.valid) {
       PointInRectIterator<N, T> pit(it.rect);
-      while(pit.valid) {
+      while (pit.valid) {
         FT val = args.filler(pit.p);
         log_app.debug() << "  [" << pit.p << "] = " << val;
         acc[pit.p] = val;
@@ -430,12 +418,11 @@ Processor::TaskFuncID next_func_id = DYNAMIC_TASK_START;
 std::map<const char *, Processor::TaskFuncID> task_ids;
 
 template <typename T>
-static Processor::TaskFuncID lookup_task_id()
-{
+static Processor::TaskFuncID lookup_task_id() {
   const char *key = typeid(T).name();
-  std::map<const char *, Processor::TaskFuncID>::const_iterator it = task_ids.find(key);
-  if(it != task_ids.end())
-    return it->second;
+  std::map<const char *, Processor::TaskFuncID>::const_iterator it =
+      task_ids.find(key);
+  if (it != task_ids.end()) return it->second;
 
   Processor::TaskFuncID id = next_func_id++;
   Event e = Processor::register_task_by_kind(
@@ -454,24 +441,25 @@ static Processor::TaskFuncID lookup_task_id()
 
 template <int N, typename T>
 template <typename FT, typename LAMBDA>
-Event DistributedData<N, T>::fill(IndexSpace<N, T> is, FieldID fid, LAMBDA filler,
-                                  Event wait_on)
-{
+Event DistributedData<N, T>::fill(IndexSpace<N, T> is, FieldID fid,
+                                  LAMBDA filler, Event wait_on) {
   typename FillerTask<N, T, FT, LAMBDA>::Args args(filler);
   args.field_id = fid;
   Processor::TaskFuncID id = lookup_task_id<FillerTask<N, T, FT, LAMBDA>>();
   std::vector<Event> events;
-  for(typename std::vector<Piece>::iterator it = pieces.begin(); it != pieces.end();
-      ++it) {
+  for (typename std::vector<Piece>::iterator it = pieces.begin();
+       it != pieces.end(); ++it) {
     IndexSpace<N, T> isect;
-    IndexSpace<N, T>::compute_intersection(is, it->space, isect, ProfilingRequestSet())
+    IndexSpace<N, T>::compute_intersection(is, it->space, isect,
+                                           ProfilingRequestSet())
         .wait();
     args.space = isect;
     args.inst = it->cpu_inst.exists() ? it->cpu_inst : it->inst;
-    Event e = it->proc.spawn(id, &args, sizeof(args), ProfilingRequestSet(), wait_on);
+    Event e =
+        it->proc.spawn(id, &args, sizeof(args), ProfilingRequestSet(), wait_on);
 
     // do a copy if we're using a proxy cpu instance
-    if(it->cpu_inst.exists()) {
+    if (it->cpu_inst.exists()) {
       std::vector<CopySrcDstField> srcs(1), dsts(1);
       srcs[0].set_field(it->cpu_inst, fid, sizeof(FT));
       dsts[0].set_field(it->inst, fid, sizeof(FT));
@@ -484,9 +472,9 @@ Event DistributedData<N, T>::fill(IndexSpace<N, T> is, FieldID fid, LAMBDA fille
   // update reference data
   std::map<Point<N, T>, Maybe<FT>> &ref = get_ref_data<FT>(fid);
   IndexSpaceIterator<N, T> it(is);
-  while(it.valid) {
+  while (it.valid) {
     PointInRectIterator<N, T> pit(it.rect);
-    while(pit.valid) {
+    while (pit.valid) {
       ref[pit.p] = filler(pit.p);
       pit.step();
     }
@@ -501,18 +489,16 @@ Event DistributedData<N, T>::fill(IndexSpace<N, T> is, FieldID fid, LAMBDA fille
 // gather-scatter.
 template <int N, typename T>
 template <typename FT, typename DST>
-Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
-                                            DistributedData<N, T> &ind, DST &dst,
-                                            FieldID src_id, FieldID dst_id,
-                                            bool oor_possible, bool aliasing_possible,
-                                            CustomSerdezID serdez_id, Event wait_on) const
-{
+Event DistributedData<N, T>::direct_scatter(
+    IndexSpace<N, T> is, FieldID ptr_id, DistributedData<N, T> &ind, DST &dst,
+    FieldID src_id, FieldID dst_id, bool oor_possible, bool aliasing_possible,
+    CustomSerdezID serdez_id, Event wait_on) const {
   std::vector<Event> events;
-  for(typename std::vector<Piece>::const_iterator it = pieces.begin(); it != pieces.end();
-      ++it) {
-    for(typename std::vector<typename DST::Piece>::const_iterator it2 =
-            dst.pieces.begin();
-        it2 != dst.pieces.end(); ++it2) {
+  for (typename std::vector<Piece>::const_iterator it = pieces.begin();
+       it != pieces.end(); ++it) {
+    for (typename std::vector<typename DST::Piece>::const_iterator it2 =
+             dst.pieces.begin();
+         it2 != dst.pieces.end(); ++it2) {
       RuntimeImpl *rt = Realm::get_runtime();
       auto module = rt->get_module<Realm::Cuda::CudaModule>("cuda");
       // Just suppport a single GPU test for now.
@@ -530,7 +516,8 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
           piece_list.find_piece(Point<DST::_N, typename DST::_T>::ZEROES());
 
       const AffineLayoutPiece<DST::_N, typename DST::_T> *affine =
-          static_cast<const AffineLayoutPiece<DST::_N, typename DST::_T> *>(layout_piece);
+          static_cast<const AffineLayoutPiece<DST::_N, typename DST::_T> *>(
+              layout_piece);
 
       Realm::Cuda::MemcpyUnstructuredInfo<DST::_N> copy_info = {};
 
@@ -540,7 +527,8 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
         count *= copy_info.dst.strides[i - 1];
       }
       copy_info.volume = is.volume();
-      copy_info.src.addr = reinterpret_cast<uintptr_t>(it->inst.pointer_untyped(0, 0));
+      copy_info.src.addr =
+          reinterpret_cast<uintptr_t>(it->inst.pointer_untyped(0, 0));
 
       assert(ind.pieces.size() == 1);
       copy_info.src_ind = 0;
@@ -558,8 +546,8 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
 
       auto gpu = module->gpus[0];
       CUfunction memcpy_fn = 0;
-      CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&memcpy_fn, gpu->device_module,
-                                                      kernel_name));
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(
+          &memcpy_fn, gpu->device_module, kernel_name));
 
       void *params[] = {&copy_info};
       size_t threads_per_block = 256;
@@ -569,15 +557,15 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
       CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxActiveBlocksPerMultiprocessor)(
           &blocks_per_grid, memcpy_fn, threads_per_block, 0));
 
-      blocks_per_grid =
-          std::min(blocks_per_grid,
-                   (int)((is.volume() + threads_per_block - 1) / threads_per_block));
+      blocks_per_grid = std::min(
+          blocks_per_grid,
+          (int)((is.volume() + threads_per_block - 1) / threads_per_block));
 
       auto stream = gpu->get_next_d2d_stream()->get_stream();
 
-      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(memcpy_fn, blocks_per_grid, 1, 1,
-                                                 threads_per_block, 1, 1, 0, stream,
-                                                 params, 0));
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(memcpy_fn, blocks_per_grid, 1,
+                                                 1, threads_per_block, 1, 1, 0,
+                                                 stream, params, 0));
 
       CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream));
 
@@ -585,11 +573,11 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
 
       dump_instance<N, T, FT>(it->inst, FID_DATA1, is, is.bounds.hi[0]);
 
-      dump_instance<N, T, Point<DST::_N, typename DST::_T>>(ind.pieces[0].inst, ptr_id,
-                                                            is, is.bounds.hi[0]);
+      dump_instance<N, T, Point<DST::_N, typename DST::_T>>(
+          ind.pieces[0].inst, ptr_id, is, is.bounds.hi[0]);
 
-      dump_instance<DST::_N, typename DST::_T, FT>(it2->inst, FID_DATA1, it2->space,
-                                                   it2->space.bounds.hi[0]);
+      dump_instance<DST::_N, typename DST::_T, FT>(
+          it2->inst, FID_DATA1, it2->space, it2->space.bounds.hi[0]);
     }
   }
 
@@ -602,16 +590,16 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
   std::map<Point<DST::_N, typename DST::_T>, Maybe<FT>> &dstref =
       dst.template get_ref_data<FT>(dst_id);
 
-  std::set<Point<DST::_N, typename DST::_T>> touched; // to detect aliasing
-                                                      //
+  std::set<Point<DST::_N, typename DST::_T>> touched;  // to detect aliasing
+                                                       //
   IndexSpaceIterator<N, T> it(is);
 
-  while(it.valid) {
+  while (it.valid) {
     PointInRectIterator<N, T> pit(it.rect);
-    while(pit.valid) {
+    while (pit.valid) {
       Point<DST::_N, typename DST::_T> p2 = ptrref.at(pit.p).get_value();
-      if(dstref.count(p2) > 0) {
-        if(touched.count(p2) > 0) {
+      if (dstref.count(p2) > 0) {
+        if (touched.count(p2) > 0) {
           assert(aliasing_possible);
           dstref[p2] = Maybe<FT>();
         } else {
@@ -619,7 +607,7 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
           touched.insert(p2);
         }
       } else
-        assert(oor_possible); // make sure we didn't lie to Realm
+        assert(oor_possible);  // make sure we didn't lie to Realm
       pit.step();
     }
     it.step();
@@ -631,20 +619,22 @@ Event DistributedData<N, T>::direct_scatter(IndexSpace<N, T> is, FieldID ptr_id,
 template <int N, typename T>
 template <typename FT, typename DST>
 Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id,
-                                     DistributedData<N, T> &ind, DST &dst, FieldID src_id,
-                                     FieldID dst_id, bool oor_possible,
-                                     bool aliasing_possible, CustomSerdezID serdez_id,
-                                     Event wait_on, Processor p,
-                                     TransposeExperiment<N> *exp) const
-{
+                                     DistributedData<N, T> &ind, DST &dst,
+                                     FieldID src_id, FieldID dst_id,
+                                     bool oor_possible, bool aliasing_possible,
+                                     CustomSerdezID serdez_id, Event wait_on,
+                                     Processor p,
+                                     TransposeExperiment<N> *exp) const {
   std::vector<Event> events;
-  for(typename std::vector<Piece>::const_iterator it = pieces.begin(); it != pieces.end();
-      ++it) {
+  for (typename std::vector<Piece>::const_iterator it = pieces.begin();
+       it != pieces.end(); ++it) {
     IndexSpace<N, T> isect;
-    IndexSpace<N, T>::compute_intersection(is, it->space, isect, ProfilingRequestSet())
+    IndexSpace<N, T>::compute_intersection(is, it->space, isect,
+                                           ProfilingRequestSet())
         .wait();
 
-    typename CopyIndirection<N, T>::template Unstructured<DST::_N, typename DST::_T>
+    typename CopyIndirection<N, T>::template Unstructured<DST::_N,
+                                                          typename DST::_T>
         indirect;
     indirect.field_id = ptr_id;
     indirect.inst = ind.pieces[0].inst;
@@ -659,14 +649,14 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id,
     dsts.resize(1);
     srcs[0].set_field(it->inst, src_id, sizeof(FT));
     dsts[0].set_indirect(0, dst_id, sizeof(FT));
-    if(serdez_id != 0) {
+    if (serdez_id != 0) {
       srcs[0].set_serdez(serdez_id);
       dsts[0].set_serdez(serdez_id);
     }
 
-    for(typename std::vector<typename DST::Piece>::const_iterator it2 =
-            dst.pieces.begin();
-        it2 != dst.pieces.end(); ++it2) {
+    for (typename std::vector<typename DST::Piece>::const_iterator it2 =
+             dst.pieces.begin();
+         it2 != dst.pieces.end(); ++it2) {
       indirect.spaces.push_back(it2->space);
       indirect.insts.push_back(it2->inst);
     }
@@ -684,19 +674,20 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id,
     prs.add_request(p, COPYPROF_TASK, &cpr, sizeof(CopyProfResult))
         .add_measurement<ProfilingMeasurements::OperationTimeline>();
 
-    Event e =
-        is.copy(srcs, dsts,
-                std::vector<const typename CopyIndirection<N, T>::Base *>(1, &indirect),
-                prs, wait_on);
+    Event e = is.copy(
+        srcs, dsts,
+        std::vector<const typename CopyIndirection<N, T>::Base *>(1, &indirect),
+        prs, wait_on);
     e.wait();
 
     dump_instance<N, T, FT>(it->inst, FID_DATA1, is, is.bounds.hi[0]);
 
-    dump_instance<N, T, Point<DST::_N, typename DST::_T>>(ind.pieces[0].inst, ptr_id, is,
-                                                          is.bounds.hi[0]);
+    dump_instance<N, T, Point<DST::_N, typename DST::_T>>(
+        ind.pieces[0].inst, ptr_id, is, is.bounds.hi[0]);
 
-    dump_instance<DST::_N, typename DST::_T, FT>(indirect.insts[0], FID_DATA1,
-                                                 indirect.spaces[0], indirect.spaces[0].bounds.hi[0]);
+    dump_instance<DST::_N, typename DST::_T, FT>(
+        indirect.insts[0], FID_DATA1, indirect.spaces[0],
+        indirect.spaces[0].bounds.hi[0]);
     // indirect.spaces[0].bounds.hi[DST::_N-1]);
   }
 
@@ -709,14 +700,14 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id,
   std::map<Point<DST::_N, typename DST::_T>, Maybe<FT>> &dstref =
       dst.template get_ref_data<FT>(dst_id);
 
-  std::set<Point<DST::_N, typename DST::_T>> touched; // to detect aliasing
+  std::set<Point<DST::_N, typename DST::_T>> touched;  // to detect aliasing
   IndexSpaceIterator<N, T> it(is);
-  while(it.valid) {
+  while (it.valid) {
     PointInRectIterator<N, T> pit(it.rect);
-    while(pit.valid) {
+    while (pit.valid) {
       Point<DST::_N, typename DST::_T> p2 = ptrref.at(pit.p).get_value();
-      if(dstref.count(p2) > 0) {
-        if(touched.count(p2) > 0) {
+      if (dstref.count(p2) > 0) {
+        if (touched.count(p2) > 0) {
           assert(aliasing_possible);
           dstref[p2] = Maybe<FT>();
         } else {
@@ -724,7 +715,7 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id,
           touched.insert(p2);
         }
       } else
-        assert(oor_possible); // make sure we didn't lie to Realm
+        assert(oor_possible);  // make sure we didn't lie to Realm
       pit.step();
     }
     it.step();
@@ -737,19 +728,20 @@ template <int N, typename T>
 template <typename FT, typename SRC>
 Event DistributedData<N, T>::gather(IndexSpace<N, T> is, FieldID ptr_id,
                                     DistributedData<N, T> &ind, const SRC &src,
-                                    FieldID src_id, FieldID dst_id, bool oor_possible,
-                                    bool aliasing_possible, CustomSerdezID serdez_id,
-                                    Event wait_on, Processor p,
-                                    TransposeExperiment<N> *exp)
-{
+                                    FieldID src_id, FieldID dst_id,
+                                    bool oor_possible, bool aliasing_possible,
+                                    CustomSerdezID serdez_id, Event wait_on,
+                                    Processor p, TransposeExperiment<N> *exp) {
   std::vector<Event> events;
-  for(typename std::vector<Piece>::const_iterator it = pieces.begin(); it != pieces.end();
-      ++it) {
+  for (typename std::vector<Piece>::const_iterator it = pieces.begin();
+       it != pieces.end(); ++it) {
     IndexSpace<N, T> isect;
-    IndexSpace<N, T>::compute_intersection(is, it->space, isect, ProfilingRequestSet())
+    IndexSpace<N, T>::compute_intersection(is, it->space, isect,
+                                           ProfilingRequestSet())
         .wait();
 
-    typename CopyIndirection<N, T>::template Unstructured<SRC::_N, typename SRC::_T>
+    typename CopyIndirection<N, T>::template Unstructured<SRC::_N,
+                                                          typename SRC::_T>
         indirect;
     indirect.field_id = ptr_id;
     indirect.inst = ind.pieces[0].inst;
@@ -764,14 +756,14 @@ Event DistributedData<N, T>::gather(IndexSpace<N, T> is, FieldID ptr_id,
     dsts.resize(1);
     srcs[0].set_indirect(0, src_id, sizeof(FT));
     dsts[0].set_field(it->inst, dst_id, sizeof(FT));
-    if(serdez_id != 0) {
+    if (serdez_id != 0) {
       srcs[0].set_serdez(serdez_id);
       dsts[0].set_serdez(serdez_id);
     }
 
-    for(typename std::vector<typename SRC::Piece>::const_iterator it2 =
-            src.pieces.begin();
-        it2 != src.pieces.end(); ++it2) {
+    for (typename std::vector<typename SRC::Piece>::const_iterator it2 =
+             src.pieces.begin();
+         it2 != src.pieces.end(); ++it2) {
       indirect.spaces.push_back(it2->space);
       indirect.insts.push_back(it2->inst);
     }
@@ -789,19 +781,19 @@ Event DistributedData<N, T>::gather(IndexSpace<N, T> is, FieldID ptr_id,
     prs.add_request(p, COPYPROF_TASK, &cpr, sizeof(CopyProfResult))
         .add_measurement<ProfilingMeasurements::OperationTimeline>();
 
-    Event e =
-        is.copy(srcs, dsts,
-                std::vector<const typename CopyIndirection<N, T>::Base *>(1, &indirect),
-                prs, wait_on);
+    Event e = is.copy(
+        srcs, dsts,
+        std::vector<const typename CopyIndirection<N, T>::Base *>(1, &indirect),
+        prs, wait_on);
     e.wait();
 
     dump_instance<N, T, FT>(it->inst, FID_DATA1, is, is.bounds.hi[0]);
 
-    dump_instance<N, T, Point<SRC::_N, typename SRC::_T>>(ind.pieces[0].inst, ptr_id, is,
-                                                          is.bounds.hi[0]);
+    dump_instance<N, T, Point<SRC::_N, typename SRC::_T>>(
+        ind.pieces[0].inst, ptr_id, is, is.bounds.hi[0]);
 
-    dump_instance<SRC::_N, typename SRC::_T, FT>(indirect.insts[0], FID_DATA1,
-                                                 indirect.spaces[0], is.bounds.hi[0]);
+    dump_instance<SRC::_N, typename SRC::_T, FT>(
+        indirect.insts[0], FID_DATA1, indirect.spaces[0], is.bounds.hi[0]);
   }
 
   // update reference data
@@ -814,11 +806,11 @@ Event DistributedData<N, T>::gather(IndexSpace<N, T> is, FieldID ptr_id,
   std::map<Point<N, T>, Maybe<FT>> &dstref = get_ref_data<FT>(dst_id);
 
   IndexSpaceIterator<N, T> it(is);
-  while(it.valid) {
+  while (it.valid) {
     PointInRectIterator<N, T> pit(it.rect);
-    while(pit.valid) {
+    while (pit.valid) {
       Point<SRC::_N, typename SRC::_T> p2 = ptrref.at(pit.p).get_value();
-      if(srcref.count(p2) > 0) {
+      if (srcref.count(p2) > 0) {
         dstref[pit.p] = srcref.at(p2);
       } else
         assert(oor_possible);
@@ -832,25 +824,25 @@ Event DistributedData<N, T>::gather(IndexSpace<N, T> is, FieldID ptr_id,
 
 template <int N, typename T>
 template <typename FT>
-bool DistributedData<N, T>::verify(IndexSpace<N, T> is, FieldID fid, Event wait_on)
-{
-  if(!TestConfig::verify)
-    return true;
+bool DistributedData<N, T>::verify(IndexSpace<N, T> is, FieldID fid,
+                                   Event wait_on) {
+  if (!TestConfig::verify) return true;
   wait_on.wait();
 
   const std::map<Point<N, T>, Maybe<FT>> &ref = get_ref_data<FT>(fid);
 
   int errors = 0;
-  for(typename std::vector<Piece>::iterator it = pieces.begin(); it != pieces.end();
-      ++it) {
+  for (typename std::vector<Piece>::iterator it = pieces.begin();
+       it != pieces.end(); ++it) {
     IndexSpace<N, T> isect;
-    IndexSpace<N, T>::compute_intersection(is, it->space, isect, ProfilingRequestSet())
+    IndexSpace<N, T>::compute_intersection(is, it->space, isect,
+                                           ProfilingRequestSet())
         .wait();
 
     AffineAccessor<FT, N, T> acc;
     RegionInstance tmp_inst = RegionInstance::NO_INST;
-    if(Machine::get_machine().has_affinity(Processor::get_executing_processor(),
-                                           it->inst.get_location())) {
+    if (Machine::get_machine().has_affinity(
+            Processor::get_executing_processor(), it->inst.get_location())) {
       // good, access this instance directly
       acc.reset(it->inst, fid);
     } else {
@@ -858,7 +850,7 @@ bool DistributedData<N, T>::verify(IndexSpace<N, T> is, FieldID fid, Event wait_
       Memory m = Machine::MemoryQuery(Machine::get_machine())
                      .has_affinity_to(Processor::get_executing_processor())
                      .has_capacity(1)
-                     .first(); // TODO: best!
+                     .first();  // TODO: best!
       assert(m.exists());
       std::map<FieldID, size_t> tmp_fields;
       tmp_fields[fid] = sizeof(FT);
@@ -877,31 +869,31 @@ bool DistributedData<N, T>::verify(IndexSpace<N, T> is, FieldID fid, Event wait_
     }
 
     IndexSpaceIterator<N, T> iit(isect);
-    while(iit.valid) {
+    while (iit.valid) {
       PointInRectIterator<N, T> pit(iit.rect);
-      while(pit.valid) {
+      while (pit.valid) {
         Maybe<FT> exp = ref.at(pit.p);
         FT act = acc[pit.p];
-        if(exp.has_value()) {
-          if(exp.get_value() == act) {
+        if (exp.has_value()) {
+          if (exp.get_value() == act) {
             // good
-            log_app.debug() << "  match at [" << pit.p << "]: exp=" << exp.get_value()
-                            << " act=" << act;
+            log_app.debug() << "  match at [" << pit.p
+                            << "]: exp=" << exp.get_value() << " act=" << act;
           } else {
-            if(errors++ < 10)
+            if (errors++ < 10)
               log_app.error() << "  mismatch at [" << pit.p
                               << "]: exp=" << exp.get_value() << " act=" << act;
           }
         } else {
-          log_app.debug() << "  cannot check at [" << pit.p << "]: exp=??? act=" << act;
+          log_app.debug() << "  cannot check at [" << pit.p
+                          << "]: exp=??? act=" << act;
         }
         pit.step();
       }
       iit.step();
     }
 
-    if(tmp_inst.exists())
-      tmp_inst.destroy();
+    if (tmp_inst.exists()) tmp_inst.destroy();
   }
 
   return (errors == 0);
@@ -909,31 +901,27 @@ bool DistributedData<N, T>::verify(IndexSpace<N, T> is, FieldID fid, Event wait_
 
 template <int N, typename T>
 class RoundRobinPicker {
-public:
+ public:
   RoundRobinPicker(const std::vector<Memory> &_memories, bool _reverse = false)
-    : memories(_memories)
-    , reverse(_reverse)
-  {}
-  Memory operator()(size_t i, IndexSpace<N, T> is)
-  {
-    if(reverse)
+      : memories(_memories), reverse(_reverse) {}
+  Memory operator()(size_t i, IndexSpace<N, T> is) {
+    if (reverse)
       return memories[memories.size() - 1 - (i % memories.size())];
     else {
       return memories[i % memories.size()];
     }
   }
 
-protected:
+ protected:
   const std::vector<Memory> &memories;
   bool reverse;
 };
 
 template <int N, typename T, typename DT>
-void dump_field(RegionInstance inst, FieldID fid, IndexSpace<N, T> is)
-{
+void dump_field(RegionInstance inst, FieldID fid, IndexSpace<N, T> is) {
   AffineAccessor<DT, N, T> acc(inst, fid);
-  for(IndexSpaceIterator<N, T> it(is); it.valid; it.step())
-    for(PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
+  for (IndexSpaceIterator<N, T> it(is); it.valid; it.step())
+    for (PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
       DT v = acc[it2.p];
       std::cout << it2.p << ": " << v << "\n";
     }
@@ -944,9 +932,7 @@ struct Pad {
   T val;
   char padding[BYTES - sizeof(T)];
   Pad() {}
-  Pad(T _val)
-    : val(_val)
-  {}
+  Pad(T _val) : val(_val) {}
   operator T() const { return val; }
 };
 
@@ -954,8 +940,7 @@ template <typename T, size_t BYTES>
 std::ostream &operator<<(std::ostream &, const Pad<T, BYTES> &);
 
 template <typename T, size_t BYTES>
-std::ostream &operator<<(std::ostream &os, const Pad<T, BYTES> &pad)
-{
+std::ostream &operator<<(std::ostream &os, const Pad<T, BYTES> &pad) {
   os << pad.val;
   return os;
 }
@@ -967,18 +952,15 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
                          bool inverse = true) {
   Rect<N, T> r1;
   Rect<N2, T2> r2;
-  for(int i = 0; i < N; i++)
-    r1.lo[i] = 0;
-  for(int i = 0; i < N; i++)
-    r1.hi[i] = TestConfig::sizes1[i] - 1;
-  for(int i = 0; i < N2; i++)
-    r2.lo[i] = 0;
-  for(int i = 0; i < N2; i++) {
+  for (int i = 0; i < N; i++) r1.lo[i] = 0;
+  for (int i = 0; i < N; i++) r1.hi[i] = TestConfig::sizes1[i] - 1;
+  for (int i = 0; i < N2; i++) r2.lo[i] = 0;
+  for (int i = 0; i < N2; i++) {
     r2.hi[i] = TestConfig::sizes2[i] - 1;
   }
 
-  log_app.info() << "Run testcase for N=" << N << " N2=" << N2 << " src_bounds=" << r1
-                 << " dst_bounds=" << r2;
+  log_app.info() << "Run testcase for N=" << N << " N2=" << N2
+                 << " src_bounds=" << r1 << " dst_bounds=" << r2;
 
   IndexSpace<N, T> is1(r1);
   IndexSpace<N2, T2> is2(r2);
@@ -997,7 +979,9 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
 
   DistributedData<N, T> region1;
   region1.add_subspaces(is1, pieces1);
-  region1.create_instances(fields1, RoundRobinPicker<N, T>(gpu_mems), /*offset=*/TestConfig::remote_gather ? 0 : 1)
+  region1
+      .create_instances(fields1, RoundRobinPicker<N, T>(gpu_mems),
+                        /*offset=*/TestConfig::remote_gather ? 0 : 1)
       .wait();
 
   DistributedData<N, T> region_ind;
@@ -1031,7 +1015,8 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
 
   region1
       .template fill<DT>(
-          is1, FID_DATA1, [&](Point<N, T> p) -> DT { return DT(p.x); }, Event::NO_EVENT)
+          is1, FID_DATA1, [&](Point<N, T> p) -> DT { return DT(p.x); },
+          Event::NO_EVENT)
       .wait();
 
   region2
@@ -1042,32 +1027,33 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
 
   TransposeExperiment<N> *exp = new TransposeExperiment<N>;
 
-  if(TestConfig::do_scatter && !TestConfig::do_direct) {
+  if (TestConfig::do_scatter && !TestConfig::do_direct) {
     region1
-        .template scatter<DT>(is1, FID_PTR1, region_ind, region2, FID_DATA1, FID_DATA1,
-                              false /*!oor_possible*/, true /*aliasing_possible*/,
-                              serdez_id, Event::NO_EVENT, p, exp)
+        .template scatter<DT>(is1, FID_PTR1, region_ind, region2, FID_DATA1,
+                              FID_DATA1, false /*!oor_possible*/,
+                              true /*aliasing_possible*/, serdez_id,
+                              Event::NO_EVENT, p, exp)
         .wait();
 
-    if(!region2.template verify<DT>(is2, FID_DATA1, Event::NO_EVENT))
+    if (!region2.template verify<DT>(is2, FID_DATA1, Event::NO_EVENT))
       return false;
   }
 
 #ifdef ENABLE_DIRECT_TEST
-  if(TestConfig::do_scatter && TestConfig::do_direct) {
+  if (TestConfig::do_scatter && TestConfig::do_direct) {
     region1
-        .template direct_scatter<DT>(is1, FID_PTR1, region_ind, region2, FID_DATA1,
-                                     FID_DATA1, false /*!oor_possible*/,
-                                     true /*aliasing_possible*/, serdez_id,
-                                     Event::NO_EVENT)
+        .template direct_scatter<DT>(
+            is1, FID_PTR1, region_ind, region2, FID_DATA1, FID_DATA1,
+            false /*!oor_possible*/, true /*aliasing_possible*/, serdez_id,
+            Event::NO_EVENT)
         .wait();
 
-    if(!region2.template verify<DT>(is2, FID_DATA1, Event::NO_EVENT))
+    if (!region2.template verify<DT>(is2, FID_DATA1, Event::NO_EVENT))
       return false;
   }
 #endif
 
-  if(!TestConfig::do_scatter && !TestConfig::do_direct) {
+  if (!TestConfig::do_scatter && !TestConfig::do_direct) {
     region1
         .template gather<DT>(is1, FID_PTR1, region_ind, region2, FID_DATA1,
                              FID_DATA1, false /*!oor_possible*/,
@@ -1075,7 +1061,7 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
                              Event::NO_EVENT, p, exp)
         .wait();
 
-    if(!region1.template verify<DT>(is1, FID_DATA1, Event::NO_EVENT))
+    if (!region1.template verify<DT>(is1, FID_DATA1, Event::NO_EVENT))
       return false;
 
     log_app.print() << "Exp Time=" << exp->nanoseconds;
@@ -1093,17 +1079,17 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
 
 std::set<Processor::Kind> supported_proc_kinds;
 
-void top_level_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
-                    Processor p)
-{
+void top_level_task(const void *args, size_t arglen, const void *userdata,
+                    size_t userlen, Processor p) {
   log_app.print() << "Realm scatter/gather test";
 
   std::vector<Memory> gpu_mems;
   Machine machine = Machine::get_machine();
-  for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin();
-      it; ++it) {
+  for (Machine::MemoryQuery::iterator it =
+           Machine::MemoryQuery(machine).begin();
+       it; ++it) {
     Memory m = *it;
-    if(!ID(m).is_ib_memory() && m.kind() == Memory::GPU_FB_MEM) {
+    if (!ID(m).is_ib_memory() && m.kind() == Memory::GPU_FB_MEM) {
       gpu_mems.push_back(m);
     }
   }
@@ -1116,35 +1102,34 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
 
   bool ok = true;
 
-  if(!scatter_gather_test<1, long long, 1, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
+  if (!scatter_gather_test<1, long long, 1, long long, int>(
+          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
     ok = false;
   }
 
-  if(!scatter_gather_test<1, long long, 2, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
+  if (!scatter_gather_test<1, long long, 2, long long, int>(
+          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
     ok = false;
   }
 
-  if(!scatter_gather_test<2, long long, 2, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
+  if (!scatter_gather_test<2, long long, 2, long long, int>(
+          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
     ok = false;
   }
 
- if(!scatter_gather_test<1, long long, 3, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
+  if (!scatter_gather_test<1, long long, 3, long long, int>(
+          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
     ok = false;
   }
 
-
-  if(!scatter_gather_test<3, long long, 3, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
+  if (!scatter_gather_test<3, long long, 3, long long, int>(
+          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
     ok = false;
   }
 
   typedef Pad<float, 70> BigFloat;
   if (!scatter_gather_test<3, long long, 3, long long, BigFloat>(
-           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
+          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
     ok = false;
   }
 
@@ -1158,17 +1143,15 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
                                   ok ? 0 : 1);
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
   Runtime rt;
 
   rt.init(&argc, &argv);
 
-  for(size_t i = 0; i < MAX_TEST_DIM; i++) {
+  for (size_t i = 0; i < MAX_TEST_DIM; i++) {
     TestConfig::sizes1[i] = 10;
-    TestConfig::sizes2[i] = TestConfig::sizes1[i];//* 2;
+    TestConfig::sizes2[i] = TestConfig::sizes1[i];  //* 2;
   }
- 
 
   CommandLineParser cp;
   // TODO(apryakhin@): Depreate some size options.
@@ -1195,9 +1178,9 @@ int main(int argc, char **argv)
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
 
-  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, COPYPROF_TASK,
-                                   CodeDescriptor(copy_profiling_task),
-                                   ProfilingRequestSet(), 0, 0)
+  Processor::register_task_by_kind(
+      Processor::LOC_PROC, false /*!global*/, COPYPROF_TASK,
+      CodeDescriptor(copy_profiling_task), ProfilingRequestSet(), 0, 0)
       .wait();
 
   rt.register_custom_serdez<WrappingSerdez<float>>(SERDEZ_WRAP_FLOAT);
