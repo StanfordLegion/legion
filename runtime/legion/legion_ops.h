@@ -268,7 +268,7 @@ namespace Legion {
         VIRTUAL_CLOSE_OP_KIND,
         RETURN_CLOSE_OP_KIND,
         REFINEMENT_OP_KIND,
-        ADVISEMENT_OP_KIND,
+        RESET_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -307,7 +307,7 @@ namespace Legion {
         "Virtual Close",            \
         "Return Close",             \
         "Refinement",               \
-        "Advisement",               \
+        "Reset",                    \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -2272,25 +2272,23 @@ namespace Legion {
     };
 
     /**
-     * \class AdvisementOp
-     * An advisement operation is an operation that goes through
-     * the execution pipeline for the sole purpose of generating
-     * refinement operations to alter the equivalence sets of a
-     * region tree.
+     * \class ResetOp
+     * A reset operation is an operation that goes through
+     * the execution pipeline for the sole purpose of reseting
+     * the equivalence sets of particular region in the region tree
+     * so that later operations can select new equivalence sets.
      */
-    class AdvisementOp : public Operation {
+    class ResetOp : public Operation {
     public:
-      AdvisementOp(Runtime *runtime);
-      AdvisementOp(const AdvisementOp &rhs);
-      virtual ~AdvisementOp(void);
+      ResetOp(Runtime *runtime);
+      ResetOp(const ResetOp &rhs) = delete;
+      virtual ~ResetOp(void);
     public:
-      AdvisementOp& operator=(const AdvisementOp &rhs);
+      ResetOp& operator=(const ResetOp &rhs) = delete;
     public:
       void initialize(InnerContext *ctx, LogicalRegion parent,
-                      const std::set<LogicalRegion> &regions,
-                      const std::set<LogicalPartition> &partitions,
-                      const std::set<FieldID> &fields, 
-                      ShardingFunction *function = NULL);
+                      LogicalRegion region,
+                      const std::set<FieldID> &fields);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2303,15 +2301,11 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
+    public:
+      void check_privilege(void);
     protected:
-      LogicalRegion parent;
-      std::vector<LogicalRegion> regions;
-      std::vector<LogicalPartition> partitions;
-      std::vector<FieldID> fields;
-      std::vector<unsigned> parent_indexes;
-      std::vector<RegionRequirement> requirements;
-      std::set<RtEvent> map_applied_conditions;
-      ShardingFunction *sharding_function;
+      RegionRequirement requirement;
+      unsigned parent_req_index;
     };
 
     /**

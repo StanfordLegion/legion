@@ -17143,7 +17143,7 @@ namespace Legion {
       free_available(available_post_close_ops);
       free_available(available_virtual_close_ops);
       free_available(available_refinement_ops);
-      free_available(available_advisement_ops);
+      free_available(available_reset_ops);
       free_available(available_dynamic_collective_ops);
       free_available(available_future_pred_ops);
       free_available(available_not_pred_ops);
@@ -17175,6 +17175,7 @@ namespace Legion {
       free_available(available_repl_merge_close_ops);
       free_available(available_repl_virtual_close_ops);
       free_available(available_repl_refinement_ops);
+      free_available(available_repl_reset_ops);
       free_available(available_repl_fill_ops);
       free_available(available_repl_index_fill_ops);
       free_available(available_repl_discard_ops);
@@ -27910,10 +27911,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AdvisementOp* Runtime::get_available_advisement_op(void)
+    ResetOp* Runtime::get_available_reset_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(advisement_op_lock, available_advisement_ops);
+      return get_available(reset_op_lock, available_reset_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28179,6 +28180,13 @@ namespace Legion {
     //-------------------------------------------------------------------------- 
     {
       return get_available(refinement_op_lock, available_repl_refinement_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplResetOp* Runtime::get_available_repl_reset_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(reset_op_lock, available_repl_reset_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28525,11 +28533,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_advisement_op(AdvisementOp *op)
+    void Runtime::free_reset_op(ResetOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock a_lock(advisement_op_lock);
-      release_operation<false>(available_advisement_ops, op);
+      AutoLock a_lock(reset_op_lock);
+      release_operation<false>(available_reset_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -28786,6 +28794,14 @@ namespace Legion {
     {
       AutoLock m_lock(refinement_op_lock);
       release_operation<false>(available_repl_refinement_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_reset_op(ReplResetOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(reset_op_lock);
+      release_operation<false>(available_repl_reset_ops, op);
     }
 
     //--------------------------------------------------------------------------

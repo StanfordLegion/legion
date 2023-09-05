@@ -1992,6 +1992,29 @@ namespace Legion {
     };
 
     /**
+     * \class ReplResetOp
+     * A reset operation that is aware it is being executed
+     * in a control replicated context
+     */
+    class ReplResetOp : public ResetOp {
+    public:
+      ReplResetOp(Runtime *runtime);
+      ReplResetOp(const ReplResetOp &rhs) = delete;
+      virtual ~ReplResetOp(void);
+    public:
+      ReplResetOp& operator=(const ReplResetOp &rhs) = delete;
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    protected:
+      RtBarrier reset_barrier;
+    };
+
+    /**
      * \class ReplFillOp
      * A copy operation that is aware that it is being
      * executed in a control replication context.

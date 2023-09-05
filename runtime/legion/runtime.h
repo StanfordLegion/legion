@@ -4090,7 +4090,7 @@ namespace Legion {
       PostCloseOp*          get_available_post_close_op(void);
       VirtualCloseOp*       get_available_virtual_close_op(void);
       RefinementOp*         get_available_refinement_op(void);
-      AdvisementOp*         get_available_advisement_op(void);
+      ResetOp*              get_available_reset_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
       FuturePredOp*         get_available_future_pred_op(void);
       NotPredOp*            get_available_not_pred_op(void);
@@ -4126,6 +4126,7 @@ namespace Legion {
       ReplMergeCloseOp*     get_available_repl_merge_close_op(void);
       ReplVirtualCloseOp*   get_available_repl_virtual_close_op(void);
       ReplRefinementOp*     get_available_repl_refinement_op(void);
+      ReplResetOp*          get_available_repl_reset_op(void);
       ReplFillOp*           get_available_repl_fill_op(void);
       ReplIndexFillOp*      get_available_repl_index_fill_op(void);
       ReplDiscardOp*        get_available_repl_discard_op(void);
@@ -4168,7 +4169,7 @@ namespace Legion {
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_refinement_op(RefinementOp *op);
-      void free_advisement_op(AdvisementOp *op);
+      void free_reset_op(ResetOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
       void free_future_predicate_op(FuturePredOp *op);
       void free_not_predicate_op(NotPredOp *op);
@@ -4204,6 +4205,7 @@ namespace Legion {
       void free_repl_merge_close_op(ReplMergeCloseOp *op);
       void free_repl_virtual_close_op(ReplVirtualCloseOp *op);
       void free_repl_refinement_op(ReplRefinementOp *op);
+      void free_repl_reset_op(ReplResetOp *op);
       void free_repl_fill_op(ReplFillOp *op);
       void free_repl_index_fill_op(ReplIndexFillOp *op);
       void free_repl_discard_op(ReplDiscardOp *op);
@@ -4576,7 +4578,7 @@ namespace Legion {
       mutable LocalLock post_close_op_lock;
       mutable LocalLock virtual_close_op_lock;
       mutable LocalLock refinement_op_lock;
-      mutable LocalLock advisement_op_lock;
+      mutable LocalLock reset_op_lock;
       mutable LocalLock dynamic_collective_op_lock;
       mutable LocalLock future_pred_op_lock;
       mutable LocalLock not_pred_op_lock;
@@ -4616,7 +4618,7 @@ namespace Legion {
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<RefinementOp*>         available_refinement_ops;
-      std::deque<AdvisementOp*>         available_advisement_ops;
+      std::deque<ResetOp*>              available_reset_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
       std::deque<FuturePredOp*>         available_future_pred_ops;
       std::deque<NotPredOp*>            available_not_pred_ops;
@@ -4652,6 +4654,7 @@ namespace Legion {
       std::deque<ReplMergeCloseOp*>     available_repl_merge_close_ops;
       std::deque<ReplVirtualCloseOp*>   available_repl_virtual_close_ops;
       std::deque<ReplRefinementOp*>     available_repl_refinement_ops;
+      std::deque<ReplResetOp*>          available_repl_reset_ops;
       std::deque<ReplFillOp*>           available_repl_fill_ops;
       std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
       std::deque<ReplDiscardOp*>        available_repl_discard_ops;

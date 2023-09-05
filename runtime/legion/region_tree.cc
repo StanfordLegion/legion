@@ -1638,8 +1638,11 @@ namespace Legion {
         // We also disallow refinements for operations that are part of
         // a must epoch launch because refinements are too hard to 
         // implement correctly in that case
+        // We also don't try to update refinements if we're doing a reset
+        // operation since that is an internal kind of operation
         if (!op->is_parent_nonexclusive_virtual_mapping(idx) &&
-            (op->get_must_epoch_op() == NULL))
+            (op->get_must_epoch_op() == NULL) &&
+            (op->get_operation_kind() != Operation::RESET_OP_KIND))
           refinement_mask = user_mask;
 #if 0
         FieldMask first_touch_refinement = user_mask;

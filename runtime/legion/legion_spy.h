@@ -603,10 +603,10 @@ namespace Legion {
         log_spy.print("Refinement Operation %llu %llu", context, unique_id);
       }
 
-      static inline void log_advisement_operation(UniqueID context,
-                                                  UniqueID unique_id)
+      static inline void log_reset_operation(UniqueID context,
+                                             UniqueID unique_id)
       {
-        log_spy.print("Advisement Operation %llu %llu", context, unique_id);
+        log_spy.print("Reset Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_internal_op_creator(UniqueID internal_op_id,

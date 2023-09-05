@@ -1890,7 +1890,7 @@ namespace Legion {
     class PostCloseOp;
     class VirtualCloseOp;
     class RefinementOp;
-    class AdvisementOp;
+    class ResetOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -2101,6 +2101,7 @@ namespace Legion {
     class ReplMergeCloseOp;
     class ReplVirtualCloseOp;
     class ReplRefinementOp;
+    class ReplResetOp;
     class ReplFillOp;
     class ReplIndexFillOp;
     class ReplDiscardOp;
@@ -2233,7 +2234,7 @@ namespace Legion {
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::RefinementOp;                    \
-    friend class Internal::AdvisementOp;                    \
+    friend class Internal::ResetOp;                         \
     friend class Internal::AcquireOp;                       \
     friend class Internal::ReleaseOp;                       \
     friend class Internal::PredicateImpl;                   \

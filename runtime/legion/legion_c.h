@@ -2106,15 +2106,12 @@ extern "C" {
    *
    * @see Legion::Runtime::advise_analysis_subtree()
    */
-  void legion_advise_analysis_subtree(legion_runtime_t runtime,
-                                      legion_context_t ctx,
-                                      legion_logical_region_t parent,
-                                      int num_regions,
-                                      legion_logical_region_t* regions,
-                                      int num_parts,
-                                      legion_logical_partition_t* partitions,
-                                      int num_fields,
-                                      legion_field_id_t* fields);
+  void legion_reset_equivalence_sets(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_logical_region_t parent,
+                                     legion_logical_region_t region,
+                                     int num_fields,
+                                     legion_field_id_t* fields);
 
   // -----------------------------------------------------------------------
   // Region Requirement Operations

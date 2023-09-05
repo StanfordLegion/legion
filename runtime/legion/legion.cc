@@ -5924,13 +5924,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::advise_analysis_subtree(Context ctx, LogicalRegion parent,
-                                        const std::set<LogicalRegion> &regions,
-                                        const std::set<LogicalPartition> &parts,
-                                        const std::set<FieldID> &fields)
+    void Runtime::reset_equivalence_sets(Context ctx, LogicalRegion parent,
+                                         LogicalRegion region,
+                                         const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
-      ctx->advise_analysis_subtree(parent, regions, parts, fields);
+      ctx->reset_equivalence_sets(parent, region, fields);
     }
 
     //--------------------------------------------------------------------------

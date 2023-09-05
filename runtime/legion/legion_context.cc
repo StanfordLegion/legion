@@ -6826,44 +6826,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::advise_analysis_subtree(LogicalRegion parent,
-                                   const std::set<LogicalRegion> &regions,
-                                   const std::set<LogicalPartition> &partitions,
-                                   const std::set<FieldID> &fields)
+    void InnerContext::reset_equivalence_sets(LogicalRegion parent,
+                                              LogicalRegion region,
+                                              const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Ignore advisement calls inside of traces
+      // Ignore reset calls inside of traces
       if ((current_trace != NULL) && current_trace->is_fixed())
       {
         REPORT_LEGION_WARNING(
-            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-            "Ignoring advised analysis subtree in %s (UID %lld) because "
-            "advisement was made inside of a trace.",
+            LEGION_WARNING_IGNORING_EQUIVALENCE_SETS_RESET,
+            "Ignoring equivalence sets reset in %s (UID %lld) because "
+            "it was made inside of a trace.",
             get_task_name(), get_unique_id())
         return;
       }
       if (fields.empty())
       {
         REPORT_LEGION_WARNING(
-            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-            "Ignoring advised analysis subtree in %s (UID %lld) because "
-            "advisement contains no fields.",
+            LEGION_WARNING_IGNORING_EQUIVALENCE_SETS_RESET,
+            "Ignoring equivalence sets reset in %s (UID %lld) because "
+            "it contains no fields.",
             get_task_name(), get_unique_id())
         return;
       }
-      if (regions.empty() && partitions.empty())
-      {
-        REPORT_LEGION_WARNING(
-            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-            "Ignoring advised analysis subtree in %s (UID %lld) because "
-            "advisement contains no regions and partitions.",
-            get_task_name(), get_unique_id())
-        return;
-      }
-      AdvisementOp *advisement = runtime->get_available_advisement_op();
-      advisement->initialize(this, parent, regions, partitions, fields);
-      add_to_dependence_queue(advisement);
+      ResetOp *reset = runtime->get_available_reset_op();
+      reset->initialize(this, parent, region, fields);
+      add_to_dependence_queue(reset);
     }
 
     //--------------------------------------------------------------------------
@@ -18183,10 +18173,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::advise_analysis_subtree(LogicalRegion parent,
-                                   const std::set<LogicalRegion> &regions,
-                                   const std::set<LogicalPartition> &partitions,
-                                   const std::set<FieldID> &fields)
+    void ReplicateContext::reset_equivalence_sets(LogicalRegion parent,
+                          LogicalRegion region, const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -18194,52 +18182,37 @@ namespace Legion {
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
-        hasher.hash(REPLICATE_ADVISE_ANALYSIS_SUBTREE, __func__);
+        hasher.hash(REPLICATE_RESET_EQUIVALENCE_SETS, __func__);
         hasher.hash(parent, "parent");
-        for (std::set<LogicalRegion>::const_iterator it =
-              regions.begin(); it != regions.end(); it++)
-          hasher.hash(*it, "regions");
-        for (std::set<LogicalPartition>::const_iterator it =
-              partitions.begin(); it != partitions.end(); it++)
-          hasher.hash(*it, "partitions");
+        hasher.hash(region, "region");
         for (std::set<FieldID>::const_iterator it =
               fields.begin(); it != fields.end(); it++)
           hasher.hash(*it, "fields");
         if (hasher.verify(__func__))
           break;
       }
-      // Ignore advisement calls inside of traces replays
+      // Ignore reset calls inside of traces replays
       if ((current_trace != NULL) && current_trace->is_fixed())
       {
         REPORT_LEGION_WARNING(
-            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-            "Ignoring advised analysis subtree in %s (UID %lld) because "
-            "advisement was made inside of a trace.",
+            LEGION_WARNING_IGNORING_EQUIVALENCE_SETS_RESET,
+            "Ignoring equivalence sets reset in %s (UID %lld) because "
+            "it was made inside of a trace.",
             get_task_name(), get_unique_id())
         return;
       }
       if (fields.empty())
       {
         REPORT_LEGION_WARNING(
-            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-            "Ignoring advised analysis subtree in %s (UID %lld) because "
-            "advisement contains no fields.",
+            LEGION_WARNING_IGNORING_EQUIVALENCE_SETS_RESET,
+            "Ignoring equivalence sets reset in %s (UID %lld) because "
+            "it contains no fields.",
             get_task_name(), get_unique_id())
         return;
       }
-      if (regions.empty() && partitions.empty())
-      {
-        REPORT_LEGION_WARNING(
-            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-            "Ignoring advised analysis subtree in %s (UID %lld) because "
-            "advisement contains no regions and partitions.",
-            get_task_name(), get_unique_id())
-        return;
-      }
-      AdvisementOp *advisement = runtime->get_available_advisement_op();
-      advisement->initialize(this, parent, regions, partitions, fields,
-          shard_manager->find_sharding_function(0/*default sharding*/));
-      add_to_dependence_queue(advisement);
+      ReplResetOp *reset = runtime->get_available_repl_reset_op();
+      reset->initialize(this, parent, region, fields);
+      add_to_dependence_queue(reset);
     }
 
     //--------------------------------------------------------------------------
@@ -25285,10 +25258,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::advise_analysis_subtree(LogicalRegion parent,
-                                   const std::set<LogicalRegion> &regions,
-                                   const std::set<LogicalPartition> &partitions,
-                                   const std::set<FieldID> &fields)
+    void LeafContext::reset_equivalence_sets(LogicalRegion parent,
+                                             LogicalRegion region,
+                                             const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       // No-op

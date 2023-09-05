@@ -12010,372 +12010,128 @@ namespace Legion {
 #endif
 
     /////////////////////////////////////////////////////////////
-    // Advisement Operation 
+    // Reset Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AdvisementOp::AdvisementOp(Runtime *runtime)
+    ResetOp::ResetOp(Runtime *runtime)
       : Operation(runtime)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    AdvisementOp::AdvisementOp(const AdvisementOp &rhs)
-      : Operation(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    AdvisementOp::~AdvisementOp(void)
+    ResetOp::~ResetOp(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    AdvisementOp& AdvisementOp::operator=(const AdvisementOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void AdvisementOp::initialize(InnerContext *ctx, LogicalRegion par,
-                                  const std::set<LogicalRegion> &regs,
-                                  const std::set<LogicalPartition> &parts,
-                                  const std::set<FieldID> &fids,
-                                  ShardingFunction *function)
+    void ResetOp::initialize(InnerContext *ctx, LogicalRegion parent,
+                             LogicalRegion region,const std::set<FieldID> &fids)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      parent = par;
-      sharding_function = function;
-      if (!regs.empty())
-        regions.insert(regions.end(), regs.begin(), regs.end());
-      if (!parts.empty())
-        partitions.insert(partitions.end(), parts.begin(), parts.end());
-      fields.insert(fields.end(), fids.begin(), fids.end());
+      requirement =
+        RegionRequirement(region, LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+      requirement.privilege_fields = fids;
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_advisement_operation(parent_ctx->get_unique_id(), 
-                                            unique_op_id);
+      {
+        LegionSpy::log_reset_operation(parent_ctx->get_unique_id(),
+                                       unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop, 
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fids);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::activate(void)
+    void ResetOp::activate(void)
     //--------------------------------------------------------------------------
     {
       Operation::activate();
-      parent = LogicalRegion::NO_REGION;
-      sharding_function = NULL;
+      parent_req_index = 0;
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::deactivate(bool freeop)
+    void ResetOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       Operation::deactivate(false/*free*/);
-      regions.clear();
-      partitions.clear();
-      fields.clear();
-      requirements.clear();
-      parent_indexes.clear();
-      map_applied_conditions.clear();
+      requirement.privilege_fields.clear();
       if (freeop)
-        runtime->free_advisement_op(this);
+        runtime->free_reset_op(this);
     }
 
     //--------------------------------------------------------------------------
-    const char* AdvisementOp::get_logging_name(void) const
+    const char* ResetOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
-      return op_names[ADVISEMENT_OP_KIND]; 
+      return op_names[RESET_OP_KIND]; 
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind AdvisementOp::get_operation_kind(void) const
+    Operation::OpKind ResetOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
-      return ADVISEMENT_OP_KIND;
+      return RESET_OP_KIND;
     }
 
     //--------------------------------------------------------------------------
-    size_t AdvisementOp::get_region_count(void) const
+    size_t ResetOp::get_region_count(void) const
     //--------------------------------------------------------------------------
     {
-      return (regions.size() + partitions.size());
+      return 1;
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::trigger_prepipeline_stage(void)
+    void ResetOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
-      RegionNode *root = runtime->forest->get_node(parent);
-      for (std::vector<FieldID>::iterator it = 
-            fields.begin(); it != fields.end(); /*nothing*/)
-      {
-        if (!root->column_source->has_field(*it))
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for field ID %d in task %s "
-              "(UID %lld) because it is not a memeber of field space %d",
-              *it, parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-              parent.get_field_space().get_id())
-          it = fields.erase(it);
-          if (fields.empty())
-            return;
-        }
-        else
-          it++;
-      }
-      std::vector<RegionNode*> region_nodes;
-      region_nodes.reserve(regions.size());
-      std::vector<PartitionNode*> part_nodes;
-      part_nodes.reserve(partitions.size());
-      std::map<PartitionNode*,std::set<RegionNode*> > observed_children;
-      for (std::vector<LogicalRegion>::const_iterator it =
-            regions.begin(); it != regions.end(); it++)
-      {
-        // Skip anything that is not in the same tree
-        if (parent.get_tree_id() != it->get_tree_id())
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for region (%d,%d,%d) "
-              "because it is not in parent region tree %d in %s (UID %lld)",
-              it->get_index_space().get_id(),
-              it->get_field_space().get_id(), it->get_tree_id(),
-              parent.get_tree_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-          continue;
-        }
-        RegionNode *node = runtime->forest->get_node(*it);
-        // Skip anything higher in the tree than the parent
-        if (node->row_source->depth <= root->row_source->depth)
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for region (%d,%d,%d) "
-              "because it is not a descendant of parent region (%d,%d,%d) "
-              "in %s (UID %lld)", it->get_index_space().get_id(),
-              it->get_field_space().get_id(), it->get_tree_id(),
-              parent.get_index_space().get_id(),
-              parent.get_field_space().get_id(), parent.get_tree_id(), 
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-          continue;
-        }
-        region_nodes.push_back(node);
-        while (node != root)
-        {
-          observed_children[node->parent].insert(node);
-          node = node->parent->parent;
-        }
-      }
-      for (std::vector<LogicalPartition>::const_iterator it =
-            partitions.begin(); it != partitions.end(); it++)
-      {
-        // Skip anything that is not in the same tree
-        if (parent.get_tree_id() != it->get_tree_id())
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
-              "because it is not in parent region tree %d in %s (UID %lld)",
-              it->get_index_partition().get_id(),
-              it->get_field_space().get_id(), it->get_tree_id(),
-              parent.get_tree_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-          continue;
-        }
-        PartitionNode *node = runtime->forest->get_node(*it);
-        // Skip anything higher in the tree than the parent
-        if (node->row_source->depth < root->row_source->depth)
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
-              "because it is not a descendant of parent region (%d,%d,%d) "
-              "in %s (UID %lld)", it->get_index_partition().get_id(),
-              it->get_field_space().get_id(), it->get_tree_id(),
-              parent.get_index_space().get_id(),
-              parent.get_field_space().get_id(), parent.get_tree_id(), 
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-          continue;
-        }
-        // Skip any partitions that are not disjoint
-        if (!node->row_source->is_disjoint(false/*from app*/))
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
-              "because it is not disjoint in %s (UID %lld)",
-              it->get_index_partition().get_id(),
-              it->get_field_space().get_id(), it->get_tree_id(),
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-          continue;
-        }
-        if (!node->row_source->is_complete(false/*from app*/))
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
-              "because it is not complete in %s (UID %lld)",
-              it->get_index_partition().get_id(),
-              it->get_field_space().get_id(), it->get_tree_id(),
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-          continue;
-        }
-        part_nodes.push_back(node);
-        RegionNode *region = node->parent;
-        // Record everything up the tree to see if we received
-        // a complete description of the tree
-        while (region != root)
-        {
-          node = region->parent;
-          observed_children[node].insert(region);
-          region = node->parent;
-        }
-      }
-      // Check to make sure that all the intermeidate partitions are
-      // disjoint and complete as well
-      for (std::map<PartitionNode*,std::set<RegionNode*> >::const_iterator it =
-            observed_children.begin(); it != observed_children.end(); it++)
-      {
-        if (!it->first->row_source->is_disjoint(false/*from app*/))
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis intermediate subtree for partition "
-              "(%d,%d,%d) because it is not disjoint in %s (UID %lld)",
-              it->first->handle.get_index_partition().get_id(),
-              it->first->handle.get_field_space().get_id(), 
-              it->first->handle.get_tree_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-          return;
-        }
-        if (!it->first->row_source->is_complete(false/*from app*/))
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis intermediate subtree for partition "
-              "(%d,%d,%d) because it is not complete in %s (UID %lld)",
-              it->first->handle.get_index_partition().get_id(),
-              it->first->handle.get_field_space().get_id(), 
-              it->first->handle.get_tree_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-          return;
-        }
-        if (it->second.size() != it->first->row_source->get_num_children())
-        {
-          REPORT_LEGION_WARNING(
-              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
-              "Ignoring advised analysis intermediate subtree for partition "
-              "(%d,%d,%d) because only %zd children of %zd where found in "
-              "%s (UID %lld)", it->first->handle.get_index_partition().get_id(),
-              it->first->handle.get_field_space().get_id(), 
-              it->first->handle.get_tree_id(), it->second.size(),
-              it->first->row_source->get_num_children(),
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-          return;
-        }
-      }
-      // Once we get here then we can make the region requirements
-      requirements.reserve(region_nodes.size() + part_nodes.size());
-      for (std::vector<RegionNode*>::const_iterator it =
-            region_nodes.begin(); it != region_nodes.end(); it++)
-        requirements.emplace_back(
-            RegionRequirement((*it)->handle, LEGION_READ_WRITE,
-              LEGION_EXCLUSIVE, parent));
-      for (std::vector<PartitionNode*>::const_iterator it =
-            part_nodes.begin(); it != part_nodes.end(); it++)
-        requirements.emplace_back(
-            RegionRequirement((*it)->handle, 0/*proj id*/,
-              LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent));
-      parent_indexes.resize(requirements.size());
-      for (unsigned idx = 0; idx < requirements.size(); idx++)
-      {
-        RegionRequirement &req = requirements[idx];
-        req.privilege_fields.insert(fields.begin(), fields.end());
-        int parent_index = parent_ctx->find_parent_region_req(req);
-        if (parent_index < 0)
-          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ADVISEMENT,
-              "Parent task %s (UID %lld) of advisement operation "
-              "(ID %lld) does not have a parent region requirement "
-              "associated with parent region (%d,%d,%d).",
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-              unique_op_id, parent.index_space.id, 
-              parent.field_space.id, parent.tree_id)
-        else
-          parent_indexes[idx] = unsigned(parent_index);
-      }
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+        REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ADVISEMENT,
+            "Parent task %s (UID %lld) of advisement operation "
+            "(ID %lld) does not have a parent region requirement "
+            "associated with parent region (%d,%d,%d).",
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+            unique_op_id, requirement.parent.index_space.id, 
+            requirement.parent.field_space.id, requirement.parent.tree_id)
+      parent_req_index = unsigned(parent_index);
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::trigger_dependence_analysis(void)
+    void ResetOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
       LogicalAnalysis logical_analysis(this);
-      for (unsigned idx = 0; idx < requirements.size(); idx++)
-      {
-        const RegionRequirement &req = requirements[idx];
-        // Check to see if this is a singular or projection requirement
-        if (req.handle_type == LEGION_PARTITION_PROJECTION)
-        {
-          PartitionNode *partition = runtime->forest->get_node(req.partition);
-          ProjectionInfo projection_info(runtime, req, 
-              partition->row_source->color_space, sharding_function);
-          runtime->forest->perform_dependence_analysis(this, idx, req,
-                                                       projection_info,
-                                                       logical_analysis);
-          if (runtime->legion_spy_enabled)
-          {
-            LegionSpy::log_logical_requirement(unique_op_id, idx, 
-                                               false/*region*/,
-                                               req.partition.index_partition.id,
-                                               req.partition.field_space.id,
-                                               req.partition.tree_id,
-                                               req.privilege,
-                                               req.prop, req.redop,
-                                               req.parent.index_space.id);
-            LegionSpy::log_requirement_fields(unique_op_id, idx, fields);
-            LegionSpy::log_requirement_projection(unique_op_id, idx, 
-                                                  req.projection);
-          }
-        }
-        else
-        {
 #ifdef DEBUG_LEGION
-          assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-          ProjectionInfo projection_info;
-          runtime->forest->perform_dependence_analysis(this, idx, req,
-                                                       projection_info,
-                                                       logical_analysis);
-          if (runtime->legion_spy_enabled)
-          {
-            LegionSpy::log_logical_requirement(unique_op_id, idx, 
-                                               true/*region*/,
-                                               req.region.index_space.id,
-                                               req.region.field_space.id,
-                                               req.region.tree_id,
-                                               req.privilege,
-                                               req.prop, req.redop,
-                                               req.parent.index_space.id);
-            LegionSpy::log_requirement_fields(unique_op_id, idx, fields);
-          }
-        }
-      }
+      ProjectionInfo projection_info;
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, requirement,
+                                                   projection_info,
+                                                   logical_analysis);
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::trigger_mapping(void)
+    void ResetOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      std::vector<RtEvent> map_applied_conditions;
+      RegionNode *node = runtime->forest->get_node(requirement.region);
+      FieldMask refinement_mask =
+        node->column_source->get_field_mask(requirement.privilege_fields);
+      parent_ctx->refine_equivalence_sets(parent_req_index,
+          requirement.parent.get_index_space(), node->row_source,
+          refinement_mask, map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -12384,13 +12140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned AdvisementOp::find_parent_index(unsigned idx)
+    unsigned ResetOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(idx < parent_indexes.size());
+      assert(idx == 0);
 #endif
-      return parent_indexes[idx];
+      return parent_req_index;
     }
 
     /////////////////////////////////////////////////////////////

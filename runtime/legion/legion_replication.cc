@@ -2573,6 +2573,84 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Reset Op
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplResetOp::ReplResetOp(Runtime *rt)
+      : ResetOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplResetOp::~ReplResetOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplResetOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      ResetOp::activate();
+      reset_barrier = RtBarrier::NO_RT_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplResetOp::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      ResetOp::deactivate(false/*free*/); 
+      if (freeop)
+        runtime->free_repl_reset_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplResetOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      reset_barrier = repl_ctx->get_next_collective_map_barriers(); 
+      ResetOp::trigger_dependence_analysis(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplResetOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(reset_barrier, 1/*count*/); 
+      const RtEvent precondition = reset_barrier;
+      Runtime::advance_barrier(reset_barrier);
+      enqueue_ready_operation(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplResetOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RtEvent> map_applied_conditions;
+      RegionNode *node = runtime->forest->get_node(requirement.region);
+      FieldMask refinement_mask =
+        node->column_source->get_field_mask(requirement.privilege_fields);
+      parent_ctx->refine_equivalence_sets(parent_req_index,
+          requirement.parent.get_index_space(), node->row_source,
+          refinement_mask, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        Runtime::phase_barrier_arrive(reset_barrier, 1/*count*/,
+            Runtime::merge_events(map_applied_conditions));
+      else
+        Runtime::phase_barrier_arrive(reset_barrier, 1/*count*/);
+      complete_mapping(reset_barrier);
+      complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl Fill Op 
     /////////////////////////////////////////////////////////////
 
