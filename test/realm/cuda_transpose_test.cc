@@ -103,7 +103,7 @@ namespace TestConfig {
   size_t max_perms = 10;
   unsigned random_seed = 12345; // used to sample permutations if needed
   bool wait_after = false;      // wait after each copy?
-  bool do_unit_test = false;
+  bool do_unit_test = true;
 };                              // namespace TestConfig
 
 template <int N, typename T, typename DT>
