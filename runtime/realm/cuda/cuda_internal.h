@@ -644,6 +644,10 @@ namespace Realm {
                                       size_t elemSize, size_t volume,
                                       GPUStream *stream);
 
+      void launch_indirect_copy_kernel(void *copy_info, size_t dim,
+                                       size_t addr_size, size_t field_size,
+                                       size_t volume, GPUStream *stream);
+
      protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -1045,6 +1049,95 @@ namespace Realm {
     private:
       std::vector<GPU *> src_gpus, dst_gpus;
       std::vector<bool> dst_is_ipc;
+    };
+
+    class GPUScatterGatherChannel;
+
+    class GPUScatterGatherXferDes : public XferDes {
+    public:
+      GPUScatterGatherXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
+                              XferDesID _guid,
+                              const std::vector<XferDesPortInfo> &inputs_info,
+                              const std::vector<XferDesPortInfo> &outputs_info,
+                              int _priority, XferDesRedopInfo _redop_info);
+
+      long get_requests(Request **requests, long nr);
+      bool progress_xd(GPUScatterGatherChannel *channel, TimeLimit work_until);
+
+    protected:
+      std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> dst_is_ipc;
+    };
+
+    class GPUScatterGatherChannel
+      : public SingleXDQChannel<GPUScatterGatherChannel, GPUScatterGatherXferDes> {
+    public:
+      GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,
+                              BackgroundWorkManager *bgwork);
+      ~GPUScatterGatherChannel();
+
+      // multi-threading of cuda copies for a given device is disabled by
+      //  default (can be re-enabled with -cuda:mtdma 1)
+      static const bool is_ordered = true;
+
+      virtual Memory suggest_ib_memories(Memory memory) const;
+
+      virtual RemoteChannelInfo *construct_remote_info() const;
+
+      virtual uint64_t
+      supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+                    CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+                    size_t total_bytes, const std::vector<size_t> *src_frags,
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
+                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node,
+                                       XferDesID guid,
+                                       const std::vector<XferDesPortInfo> &inputs_info,
+                                       const std::vector<XferDesPortInfo> &outputs_info,
+                                       int priority, XferDesRedopInfo redop_info,
+                                       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
+
+      long submit(Request **requests, long nr);
+
+    protected:
+      friend class GPUScatterGatherXferDes;
+      GPU *src_gpu;
+    };
+
+    class GPUScatterGatherRemoteChannelInfo : public SimpleRemoteChannelInfo {
+    public:
+      GPUScatterGatherRemoteChannelInfo(
+          NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+          const std::vector<Channel::SupportedPath> &_paths);
+
+      virtual RemoteChannel *create_remote_channel();
+
+      template <typename S>
+      bool serialize(S &serializer) const;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S &deserializer);
+
+    protected:
+      static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      GPUScatterGatherRemoteChannelInfo>
+          serdez_subclass;
+    };
+
+    class GPUScatterGatherRemoteChannel : public RemoteChannel {
+      friend class GPUScatterGatherRemoteChannelInfo;
+
+    public:
+      GPUScatterGatherRemoteChannel(uintptr_t _remote_ptr);
+      virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual uint64_t
+      supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+                    CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+                    size_t total_bytes, const std::vector<size_t> *src_frags,
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
+                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {

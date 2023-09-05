@@ -1102,6 +1102,8 @@ namespace Realm {
         return;
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
+      r->add_dma_channel(
+          new GPUScatterGatherChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
       r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
 
@@ -1117,6 +1119,8 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(
+            new GPUScatterGatherChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
       }
     }
 
@@ -2094,6 +2098,22 @@ namespace Realm {
       CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
                                                  num_threads, 1, 1, 0,
                                                  stream->get_stream(), args, NULL));
+    }
+
+    void GPU::launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
+                                          size_t field_size, size_t volume,
+                                          GPUStream *stream)
+    {
+      size_t log_field_size = std::min(static_cast<size_t>(ctz(field_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_field_size) <= field_size);
+      assert(dim <= CUDA_MAX_DIM);
+      assert(dim >= 1);
+
+      GPUFuncInfo &func_info = indirect_copy_kernels[dim - 1][log_field_size];
+
+      launch_kernel(func_info, copy_info, volume, stream);
     }
 
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,

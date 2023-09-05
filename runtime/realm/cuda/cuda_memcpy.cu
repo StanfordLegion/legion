@@ -116,6 +116,54 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
   }
 }
 
+/*
+ * Scatter/gather points using indirection from/to dense buffer.
+ * General assumptions:
+ * 1. The src_ind/dst_ind buffer is dense and always has the same size
+ * as the src/dst buffer (depending whether we are doing scatter or gather).
+ * 2. src_ind_/dst_ind are accessed in a linear fashion with the base
+ * type Point<N, Offset_t> per indirection element.
+ * 3. src_ind/dst_ind do not have to be sorted but it should be
+ * considered for coalesced access.
+ *
+ * TODO(apryakhin@): Consider handling ranges where src_ind/dst_ind
+ * contain Rect<N, Offset_t> instead of Point<N Offset_t>.
+ *
+ * */
+
+template <typename T, size_t N, typename Offset_t = size_t>
+static __device__ inline void
+memcpy_indirect_points(Realm::Cuda::MemcpyUnstructuredInfo<N> info)
+{
+  Offset_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+  __restrict__ Offset_t *dst_ind_base = reinterpret_cast<Offset_t *>(info.dst_ind);
+  __restrict__ Offset_t *src_ind_base = reinterpret_cast<Offset_t *>(info.src_ind);
+
+  Offset_t chunks = info.field_size / sizeof(T);
+  for(; offset < info.volume; offset += blockDim.x * gridDim.x) {
+    const Offset_t src_index =
+        info.src_ind ? coords_to_index<N, Offset_t>(&src_ind_base[offset * N],
+                                                    &info.src.strides[0])
+                     : offset;
+    Offset_t dst_index = info.dst_ind
+                             ? coords_to_index<N, Offset_t>(&dst_ind_base[offset * N],
+                                                            &info.dst.strides[0])
+                             : offset;
+
+    Realm::Cuda::AffineSubRect<N, Offset_t> src_rect;
+    Realm::Cuda::AffineSubRect<N, Offset_t> dst_rect;
+    src_rect.addr = info.src.addr + src_index * info.field_size;
+    dst_rect.addr = info.dst.addr + dst_index * info.field_size;
+    Realm::Cuda::AffineCopyPair<N, Offset_t> copy_info;
+    memset(&copy_info, 0, sizeof(Realm::Cuda::AffineCopyPair<N, Offset_t>));
+    copy_info.src = src_rect;
+    copy_info.dst = dst_rect;
+
+    copy_info.volume = offset + 1 * chunks;
+    memcpy_affine_batch<T, N, Offset_t>(&copy_info, /*num_rects=*/1, offset);
+  }
+}
+
 #define MEMCPY_TEMPLATE_INST(type, dim, offt, name)                            \
   extern "C" __global__ __launch_bounds__(256, 8) void                         \
       memcpy_affine_batch##name(Realm::Cuda::AffineCopyInfo<dim, offt> info) { \
@@ -138,7 +186,9 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
 
 #define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                  \
   extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name( \
-      Realm::Cuda::MemcpyUnstructuredInfo<dim> info) {}
+      Realm::Cuda::MemcpyUnstructuredInfo<dim> info) {                        \
+    memcpy_indirect_points<type, dim, offt>(info);                            \
+  }
 
 #define INST_TEMPLATES(type, sz, dim, off)                                     \
   MEMCPY_TEMPLATE_INST(type, dim, off, dim##D_##sz)                            \
