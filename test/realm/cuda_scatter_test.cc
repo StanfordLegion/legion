@@ -4,8 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "osdep.h"
 #include "realm.h"
+#include "osdep.h"
 #include "realm/cmdline.h"
 
 #ifdef ENABLE_DIRECT_TEST
