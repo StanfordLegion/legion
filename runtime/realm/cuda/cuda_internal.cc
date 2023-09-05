@@ -453,8 +453,7 @@ namespace Realm {
       if ((in_gpu != NULL) &&
           in_gpu->can_access_peer(out_gpu) &&  // If this is a gpu->gpu copy
           (in_dim != out_dim) &&
-         ((in_pstride != out_lstride && contig_bytes <= 16) ||
-           (in_pstride == out_lstride && contig_bytes <= CUDA_MAX_FIELD_BYTES))) {
+          contig_bytes <= CUDA_MAX_FIELD_BYTES) {
         transpose_info.src = reinterpret_cast<void *>(in_base + in_offset);
         transpose_info.dst = reinterpret_cast<void *>(out_base + out_offset);
         // TODO(apryakhin@): This is a hack which needs to be fixed for
