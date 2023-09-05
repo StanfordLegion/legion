@@ -456,8 +456,6 @@ namespace Realm {
           contig_bytes <= CUDA_MAX_FIELD_BYTES) {
         transpose_info.src = reinterpret_cast<void *>(in_base + in_offset);
         transpose_info.dst = reinterpret_cast<void *>(out_base + out_offset);
-        // TODO(apryakhin@): This is a hack which needs to be fixed for
-        // field_size > sizeof(T)
         transpose_info.src_stride_x = in_pstride / contig_bytes;
         transpose_info.src_stride = in_lstride / contig_bytes;
         transpose_info.dst_stride = out_pstride / contig_bytes;
