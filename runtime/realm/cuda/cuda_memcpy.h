@@ -107,6 +107,7 @@ namespace Realm {
       size_t width;
       size_t height;
       size_t src_stride;
+      size_t src_stride_x;
       size_t dst_stride;
       size_t field_size;
       size_t tile_size;

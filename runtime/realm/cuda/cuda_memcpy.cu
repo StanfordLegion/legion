@@ -90,7 +90,8 @@ static __device__ inline void memcpy_kernel_transpose(
       if (x_base + block_offset < info.width * chunks && y_base < info.height) {
         Offset_t in_tile_idx = tidx + (tile_size + 1) * tidy * chunks;
         tile[in_tile_idx + block_offset] =
-            in_base[x_base + y_base * info.src_stride * chunks + block_offset];
+            in_base[x_base * info.src_stride_x + y_base * info.src_stride * chunks +
+                    block_offset];
       }
     }
 

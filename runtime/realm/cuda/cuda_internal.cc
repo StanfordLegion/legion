@@ -452,16 +452,20 @@ namespace Realm {
                                      (bytes_left / (contig_bytes * lines)));
       if ((in_gpu != NULL) &&
           in_gpu->can_access_peer(out_gpu) &&  // If this is a gpu->gpu copy
-          (in_pstride ==
-           out_lstride) &&  // And this is a transpose compatible stride
-          (contig_bytes <= CUDA_MAX_FIELD_BYTES)) {
+          (in_dim != out_dim) &&
+         ((in_pstride != out_lstride && contig_bytes <= 16) ||
+           (in_pstride == out_lstride && contig_bytes <= CUDA_MAX_FIELD_BYTES))) {
         transpose_info.src = reinterpret_cast<void *>(in_base + in_offset);
         transpose_info.dst = reinterpret_cast<void *>(out_base + out_offset);
+        // TODO(apryakhin@): This is a hack which needs to be fixed for
+        // field_size > sizeof(T)
+        transpose_info.src_stride_x = in_pstride / contig_bytes;
         transpose_info.src_stride = in_lstride / contig_bytes;
         transpose_info.dst_stride = out_pstride / contig_bytes;
         transpose_info.height = lines;
         transpose_info.field_size = contig_bytes;
-        transpose_info.width = planes;  // bytes_left / (contig_bytes * lines);
+        // bytes_left / (contig_bytes * lines);
+        transpose_info.width = planes;
         // Remove this rectangle from the copy info, since we've put
         // this in the tranpose info.
         copy_infos.num_rects--;
@@ -621,10 +625,17 @@ namespace Realm {
 
             AffineCopyPair<3> copy_info =
                 copy_infos.subrects[copy_infos.num_rects - 1];
-            if ((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu) ||
-                copy_info.src.strides[2] == copy_info.dst.strides[0]) {
+            if ((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
               break;
             }
+
+            if(!((copy_info.src.strides[0] > copy_info.src.strides[2] &&
+                 copy_info.dst.strides[0] > copy_info.dst.strides[2]) ||
+                (copy_info.src.strides[0] > copy_info.src.strides[2] &&
+                 copy_info.dst.strides[0] > copy_info.dst.strides[2]))) {
+              break;
+            }
+
             if (transpose_copy.width > 0) {  // TODO: batch up the transposes
               log_gpudma.info() << "\tFound a transpose copy (width=" << transpose_copy.width << ')';
               break;

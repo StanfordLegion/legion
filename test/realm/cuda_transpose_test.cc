@@ -95,7 +95,7 @@ namespace TestConfig {
   size_t block_rows = 4;
   bool verbose = false;
   bool verify = true;
-  size_t buffer_size = 8192 << 4; // should be bigger than any cache in system
+  size_t buffer_size = 8192 << 6; // should be bigger than any cache in system
   size_t narrow_dim = 0;        // should one dimension be a fixed (narrow) size?
   unsigned dim_mask = 3;        // i.e. all the dimensions
   bool all_mems = true;
@@ -278,7 +278,10 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
   Event wait_for = Event::NO_EVENT;
   std::vector<Event> done_events;
   for(unsigned i = 0; i < perms.size(); i++) {
-    if (src_perms.find(perms[i].name) == src_perms.end()) continue;
+    if (!src_perms.empty() &&
+        src_perms.find(perms[i].name) == src_perms.end()) {
+      continue;
+    }
     RegionInstance src_inst;
     {
       InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
@@ -296,7 +299,10 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     }
 
     for (unsigned j = 0; j < perms.size(); j++) {
-      if (dst_perms.find(perms[j].name) == dst_perms.end()) continue;
+      if (!dst_perms.empty() &&
+          dst_perms.find(perms[j].name) == dst_perms.end()) {
+        continue;
+      }
       RegionInstance dst_inst;
       {
         InstanceLayoutGeneric *ilg =
@@ -462,7 +468,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
                   for (int pad_y = -1; pad_y <= 1; pad_y++) {
                     do_single_dim_field_size<3>(
                         *src_it, *dst_it, log2_buffer_size,
-                        TestConfig::narrow_dim, p, {"XYZ"}, {"YXZ"},
+                        TestConfig::narrow_dim, p, {}, {},
                         Rect<3>(Point<3>(0, 0, 0),
                                 Point<3>((xscale * block_cols) + pad_x,
                                          (yscale * block_rows) + pad_y,
@@ -503,6 +509,7 @@ int main(int argc, char **argv)
       .add_option_int("-verbose", TestConfig::verbose)
       .add_option_int("-verify", TestConfig::verify)
       .add_option_int("-wait", TestConfig::wait_after)
+      .add_option_int("-field_size", TestConfig::field_size)
       .add_option_int("-unit_test", TestConfig::do_unit_test);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
