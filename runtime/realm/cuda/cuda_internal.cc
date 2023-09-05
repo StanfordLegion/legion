@@ -296,6 +296,14 @@ namespace Realm {
       return 1; // Unfortunately this can only be byte aligned :(
     }
 
+    static bool needs_transpose(const AffineCopyPair<3> &copy_info)
+    {
+      return !(((copy_info.src.strides[0] > copy_info.src.strides[2] &&
+                 copy_info.dst.strides[0] > copy_info.dst.strides[2]) ||
+                (copy_info.src.strides[0] < copy_info.src.strides[2] &&
+                 copy_info.dst.strides[0] < copy_info.dst.strides[2])));
+    }
+
     static size_t populate_affine_copy_info(AffineCopyInfo<3> &copy_infos,
                                             size_t &min_align,
                                             MemcpyTransposeInfo<size_t> &transpose_info,
@@ -620,16 +628,9 @@ namespace Realm {
             const size_t bytes_to_copy = populate_affine_copy_info(copy_infos, min_align, transpose_copy, in_alc, in_base, in_gpu, out_alc, out_base, out_gpu, bytes_left);
             // Either src or dst can't be accessed with a kernel, so just break out and perform a standard cuMemcpy
 
-            AffineCopyPair<3> copy_info =
-                copy_infos.subrects[copy_infos.num_rects - 1];
-            if ((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
-              break;
-            }
-
-            if(!((copy_info.src.strides[0] > copy_info.src.strides[2] &&
-                 copy_info.dst.strides[0] > copy_info.dst.strides[2]) ||
-                (copy_info.src.strides[0] > copy_info.src.strides[2] &&
-                 copy_info.dst.strides[0] > copy_info.dst.strides[2]))) {
+            AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
+            if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu) ||
+               !needs_transpose(copy_info)) {
               break;
             }
 
@@ -732,10 +733,7 @@ namespace Realm {
     // transpose copies, make this a default path and remove the
     // underlying implementation in the else branch.
 #ifdef ENABLE_2D_TRANSPOSE
-          if (((copy_info.src.strides[0] > copy_info.src.strides[2] &&
-                copy_info.dst.strides[0] > copy_info.dst.strides[2]) ||
-               (copy_info.src.strides[0] < copy_info.src.strides[2] &&
-                copy_info.dst.strides[0] < copy_info.dst.strides[2]))) {
+          if (!needs_transpose(copy_info)) {
 #endif
 
 
