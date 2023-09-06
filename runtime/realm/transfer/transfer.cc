@@ -1124,6 +1124,10 @@ namespace Realm {
                                               TransferIterator::AddressInfo &info,
                                               unsigned flags, bool tentative /*= false*/)
   {
+    if(can_access_addresses()) {
+      return TransferIteratorBase<N, T>::step(max_bytes, info, flags, tentative);
+    }
+
     FieldID cur_field_id = fields[0];
     size_t cur_field_offset = fld_offsets[0];
     size_t cur_field_size = fld_sizes[0];
