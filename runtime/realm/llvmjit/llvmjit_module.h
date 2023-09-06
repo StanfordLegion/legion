@@ -20,7 +20,6 @@
 //  a bunch of C++11 baggage
 
 #include "realm/module.h"
-#include "realm/threads.h"
 
 #include <string>
 

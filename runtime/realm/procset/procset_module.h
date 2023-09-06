@@ -17,8 +17,6 @@
 #define REALM_PROCSET_MODULE_H
 
 #include "realm/module.h"
-#include "realm/proc_impl.h"
-#include "realm/mem_impl.h"
 
 namespace Realm {
 

@@ -17,7 +17,6 @@
 #define REALM_HDF5_MODULE_H
 
 #include "realm/module.h"
-#include "realm/mem_impl.h"
 
 namespace Realm {
 
