@@ -2556,14 +2556,21 @@ namespace Realm {
 
     GPUDynamicFBMemory::~GPUDynamicFBMemory(void)
     {
+      cleanup();
+    }
+
+    void GPUDynamicFBMemory::cleanup(void)
+    {
+      AutoLock<> al(mutex);
+      if(alloc_bases.empty())
+        return;
       // free any remaining allocations
       AutoGPUContext agc(gpu);
-      AutoLock<> al(mutex);
-      for(std::map<RegionInstance, std::pair<CUdeviceptr, size_t> >::const_iterator it = alloc_bases.begin();
-          it != alloc_bases.end();
-          ++it)
+      for(std::map<RegionInstance, std::pair<CUdeviceptr, size_t>>::const_iterator it =
+              alloc_bases.begin();
+          it != alloc_bases.end(); ++it)
         if(it->second.first)
-          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(it->second.first) );
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemFree)(it->second.first));
       alloc_bases.clear();
     }
 
@@ -3435,6 +3442,10 @@ namespace Realm {
         }
       }
 
+      if (fb_dmem) {
+        fb_dmem->cleanup();
+      }
+
       if(fb_ibmem_base)
         CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fb_ibmem_base) );
 
@@ -3716,8 +3727,9 @@ namespace Realm {
       }
 
       Memory m = runtime->next_local_memory_id();
-      GPUDynamicFBMemory *dfb = new GPUDynamicFBMemory(m, this, max_size);
-      runtime->add_memory(dfb);
+      // TODO(apryakhin@): Determine if we need to keep the pointer.
+      fb_dmem = new GPUDynamicFBMemory(m, this, max_size);
+      runtime->add_memory(fb_dmem);
     }
 
 #ifdef REALM_USE_CUDART_HIJACK

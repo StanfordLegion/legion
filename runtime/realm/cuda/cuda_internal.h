@@ -137,6 +137,7 @@ namespace Realm {
     class GPUWorker;
     class GPUStream;
     class GPUFBMemory;
+    class GPUDynamicFBMemory;
     class GPUZCMemory;
     class GPUFBIBMemory;
     class GPU;
@@ -648,6 +649,7 @@ namespace Realm {
       GPUWorker *worker;
       GPUProcessor *proc;
       GPUFBMemory *fbmem;
+      GPUDynamicFBMemory *fb_dmem;
       GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
@@ -883,6 +885,7 @@ namespace Realm {
       GPUDynamicFBMemory(Memory _me, GPU *_gpu, size_t _max_size);
 
       virtual ~GPUDynamicFBMemory(void);
+      void cleanup(void);
 
       // deferred allocation not supported
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
