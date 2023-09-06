@@ -22,7 +22,6 @@
 #include "realm/processor.h"
 #include "realm/network.h"
 #include "realm/atomics.h"
-#include "realm/module_config.h"
 
 
 // realm/hip_module.h is designed to be include-able even when the system
