@@ -2615,13 +2615,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
         module_registrar.unload_module_sofiles();
 
-        // delete processors, nodes, etc.
+        // delete processors, memories, nodes, etc.
         for (NodeID i = 0; i <= Network::max_node_id; i++) {
           Node &n = nodes[i];
 
           delete_container_contents(n.memories);
-          delete_container_contents(n.ib_memories);
           delete_container_contents(n.processors);
+          delete_container_contents(n.ib_memories);
           delete_container_contents(n.dma_channels);
 
           for (std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *>>::
