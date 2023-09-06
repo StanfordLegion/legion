@@ -105,6 +105,14 @@ namespace Realm {
 
     virtual bool get_addresses(AddressList &addrlist,
                                const InstanceLayoutPieceBase *&nonaffine);
+    virtual bool can_access_memory(void) const
+    {
+      Memory memory = inst_impl->memory;
+      return (memory.kind() == Memory::SYSTEM_MEM ||
+              memory.kind() == Memory::Z_COPY_MEM ||
+              memory.kind() == Memory::SOCKET_MEM ||
+              memory.kind() == Memory::REGDMA_MEM);
+    }
 
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
@@ -988,12 +996,9 @@ namespace Realm {
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
 			       size_t& offset, size_t& fsize);
 
-    bool can_access_addresses() const;
-
     TransferIterator *addrs_in;
     Memory addrs_mem;
     intptr_t addrs_mem_base;
-    Memory::Kind addrs_mem_base_kind;
     //IndexSpace<N,T> is;
     bool can_merge;
     static const size_t MAX_POINTS = 64;
@@ -1025,7 +1030,6 @@ namespace Realm {
     , addrs_in(0)
     , addrs_mem(_addrs_mem)
     , addrs_mem_base(0)
-    , addrs_mem_base_kind(Memory::NO_MEMKIND)
     , point_pos(0)
     , num_points(0)
       //, is(_is)
@@ -1080,13 +1084,10 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  Event TransferIteratorIndirect<N, T>::request_metadata(void) {
-   std::vector<Event> events;
-   if (can_access_addresses()) {
-    events.push_back(addrs_in->request_metadata());
-   }
-   events.push_back(TransferIteratorBase<N, T>::request_metadata());
-   return Event::merge_events(events);
+  Event TransferIteratorIndirect<N, T>::request_metadata(void)
+  {
+    return Event::merge_events(
+        {addrs_in->request_metadata(), TransferIteratorBase<N, T>::request_metadata()});
   }
 
   template <int N, typename T>
@@ -1097,13 +1098,11 @@ namespace Realm {
     indirect_xd = xd;
     indirect_port_idx = port_idx;
     addrs_in = inner_iter;
-
     assert(indirect_xd != 0);
     assert(indirect_port_idx >= 0);
     void *mem_base = indirect_xd->input_ports[indirect_port_idx].mem->get_direct_ptr(0, 0);
     assert(mem_base != 0);
     addrs_mem_base = reinterpret_cast<intptr_t>(mem_base);
-    addrs_mem_base_kind = indirect_xd->input_ports[indirect_port_idx].mem->get_kind();
   }
   
   template <int N, typename T>
@@ -1124,7 +1123,7 @@ namespace Realm {
                                               TransferIterator::AddressInfo &info,
                                               unsigned flags, bool tentative /*= false*/)
   {
-    if(can_access_addresses()) {
+    if(addrs_in->can_access_memory()) {
       return TransferIteratorBase<N, T>::step(max_bytes, info, flags, tentative);
     }
 
@@ -1185,7 +1184,8 @@ namespace Realm {
     offset = fld_offsets[0];
     fsize = fld_sizes[0];
 
-    if (!can_access_addresses()) {
+    addrs_in->done();
+    if(!addrs_in->can_access_memory()) {
       r = Rect<N, T>::make_empty();
       return false;
     }
@@ -1304,12 +1304,6 @@ namespace Realm {
 	}
       }
     }
-  }
-
-  template <int N, typename T>
-  bool TransferIteratorIndirect<N, T>::can_access_addresses() const
-  {
-    return addrs_mem_base_kind != Memory::GPU_FB_MEM;
   }
 
   ////////////////////////////////////////////////////////////////////////

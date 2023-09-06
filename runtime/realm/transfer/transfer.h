@@ -54,6 +54,7 @@ namespace Realm {
     virtual bool done(void) = 0;
     virtual size_t get_base_offset(void) const;
     virtual size_t get_address_size(void) const;
+    virtual bool can_access_memory(void) const = 0;
 
     // flag bits to control iterators
     enum {

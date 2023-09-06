@@ -822,6 +822,11 @@ namespace Realm {
     return false;
   }
 
+  bool WrappingFIFOIterator::can_access_memory(void) const
+  {
+    return true;
+  }
+
   size_t WrappingFIFOIterator::step(size_t max_bytes, AddressInfo &info,
 				    unsigned flags,
 				    bool tentative /*= false*/)
