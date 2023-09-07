@@ -23270,6 +23270,7 @@ namespace Legion {
       Operation::deactivate(false/*free*/);
       future_map = FutureMap();
       result = Future();
+      initial_value = Future();
       sources.clear();
       targets.clear();
       if (serdez_redop_buffer != NULL)
