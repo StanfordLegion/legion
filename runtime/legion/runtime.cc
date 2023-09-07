@@ -13673,7 +13673,30 @@ namespace Legion {
         else
         {
           log_shutdown.info("SHUTDOWN SUCCEEDED!");
-          runtime->finalize_runtime_shutdown(return_code);
+          std::vector<RtEvent> shutdown_events;
+          Realm::ProfilingRequestSet empty_requests;
+          if (runtime->separate_runtime_instances)
+          {
+            Machine::ProcessorQuery all_procs(Machine::get_machine());
+            for (Machine::ProcessorQuery::iterator it = all_procs.begin();
+                  it != all_procs.end(); it++)
+              shutdown_events.push_back(RtEvent(
+                    it->spawn(LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+          }
+          else
+          {
+            const Processor utility_group = runtime->find_utility_group();
+            shutdown_events.push_back(RtEvent(utility_group.spawn(
+                    LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+          }
+          // One last really crazy precondition on shutdown, we actually need to
+          // make sure that this task itself is done executing before trying to
+          // shutdown so add our own completion event as a precondition
+          shutdown_events.push_back(
+              RtEvent(Processor::get_current_finish_event()));
+          // Then tell Realm to shutdown when they are all done
+          RealmRuntime realm = RealmRuntime::get_runtime();
+          realm.shutdown(Runtime::merge_events(shutdown_events), return_code);
         }
       }
       else if (runtime->address_space != source)
@@ -18026,9 +18049,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_runtime(void)
+    void Runtime::finalize_runtime(std::vector<RtEvent> &shutdown_preconditions)
     //--------------------------------------------------------------------------
-    { 
+    {
+      if (!separate_runtime_instances)
+      {
+        // If we we're doing separate runtime instances then the 
+        // ShutdownManager already launched tasks on all the processors
+        // Otherwise we send messages to the next address spaces up the
+        // tree from us to do the shutdown
+        Realm::ProfilingRequestSet empty_requests;
+        AddressSpaceID start = address_space * legion_collective_radix + 1;
+        for (int idx = 0; idx < legion_collective_radix; idx++)
+        {
+          AddressSpaceID next = start + idx;
+          if (total_address_spaces <= next)
+            break;
+          MessageManager *messenger = find_messenger(next);
+          shutdown_preconditions.push_back(RtEvent(messenger->target.spawn(
+                  LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+        }
+      }
       // Have the memory managers for deletion of all their instances
       for (std::map<Memory,MemoryManager*>::const_iterator it =
            memory_managers.begin(); it != memory_managers.end(); it++)
@@ -27669,54 +27710,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_runtime_shutdown(int exit_code)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0); // only happens on node 0
-#endif
-      std::set<RtEvent> shutdown_events;
-      // Launch tasks to shutdown all the runtime instances
-      Machine::ProcessorQuery all_procs(machine);
-      Realm::ProfilingRequestSet empty_requests;
-      if (Runtime::separate_runtime_instances)
-      {
-        // If we are doing separate runtime instances, run it once on every
-        // processor since we have separate runtimes for every processor
-        for (Machine::ProcessorQuery::iterator it = all_procs.begin();
-              it != all_procs.end(); it++)
-        {
-          shutdown_events.insert(
-              RtEvent(it->spawn(LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
-        }
-      }
-      else
-      {
-        // In the normal case we just have to run this once on every node
-        std::set<AddressSpace> shutdown_spaces;
-        for (Machine::ProcessorQuery::iterator it = all_procs.begin();
-              it != all_procs.end(); it++)
-        {
-          AddressSpace space = it->address_space();
-          if (shutdown_spaces.find(space) == shutdown_spaces.end())
-          {
-            shutdown_events.insert(
-                RtEvent(it->spawn(LG_SHUTDOWN_TASK_ID,NULL,0,empty_requests)));
-            shutdown_spaces.insert(space);
-          }
-        }
-      }
-      // One last really crazy precondition on shutdown, we actually need to
-      // make sure that this task itself is done executing before trying to
-      // shutdown so add our own completion event as a precondition
-      shutdown_events.insert(RtEvent(Processor::get_current_finish_event()));
-      // Then tell Realm to shutdown when they are all done
-      RtEvent shutdown_precondition = Runtime::merge_events(shutdown_events);
-      RealmRuntime realm = RealmRuntime::get_runtime();
-      realm.shutdown(shutdown_precondition, exit_code);
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::has_outstanding_tasks(void)
     //--------------------------------------------------------------------------
     {
@@ -32276,8 +32269,16 @@ namespace Legion {
       if (implicit_context != NULL)
         implicit_context = NULL;
       // Finalize the runtime and then delete it
-      runtime->finalize_runtime();
+      std::vector<RtEvent> shutdown_events;
+      runtime->finalize_runtime(shutdown_events);
       delete runtime;
+      // If we have any shutdown events we need to wait for them to have
+      // finished before we return and end up marking ourselves finished
+      if (!shutdown_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(shutdown_events);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
