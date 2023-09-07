@@ -41,7 +41,7 @@ namespace Realm {
     };
 
     // our interface to the rest of the runtime
-    class NumaModule : public Module {
+    class REALM_INTERNAL_API_EXTERNAL_LINKAGE NumaModule : public Module {
     protected:
       NumaModule(void);
       

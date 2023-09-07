@@ -97,6 +97,26 @@ namespace Realm {
   #undef DEFINE_FNPTR
 #endif
 
+    static unsigned ctz(uint64_t v) {
+#ifdef REALM_ON_WINDOWS
+      unsigned long index;
+#ifdef _WIN64
+      if (_BitScanForward64(&index, v)) return index;
+#else
+      unsigned v_lo = v;
+      unsigned v_hi = v >> 32;
+      if (_BitScanForward(&index, v_lo))
+        return index;
+      else if (_BitScanForward(&index, v_hi))
+        return index + 32;
+#endif
+      else
+        return 0;
+#else
+      return __builtin_ctzll(v);
+#endif
+    }
+
 #define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
 
     NVML_APIS(DEFINE_FNPTR);
@@ -3977,6 +3997,13 @@ namespace Realm {
       config_map.insert({"gpu", &cfg_num_gpus});
       config_map.insert({"zcmem", &cfg_zc_mem_size});
       config_map.insert({"fbmem", &cfg_fb_mem_size});
+      config_map.insert({"ib_fbmem", &cfg_fb_ib_size});
+      config_map.insert({"ib_zcmem", &cfg_zc_ib_size});
+      config_map.insert({"uvmem", &cfg_uvm_mem_size});
+      config_map.insert({"use_dynamic_fb", &cfg_use_dynamic_fb});
+      config_map.insert({"dynfb_max_size", &cfg_dynfb_max_size});
+      config_map.insert({"task_streams", &cfg_task_streams});
+      config_map.insert({"d2d_streams", &cfg_d2d_streams});
       res_fbmem_sizes.push_back(0);
     }
 

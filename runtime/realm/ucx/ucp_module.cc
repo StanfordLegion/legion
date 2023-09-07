@@ -93,6 +93,12 @@ err_del_mod:
     // maximum number of background work items to use for UCP polling
     cp.add_option_int("-ucx:pollers_max", config.pollers_max);
 
+    // number of message priority levels to support
+    cp.add_option_int("-ucx:num_priorities", config.num_priorities);
+
+    // maximum message size that is sent with higher priority
+    cp.add_option_int_units("-ucx:priority_size_max", config.priority_size_max);
+
     // check memory pools for leak
     cp.add_option_bool("-ucx:mpool_leakcheck", config.mpool_leakcheck);
 

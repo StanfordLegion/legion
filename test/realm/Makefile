@@ -92,6 +92,16 @@ TESTARGS_scatter := -p1 2 -p2 2
 TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose
 TESTARGS_task_stream := -ll:gpu 1
+TESTARGS_machine_config_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin 1
+ifeq ($(strip $(USE_CUDA)),1)
+TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
+endif
+ifeq ($(strip $(USE_OPENMP)),1)
+TESTARGS_machine_config_args += -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4
+endif
+ifeq ($(strip $(USE_PYTHON)),1)
+TESTARGS_machine_config_args += -ll:py 1 -ll:pystack 4
+endif
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
               $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
@@ -113,12 +123,17 @@ REALM_LIB := librealm.a
 
 TEST_OBJS := $(TESTS:%=%.o)
 
-run_all : $(TESTS:%=run_%)
+run_all : $(TESTS:%=run_%) run_machine_config_args
 
 run_% : %
 	@# this echos exactly once, even if -s was specified
 	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
 	@$(LAUNCHER) ./$* $(TESTARGS_$*)
+
+run_machine_config_args : machine_config
+	@# this echos exactly once, even if -s was specified
+	@echo $(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
+	@$(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
 
 build : $(TESTS)
 
@@ -127,6 +142,8 @@ clean :
 
 # scatter uses C++11 lambdas
 scatter.o : CC_FLAGS += -std=c++11
+
+machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
 $(TESTS) : % : %.o librealm.a
 	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)

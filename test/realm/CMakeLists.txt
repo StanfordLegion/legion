@@ -114,6 +114,11 @@ set_target_properties(scatter PROPERTIES CXX_STANDARD 11
                                          CXX_STANDARD_REQUIRED YES
                                          CXX_EXTENSIONS NO)
 
+if(REALM_LIMIT_SYMBOL_VISIBILITY)
+  set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+endif()
+
 # some tests need test-specific arguments
 set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
@@ -126,11 +131,24 @@ set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
 set(TESTARGS_cuda_arrays       -ll:gpu 1)
 set(TESTARGS_cuda_memcpy_test      -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
+set(TESTARGS_machine_config_args    -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin 1)
+if(Legion_USE_CUDA)
+  list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
+endif()
+if(Legion_USE_OpenMP)
+  list(APPEND TESTARGS_machine_config_args -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4)
+endif()
+if(Legion_USE_Python)
+  list(APPEND TESTARGS_machine_config_args -ll:py 1 -ll:pystack 4)
+endif()
+
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
     add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
   endforeach()
+  # test machine_config with -test_args 1
+  add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${Legion_TEST_ARGS} ${TESTARGS_machine_config_args})
 
   if(Legion_NETWORKS)
     # For verifying the -ll:networks arguments, try each network we've compiled with
