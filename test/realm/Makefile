@@ -96,6 +96,9 @@ TESTARGS_machine_config_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:c
 ifeq ($(strip $(USE_CUDA)),1)
 TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
 endif
+ifeq ($(strip $(USE_HIP)),1)
+TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
+endif
 ifeq ($(strip $(USE_OPENMP)),1)
 TESTARGS_machine_config_args += -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4
 endif

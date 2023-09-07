@@ -4602,7 +4602,7 @@ namespace Realm {
         }
         // if num_gpus was specified, they should match
         if(config->cfg_num_gpus > 0) {
-          if(config->cfg_num_gpus != (int)fixed_indices.size()) {
+          if(config->cfg_num_gpus != static_cast<int>(fixed_indices.size())) {
             log_gpu.fatal() << "mismatch between '-ll:gpu' and '-ll:gpu_ids'";
             abort();
           }
@@ -4617,7 +4617,7 @@ namespace Realm {
       unsigned gpu_count = 0;
       // try to get cfg_num_gpus, working through the list in order
       for(size_t i = config->cfg_skip_gpu_count;
-          (i < gpu_info.size()) && ((int)gpu_count < config->cfg_num_gpus); i++) {
+          (i < gpu_info.size()) && (static_cast<int>(gpu_count) < config->cfg_num_gpus); i++) {
         int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
 
         // try to create a context and possibly check available memory - in order
@@ -4704,7 +4704,7 @@ namespace Realm {
       }
 
       // did we actually get the requested number of GPUs?
-      if((int)gpu_count < config->cfg_num_gpus) {
+      if(static_cast<int>(gpu_count) < config->cfg_num_gpus) {
         log_gpu.fatal() << config->cfg_num_gpus << " GPUs requested, but only " << gpu_count
                         << " available!";
         assert(false);
