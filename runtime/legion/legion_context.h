@@ -1756,10 +1756,9 @@ namespace Legion {
           bool filter_specific_fields);
       virtual void free_region_tree_context(void);
     public:
-      virtual ProjectionNode* construct_projection_tree(
+      virtual ProjectionSummary* construct_projection_summary(
           Operation *op, unsigned index, const RegionRequirement &req,
-          RegionTreeNode *root, const ProjectionInfo &proj_info,
-          bool &disjoint, bool &permits_name_based, bool &unique_shards);
+          LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
       virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
@@ -2943,10 +2942,9 @@ namespace Legion {
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
     public:
-      virtual ProjectionNode* construct_projection_tree(
+      virtual ProjectionSummary* construct_projection_summary(
           Operation *op, unsigned index, const RegionRequirement &req,
-          RegionTreeNode *root, const ProjectionInfo &proj_info,
-          bool &disjoint, bool &permits_name_based, bool &unique_shards);
+          LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
       virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,

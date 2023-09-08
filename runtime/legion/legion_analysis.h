@@ -1295,9 +1295,18 @@ namespace Legion {
      */
     class ProjectionSummary : public Collectable {
     public:
+      // Non-replicated
       ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
-          const RegionRequirement &req, LogicalState *owner, bool dis,
-          bool comp, bool permit_self, bool unique_shards);
+          Operation *op, unsigned index, const RegionRequirement &req, 
+          LogicalState *owner);
+      // Replicated for projection functor 0
+      ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
+          Operation *op, unsigned index, const RegionRequirement &req, 
+          LogicalState *owner, bool disjoint, bool unique);
+      // General replicated 
+      ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
+          Operation *op, unsigned index, const RegionRequirement &req, 
+          LogicalState *owner, ReplicateContext *context);
       ProjectionSummary(const ProjectionSummary &rhs) = delete;
       ~ProjectionSummary(void);
     public:
@@ -1305,21 +1314,35 @@ namespace Legion {
     public:
       bool matches(const ProjectionInfo &rhs,
                    const RegionRequirement &req) const;
+      inline bool is_complete(void) const { return complete; }
+      bool is_disjoint(void);
+      bool can_perform_name_based_self_analysis(void);
+      bool has_unique_shard_users(void);
+      ProjectionNode* get_tree(void);
     public:
       LogicalState *const owner;
       IndexSpaceNode *const domain;
       ProjectionFunction *const projection;
       ShardingFunction *const sharding;
       IndexSpaceNode *const sharding_domain;
-      ProjectionNode *const result;
       const size_t arglen;
       void *const args;
+    private:
+      // These members are not actually ready until the exchange has
+      // completed which is why they are private to ensure everything
+      // goes through the getter interfaces which will check that the
+      // exchange has complete before allowing access
+      ProjectionNode *const tree;
+      // For control replication contexts we might have an outstanding
+      // exchange that is being used to finalize the tree and update
+      // the properties of the tree
+      ProjectionTreeExchange *exchange; 
       // We track a few different properties of this index space launch
       // that are useful for various different analyses and kinds of 
       // comparisons between index space launches
       // Whether we know all the points are disjoint from each other
       // based privileges of the projection and the projection function 
-      const bool disjoint;
+      bool disjoint;
       // Whether this projection tree is complete or not according to
       // the projection functor
       const bool complete; 
@@ -1329,9 +1352,9 @@ namespace Legion {
       // and all accesses at the leaves of the tree
       // Note that individual points in the same launch can still use
       // the same sub-regions here
-      const bool permits_name_based_self_analysis;
+      bool permits_name_based_self_analysis;
       // Whether each region has a unique set of shards users
-      const bool unique_shard_users;
+      bool unique_shard_users;
     };
 
     /**

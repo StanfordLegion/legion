@@ -3945,27 +3945,106 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
-                             ProjectionNode *node, const RegionRequirement &req,
-                             LogicalState *own, bool dis, bool comp,
-                             bool permit_self, bool unique_shards)
-      : owner(own), domain(proj_info.projection_space),
+                           ProjectionNode *node, Operation *op, unsigned index,
+                           const RegionRequirement &req, LogicalState *state)
+      : owner(state), domain(proj_info.projection_space),
         projection(proj_info.projection), sharding(proj_info.sharding_function),
-        sharding_domain(proj_info.sharding_space), result(node), 
+        sharding_domain(proj_info.sharding_space), 
         arglen(req.projection_args_size), 
-        args((arglen > 0) ? malloc(arglen) : NULL), disjoint(dis),
-        complete(comp), permits_name_based_self_analysis(permit_self),
-        unique_shard_users(unique_shards)
+        args((arglen > 0) ? malloc(arglen) : NULL), tree(node), exchange(NULL), 
+        // Special case here: if we can't prove its disjoint by the region tree
+        // but we know that all the regions are writing and the projection
+        // function is not invertible then the user is guaranteeing use that all
+        // the point in this projection function are disjoint from each other
+        disjoint((IS_WRITE(req) && !proj_info.projection->is_invertible) ||
+                  tree->is_disjoint()),
+        complete(proj_info.projection->is_complete(state->owner, op, index,
+                                                   proj_info.projection_space)),
+        permits_name_based_self_analysis(disjoint && tree->is_leaves_only()),
+        unique_shard_users(true)/* no shard in non-control-replicated context */
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(proj_info.is_projecting());
-      assert(result != NULL);
+      assert(tree != NULL);
 #endif
       if (domain != NULL)
         domain->add_base_gc_ref(PROJECTION_REF);
       if (sharding_domain != NULL)
         sharding_domain->add_base_gc_ref(PROJECTION_REF);
-      result->add_reference();
+      tree->add_reference();
+      if (arglen > 0)
+        memcpy(args, req.projection_args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
+                           ProjectionNode *node, Operation *op, unsigned index,
+                           const RegionRequirement &req, LogicalState *state,
+                           bool dis, bool unique)
+      : owner(state), domain(proj_info.projection_space),
+        projection(proj_info.projection), sharding(proj_info.sharding_function),
+        sharding_domain(proj_info.sharding_space),
+        arglen(req.projection_args_size), 
+        args((arglen > 0) ? malloc(arglen) : NULL), tree(node), exchange(NULL),
+        // Special case here: if we can't prove its disjoint by the region tree
+        // but we know that all the regions are writing and the projection
+        // function is not invertible then the user is guaranteeing use that all
+        // the point in this projection function are disjoint from each other
+        disjoint(dis || (IS_WRITE(req) &&
+              !proj_info.projection->is_invertible)),
+        complete(proj_info.projection->is_complete(state->owner, op, index,
+                                                   proj_info.projection_space)),
+        permits_name_based_self_analysis(disjoint), unique_shard_users(unique)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proj_info.is_projecting());
+      assert(tree != NULL);
+#endif
+      if (domain != NULL)
+        domain->add_base_gc_ref(PROJECTION_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      tree->add_reference();
+      if (arglen > 0)
+        memcpy(args, req.projection_args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
+                           ProjectionNode *node, Operation *op, unsigned index,
+                           const RegionRequirement &req, LogicalState *state,
+                           ReplicateContext *context)
+      : owner(state), domain(proj_info.projection_space),
+        projection(proj_info.projection), sharding(proj_info.sharding_function),
+        sharding_domain(proj_info.sharding_space),
+        arglen(req.projection_args_size), 
+        args((arglen > 0) ? malloc(arglen) : NULL), tree(node),
+        exchange(new ProjectionTreeExchange(tree, context, COLLECTIVE_LOC_50,
+              disjoint, permits_name_based_self_analysis, unique_shard_users)),
+        // Special case here: if we can't prove its disjoint by the region tree
+        // but we know that all the regions are writing and the projection
+        // function is not invertible then the user is guaranteeing use that all
+        // the point in this projection function are disjoint from each other
+        disjoint((IS_WRITE(req) && !proj_info.projection->is_invertible) || 
+                  tree->is_disjoint()),
+        complete(proj_info.projection->is_complete(state->owner, op, index,
+                                                   proj_info.projection_space)),
+        permits_name_based_self_analysis(true), 
+        unique_shard_users(tree->is_unique_shards())
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proj_info.is_projecting());
+      assert(tree != NULL);
+#endif
+      exchange->perform_collective_async();
+      if (domain != NULL)
+        domain->add_base_gc_ref(PROJECTION_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      tree->add_reference();
       if (arglen > 0)
         memcpy(args, req.projection_args, arglen);
     }
@@ -3980,10 +4059,15 @@ namespace Legion {
       if ((sharding_domain != NULL) && 
           sharding_domain->remove_base_gc_ref(PROJECTION_REF))
         delete sharding_domain;
-      if ((result != NULL) && result->remove_reference())
-        delete result;
+      if (tree->remove_reference())
+        delete tree;
       if (args != NULL)
         free(args);
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);  
+        delete exchange;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4006,6 +4090,58 @@ namespace Legion {
       if ((arglen > 0) && (memcmp(args, projection_args, arglen) != 0))
         return false;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::is_disjoint(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return disjoint;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::can_perform_name_based_self_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return permits_name_based_self_analysis;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::has_unique_shard_users(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return unique_shard_users;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionNode* ProjectionSummary::get_tree(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return tree;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4273,14 +4409,14 @@ namespace Legion {
 #endif
             // If we don't have any refinements, we'll always allow them
             allow_refinement = true;
-            if (summary->complete)
+            if (summary->is_complete())
               refinement_state = IS_WRITE(usage) ? 
                 COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
             else
               refinement_state = IS_WRITE(usage) ?
                 INCOMPLETE_WRITE_REFINED_STATE : 
                 INCOMPLETE_NONWRITE_REFINED_STATE;
-            refined_projection = summary->result->as_region_projection();
+            refined_projection = summary->get_tree()->as_region_projection();
             refined_projection->add_reference();
             break;
           }
@@ -4305,7 +4441,7 @@ namespace Legion {
               // any kind of field coalescing happening
               return true;
             }
-            if (summary->complete)
+            if (summary->is_complete())
             {
               // Swith over to non-write complete
               // We can delete this tracker and make a new one to
@@ -4316,10 +4452,10 @@ namespace Legion {
           }
         case COMPLETE_WRITE_REFINED_STATE:
           {
-            if (IS_WRITE(usage) && summary->complete)
+            if (IS_WRITE(usage) && summary->is_complete())
             {
               ProjectionRegion *projection = 
-                summary->result->as_region_projection();
+                summary->get_tree()->as_region_projection();
               // Step the clock for a new traversal
               total_traversals++;
               // Check to see if we observed this refinement before
@@ -4381,7 +4517,7 @@ namespace Legion {
           {
             if (IS_WRITE(usage))
             {
-              if (summary->complete)
+              if (summary->is_complete())
               {
                 // If this is a complete write then we're going to switch to it
                 return true;
@@ -4392,7 +4528,7 @@ namespace Legion {
               // disjoint and complete partitions, so we track a set of 
               // the most recent MAX_INCOMPLETE_WRITES
               ProjectionRegion *projection = 
-                summary->result->as_region_projection();
+                summary->get_tree()->as_region_projection();
               std::unordered_map<ProjectionRegion*,
                 std::pair<double,uint64_t> >::iterator finder =
                   candidate_projections.find(projection);
@@ -5365,9 +5501,9 @@ namespace Legion {
             assert(refined_projection == NULL);
 #endif
             allow_refinement = true;
-            refined_projection = summary->result->as_partition_projection();
+            refined_projection = summary->get_tree()->as_partition_projection();
             refined_projection->add_reference();
-            if (summary->complete)
+            if (summary->is_complete())
               refinement_state = IS_WRITE(usage) ?
                 COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
             else
@@ -5399,7 +5535,7 @@ namespace Legion {
               return true;
             }
             // Check to see if we're a complete projection
-            if (summary->complete)
+            if (summary->is_complete())
             {
               // We're a new complete non-write projection so 
               // swtich to that
@@ -5410,14 +5546,14 @@ namespace Legion {
           }
         case COMPLETE_WRITE_REFINED_STATE:
           {
-            if (IS_WRITE(usage) && summary->complete)
+            if (IS_WRITE(usage) && summary->is_complete())
             {
               // Testing against other writing-complete projections
               // and/or the group of direct children
               // Step the clock for a new traversal
               total_traversals++;
               ProjectionPartition *projection =
-                summary->result->as_partition_projection();
+                summary->get_tree()->as_partition_projection();
               std::unordered_map<ProjectionPartition*,
                 std::pair<double,uint64_t> >::iterator finder =
                   candidate_projections.find(projection);
@@ -5479,7 +5615,7 @@ namespace Legion {
             if (IS_WRITE(usage))
             {
               // Check to see if we're a complete projection
-              if (summary->complete)
+              if (summary->is_complete())
               {
                 // We're a new complete writing projection so 
                 // swtich to that
@@ -5491,7 +5627,7 @@ namespace Legion {
               // disjoint and complete partitions, so we track a set of 
               // the most recent MAX_INCOMPLETE_WRITES
               ProjectionPartition *projection = 
-                summary->result->as_partition_projection();
+                summary->get_tree()->as_partition_projection();
               std::unordered_map<ProjectionPartition*,
                 std::pair<double,uint64_t> >::iterator finder =
                   candidate_projections.find(projection);
@@ -6500,22 +6636,9 @@ namespace Legion {
         if ((invalidated != NULL) && invalidated->remove_reference())
           delete invalidated;
       }
-      bool disjoint = false;
-      bool permits_name_based = false;
-      bool unique_shards = false;
-      ProjectionNode *node = analysis.context->construct_projection_tree(op,
-                                    index, req, owner, proj_info, disjoint,
-                                    permits_name_based, unique_shards);
-      // Special case here: if we can't prove its disjoint by the region tree
-      // but we know that all the regions are writing and the projection
-      // function is not invertible then the user is guaranteeing use that
-      // all the point in this projection function are disjoint from each other
-      if (!disjoint && IS_WRITE(req) && !proj_info.projection->is_invertible)  
-        disjoint = true;
-      bool complete = proj_info.projection->is_complete(owner, op, index,
-                                              proj_info.projection_space);
-      ProjectionSummary *result = new ProjectionSummary(proj_info, node, req,
-          this, disjoint, complete, permits_name_based, unique_shards);
+      ProjectionSummary *result =
+        analysis.context->construct_projection_summary(op, index, req,
+                                                       this, proj_info);
       // If the projection functor is functional then we can save it for
       // the future and evict the least recently used projection
       if (proj_info.projection->is_functional)
@@ -6580,8 +6703,8 @@ namespace Legion {
         // We can elide the close operation here if we can prove that
         // all the regions used a disjoint from each other and they all
         // have exactly one kind of shard user
-        return (!one->permits_name_based_self_analysis ||
-                !one->unique_shard_users);
+        return (!one->can_perform_name_based_self_analysis() ||
+                !one->has_unique_shard_users());
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,bool> >::const_iterator
           one_finder = interfering_shards.find(one);

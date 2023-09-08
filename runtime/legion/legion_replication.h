@@ -1483,9 +1483,9 @@ namespace Legion {
      */
     class ProjectionTreeExchange : public AllGatherCollective<false> {
     public:
-      ProjectionTreeExchange(ProjectionNode *n, bool &disjoint,
-          bool &leaves_only, bool &unique_shards, ReplicateContext *ctx,
-          CollectiveIndexLocation loc);
+      ProjectionTreeExchange(ProjectionNode *n, ReplicateContext *ctx,
+          CollectiveIndexLocation loc, bool &disjoint, 
+          bool &permits_name_based_self_analysis, bool &unique_shards);
       ProjectionTreeExchange(const ProjectionTreeExchange &rhs) = delete;
       ~ProjectionTreeExchange(void);
     public:
@@ -1496,11 +1496,13 @@ namespace Legion {
       virtual void pack_collective_stage(ShardID target, 
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
     public:
       ProjectionNode *const node;
       bool &disjoint;
-      bool &leaves_only;
+      bool &permits_name_based_self_analysis;
       bool &unique_shards;
+      bool leaves_only;
     protected:
       typedef ProjectionNode::RegionSummary RegionSummary; 
       typedef ProjectionNode::PartitionSummary PartitionSummary; 

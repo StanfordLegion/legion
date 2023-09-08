@@ -2149,6 +2149,7 @@ namespace Legion {
     class MustEpochMappingExchange;
     class PredicateCollective;
     class ShardRendezvous;
+    class ProjectionTreeExchange;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly

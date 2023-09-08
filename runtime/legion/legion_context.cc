@@ -11227,22 +11227,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionNode* InnerContext::construct_projection_tree(Operation *op,
-            unsigned index, const RegionRequirement &req, RegionTreeNode *root,
-            const ProjectionInfo &proj_info, bool &disjoint,
-            bool &permits_name_based, bool &unique_shards)
+    ProjectionSummary* InnerContext::construct_projection_summary(Operation *op,
+            unsigned index, const RegionRequirement &req, 
+            LogicalState *state, const ProjectionInfo &proj_info) 
     //--------------------------------------------------------------------------
     {
-      ProjectionNode *result = proj_info.projection->construct_projection_tree(
-                            op, index, req, 0/*local shard*/, root, proj_info);
-      disjoint = result->is_disjoint();
-      if (disjoint)
-        permits_name_based = result->is_leaves_only();
-      else
-        permits_name_based = false;
-      // No shards in non-control replicated context so this is easy
-      unique_shards = true;
-      return result;
+      ProjectionNode *tree = proj_info.projection->construct_projection_tree(
+          op, index, req, 0/*local shard*/, state->owner, proj_info);
+      return new ProjectionSummary(proj_info, tree, op, index, req, state);
     }
 
     //--------------------------------------------------------------------------
@@ -11250,7 +11242,7 @@ namespace Legion {
                                               ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
-      return one->result->interferes(two->result, 0/*local shard*/);
+      return one->get_tree()->interferes(two->get_tree(), 0/*local shard*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20556,15 +20548,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionNode* ReplicateContext::construct_projection_tree(Operation *op, 
-            unsigned index, const RegionRequirement &req, RegionTreeNode *root,
-            const ProjectionInfo &proj_info, bool &disjoint, 
-            bool &permits_name_based, bool &unique_shards)
+    ProjectionSummary* ReplicateContext::construct_projection_summary(
+            Operation *op, unsigned index, const RegionRequirement &req, 
+            LogicalState *state, const ProjectionInfo &proj_info) 
     //--------------------------------------------------------------------------
     {
       const ShardID local_shard = owner_shard->shard_id;
       ProjectionNode *result = proj_info.projection->construct_projection_tree(
-                                  op, index, req, local_shard, root, proj_info);
+                          op, index, req, local_shard, state->owner, proj_info);
       // Now we need to exchange this between the shards. The secret to this
       // function is knowing that it is only called in the logical dependence
       // analysis stage of the pipeline so we can get a collective ID here to
@@ -20582,7 +20573,7 @@ namespace Legion {
           proj_info.sharding_space->get_domain(shard_domain);
         else
           shard_domain = launch_domain;
-        if (root->is_region())
+        if (state->owner->is_region())
         {
           // Iterate all the points in the launch space and compute their
           // shards and record them in the shard users
@@ -20593,15 +20584,15 @@ namespace Legion {
               proj_info.sharding_function->find_owner(*itr, shard_domain);
             projection->add_user(shard);
           }
-          disjoint = true;
-          permits_name_based = true;
-          unique_shards = false;
+          return new ProjectionSummary(proj_info, result, op, index, req, 
+              state, true/*disjoint*/, false/*unique*/);
         }
         else
         {
           // Iterate all the points in the launch space and linearize
           // their colors to add to the summary
-          IndexPartNode *partition = root->as_partition_node()->row_source;
+          IndexPartNode *partition = 
+            state->owner->as_partition_node()->row_source;
           IndexSpaceNode *color_space = partition->color_space;
           ProjectionPartition *projection = result->as_partition_projection();
           for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -20617,28 +20608,14 @@ namespace Legion {
 #endif
             projection->shard_children.add_child(color);
           }
-          disjoint = partition->is_disjoint(false/*from app*/);
-          if (disjoint)
-            permits_name_based = true;
-          else
-            permits_name_based = false;
-          // Exactly one point can map to each subregion in this case
-          // and therefore only shard can map to each subregion as well
-          unique_shards = true;
+          const bool disjoint = partition->is_disjoint(false/*from app*/);
+          return new ProjectionSummary(proj_info, result, op, index, req,
+                                       state, disjoint, true/*unique*/);
         }
       }
       else
-      {
-        disjoint = result->is_disjoint();
-        bool leaves_only = result->is_leaves_only();
-        unique_shards = result->is_unique_shards();
-        // For all other projection functors though we need to do the exchange
-        ProjectionTreeExchange exchange(result, disjoint,
-            leaves_only, unique_shards, this, COLLECTIVE_LOC_50);
-        exchange.perform_collective_sync();
-        permits_name_based = disjoint && leaves_only;
-      }
-      return result;
+        return new ProjectionSummary(proj_info, result, op, index, 
+                                     req, state, this); 
     }
 
     //--------------------------------------------------------------------------
@@ -20646,7 +20623,8 @@ namespace Legion {
                                                   ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
-      bool result = one->result->interferes(two->result, owner_shard->shard_id);
+      bool result = one->get_tree()->interferes(two->get_tree(), 
+                                          owner_shard->shard_id);
       // Now we need to perform a collective to make sure that all the 
       // shards agree on the result of the interference
       AllReduceCollective<SumReduction<bool> > any_interfering(this,

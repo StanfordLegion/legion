@@ -16880,11 +16880,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionTreeExchange::ProjectionTreeExchange(ProjectionNode *n,
-        bool &dis, bool &leaves, bool &unique, ReplicateContext *ctx, 
-        CollectiveIndexLocation loc)
+        ReplicateContext *ctx, CollectiveIndexLocation loc, bool &dis, 
+        bool &name_based, bool &unique)
       : AllGatherCollective<false>(ctx,
           ctx->get_next_collective_index(loc, true/*logical*/)),
-        node(n), disjoint(dis), leaves_only(leaves), unique_shards(unique)
+        node(n), disjoint(dis), permits_name_based_self_analysis(name_based),
+        unique_shards(unique), leaves_only(node->is_leaves_only())
     //--------------------------------------------------------------------------
     {
       // Extract our local summaries
@@ -16895,10 +16896,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionTreeExchange::~ProjectionTreeExchange(void)
     //--------------------------------------------------------------------------
-    {
-      // Update our local summaries
-      node->update_shard_summaries(disjoint && leaves_only, local_shard,
-          context->total_shards, region_summaries, partition_summaries);
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -17016,6 +17014,19 @@ namespace Legion {
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ProjectionTreeExchange::post_complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      permits_name_based_self_analysis = disjoint && leaves_only;  
+      // Update our local summaries
+      node->update_shard_summaries(disjoint && leaves_only, local_shard,
+          context->total_shards, region_summaries, partition_summaries);
+      region_summaries.clear();
+      partition_summaries.clear();
+      return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
