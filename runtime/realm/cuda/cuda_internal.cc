@@ -296,12 +296,11 @@ namespace Realm {
       return 1; // Unfortunately this can only be byte aligned :(
     }
 
-    static bool needs_transpose(const AffineCopyPair<3> &copy_info)
+    static bool needs_transpose(size_t in_lstride, size_t in_pstride, size_t out_lstride,
+                                size_t out_pstride)
     {
-      return !(((copy_info.src.strides[0] > copy_info.src.strides[2] &&
-                 copy_info.dst.strides[0] > copy_info.dst.strides[2]) ||
-                (copy_info.src.strides[0] < copy_info.src.strides[2] &&
-                 copy_info.dst.strides[0] < copy_info.dst.strides[2])));
+      return !((in_lstride < in_pstride && out_lstride < out_pstride) ||
+               (in_lstride > in_pstride && out_lstride > out_pstride));
     }
 
     static size_t populate_affine_copy_info(AffineCopyInfo<3> &copy_infos,
@@ -458,10 +457,11 @@ namespace Realm {
 
       const size_t planes = std::min(std::min(icount, ocount),
                                      (bytes_left / (contig_bytes * lines)));
-      if ((in_gpu != NULL) &&
-          in_gpu->can_access_peer(out_gpu) &&  // If this is a gpu->gpu copy
-          (in_dim != out_dim) &&
-          contig_bytes <= CUDA_MAX_FIELD_BYTES) {
+
+      if((in_gpu != NULL) &&
+         in_gpu->can_access_peer(out_gpu) && // If this is a gpu->gpu copy
+         needs_transpose(in_lstride, in_pstride, out_lstride, out_pstride) &&
+         contig_bytes <= CUDA_MAX_FIELD_BYTES) {
         transpose_info.src = reinterpret_cast<void *>(in_base + in_offset);
         transpose_info.dst = reinterpret_cast<void *>(out_base + out_offset);
         transpose_info.src_stride_x = in_pstride / contig_bytes;
@@ -630,7 +630,8 @@ namespace Realm {
 
             AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
             if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu) ||
-               !needs_transpose(copy_info)) {
+               !needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
+                                copy_info.dst.strides[0], copy_info.dst.strides[2])) {
               break;
             }
 
@@ -733,7 +734,8 @@ namespace Realm {
     // transpose copies, make this a default path and remove the
     // underlying implementation in the else branch.
 #ifdef ENABLE_2D_TRANSPOSE
-          if (!needs_transpose(copy_info)) {
+          if(!needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
+                              copy_info.dst.strides[0], copy_info.dst.strides[2])) {
 #endif
 
 
