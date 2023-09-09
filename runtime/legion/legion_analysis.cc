@@ -4059,15 +4059,15 @@ namespace Legion {
       if ((sharding_domain != NULL) && 
           sharding_domain->remove_base_gc_ref(PROJECTION_REF))
         delete sharding_domain;
-      if (tree->remove_reference())
-        delete tree;
-      if (args != NULL)
-        free(args);
       if (exchange != NULL)
       {
         exchange->perform_collective_wait(true/*block*/);  
         delete exchange;
       }
+      if (tree->remove_reference())
+        delete tree;
+      if (args != NULL)
+        free(args);
     }
 
     //--------------------------------------------------------------------------
