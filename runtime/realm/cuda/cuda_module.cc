@@ -97,6 +97,26 @@ namespace Realm {
   #undef DEFINE_FNPTR
 #endif
 
+    static unsigned ctz(uint64_t v) {
+#ifdef REALM_ON_WINDOWS
+      unsigned long index;
+#ifdef _WIN64
+      if (_BitScanForward64(&index, v)) return index;
+#else
+      unsigned v_lo = v;
+      unsigned v_hi = v >> 32;
+      if (_BitScanForward(&index, v_lo))
+        return index;
+      else if (_BitScanForward(&index, v_hi))
+        return index + 32;
+#endif
+      else
+        return 0;
+#else
+      return __builtin_ctzll(v);
+#endif
+    }
+
 #define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
 
     NVML_APIS(DEFINE_FNPTR);
@@ -2022,6 +2042,11 @@ namespace Realm {
       return NULL;
     }
 
+    bool GPU::can_access_peer(const GPU *peer) const {
+      return (peer != NULL) &&
+             (info->peers.find(peer->info->device) != info->peers.end());
+    }
+
     GPUStream* GPU::get_null_task_stream(void) const
     {
       GPUStream *stream = ThreadLocal::current_gpu_stream;
@@ -2051,6 +2076,40 @@ namespace Realm {
       unsigned d2d_stream_index = (next_d2d_stream.fetch_add(1) %
                                    module->config->cfg_d2d_streams);
       return device_to_device_streams[d2d_stream_index];
+    }
+
+    static void launch_kernel(const Realm::Cuda::GPU::GPUFuncInfo &func_info, void *params,
+                              size_t num_elems, GPUStream *stream)
+    {
+      unsigned int num_blocks = 0, num_threads = 0;
+      void *args[] = {params};
+
+      num_threads = std::min(static_cast<unsigned int>(func_info.occ_num_threads),
+                             static_cast<unsigned int>(num_elems));
+      num_blocks = std::min(
+          static_cast<unsigned int>((num_elems + num_threads - 1) / num_threads),
+          static_cast<unsigned int>(
+              func_info.occ_num_blocks)); // Cap the grid based on the given volume
+
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
+                                                 num_threads, 1, 1, 0,
+                                                 stream->get_stream(), args, NULL));
+    }
+
+    void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
+                                         size_t elem_size, size_t volume,
+                                         GPUStream *stream) {
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_elem_size) == elem_size);
+      assert(dim <= REALM_MAX_DIM);
+      assert(dim >= 1);
+
+      // TODO: probably replace this
+      // with a better data-structure
+      GPUFuncInfo &func_info = batch_affine_kernels[dim - 1][log_elem_size];
+      launch_kernel(func_info, copy_info, volume, stream);
     }
 
     const GPU::CudaIpcMapping *GPU::find_ipc_mapping(Memory mem) const
@@ -2556,14 +2615,21 @@ namespace Realm {
 
     GPUDynamicFBMemory::~GPUDynamicFBMemory(void)
     {
+      cleanup();
+    }
+
+    void GPUDynamicFBMemory::cleanup(void)
+    {
+      AutoLock<> al(mutex);
+      if(alloc_bases.empty())
+        return;
       // free any remaining allocations
       AutoGPUContext agc(gpu);
-      AutoLock<> al(mutex);
-      for(std::map<RegionInstance, std::pair<CUdeviceptr, size_t> >::const_iterator it = alloc_bases.begin();
-          it != alloc_bases.end();
-          ++it)
+      for(std::map<RegionInstance, std::pair<CUdeviceptr, size_t>>::const_iterator it =
+              alloc_bases.begin();
+          it != alloc_bases.end(); ++it)
         if(it->second.first)
-          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(it->second.first) );
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemFree)(it->second.first));
       alloc_bases.clear();
     }
 
@@ -3435,6 +3501,10 @@ namespace Realm {
         }
       }
 
+      if (fb_dmem) {
+        fb_dmem->cleanup();
+      }
+
       if(fb_ibmem_base)
         CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fb_ibmem_base) );
 
@@ -3716,8 +3786,9 @@ namespace Realm {
       }
 
       Memory m = runtime->next_local_memory_id();
-      GPUDynamicFBMemory *dfb = new GPUDynamicFBMemory(m, this, max_size);
-      runtime->add_memory(dfb);
+      // TODO(apryakhin@): Determine if we need to keep the pointer.
+      fb_dmem = new GPUDynamicFBMemory(m, this, max_size);
+      runtime->add_memory(fb_dmem);
     }
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -4531,7 +4602,7 @@ namespace Realm {
         }
         // if num_gpus was specified, they should match
         if(config->cfg_num_gpus > 0) {
-          if(config->cfg_num_gpus != (int)fixed_indices.size()) {
+          if(config->cfg_num_gpus != static_cast<int>(fixed_indices.size())) {
             log_gpu.fatal() << "mismatch between '-ll:gpu' and '-ll:gpu_ids'";
             abort();
           }
@@ -4546,7 +4617,7 @@ namespace Realm {
       unsigned gpu_count = 0;
       // try to get cfg_num_gpus, working through the list in order
       for(size_t i = config->cfg_skip_gpu_count;
-          (i < gpu_info.size()) && ((int)gpu_count < config->cfg_num_gpus); i++) {
+          (i < gpu_info.size()) && (static_cast<int>(gpu_count) < config->cfg_num_gpus); i++) {
         int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
 
         // try to create a context and possibly check available memory - in order
@@ -4633,7 +4704,7 @@ namespace Realm {
       }
 
       // did we actually get the requested number of GPUs?
-      if((int)gpu_count < config->cfg_num_gpus) {
+      if(static_cast<int>(gpu_count) < config->cfg_num_gpus) {
         log_gpu.fatal() << config->cfg_num_gpus << " GPUs requested, but only " << gpu_count
                         << " available!";
         assert(false);

@@ -2739,7 +2739,7 @@ namespace Legion {
       void register_static_projections(void);
       void register_static_sharding_functors(void);
       void initialize_legion_prof(const LegionConfiguration &config);
-      void log_machine(void) const;
+      void log_local_machine(void) const;
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);

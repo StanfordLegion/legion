@@ -137,6 +137,7 @@ namespace Realm {
     class GPUWorker;
     class GPUStream;
     class GPUFBMemory;
+    class GPUDynamicFBMemory;
     class GPUZCMemory;
     class GPUFBIBMemory;
     class GPU;
@@ -632,12 +633,16 @@ namespace Realm {
       void fence_within_fb(Realm::Operation *op);
       void fence_to_peer(Realm::Operation *op, GPU *dst);
 
-      bool can_access_peer(GPU *peer);
+      bool can_access_peer(const GPU *peer) const;
 
       GPUStream *find_stream(CUstream stream) const;
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
       GPUStream *get_next_d2d_stream();
+
+      void launch_batch_affine_kernel(void *copy_info, size_t dim,
+                                      size_t elemSize, size_t volume,
+                                      GPUStream *stream);
 
      protected:
       CUmodule load_cuda_module(const void *data);
@@ -648,6 +653,7 @@ namespace Realm {
       GPUWorker *worker;
       GPUProcessor *proc;
       GPUFBMemory *fbmem;
+      GPUDynamicFBMemory *fb_dmem;
       GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
@@ -883,6 +889,7 @@ namespace Realm {
       GPUDynamicFBMemory(Memory _me, GPU *_gpu, size_t _max_size);
 
       virtual ~GPUDynamicFBMemory(void);
+      void cleanup(void);
 
       // deferred allocation not supported
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,

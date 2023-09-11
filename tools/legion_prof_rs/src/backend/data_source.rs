@@ -366,8 +366,8 @@ impl StateDataSource {
                                 format!("{}-{}", src_short.unwrap(), dst_short.unwrap())
                             }
                             ChanKind::Fill => format!("f {}", dst_short.unwrap()),
-                            ChanKind::Gather => format!("g {}", dst_short.unwrap()),
-                            ChanKind::Scatter => format!("s {}", src_short.unwrap()),
+                            ChanKind::Gather => format!("g {}", src_short.unwrap()),
+                            ChanKind::Scatter => format!("s {}", dst_short.unwrap()),
                             ChanKind::DepPart => "dp".to_owned(),
                         };
 
@@ -376,9 +376,9 @@ impl StateDataSource {
                                 format!("{} to {}", src_name.unwrap(), dst_name.unwrap())
                             }
                             ChanKind::Fill => format!("Fill {}", dst_name.unwrap()),
-                            ChanKind::Gather => format!("Gather to {}", dst_name.unwrap()),
+                            ChanKind::Gather => format!("Gather to {}", src_name.unwrap()),
                             ChanKind::Scatter => {
-                                format!("Scatter from {}", src_name.unwrap())
+                                format!("Scatter from {}", dst_name.unwrap())
                             }
                             ChanKind::DepPart => "Dependent Partitioning".to_owned(),
                         };

@@ -183,9 +183,12 @@ void top_level_task(const void *args, size_t arglen,
     ret_value = gpu_config->get_property("ib_zcmem", zc_ib_size);
     assert(ret_value == true);
     assert(zc_ib_size == TestConfig::zc_ib_size);
-    ret_value = gpu_config->get_property("uvmem", uvm_mem_size);
-    assert(ret_value == true);
-    assert(uvm_mem_size == TestConfig::uvm_mem_size);
+    // uvm is only available in cuda
+    if (cuda_config) {
+      ret_value = gpu_config->get_property("uvmem", uvm_mem_size);
+      assert(ret_value == true);
+      assert(uvm_mem_size == TestConfig::uvm_mem_size);
+    }
     ret_value = gpu_config->get_property("use_dynamic_fb", use_dynamic_fb);
     assert(ret_value == true);
     assert(use_dynamic_fb == TestConfig::use_dynamic_fb);
@@ -404,7 +407,10 @@ void top_level_task(const void *args, size_t arglen,
 #if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
     assert(fb_mem_size == TestConfig::fb_mem_size * num_nodes);
     assert(zc_mem_size == TestConfig::zc_mem_size * num_nodes);
+#ifdef REALM_USE_CUDA
+    // uvm is only available in cuda
     assert(uvm_mem_size == TestConfig::uvm_mem_size * num_nodes);
+#endif
     assert(dynfb_max_size == TestConfig::dynfb_max_size * num_nodes);
 #endif
   }
@@ -511,8 +517,11 @@ int main(int argc, char **argv)
       assert(ret_value == true);
       ret_value = gpu_config->set_property<size_t>("ib_zcmem", TestConfig::zc_ib_size);
       assert(ret_value == true);
-      ret_value = gpu_config->set_property<size_t>("uvmem", TestConfig::uvm_mem_size);
-      assert(ret_value == true);
+      // uvm is only available in cuda
+      if (cuda_config) {
+        ret_value = gpu_config->set_property<size_t>("uvmem", TestConfig::uvm_mem_size);
+        assert(ret_value == true);
+      }
       ret_value = gpu_config->set_property<bool>("use_dynamic_fb", TestConfig::use_dynamic_fb);
       assert(ret_value == true);
       ret_value = gpu_config->set_property<size_t>("dynfb_max_size", TestConfig::dynfb_max_size);

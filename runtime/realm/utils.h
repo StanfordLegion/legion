@@ -410,6 +410,9 @@ namespace Realm {
   // OS error codes back to strings in portable way across OSes
   REALM_PUBLIC_API const char* realm_strerror(int err);
 
+  // Finds first-bit-set
+  unsigned ctz(uint64_t v);
+
 }; // namespace Realm
 
 #include "realm/utils.inl"

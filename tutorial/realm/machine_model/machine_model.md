@@ -41,9 +41,9 @@ The address space of a Realm resource, such as Processor and Memory (introduced 
 
 A `Processor` can also be queried by its `kind` and the runtime supports the following options:
 
-- `TOC_PROC` represents a throughput processor, which is usually a CPU core. 
+- `LOC_PROC` represents a latency processor,which is usually a CPU core. 
   It can be specified by `-ll:cpu`.
-- `LOC_PROC` represents a latency processor (GPU).
+- `TOC_PROC` represents a throughput processor (GPU).
   Currently, Realm supports both NVIDIA and AMD GPUs.
   It can be specified by `-ll:gpu`.
 - `UTIL_PROC` represents a CPU processor that is designed for users to run their own background work.
