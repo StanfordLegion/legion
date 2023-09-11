@@ -60,7 +60,20 @@ namespace Realm {
     // should not be called
     assert(0);
   }
-  
+
+  size_t TransferIterator::get_base_offset(void) const
+  {
+    // should not be called
+    assert(0);
+    return 0;
+  }
+
+  size_t TransferIterator::get_address_size(void) const
+  {
+    // should not be called
+    assert(0);
+    return 0;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -88,13 +101,23 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
+    virtual size_t get_base_offset(void) const;
+
     virtual bool get_addresses(AddressList &addrlist,
                                const InstanceLayoutPieceBase *&nonaffine);
+    virtual bool can_access_memory(void) const
+    {
+      Memory memory = inst_impl->memory;
+      return (memory.kind() == Memory::SYSTEM_MEM ||
+              memory.kind() == Memory::Z_COPY_MEM ||
+              memory.kind() == Memory::SOCKET_MEM ||
+              memory.kind() == Memory::REGDMA_MEM);
+    }
 
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
 			       size_t& offset, size_t& fsize) = 0;
-    
+
     bool have_rect, is_done;
     Rect<N,T> cur_rect;
     FieldID cur_field_id;
@@ -177,6 +200,35 @@ namespace Realm {
 	return is_done;
       }
     }
+  }
+
+  template <int N, typename T>
+  static size_t get_layout_piece(const InstanceLayout<N, T> *inst_layout,
+                                 const InstanceLayoutPiece<N, T> *&layout_piece,
+                                 size_t field_id, size_t field_size, size_t field_offset,
+                                 int piece_idx)
+  {
+    size_t field_rel_offset;
+    {
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+          inst_layout->fields.find(field_id);
+      assert(it != inst_layout->fields.end());
+      assert((field_offset + field_size) <= size_t(it->second.size_in_bytes));
+      const InstancePieceList<N, T> &piece_list =
+          inst_layout->piece_lists[it->second.list_idx];
+      assert(piece_idx >= 0);
+      assert(piece_list.pieces.size() > static_cast<size_t>(piece_idx));
+      layout_piece = piece_list.pieces[piece_idx];
+      // TODO(apryakhin@): Consider adding point lookup.
+      // layout_piece = piece_list.find_piece(cur_point) and testing
+      // for non-affine layouts.
+      if(REALM_UNLIKELY(layout_piece == 0)) {
+        abort();
+      }
+      assert(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType);
+      field_rel_offset = it->second.rel_offset + field_offset;
+    }
+    return field_rel_offset;
   }
 
   // finds the largest subrectangle of 'domain' that starts with 'start',
@@ -517,6 +569,11 @@ namespace Realm {
   {
     assert(tentative_valid);
     tentative_valid = false;
+  }
+
+  template <int N, typename T>
+  uintptr_t TransferIteratorBase<N, T>::get_base_offset(void) const {
+    return inst_impl->metadata.inst_offset;
   }
 
   template <int N, typename T>
@@ -926,6 +983,10 @@ namespace Realm {
 
     virtual void reset(void);
 
+    virtual size_t get_address_size(void) const;
+    virtual size_t step(size_t max_bytes, TransferIterator::AddressInfo &info,
+                        unsigned flags, bool tentative = false);
+
     static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirect<N,T> > serdez_subclass;
 
     template <typename S>
@@ -934,7 +995,7 @@ namespace Realm {
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
 			       size_t& offset, size_t& fsize);
-    
+
     TransferIterator *addrs_in;
     Memory addrs_mem;
     intptr_t addrs_mem_base;
@@ -947,6 +1008,8 @@ namespace Realm {
     std::vector<size_t> fld_offsets, fld_sizes;
     XferDes *indirect_xd;
     int indirect_port_idx;
+    // TODO(apryakhin@): Don't forget to reset.
+    size_t piece_idx;
   };
 
   template <int N, typename T>
@@ -975,6 +1038,7 @@ namespace Realm {
     , fld_sizes(_fld_sizes)
     , indirect_xd(0)
     , indirect_port_idx(-1)
+    , piece_idx(0)
   {}
     
   template <int N, typename T>
@@ -1020,12 +1084,10 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  Event TransferIteratorIndirect<N,T>::request_metadata(void)
+  Event TransferIteratorIndirect<N, T>::request_metadata(void)
   {
-    Event ev1 = addrs_in->request_metadata();
-    //Event ev2 = is.make_valid();
-    Event ev3 = TransferIteratorBase<N,T>::request_metadata();
-    return Event::merge_events(ev1, /*ev2,*/ ev3);
+    return Event::merge_events(
+        {addrs_in->request_metadata(), TransferIteratorBase<N, T>::request_metadata()});
   }
 
   template <int N, typename T>
@@ -1036,7 +1098,6 @@ namespace Realm {
     indirect_xd = xd;
     indirect_port_idx = port_idx;
     addrs_in = inner_iter;
-
     assert(indirect_xd != 0);
     assert(indirect_port_idx >= 0);
     void *mem_base = indirect_xd->input_ports[indirect_port_idx].mem->get_direct_ptr(0, 0);
@@ -1050,7 +1111,68 @@ namespace Realm {
     TransferIteratorBase<N,T>::reset();
     addrs_in->reset();
   }
-  
+
+  template <int N, typename T>
+  size_t TransferIteratorIndirect<N, T>::get_address_size(void) const
+  {
+    return sizeof(T);
+  }
+
+  template <int N, typename T>
+  size_t TransferIteratorIndirect<N, T>::step(size_t max_bytes,
+                                              TransferIterator::AddressInfo &info,
+                                              unsigned flags, bool tentative /*= false*/)
+  {
+    if(addrs_in->can_access_memory()) {
+      return TransferIteratorBase<N, T>::step(max_bytes, info, flags, tentative);
+    }
+
+    FieldID cur_field_id = fields[0];
+    size_t cur_field_offset = fld_offsets[0];
+    size_t cur_field_size = fld_sizes[0];
+
+    if(this->inst_layout == 0) {
+      assert(this->inst_impl->metadata.is_valid());
+      this->inst_layout =
+          checked_cast<const InstanceLayout<N, T> *>(this->inst_impl->metadata.layout);
+    }
+
+    assert(this->inst_layout);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it =
+        this->inst_layout->fields.find(cur_field_id);
+    assert(it != this->inst_layout->fields.end());
+    size_t pieces = this->inst_layout->piece_lists[it->second.list_idx].pieces.size();
+
+    if(piece_idx < pieces) {
+      const InstanceLayoutPiece<N, T> *layout_piece;
+      size_t field_rel_offset = get_layout_piece(
+          this->inst_layout, layout_piece, cur_field_id, cur_field_size, cur_field_offset,
+          /*piece_idx=*/piece_idx);
+
+      if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
+        const AffineLayoutPiece<N, T> *affine =
+            static_cast<const AffineLayoutPiece<N, T> *>(layout_piece);
+
+        info.base_offset = (this->inst_impl->metadata.inst_offset + affine->offset +
+                            affine->strides.dot(affine->bounds.lo) + field_rel_offset);
+
+        size_t cur_dim = 0;
+        info.bytes_per_chunk = affine->strides[cur_dim++];
+        if(N > cur_dim) {
+          info.num_lines = affine->bounds.hi[cur_dim] - affine->bounds.lo[cur_dim] + 1;
+          info.line_stride = affine->strides[cur_dim];
+        }
+        cur_dim++;
+        if(N > cur_dim) {
+          info.num_planes = affine->bounds.hi[cur_dim] - affine->bounds.lo[cur_dim] + 1;
+          info.plane_stride = affine->strides[cur_dim];
+        }
+        piece_idx++;
+      }
+    }
+    return 0;
+  }
+
   template <int N, typename T>
   bool TransferIteratorIndirect<N,T>::get_next_rect(Rect<N,T>& r,
 						    FieldID& fid,
@@ -1061,6 +1183,12 @@ namespace Realm {
     fid = fields[0];
     offset = fld_offsets[0];
     fsize = fld_sizes[0];
+
+    addrs_in->done();
+    if(!addrs_in->can_access_memory()) {
+      r = Rect<N, T>::make_empty();
+      return false;
+    }
 
     bool nonempty = false;
     int merge_dim = -1;
@@ -1177,7 +1305,6 @@ namespace Realm {
       }
     }
   }
-  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -2993,6 +3120,7 @@ namespace Realm {
 
     // ... but we need three helpers that will be defined in the typed versions
     virtual size_t num_spaces() const = 0;
+    virtual void populate_copy_info(ChannelCopyInfo& info) const = 0;
     virtual size_t domain_size() const = 0;
     virtual size_t address_size() const = 0;
 
@@ -3118,9 +3246,13 @@ namespace Realm {
 	// new path to compute
 	path_infos.resize(idx + 1);
         std::vector<size_t> src_frags{domain_size()}, dst_frags{1};
-        bool ok = find_fastest_path(ChannelCopyInfo{insts[i].get_location(), dst_mem}, serdez_id,
-                                    0, domain_size() * bytes_per_element,
-                                    &src_frags, &dst_frags, path_infos[idx]);
+        log_xpath.info() << "Find fastest path for gather op.";
+        ChannelCopyInfo copy_info{insts[i].get_location(), dst_mem, inst.get_location(),
+                                  /*is_scatter=*/false};
+        populate_copy_info(copy_info);
+        bool ok =
+            find_fastest_path(copy_info, serdez_id, 0, domain_size() * bytes_per_element,
+                              &src_frags, &dst_frags, path_infos[idx]);
         assert(ok);
       }
     }
@@ -3135,19 +3267,18 @@ namespace Realm {
     //  accesses
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
-      // HACK!
-      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[0]->node);
-      // do we have to do anything to get the addresses into a cpu-readable
-      //  memory on that node?
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   local_ib_mem,
-				   0 /*no serdez*/,
-                                   0 /*redop_id*/,
-				   addr_path,
-				   true /*skip_final_memcpy*/);
-      assert(ok);
-      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      auto channel = path_infos[0].xd_channels[0];
+      Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
+      if(ind_ib_mem != Memory::NO_MEMORY) {
+        log_xpath.info() << "Copy indirect points to local ib memory=" << ind_ib_mem
+                         << "(" << ind_ib_mem.kind() << ")";
+        MemPathInfo addr_path;
+        bool ok =
+            find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
+                               0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+        assert(ok);
+        addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      }
 
       size_t xd_idx = xd_nodes.size();
       size_t ib_idx = ib_edges.size();
@@ -3395,7 +3526,6 @@ namespace Realm {
   {
     // TODO: see how much of this we can reuse for the structured case?
     assert(!structured);
-
     size_t spaces_size = num_spaces();
 
     // compute the paths from the src instance to each dst data instance
@@ -3422,9 +3552,13 @@ namespace Realm {
         // fragments) to handle can be less. Consider finding a
         // better way to handle this (same for gather op).
         std::vector<size_t> src_frags{1}, dst_frags{domain_size()};
-        bool ok = find_fastest_path(ChannelCopyInfo{src_mem, insts[i].get_location()}, serdez_id,
-                                    0, domain_size() * bytes_per_element,
-                                    &src_frags, &dst_frags, path_infos[idx]);
+        log_xpath.info() << "Find fastest path for scatter op.";
+        ChannelCopyInfo copy_info{src_mem, insts[i].get_location(), inst.get_location(),
+                                  /*is_scatter=*/true};
+        populate_copy_info(copy_info);
+        bool ok =
+            find_fastest_path(copy_info, serdez_id, 0, domain_size() * bytes_per_element,
+                              &src_frags, &dst_frags, path_infos[idx]);
         assert(ok);
       }
     }
@@ -3439,19 +3573,21 @@ namespace Realm {
     //  range accesses
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
-      // HACK!
-      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node);
-      // do we have to do anything to get the addresses into a cpu-readable
-      //  memory on that node?
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   local_ib_mem,
-				   0 /*no serdez*/,
-                                   0 /*redop_id*/,
-				   addr_path,
-				   true /*skip_final_memcpy*/);
-      assert(ok);
-      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      auto channel = path_infos[0].xd_channels[pathlen - 1];
+      Memory ind_ib_mem = channel->suggest_ib_memories(inst.get_location());
+
+      if(ind_ib_mem != Memory::NO_MEMORY) {
+        log_xpath.info() << "Copy indirect points to local ib memory=" << ind_ib_mem
+                         << "(" << ind_ib_mem.kind() << ")";
+        // do we have to do anything to get the addresses into a cpu-readable
+        //  memory on that node?
+        MemPathInfo addr_path;
+        bool ok =
+            find_shortest_path(inst.get_location(), ind_ib_mem, 0 /*no serdez*/,
+                               0 /*redop_id*/, addr_path, true /*skip_final_memcpy*/);
+        assert(ok);
+        addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      }
 
       size_t xd_idx = xd_nodes.size();
       size_t ib_idx = ib_edges.size();
@@ -3733,6 +3869,7 @@ namespace Realm {
 
   protected:
     virtual size_t num_spaces() const;
+    virtual void populate_copy_info(ChannelCopyInfo& info) const;
     virtual size_t domain_size() const;
     virtual size_t address_size() const;
 
@@ -3779,6 +3916,13 @@ namespace Realm {
   size_t IndirectionInfoTyped<N,T,N2,T2>::num_spaces() const
   {
     return spaces.size();
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void IndirectionInfoTyped<N, T, N2, T2>::populate_copy_info(
+      ChannelCopyInfo& info) const {
+    info.is_ranges = is_ranges;
+    info.addr_size = sizeof(T2);
   }
 
   template <int N, typename T, int N2, typename T2>

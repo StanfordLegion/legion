@@ -795,6 +795,533 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class GPUScatterGatherXferDes
+
+    template <int N>
+    static MemcpyUnstructuredInfo<N>
+    make_indirect_info(const TransferIterator::AddressInfo &info, size_t bytes,
+                       uintptr_t in_base, uintptr_t out_base, uintptr_t src_ind_base,
+                       uintptr_t dst_ind_base, bool do_scatter = false)
+    {
+      MemcpyUnstructuredInfo<N> memcpy_info;
+      memset(&memcpy_info, 0, sizeof(MemcpyUnstructuredInfo<3>));
+      memcpy_info.src_ind = src_ind_base;
+      memcpy_info.dst_ind = dst_ind_base;
+      memcpy_info.src.addr = in_base;
+      memcpy_info.dst.addr = out_base;
+      if(do_scatter)
+        memcpy_info.dst.addr += info.base_offset;
+      else
+        memcpy_info.src.addr += info.base_offset;
+      memcpy_info.field_size = info.bytes_per_chunk;
+      assert(memcpy_info.field_size);
+      memcpy_info.volume = bytes / info.bytes_per_chunk;
+      assert(memcpy_info.volume);
+
+      if(do_scatter) {
+        if(N >= 2)
+          memcpy_info.dst.strides[0] = info.num_lines;
+        if(N >= 3)
+          memcpy_info.dst.strides[1] = info.num_planes;
+      } else {
+        if(N >= 2)
+          memcpy_info.src.strides[0] = info.num_lines;
+        if(N >= 3)
+          memcpy_info.src.strides[1] = info.num_planes;
+      }
+
+      return memcpy_info;
+    }
+
+    static void launch_indirect_copy(GPU *gpu, GPUStream *stream, uintptr_t in_base,
+                                     uintptr_t out_base, uintptr_t src_ind_base,
+                                     uintptr_t dst_ind_base, size_t bytes,
+                                     size_t addr_size,
+                                     const TransferIterator::AddressInfo &info,
+                                     bool do_scatter)
+    {
+      if(info.num_lines == 0 && info.num_planes == 0) {
+        auto memcpy_info = make_indirect_info<1>(info, bytes, in_base, out_base,
+                                                 src_ind_base, dst_ind_base, do_scatter);
+        gpu->launch_indirect_copy_kernel(&memcpy_info, 1, addr_size,
+                                         memcpy_info.field_size, memcpy_info.volume,
+                                         stream);
+      } else if(info.num_planes == 0) {
+        auto memcpy_info = make_indirect_info<2>(info, bytes, in_base, out_base,
+                                                 src_ind_base, dst_ind_base, do_scatter);
+        gpu->launch_indirect_copy_kernel(&memcpy_info, 2, addr_size,
+                                         memcpy_info.field_size, memcpy_info.volume,
+                                         stream);
+      } else {
+        auto memcpy_info = make_indirect_info<3>(info, bytes, in_base, out_base,
+                                                 src_ind_base, dst_ind_base, do_scatter);
+        gpu->launch_indirect_copy_kernel(&memcpy_info, 3, addr_size,
+                                         memcpy_info.field_size, memcpy_info.volume,
+                                         stream);
+      }
+    }
+
+    GPUScatterGatherXferDes::GPUScatterGatherXferDes(
+        uintptr_t _dma_op, Channel *_channel, NodeID _launch_node, XferDesID _guid,
+        const std::vector<XferDesPortInfo> &inputs_info,
+        const std::vector<XferDesPortInfo> &outputs_info, int _priority,
+        XferDesRedopInfo _redop_info)
+      : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
+                _priority, 0, 0)
+    {
+      kind = XFER_GPU_IN_FB;
+
+      src_gpus.resize(inputs_info.size(), 0);
+      for(size_t i = 0; i < input_ports.size(); i++) {
+        src_gpus[i] = mem_to_gpu(input_ports[i].mem);
+        if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
+          assert(src_gpus[i]);
+      }
+
+      dst_gpus.resize(outputs_info.size(), 0);
+      dst_is_ipc.resize(outputs_info.size(), false);
+      for(size_t i = 0; i < output_ports.size(); i++) {
+        dst_gpus[i] = mem_to_gpu(output_ports[i].mem);
+        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+          assert(dst_gpus[i]);
+        } else {
+          if(NodeID(ID(output_ports[i].mem->me).memory_owner_node()) !=
+             Network::my_node_id)
+            dst_is_ipc[i] = true;
+        }
+      }
+    }
+
+    long GPUScatterGatherXferDes::get_requests(Request **requests, long nr)
+    {
+      // unused
+      assert(0);
+      return 0;
+    }
+
+    bool GPUScatterGatherXferDes::progress_xd(GPUScatterGatherChannel *channel,
+                                              TimeLimit work_until)
+    {
+      bool did_work = false;
+      ReadSequenceCache rseqcache(this, 2 << 20);
+
+      while(true) {
+        size_t min_xfer_size = 4 << 20;
+        const InstanceLayoutPieceBase *in_nonaffine, *out_nonaffine;
+
+        size_t in_span_start = 0, out_span_start = 0;
+        XferPort *in_port = 0, *out_port = 0;
+        GPU *in_gpu = 0, *out_gpu = 0;
+        bool out_is_ipc = false;
+        int src_io_port = 0, dst_io_port = 0;
+
+        if(input_control.current_io_port >= 0) {
+          in_port = &input_ports[input_control.current_io_port];
+          in_gpu = this->src_gpus[input_control.current_io_port];
+          in_span_start = in_port->local_bytes_total;
+          src_io_port = input_control.current_io_port;
+        }
+
+        if(output_control.current_io_port >= 0) {
+          out_port = &output_ports[output_control.current_io_port];
+          out_gpu = this->dst_gpus[output_control.current_io_port];
+          out_is_ipc = this->dst_is_ipc[output_control.current_io_port];
+          out_span_start = out_port->local_bytes_total;
+          dst_io_port = input_control.current_io_port;
+        }
+
+        if(in_port->indirect_port_idx >= 0)
+          input_control.current_io_port = -1;
+
+        if(out_port->indirect_port_idx >= 0)
+          output_control.current_io_port = -1;
+
+        size_t max_bytes =
+            get_addresses(min_xfer_size, &rseqcache, in_nonaffine, out_nonaffine);
+        if(max_bytes == 0)
+          break;
+
+        input_control.current_io_port = src_io_port;
+        output_control.current_io_port = dst_io_port;
+
+        // assert(in_gpu && out_gpu);
+        assert(in_port != nullptr && out_port != nullptr);
+
+        size_t total_bytes = 0;
+        log_xd.info() << "cuda memcpy chunk: min=" << min_xfer_size
+                      << " max=" << max_bytes;
+
+        uintptr_t in_base = 0;
+        if(!in_nonaffine)
+          in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+        uintptr_t out_base = 0;
+        const GPU::CudaIpcMapping *out_mapping = 0;
+        if(!out_nonaffine) {
+          if(out_is_ipc) {
+            out_mapping = in_gpu->find_ipc_mapping(out_port->mem->me);
+            assert(out_mapping);
+            out_base = out_mapping->local_base;
+          } else {
+            out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+          }
+        }
+
+        TransferIterator::AddressInfo address_info;
+        memset(&address_info, 0, sizeof(TransferIterator::AddressInfo));
+
+        uintptr_t dst_ind_base = 0;
+        if(out_port->indirect_port_idx >= 0) {
+          // TODO(apryakhin@): Handle return value.
+          size_t iter_bytes = out_port->iter->step(max_bytes, address_info, 0, 0);
+          assert(iter_bytes == 0);
+          dst_ind_base = reinterpret_cast<uintptr_t>(
+              input_ports[out_port->indirect_port_idx].mem->get_direct_ptr(
+                  input_ports[out_port->indirect_port_idx].iter->get_base_offset(), 0));
+        }
+
+        uintptr_t src_ind_base = 0;
+        if(in_port->indirect_port_idx >= 0) {
+          size_t iter_bytes = in_port->iter->step(max_bytes, address_info, 0, 0);
+          assert(iter_bytes == 0);
+          src_ind_base = reinterpret_cast<uintptr_t>(
+              input_ports[in_port->indirect_port_idx].mem->get_direct_ptr(
+                  input_ports[in_port->indirect_port_idx].iter->get_base_offset(), 0));
+        }
+
+        auto stream = select_stream(out_gpu, in_gpu, out_mapping);
+        AutoGPUContext agc(stream->get_gpu());
+        // We can't do gather-scatter yet.
+        assert(!(out_port->indirect_port_idx >= 0 && in_port->indirect_port_idx >= 0));
+
+        size_t bytes_to_fence = 0;
+        size_t addr_size = out_port->indirect_port_idx >= 0
+                               ? out_port->iter->get_address_size()
+                               : in_port->iter->get_address_size();
+        assert(addr_size > 0);
+
+        while(total_bytes < max_bytes) {
+          AddressListCursor &in_alc = in_port->addrcursor;
+          AddressListCursor &out_alc = out_port->addrcursor;
+
+          size_t bytes_left = max_bytes - total_bytes;
+
+          if(!in_nonaffine && !out_nonaffine) {
+            if(in_port->indirect_port_idx == -1) {
+              in_base += in_alc.get_offset();
+            }
+            if(out_port->indirect_port_idx == -1) {
+              out_base += out_alc.get_offset();
+            }
+
+            launch_indirect_copy(in_gpu, stream, in_base, out_base, src_ind_base,
+                                 dst_ind_base, max_bytes, addr_size, address_info,
+                                 out_port->indirect_port_idx >= 0);
+
+            if(in_port->indirect_port_idx == -1)
+              in_alc.advance(0, max_bytes);
+            else
+              out_alc.advance(0, max_bytes);
+
+            bytes_to_fence += max_bytes;
+          } else {
+            // Unsupported yet.
+            assert(0);
+          }
+
+          assert(max_bytes <= bytes_left);
+          total_bytes += max_bytes;
+          if((total_bytes >= min_xfer_size) && work_until.is_expired()) {
+            break;
+          }
+        }
+
+        if(bytes_to_fence > 0) {
+          add_reference(); // released by transfer completion
+          log_gpudma.info() << "gpu indirect copy fence: stream=" << stream << " "
+                            << " xd=" << std::hex << guid << std::dec
+                            << " bytes=" << total_bytes;
+
+          stream->add_notification(new GPUTransferCompletion(
+              this, input_control.current_io_port, /*_read_offset=*/in_span_start,
+              total_bytes, output_control.current_io_port,
+              /*_write_offset=*/out_span_start, total_bytes));
+        }
+
+        if(total_bytes > 0) {
+          did_work = true;
+          bool done = record_address_consumption(total_bytes, total_bytes);
+
+          if(in_port->indirect_port_idx == -1)
+            out_port->iter->reset();
+          else
+            in_port->iter->reset();
+
+          if(done || work_until.is_expired()) {
+            break;
+          }
+        }
+      }
+
+      rseqcache.flush();
+
+      return did_work;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUScatterGatherChannel
+
+    static bool supports_scatter_gather_path(ChannelCopyInfo channel_copy_info,
+                                             NodeID node)
+    {
+      if(channel_copy_info.ind_mem == Memory::NO_MEMORY ||
+         channel_copy_info.addr_size != sizeof(size_t) || channel_copy_info.is_ranges) {
+        return 0;
+      }
+
+      // TODO(apriakhin@): Check for peer access.
+      if(channel_copy_info.src_mem.kind() != Memory::GPU_FB_MEM ||
+         channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM)
+        return 0;
+
+      /*NodeID src_node_id =
+          NodeID(ID(channel_copy_info.src_mem).memory_owner_node());
+
+      GPU *src_gpu =
+          mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.src_mem));
+      if (!src_gpu || !dst_gpu || !src_gpu->can_access_peer(dst_gpu)) {
+        //return false;
+      }*/
+
+      return true;
+    }
+
+    GPUScatterGatherChannel::GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,
+                                                     BackgroundWorkManager *bgwork)
+      : SingleXDQChannel<GPUScatterGatherChannel, GPUScatterGatherXferDes>(
+            bgwork, _kind,
+            stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index
+                            << " kind=" << (int)_kind << ")")
+    {
+      src_gpu = _src_gpu;
+
+      // switch out of ordered mode if multi-threaded dma is requested
+      if(_src_gpu->module->config->cfg_multithread_dma)
+        xdq.ordered_mode = false;
+
+      std::vector<Memory> local_gpu_mems;
+      local_gpu_mems.push_back(src_gpu->fbmem->me);
+      if(src_gpu->fb_ibmem)
+        local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
+
+      std::vector<Memory> peer_gpu_mems;
+      peer_gpu_mems.insert(peer_gpu_mems.end(), src_gpu->peer_fbs.begin(),
+                           src_gpu->peer_fbs.end());
+      for(std::vector<GPU::CudaIpcMapping>::const_iterator it =
+              src_gpu->cudaipc_mappings.begin();
+          it != src_gpu->cudaipc_mappings.end(); ++it)
+        peer_gpu_mems.push_back(it->mem);
+
+      // look for any other local memories that belong to our context or
+      //  peer-able contexts
+      const Node &n = get_runtime()->nodes[Network::my_node_id];
+      for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+          it != n.memories.end(); ++it) {
+        CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
+        if(!cdm)
+          continue;
+        if(cdm->context == src_gpu->context) {
+          local_gpu_mems.push_back((*it)->me);
+        } else {
+          // if the other context is associated with a gpu and we've got peer
+          //  access, use it
+          // TODO: add option to enable peer access at this point?  might be
+          //  expensive...
+          if(cdm->gpu && (src_gpu->info->peers.count(cdm->gpu->info->device) > 0))
+            peer_gpu_mems.push_back((*it)->me);
+        }
+      }
+
+      switch(_kind) {
+      case XFER_GPU_SC_IN_FB:
+      {
+        // self-path
+        unsigned bw = 200000;   // HACK - estimate at 200 GB/s
+        unsigned latency = 250; // HACK - estimate at 250 ns
+        // TODO(apriakhin): Consider tweaking this value.
+        unsigned frag_overhead = 200; // HACK - estimate at 2 us
+
+        add_path(local_gpu_mems, local_gpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_SC_IN_FB)
+            .allow_redops()
+            .set_max_dim(3);
+
+        break;
+      }
+
+      case XFER_GPU_SC_PEER_FB:
+      {
+        // just do paths to peers - they'll do the other side
+        unsigned bw = 50000;          // HACK - estimate at 50 GB/s
+        unsigned latency = 1000;      // HACK - estimate at 1 us
+        unsigned frag_overhead = 200; // HACK - estimate at 2 us
+
+        add_path(local_gpu_mems, peer_gpu_mems, bw, latency, frag_overhead,
+                 XFER_GPU_SC_PEER_FB)
+            .set_max_dim(3);
+
+        break;
+      }
+
+      default:
+        assert(0);
+      }
+    }
+
+    GPUScatterGatherChannel::~GPUScatterGatherChannel() {}
+
+    Memory GPUScatterGatherChannel::suggest_ib_memories(Memory memory) const
+    {
+      if(memory.kind() != Memory::GPU_FB_MEM ||
+         node != NodeID(ID(memory).memory_owner_node())) {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+            return (*it)->me;
+          }
+        }
+      }
+      return Memory::NO_MEMORY;
+    }
+
+    uint64_t GPUScatterGatherChannel::supports_path(
+        ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+        CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+        const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+        XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
+        unsigned *lat_ret /*= 0*/)
+    {
+      if(!supports_scatter_gather_path(channel_copy_info, node))
+        return 0;
+      return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                    redop_id, total_bytes, src_frags, dst_frags, kind_ret,
+                                    bw_ret, lat_ret);
+    }
+
+    XferDes *GPUScatterGatherChannel::create_xfer_des(
+        uintptr_t dma_op, NodeID launch_node, XferDesID guid,
+        const std::vector<XferDesPortInfo> &inputs_info,
+        const std::vector<XferDesPortInfo> &outputs_info, int priority,
+        XferDesRedopInfo redop_info, const void *fill_data, size_t fill_size,
+        size_t fill_total)
+    {
+      // assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new GPUScatterGatherXferDes(dma_op, this, launch_node, guid, inputs_info,
+                                         outputs_info, priority, redop_info);
+    }
+
+    long GPUScatterGatherChannel::submit(Request **requests, long nr)
+    {
+      // unused
+      assert(0);
+      return 0;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUScatterGatherRemoteChannelInfo
+    //
+
+    GPUScatterGatherRemoteChannelInfo::GPUScatterGatherRemoteChannelInfo(
+        NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+        const std::vector<Channel::SupportedPath> &_paths)
+      : SimpleRemoteChannelInfo(_owner, _kind, _remote_ptr, _paths)
+    {}
+
+    RemoteChannel *GPUScatterGatherRemoteChannelInfo::create_remote_channel()
+    {
+      GPUScatterGatherRemoteChannel *rc = new GPUScatterGatherRemoteChannel(remote_ptr);
+      rc->node = owner;
+      rc->kind = kind;
+      rc->paths.swap(paths);
+      return rc;
+    }
+
+    template <typename S>
+    bool GPUScatterGatherRemoteChannelInfo::serialize(S &serializer) const
+    {
+      return ((serializer << owner) && (serializer << kind) &&
+              (serializer << remote_ptr) && (serializer << paths));
+    }
+
+    template <typename S>
+    /*static*/ RemoteChannelInfo *
+    GPUScatterGatherRemoteChannelInfo::deserialize_new(S &deserializer)
+    {
+      NodeID owner;
+      XferDesKind kind;
+      uintptr_t remote_ptr;
+      std::vector<Channel::SupportedPath> paths;
+
+      if((deserializer >> owner) && (deserializer >> kind) &&
+         (deserializer >> remote_ptr) && (deserializer >> paths)) {
+        return new GPUScatterGatherRemoteChannelInfo(owner, kind, remote_ptr, paths);
+      } else {
+        return 0;
+      }
+    }
+
+    /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                        GPUScatterGatherRemoteChannelInfo>
+        GPUScatterGatherRemoteChannelInfo::serdez_subclass;
+
+    RemoteChannelInfo *GPUScatterGatherChannel::construct_remote_info() const
+    {
+      return new GPUScatterGatherRemoteChannelInfo(
+          node, kind, reinterpret_cast<uintptr_t>(this), paths);
+    }
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUScatterGatherRemoteChannel
+    //
+
+    GPUScatterGatherRemoteChannel::GPUScatterGatherRemoteChannel(uintptr_t _remote_ptr)
+      : RemoteChannel(_remote_ptr)
+    {}
+
+    Memory GPUScatterGatherRemoteChannel::suggest_ib_memories(Memory memory) const
+    {
+      if(memory.kind() != Memory::GPU_FB_MEM ||
+         node != NodeID(ID(memory).memory_owner_node())) {
+        Node &n = get_runtime()->nodes[node];
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end(); ++it) {
+          if((*it)->lowlevel_kind == Memory::GPU_FB_MEM) {
+            return (*it)->me;
+          }
+        }
+      }
+      return Memory::NO_MEMORY;
+    }
+
+    uint64_t GPUScatterGatherRemoteChannel::supports_path(
+        ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+        CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+        const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+        XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
+        unsigned *lat_ret /*= 0*/)
+    {
+      if(!supports_scatter_gather_path(channel_copy_info, node))
+        return 0;
+      return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                    redop_id, total_bytes, src_frags, dst_frags, kind_ret,
+                                    bw_ret, lat_ret);
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class GPUChannel
 
     GPUChannel::GPUChannel(GPU *_src_gpu, XferDesKind _kind,
