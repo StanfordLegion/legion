@@ -55,6 +55,7 @@
 #cmakedefine GASNET_CONDUIT_OFI 1
 
 #cmakedefine REALM_USE_MPI
+#cmakedefine REALM_MPI_HAS_COMM_SPLIT_TYPE
 
 #cmakedefine REALM_USE_UCX
 

@@ -29,6 +29,8 @@ enum reduction_op {
 typedef struct bootstrap_handle {
   int pg_rank;
   int pg_size;
+  int *shared_ranks;
+  int num_shared_ranks;
   int (*barrier)(struct bootstrap_handle *handle);
   int (*bcast)(void *buf, int bytes, int root,
                struct bootstrap_handle *handle);
