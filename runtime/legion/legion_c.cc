@@ -2484,6 +2484,35 @@ legion_logical_partition_retrieve_name(legion_runtime_t runtime_,
   runtime->retrieve_name(handle, *result);
 }
 
+void
+legion_advise_analysis_subtree(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_logical_region_t parent_,
+                               int num_regions,
+                               legion_logical_region_t* regions_,
+                               int num_partitions,
+                               legion_logical_partition_t* partitions_,
+                               int num_fields,
+                               legion_field_id_t* fields_) {
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  std::set<LogicalRegion> regions;
+  std::set<LogicalPartition> partitions;
+  std::set<FieldID> fields;
+  for (int i = 0; i < num_regions; i++) {
+    regions.insert(CObjectWrapper::unwrap(regions_[i]));
+  }
+  for (int i = 0; i < num_partitions; i++) {
+    partitions.insert(CObjectWrapper::unwrap(partitions_[i]));
+  }
+  for (int i = 0; i < num_fields; i++) {
+    fields.insert(fields_[i]);
+  }
+  runtime->advise_analysis_subtree(ctx, parent, regions, partitions, fields);
+}
+
 // -----------------------------------------------------------------------
 // Region Requirement Operations
 // -----------------------------------------------------------------------
@@ -2705,6 +2734,79 @@ legion_region_requirement_get_projection(legion_region_requirement_t req_)
   RegionRequirement *req = CObjectWrapper::unwrap(req_);
 
   return req->projection;
+}
+
+// -----------------------------------------------------------------------
+// Output Requirement Operations
+// -----------------------------------------------------------------------
+
+legion_output_requirement_t
+legion_output_requirement_create(legion_field_space_t field_space_,
+                                 legion_field_id_t *fields_,
+                                 size_t fields_size,
+                                 int dim,
+                                 bool global_indexing)
+{
+  FieldSpace field_space = CObjectWrapper::unwrap(field_space_);
+  std::set<FieldID> fields;
+  for (size_t idx = 0; idx < fields_size; ++idx)
+    fields.insert(fields_[idx]);
+
+  OutputRequirement *req = new OutputRequirement(field_space,
+                                                 fields,
+                                                 dim,
+                                                 global_indexing);
+  return CObjectWrapper::wrap(req);
+}
+
+legion_output_requirement_t
+legion_output_requirement_create_region_requirement(
+    legion_region_requirement_t handle_)
+{
+  return CObjectWrapper::wrap(
+      new OutputRequirement(*CObjectWrapper::unwrap(handle_)));
+}
+
+void
+legion_output_requirement_destroy(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  delete req;
+}
+
+void
+legion_output_requirement_add_field(legion_output_requirement_t req_,
+                                    legion_field_id_t field,
+                                    bool instance)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->add_field(field, instance);
+}
+
+legion_logical_region_t
+legion_output_requirement_get_region(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->region);
+}
+
+legion_logical_region_t
+legion_output_requirement_get_parent(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->parent);
+}
+
+legion_logical_partition_t
+legion_output_requirement_get_partition(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->partition);
 }
 
 // -------------------------------------------------------
@@ -3052,10 +3154,22 @@ legion_future_from_untyped_pointer(legion_runtime_t runtime_,
                                    const void *buffer,
                                    size_t size)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
   Future *result = new Future(
-    Future::from_untyped_pointer(runtime, buffer, size));
+    Future::from_untyped_pointer(buffer, size));
+  return CObjectWrapper::wrap(result);
+}
+
+legion_future_t
+legion_future_from_untyped_pointer_detailed(legion_runtime_t runtime_,
+                                            const void *buffer,
+                                            size_t size,
+                                            bool take_ownership,
+                                            const char *provenance,
+                                            bool shard_local)
+{
+  Future *result = new Future(
+    Future::from_untyped_pointer(buffer, size, 
+      take_ownership, provenance, shard_local));
   return CObjectWrapper::wrap(result);
 }
 
@@ -3134,6 +3248,13 @@ legion_future_get_untyped_size(legion_future_t handle_)
   return handle->get_untyped_size();
 }
 
+const void *
+legion_future_get_metadata(legion_future_t handle_, size_t *size)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+  return handle->get_metadata(size);
+}
+
 // -----------------------------------------------------------------------
 // Future Map Operations
 // -----------------------------------------------------------------------
@@ -3173,19 +3294,57 @@ legion_future_map_get_future(legion_future_map_t fm_,
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
 }
 
+legion_domain_t
+legion_future_map_get_domain(legion_future_map_t fm_)
+{
+  FutureMap *fm = CObjectWrapper::unwrap(fm_);
+  const Domain &domain = fm->get_future_map_domain();
+  return CObjectWrapper::wrap(domain);
+}
+
 legion_future_t
 legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          legion_future_map_t fm_,
                          legion_reduction_op_id_t redop,
-                         bool deterministic)
+                         bool deterministic,
+                         legion_mapper_id_t map_id,
+                         legion_mapping_tag_id_t tag)
+{
+  Future empty_future;
+
+  legion_future_t initial_value = CObjectWrapper::wrap(&empty_future);
+  return legion_future_map_reduce_with_initial_value(
+    runtime_,
+    ctx_,
+    fm_,
+    redop,
+    deterministic,
+    map_id,
+    tag,
+    NULL,
+    initial_value);
+}
+
+legion_future_t
+legion_future_map_reduce_with_initial_value(legion_runtime_t runtime_,
+                                            legion_context_t ctx_,
+                                            legion_future_map_t fm_,
+                                            legion_reduction_op_id_t redop,
+                                            bool deterministic,
+                                            legion_mapper_id_t map_id,
+                                            legion_mapping_tag_id_t tag,
+                                            const char *provenance,
+                                            legion_future_t initial_value_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   FutureMap *fm = CObjectWrapper::unwrap(fm_);
+  Future *initial_value = CObjectWrapper::unwrap(initial_value_);
 
   return CObjectWrapper::wrap(new Future(
-        runtime->reduce_future_map(ctx, *fm, redop, deterministic)));
+      runtime->reduce_future_map(ctx, *fm, redop, deterministic, map_id, tag,
+                                 provenance, *initial_value)));
 }
 
 legion_future_map_t
@@ -3236,6 +3395,26 @@ legion_future_map_construct_from_futures(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(new FutureMap(
     runtime->construct_future_map(ctx, domain, futures, collective, sid,
                                   implicit_sharding)));
+}
+
+legion_future_map_t
+legion_future_map_transform(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_future_map_t fm_,
+                            legion_index_space_t new_domain_,
+                            legion_point_transform_functor_t functor_,
+                            bool take_ownership)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace new_domain = CObjectWrapper::unwrap(new_domain_);
+  FutureMap *fm = CObjectWrapper::unwrap(fm_);
+  PointTransformFunctor *functor = CObjectWrapper::unwrap(functor_);
+
+  FutureMap result =
+    runtime->transform_future_map(
+      ctx, *fm, new_domain, functor, take_ownership);
+  return CObjectWrapper::wrap(new FutureMap(result));
 }
 
 // -----------------------------------------------------------------------
@@ -3335,6 +3514,40 @@ legion_task_launcher_execute(legion_runtime_t runtime_,
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   Future f = runtime->execute_task(ctx, *launcher);
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_future_t
+legion_task_launcher_execute_outputs(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_task_launcher_t launcher_,
+                                     legion_output_requirement_t *reqs_,
+                                     size_t reqs_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  std::vector<OutputRequirement> reqs;
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+    reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
+
+  Future f = runtime->execute_task(ctx, *launcher, &reqs);
+
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+  {
+    OutputRequirement *target = CObjectWrapper::unwrap(reqs_[idx]);
+    target->parent = reqs[idx].parent;
+    target->partition = reqs[idx].partition;
+  }
+
   if (launcher->elide_future_return)
   {
     legion_future_t result_;
@@ -3733,6 +3946,40 @@ legion_index_launcher_execute_reduction(legion_runtime_t runtime_,
     return CObjectWrapper::wrap(new Future(f));
 }
 
+legion_future_map_t
+legion_index_launcher_execute_outputs(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      legion_index_launcher_t launcher_,
+                                      legion_output_requirement_t *reqs_,
+                                      size_t reqs_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  std::vector<OutputRequirement> reqs;
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+    reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
+
+  FutureMap f = runtime->execute_index_space(ctx, *launcher, &reqs);
+
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+  {
+    OutputRequirement *target = CObjectWrapper::unwrap(reqs_[idx]);
+    target->parent = reqs[idx].parent;
+    target->partition = reqs[idx].partition;
+  }
+
+  if (launcher->elide_future_return)
+  {
+    legion_future_map_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new FutureMap(f));
+}
+
 legion_future_t
 legion_index_launcher_execute_deterministic_reduction(
                                         legion_runtime_t runtime_,
@@ -3746,6 +3993,43 @@ legion_index_launcher_execute_deterministic_reduction(
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic);
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_future_t
+legion_index_launcher_execute_reduction_and_outputs(
+                                        legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_index_launcher_t launcher_,
+                                        legion_reduction_op_id_t redop,
+                                        bool deterministic,
+                                        legion_output_requirement_t *reqs_,
+                                        size_t reqs_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  std::vector<OutputRequirement> reqs;
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+    reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
+
+  Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic, &reqs);
+
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+  {
+    OutputRequirement *target = CObjectWrapper::unwrap(reqs_[idx]);
+    target->parent = reqs[idx].parent;
+    target->partition = reqs[idx].partition;
+  }
+
   if (launcher->elide_future_return)
   {
     legion_future_t result_;
@@ -4085,6 +4369,23 @@ legion_index_launcher_set_provenance(legion_index_launcher_t launcher_,
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->provenance = provenance;
+}
+
+void
+legion_index_launcher_set_concurrent(legion_index_launcher_t launcher_,
+                                     bool concurrent)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->concurrent = concurrent;
+}
+
+void
+legion_index_launcher_set_initial_value(legion_index_launcher_t launcher,
+                                        legion_future_t initial_value)
+{
+  CObjectWrapper::unwrap(launcher)->initial_value =
+    *CObjectWrapper::unwrap(initial_value);
 }
 
 // -----------------------------------------------------------------------
@@ -4683,6 +4984,59 @@ legion_fill_get_requirement(legion_fill_t fill_)
   Fill *fill = CObjectWrapper::unwrap(fill_);
 
   return CObjectWrapper::wrap(&fill->requirement);
+}
+
+// -----------------------------------------------------------------------
+// Discard Operation
+// -----------------------------------------------------------------------
+
+legion_discard_launcher_t
+legion_discard_launcher_create(legion_logical_region_t handle_,
+                               legion_logical_region_t parent_)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  DiscardLauncher *launcher = new DiscardLauncher(handle, parent);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_discard_launcher_destroy(legion_discard_launcher_t launcher_)
+{
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  delete launcher;
+}
+
+void
+legion_discard_launcher_add_field(legion_discard_launcher_t launcher_,
+                                  legion_field_id_t fid)
+{
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid);
+}
+
+void
+legion_discard_launcher_execute(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_discard_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->discard_fields(ctx, *launcher);
+}
+
+void
+legion_discard_launcher_set_provenance(legion_discard_launcher_t launcher_,
+                                       const char *provenance)
+{
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 // -----------------------------------------------------------------------
@@ -6073,7 +6427,19 @@ legion_runtime_local_shard(legion_runtime_t runtime_, legion_context_t ctx_)
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  return runtime->local_shard(ctx);
+  const Task *task = runtime->get_local_task(ctx);
+  return task->get_shard_id();
+}
+
+legion_shard_id_t
+legion_runtime_local_shard_without_context(void)
+{
+  Context ctx = Runtime::get_context();
+  if (ctx == NULL)
+    return 0; // no shard if we're not inside a task
+  Runtime *runtime = Runtime::get_runtime();
+  const Task *task = runtime->get_local_task(ctx);
+  return task->get_shard_id();
 }
 
 size_t
@@ -6082,7 +6448,44 @@ legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  return runtime->total_shards(ctx);
+  const Task *task = runtime->get_local_task(ctx);
+  return task->get_total_shards();
+}
+
+legion_shard_id_t
+legion_sharding_functor_shard(legion_sharding_id_t sid,
+                              legion_domain_point_t point_,
+                              legion_domain_t full_space_,
+                              size_t total_shards)
+{
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  Domain full_space = CObjectWrapper::unwrap(full_space_);
+  ShardingFunctor *functor = Runtime::get_sharding_functor(sid);
+  return functor->shard(point, full_space, total_shards);
+}
+
+void
+legion_sharding_functor_invert(legion_sharding_id_t sid,
+                               legion_shard_id_t shard,
+                               legion_domain_t shard_domain_,
+                               legion_domain_t full_domain_,
+                               size_t total_shards,
+                               legion_domain_point_t *points_,
+                               size_t *points_size)
+{
+  Domain shard_domain = CObjectWrapper::unwrap(shard_domain_);
+  Domain full_domain = CObjectWrapper::unwrap(full_domain_);
+  ShardingFunctor *functor = Runtime::get_sharding_functor(sid);
+#ifdef DEBUG_LEGION
+  assert(functor->is_invertible());
+#endif
+  std::vector<DomainPoint> points;
+  functor->invert(shard, shard_domain, full_domain, total_shards, points);
+  assert(*points_size >= points.size());
+  *points_size = points.size();
+  for (size_t i = 0; i < points.size(); ++i) {
+    points_[i] = CObjectWrapper::wrap(points[i]);
+  }
 }
 
 void
@@ -7912,13 +8315,11 @@ legion_task_postamble(
   const void *retval,
   size_t retsize)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   CContext *cctx = CObjectWrapper::unwrap(ctx_);
   Context ctx = cctx->context();
   delete cctx;
 
-  Runtime::legion_task_postamble(runtime,
-				 ctx,
+  Runtime::legion_task_postamble(ctx,
 				 retval,
 				 retsize);
 }
@@ -8854,6 +9255,20 @@ legion_context_get_num_shards(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   return runtime->get_num_shards(ctx, I_know_what_I_am_doing);
+}
+
+legion_future_t
+legion_context_consensus_match(legion_runtime_t runtime_,
+                               legion_context_t context_,
+                               const void *input, void *output,
+                               size_t num_elements, size_t element_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(context_)->context();  
+
+  Future f = runtime->consensus_match(ctx, input, output, 
+                              num_elements, element_size);
+  return CObjectWrapper::wrap(new Future(f));
 }
 
 legion_physical_region_t

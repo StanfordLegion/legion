@@ -9286,10 +9286,6 @@
     inline int CompoundBitMask<DT,BLOAT,BIDIR>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(bit >= 0);
-      assert(bit < pop_count());
-#endif
       if (is_sparse())
       {
         // Binary search for it

@@ -43,9 +43,11 @@ namespace Legion {
     class PhysicalInstance {
     public:
       PhysicalInstance(void);
+      PhysicalInstance(PhysicalInstance &&rhs);
       PhysicalInstance(const PhysicalInstance &rhs);
       ~PhysicalInstance(void);
     public:
+      PhysicalInstance& operator=(PhysicalInstance &&rhs);
       PhysicalInstance& operator=(const PhysicalInstance &rhs); 
     public:
       bool operator<(const PhysicalInstance &rhs) const;
@@ -75,7 +77,6 @@ namespace Legion {
       bool is_virtual_instance(void) const;
       bool is_reduction_instance(void) const;
       bool is_external_instance(void) const;
-      bool is_collective_instance(void) const;
     public:
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fids) const;
@@ -93,14 +94,52 @@ namespace Legion {
                    const LayoutConstraint **failed_constraint = NULL) const;
     public:
       static PhysicalInstance get_virtual_instance(void);
-    protected:
+    private:
+      friend class CollectiveView;
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this
       PhysicalInstance(PhysicalInstanceImpl impl);
-    protected:   
+    private:
       PhysicalInstanceImpl impl;
       friend std::ostream& operator<<(std::ostream& os,
 				      const PhysicalInstance& p);
+    };
+
+    /**
+     * \class CollectiveView
+     * A collective view is simply a group of physical instances 
+     * that the runtime knows all have the same data replicated
+     * across the different copies. Collective views only show
+     * up when the mapper is asked to pick a source instances 
+     * from a collective group.
+     */
+    class CollectiveView {
+    public:
+      CollectiveView(void);
+      CollectiveView(CollectiveView &&rhs);
+      CollectiveView(const CollectiveView &rhs);
+      ~CollectiveView(void);
+    public:
+      CollectiveView& operator=(CollectiveView &&rhs);
+      CollectiveView& operator=(const CollectiveView&rhs); 
+    public:
+      bool operator<(const CollectiveView &rhs) const;
+      bool operator==(const CollectiveView &rhs) const;
+      bool operator!=(const CollectiveView &rhs) const;
+    public:
+      void find_instances_in_memory(Memory memory,
+                                    std::vector<PhysicalInstance> &insts) const;
+      void find_instances_nearest_memory(Memory memory,
+                                    std::vector<PhysicalInstance> &insts,
+                                    bool bandwidth = true) const;
+    private:
+      FRIEND_ALL_RUNTIME_CLASSES
+      // Only the runtime can make an instance like this
+      CollectiveView(CollectiveViewImpl impl);
+    private:
+      CollectiveViewImpl impl;
+      friend std::ostream& operator<<(std::ostream& os,
+				      const CollectiveView& p);
     };
 
     /**
@@ -341,62 +380,83 @@ namespace Legion {
        *     can opt-out of receiving the valid instance information
        *     for a task.
        *
+       * replicate default:false
+       *     Enable replication of the individual tasks for this
+       *     operation. This is useful for performing redundant
+       *     computation to avoid communication. There are 
+       *     requirements on the properties of replicated tasks
+       *     and how they are mapped. Replicated tasks are not
+       *     allowed to have reduction-only privileges. Furthermore
+       *     the mapper must map any regions with write privileges
+       *     for different copies of the task to different instances.
+       *
        * parent_priority default:current
        *     If the mapper for the parent task permits child
        *     operations to mutate the priority of the parent task
        *     then the mapper can use this field to alter the 
        *     priority of the parent task
+       *
+       * check_collective_regions:empty
+       *     For index space tasks, provide the indexes of any region 
+       *     requirements that the runtime should check for collective
+       *     mappings between the point tasks.
        */
       struct TaskOptions {
         Processor                              initial_proc; // = current
         bool                                   inline_task;  // = false
-        bool                                   stealable;   // = false
+        bool                                   stealable;    // = false
         bool                                   map_locally;  // = false
         bool                                   valid_instances; // = true
         bool                                   memoize;  // = false
-        bool                                   replicate; // = false
+        bool                                   replicate;    // = false
         TaskPriority                           parent_priority; // = current
+        std::set<unsigned>                     check_collective_regions;
       };
       //------------------------------------------------------------------------
       virtual void select_task_options(const MapperContext    ctx,
                                        const Task&            task,
                                              TaskOptions&     output) = 0;
       //------------------------------------------------------------------------
-      
+
       /**
        * ----------------------------------------------------------------------
-       *  Premap Task 
+       *  Premap Task (should really be called map_index_task) 
        * ----------------------------------------------------------------------
-       * This mapper call is only invoked for tasks having a region requirement
-       * which needs to be premapped (e.g. an in index space task launch with 
-       * an individual region requirement with READ_WRITE EXCLUSIVE privileges 
-       * that all tasks must share). The mapper is told the indicies of which 
-       * region requirements need to be premapped in the 'must_premap' set.
-       * All other regions can be optionally mapped. The mapper is given
-       * a vector containing sets of valid PhysicalInstances (if any) for
-       * each region requirement.
+       * This mapper call is only invoked for index space task launches. It
+       * will invoked if at least one of the following two conditions occur:
+       * 1. The task is performing a reduction of its point task futures down
+       *    to a single future value as an output, in which case the mapper
+       *    needs to select one or more locations for the futures to go.
+       * 2. (No longer applies) 
        *
-       * The mapper performs the premapping by filling in premapping at
-       * least all the required premapped regions and indicates all premapped
-       * region indicies in 'premapped_region'. For each region requirement
-       * the mapper can specify a ranking of PhysicalInstances to re-use
-       * in 'chosen_ranking'. This can optionally be left empty. The mapper
-       * can also specify constraints on the creation of a physical instance
-       * in 'layout_constraints'. Finally, the mapper can force the creation
-       * of a new instance if an write-after-read dependences are detected
-       * on existing physical instances by enabling the WAR optimization.
-       * All vector data structures are size appropriately for the number of
-       * region requirements in the task.
+       * In the case of (1), the mapper can optionally choose to fill in 
+       * the 'reduction_futures' vector with one or more memories in which 
+       * to create a copy of the reduced future output. If multiple such
+       * destinations are specified, the runtime will construct a broadcast
+       * tree to make the copies efficiently. We allo the 'reduction_instances'
+       * data structure to be left empty for backwards compatibility. In this
+       * case the runtime will create a single copy of the future in the 
+       * local system memory.
        */
       struct PremapTaskInput {
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
         std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
+        PremapTaskInput(void);
+        ~PremapTaskInput(void);
       };
       struct PremapTaskOutput {
         Processor                                          new_target_proc;
+        std::vector<Memory>                                reduction_futures;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
+        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_sources;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
         ProfilingRequest                                   copy_prof_requests;
-        RealmPriority                                      profiling_priority;
-        RealmPriority                                      copy_fill_priority;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
+        TaskPriority                                       profiling_priority;
+        PremapTaskOutput(void);
+        ~PremapTaskOutput(void);
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
@@ -489,6 +549,11 @@ namespace Legion {
        * for garbage collection after the task is done mapping. Only the
        * indexes of read-only region requirements should be specified.
        *
+       * In addition to mapping regions for the task, the mapper can also
+       * specify a memory to use for each of the futures of the task. The
+       * entries in this vector will be zipped with the vector of futures
+       * in the 'Task' object to determine which memory to map each future.
+       *
        * The mapper must also select a set of 'target_procs'
        * that specifies the target processor(s) on which the task can run.
        * If a single processor is chosen then the task is guaranteed to 
@@ -527,26 +592,76 @@ namespace Legion {
        * to true.
        */
       struct MapTaskInput {
-        std::vector<std::vector<PhysicalInstance> >     valid_instances;
-        std::vector<unsigned>                           premapped_regions;
+        std::vector<std::vector<PhysicalInstance> > valid_instances;
+        std::vector<std::vector<CollectiveView> >   valid_collectives;
+        std::vector<unsigned>                       premapped_regions;
       };
       struct MapTaskOutput {
-        std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
-        std::set<unsigned>                              untracked_valid_regions;
-        std::vector<Processor>                          target_procs;
-        VariantID                                       chosen_variant; // = 0 
-        TaskPriority                                    task_priority;  // = 0
-        RealmPriority                                   copy_fill_priority;
-        RealmPriority                                   profiling_priority;
-        ProfilingRequest                                task_prof_requests;
-        ProfilingRequest                                copy_prof_requests;
-        bool                                            postmap_task; // = false
+        std::vector<std::vector<PhysicalInstance> > chosen_instances; 
+        std::vector<std::vector<PhysicalInstance> > source_instances;
+        std::vector<Memory>                         output_targets;
+        std::vector<LayoutConstraintSet>            output_constraints;
+        std::set<unsigned>                          untracked_valid_regions;
+        std::vector<Memory>                         future_locations;
+        std::vector<Processor>                      target_procs;
+        VariantID                                   chosen_variant; // = 0 
+        TaskPriority                                task_priority;  // = 0
+        RealmPriority                               copy_fill_priority;
+        RealmPriority                               profiling_priority;
+        ProfilingRequest                            task_prof_requests;
+        ProfilingRequest                            copy_prof_requests;
+        bool                                        postmap_task; // = false
       };
       //------------------------------------------------------------------------
       virtual void map_task(const MapperContext      ctx,
                             const Task&              task,
                             const MapTaskInput&      input,
                                   MapTaskOutput&     output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Replicate Task 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked instead of map_task to map multiple copies
+       * of a single task to run in parallel and generate multiple functionally
+       * equivalent copies of the output data in different locations. It is
+       * the responsibility of the mapper to ensure that each task gets assigned
+       * to exactly one processor and each copy of the task gets assigned to 
+       * a different processor. The mapper must also guarantee that any region
+       * requirements with write privileges be mapped to different physical
+       * instances for each copy of the task. The runtime will check all these
+       * invariants in debug mode or if safe mapping is enabled.
+       *
+       * The mapper can also choose to make this a control replicated version
+       * of this task by filling in the 'control_replicate' map. This will make
+       * all the copies of the task work together as though they were one
+       * logical version of the task rather than having them all execute
+       * independently. The vector should be exactly the same size as the 
+       * vector of task_mappings if it is not empty
+       *
+       * The mapper can optionally give names to the shards by filling in the
+       * 'shard_points' vector with a set of unique points, all which must be
+       * of the same dimension. The 'shard_points' vector must either be empty
+       * or be of the same size as the 'task_mappings'. The mapper can also 
+       * provide an optional 'shard_domain' value to describe the set of points.
+       * If this is provided the runtime does not introspect it other than to
+       * check that its dimensionality matches that of the points. This value
+       * is then passed as the 'shard_domain' argument to all invocations of a
+       * sharding functor for operations launched by these shards.
+       */
+      struct MapReplicateTaskOutput {
+        std::vector<MapTaskOutput>                      task_mappings;
+        std::vector<Processor>                          control_replication_map;
+        std::vector<DomainPoint>                        shard_points;
+        Domain                                          shard_domain;
+      };
+      //------------------------------------------------------------------------
+      virtual void map_replicate_task(const MapperContext      ctx,
+                                      const Task&              task,
+                                      const MapTaskInput&      input,
+                                      const MapTaskOutput&     default_output,
+                                      MapReplicateTaskOutput&  output) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -595,9 +710,11 @@ namespace Legion {
       struct PostMapInput {
         std::vector<std::vector<PhysicalInstance> >     mapped_regions;
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
+        std::vector<std::vector<CollectiveView> >       valid_collectives;
       };
       struct PostMapOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances;
+        std::vector<std::vector<PhysicalInstance> >     source_instances;
       };
       //------------------------------------------------------------------------
       virtual void postmap_task(const MapperContext      ctx,
@@ -623,6 +740,7 @@ namespace Legion {
       struct SelectTaskSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
         unsigned                                region_req_index;
       };
       struct SelectTaskSrcOutput {
@@ -642,34 +760,15 @@ namespace Legion {
         PhysicalInstance                        destination_instance;
       };
       struct CreateTaskTemporaryOutput {
-        PhysicalInstance                        temporary_instance;
+        PhysicalInstance                        temporary_instance; 
       };
 
-      /**
-       * ----------------------------------------------------------------------
-       *  Speculate
-       * ----------------------------------------------------------------------
-       * The speculate mapper call asks the mapper to make a 
-       * decision about whether to speculatively execute a task
-       * or not. The mapper can say whether to speculate or not
-       * using the 'speculate' field. If it does choose to speculate
-       * then the mapper can control the guessed value for the
-       * predicate by setting the 'speculative_value' field.
-       * Finally the mapper can control whether the speculation
-       * is solely for the mapping of the operation or whether it
-       * should extend to the execution of the operation with 
-       * the 'speculate_mapping_only' field.
-       */
+      // Keep this struct around for backwards compatibility 
       struct SpeculativeOutput {
         bool                                    speculate;
         bool                                    speculative_value;
         bool                                    speculate_mapping_only;
       };
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext      ctx,
-                             const Task&              task,
-                                   SpeculativeOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -699,6 +798,35 @@ namespace Legion {
                                     const Task&              task,
                                     const TaskProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the task being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * task. The mapper must return the same sharding functor for all
+       * copies of the task. The runtime will verify this in debug mode
+       * but not in release mode. In the case of sharding index space
+       * tasks, the mapper can also specify whether the resulting slice
+       * should be recursively sliced or not using 'slice_recurse'.
+       */
+      struct SelectShardingFunctorInput {
+        std::vector<Processor>                  shard_mapping;
+      };
+      struct SelectShardingFunctorOutput {
+        ShardingID                              chosen_functor;
+        bool                                    slice_recurse;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Inline mapping
       /**
        * ----------------------------------------------------------------------
@@ -724,9 +852,11 @@ namespace Legion {
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        std::vector<CollectiveView>             valid_collectives;
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
+        std::vector<PhysicalInstance>           source_instances;
         RealmPriority                           copy_fill_priority;
         ProfilingRequest                        profiling_requests;
         RealmPriority                           profiling_priority;
@@ -755,6 +885,7 @@ namespace Legion {
       struct SelectInlineSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
       };
       struct SelectInlineSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -848,12 +979,21 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >   dst_instances;
         std::vector<std::vector<PhysicalInstance> >   src_indirect_instances;
         std::vector<std::vector<PhysicalInstance> >   dst_indirect_instances;
+        std::vector<std::vector<CollectiveView> >     src_collectives;
+        std::vector<std::vector<CollectiveView> >     dst_collectives;
+        std::vector<std::vector<CollectiveView> >     src_indirect_collectives;
+        std::vector<std::vector<CollectiveView> >     dst_indirect_collectives;
       };
       struct MapCopyOutput {
         std::vector<std::vector<PhysicalInstance> >   src_instances;
         std::vector<std::vector<PhysicalInstance> >   dst_instances;
         std::vector<PhysicalInstance>                 src_indirect_instances;
         std::vector<PhysicalInstance>                 dst_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_source_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_source_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_indirect_source_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_indirect_source_instances;
+
         std::set<unsigned>                            untracked_valid_srcs;
         std::set<unsigned>                            untracked_valid_ind_srcs;
         std::set<unsigned>                            untracked_valid_ind_dsts;
@@ -888,6 +1028,7 @@ namespace Legion {
       struct SelectCopySrcInput {
         PhysicalInstance                              target;
         std::vector<PhysicalInstance>                 source_instances;
+        std::vector<CollectiveView>                   collective_views;
         bool                                          is_src;
         bool                                          is_dst;
         bool                                          is_src_indirect;
@@ -914,23 +1055,6 @@ namespace Legion {
       struct CreateCopyTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-
-      /**
-       * ----------------------------------------------------------------------
-       *  Speculate 
-       * ----------------------------------------------------------------------
-       * The speculate mapper call gives the mapper the opportunity
-       * to optionally speculate on the predicate value for an explicit
-       * copy operation. The mapper sets the 'speculative' field to 
-       * indicate whether to speculate or not. If it does chose to 
-       * speculate, it can provide a speculative value in the
-       * 'speculative_value' field.
-       */
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext      ctx,
-                             const Copy&              copy,
-                                   SpeculativeOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -961,6 +1085,26 @@ namespace Legion {
                                     const Copy&              copy,
                                     const CopyProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the copy being launched has been control replicated
+       * and it's up to the mapper for this copy to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * copy. The mapper must return the same sharding functor for all
+       * instances of the copy. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Close operations
       // These are here for backwards compatibility
       // The mapper call these were used by no longer exists
@@ -987,6 +1131,7 @@ namespace Legion {
       struct SelectCloseSrcInput {
         PhysicalInstance                            target;
         std::vector<PhysicalInstance>               source_instances;
+        std::vector<CollectiveView>                 collective_views;
       };
       struct SelectCloseSrcOutput {
         std::deque<PhysicalInstance>                chosen_ranking;
@@ -1035,6 +1180,26 @@ namespace Legion {
                                     const Close&              close,
                                     const CloseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the close being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * close. The mapper must return the same sharding functor for all
+       * instances of the close. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Close&                       close,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Acquire operations
       /**
        * ----------------------------------------------------------------------
@@ -1062,21 +1227,6 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Speculate
-       * ----------------------------------------------------------------------
-       * Speculation for acquire operations works just like any other
-       * operation. The mapper can choose whether to speculate with
-       * the 'speculate' field. If it does choose to speculate, then 
-       * it can predict the value with the 'speculative_value'.
-       */
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext         ctx,
-                             const Acquire&              acquire,
-                                   SpeculativeOutput&    output) = 0;
-      //------------------------------------------------------------------------
-
-      /**
-       * ----------------------------------------------------------------------
        *  Report Profiling
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information on this acquire
@@ -1099,6 +1249,26 @@ namespace Legion {
                                     const Acquire&              acquire,
                                     const AcquireProfilingInfo& input) = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the acquire being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * acquire . The mapper must return the same sharding functor for all
+       * instances of the acquire. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Acquire&                     acquire,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Release operations 
       /**
        * ----------------------------------------------------------------------
@@ -1116,6 +1286,7 @@ namespace Legion {
         // Nothing
       };
       struct MapReleaseOutput {
+        std::vector<PhysicalInstance>               source_instances;
         ProfilingRequest                            profiling_requests;
         RealmPriority                               profiling_priority;
         RealmPriority                               copy_fill_priority;
@@ -1141,6 +1312,7 @@ namespace Legion {
       struct SelectReleaseSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
       };
       struct SelectReleaseSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -1160,23 +1332,6 @@ namespace Legion {
       struct CreateReleaseTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-
-      /**
-       * ----------------------------------------------------------------------
-       *  Speculate 
-       * ----------------------------------------------------------------------
-       * The speculate call will be invoked for any release operations with
-       * a predicate that has not yet been satisfied. The mapper can choose
-       * whether to speculate on the result with the 'speculate' field. If
-       * the mapper does choose to speculate, it can choose the set the
-       * 'speculative_value' field as a guess for the value the predicate
-       * will take.
-       */
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext         ctx,
-                             const Release&              release,
-                                   SpeculativeOutput&    output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -1202,6 +1357,26 @@ namespace Legion {
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the release being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * release. The mapper must return the same sharding functor for all
+       * instances of the release. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Release&                     release,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Partition Operations
       /**
        * ----------------------------------------------------------------------
@@ -1214,7 +1389,7 @@ namespace Legion {
        * where a previous index space launch filled in the field containing
        * the colors). In these cases , the mapper may want to specify that
        * the mapping for the projection operation should not be done with
-       * respect to the region being partitioning, but for each fo the
+       * respect to the region being partitioning, but for each of the
        * subregions of a complete partition of the logical region. This
        * mapper call permits the mapper to decide whether to make the 
        * partition operation an 'index' operation over the color space
@@ -1264,9 +1439,11 @@ namespace Legion {
        */
       struct MapPartitionInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        std::vector<CollectiveView>             valid_collectives;
       };
       struct MapPartitionOutput {
         std::vector<PhysicalInstance>           chosen_instances;
+        std::vector<PhysicalInstance>           source_instances;
         ProfilingRequest                        profiling_requests;
         RealmPriority                           profiling_priority;
         RealmPriority                           copy_fill_priority;
@@ -1295,6 +1472,7 @@ namespace Legion {
       struct SelectPartitionSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
       };
       struct SelectPartitionSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -1342,6 +1520,81 @@ namespace Legion {
                                     const Partition&                 partition,
                                     const PartitionProfilingInfo&    input) = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the partition being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * partition. The mapper must return the same sharding functor for all
+       * instances of the partition. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Partition&                   partition,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
+    public: // Fill Operations
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the fill being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the points of the
+       * fill. The mapper must return the same sharding functor for all
+       * instances of the fill. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
+    public: // Future Map Reductions
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Future Map Reduction
+       * This mapper call is invoked to map the output futures of a request
+       * to reduce a future map down to a single future value. The runtime
+       * provides the mapping tag that was passed into the runtime at the
+       * dispatch site. The mapper should return a set of memories for where
+       * to place instances of the future as output. If there are multiple
+       * copies the runtime will broadcast out the results in the order in
+       * which they are specified. Note that this mapper call is not a pure
+       * virtual function because we allow the output to be empty for
+       * backwards compatibility. If the destination memories are empty
+       * then the runtime will map one copy in the local system memory.
+       *
+       * In the case that the all-reduce is being performed using a reduction
+       * operator with serdez functions, then the mapper can also specify an
+       * upper bound on the amount of memory required for the findl output 
+       * instance of the fully reduced future which will improve performance.
+       * Not specifying an upper bound will not impact correctness.
+       * ----------------------------------------------------------------------
+       */
+      struct FutureMapReductionInput {
+        MappingTagID                            tag;
+      };
+      struct FutureMapReductionOutput {
+        std::vector<Memory>                     destination_memories;
+        size_t                                  serdez_upper_bound; // =SIZE_MAX
+      };
+      //------------------------------------------------------------------------
+      virtual void map_future_map_reduction(const MapperContext      ctx,
+                                     const FutureMapReductionInput&  input,
+                                           FutureMapReductionOutput& output) { }
+      //------------------------------------------------------------------------
+
     public: // Single Task Context 
       /**
        * ----------------------------------------------------------------------
@@ -1439,6 +1692,36 @@ namespace Legion {
     public: // Mapping collections of operations 
       /**
        * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the must epoch operation being launched has been 
+       * control replicated and it's up to the mapper for this must epoch
+       * operation to pick a sharding functor to determine which shard will 
+       * own the point(s) of the must epoch operation . The mapper must return 
+       * the same sharding functor for all instances of the must epoch 
+       * operation. The runtime will verify this in debug mode
+       * but not in release mode. For this mapper call the mapper must 
+       * also choose whether to perform the map_must_epoch call as a collective
+       * operation or not. If it chooses to perform it as a collective then we 
+       * will do one map_must_epoch call on each shard with the constraints 
+       * that apply to the points owned by the shard. The default is not to
+       * perform the map must epoch call as a collective operation.
+       */
+      struct MustEpochShardingFunctorOutput :
+              public SelectShardingFunctorOutput {
+        bool                                    collective_map_must_epoch_call;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                              const MapperContext                   ctx,
+                              const MustEpoch&                      epoch,
+                              const SelectShardingFunctorInput&     input,
+                                    MustEpochShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
        *  Map Must Epoch 
        * ----------------------------------------------------------------------
        * The map_must_epoch mapper call is invoked for mapping groups of
@@ -1452,6 +1735,23 @@ namespace Legion {
        * field which says which logical regions in different tasks must be 
        * mapped to the same physical instance. The mapper is also given 
        * the mapping tag passed at the callsite in 'mapping_tag'.
+       *
+       * A special case of map_must_epoch is when it is called as a collective
+       * mapping call for a must epoch launch performed inside of a control
+       * replicated parent task. This behavior is controlled by the result
+       * of select_sharding_functor for the must epoch operation (see above).
+       * In this case map_must_epoch will only be given 'tasks' owned by its
+       * shard and 'constraints' that apply to those 'tasks'. The mapper must
+       * still pick 'task_processors' and these processor must be unique with
+       * respect to any chosen for other 'tasks' by other mappers. The runime
+       * will check this property in debug mode. For constraints, the mapper
+       * may also pick optional 'constraint_mappings' for its constraints or
+       * rely on another mapper to pick them (it's up to the mapper to 
+       * determine which mapper instance picks thems). The mapper can then
+       * specify a 'weight' for each constraint mapping. The runtime will 
+       * do a collective reduction across all the 'constraint_mappings' taking
+       * the mappings with the highest weights and the lowest shard ID when
+       * the weights are the same.
        */
       struct MappingConstraint {
         std::vector<const Task*>                    constrained_tasks;
@@ -1657,23 +1957,6 @@ namespace Legion {
       virtual void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result) = 0;
       //------------------------------------------------------------------------
-    public:
-      // Future structs for control replication, 
-      // provided here for forward compatibility
-      struct MapReplicateTaskOutput {
-        std::vector<MapTaskOutput>                      task_mappings;
-        std::vector<Processor>                          control_replication_map;
-      };
-      struct SelectShardingFunctorInput {
-        std::vector<Processor>                  shard_mapping;
-      };
-      struct SelectShardingFunctorOutput {
-        ShardingID                              chosen_functor;
-      };
-      struct MustEpochShardingFunctorOutput :
-              public SelectShardingFunctorOutput {
-        bool                                    collective_map_must_epoch_call;
-      };
     };
 
     /**
@@ -1796,13 +2079,13 @@ namespace Legion {
       const char* find_task_variant_name(MapperContext ctx,
                                          TaskID task_id, VariantID vid) const;
       bool is_leaf_variant(MapperContext ctx, TaskID task_id,
-                                     VariantID variant_id) const;
+                                      VariantID variant_id) const;
       bool is_inner_variant(MapperContext ctx, TaskID task_id,
                                       VariantID variant_id)const;
       bool is_idempotent_variant(MapperContext ctx, TaskID task_id,
-                                           VariantID variant_id) const;
+                                      VariantID variant_id) const;
       bool is_replicable_variant(MapperContext ctx, TaskID task_id,
-                                      VariantID variant_id) const; 
+                                      VariantID variant_id) const;     
     public:
       //------------------------------------------------------------------------
       // Methods for registering variants 
@@ -1834,6 +2117,8 @@ namespace Legion {
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
 				      size_t user_len = 0,
+                                      size_t return_type_size =
+                                              LEGION_MAX_RETURN_SIZE,
                                       bool has_return_type = false);
     public:
       //------------------------------------------------------------------------
@@ -1933,7 +2218,7 @@ namespace Legion {
       bool acquire_instance(MapperContext ctx, 
                                       const PhysicalInstance &instance) const;
       bool acquire_instances(MapperContext ctx,
-                          const std::vector<PhysicalInstance> &instances) const;
+                             const std::vector<PhysicalInstance> &insts) const;
       bool acquire_and_filter_instances(MapperContext ctx,
                                 std::vector<PhysicalInstance> &instances,
                                 bool filter_acquired_instance = false) const;
@@ -1948,6 +2233,10 @@ namespace Legion {
                           const std::vector<PhysicalInstance> &instances) const;
       void release_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
+    public:
+      // Futures can also be acquired to ensure that they are available in
+      // particular memories prior to running a task.
+      bool acquire_future(MapperContext ctx, const Future &f, Memory mem) const;
     public:
       //------------------------------------------------------------------------
       // Methods for creating index spaces which mappers need to do
@@ -2198,6 +2487,17 @@ namespace Legion {
                                    const char *&result);
     public:
       //------------------------------------------------------------------------
+      // Methods for MPI interoperability
+      //------------------------------------------------------------------------
+      bool is_MPI_interop_configured(MapperContext ctx);
+      const std::map<int/*rank*/,AddressSpace>& 
+                                    find_forward_MPI_mapping(MapperContext ctx); 
+
+      const std::map<AddressSpace,int/*rank*/>&
+                                    find_reverse_MPI_mapping(MapperContext ctx);
+      int find_local_MPI_rank(MapperContext ctx);
+    public:
+      //------------------------------------------------------------------------
       // Support for packing tunable values
       //------------------------------------------------------------------------
       template<typename T>
@@ -2213,6 +2513,28 @@ namespace Legion {
         output.size = sizeof(T);
       }
     }; 
+
+    /**
+     * \class AutoLock
+     * This class allows mappers to use their own fast reservation
+     * synchronization primitives instead of relying on the mapper
+     * synchronization model to perform all the synchronization.
+     * (This is still an experimental feature and subject to change)
+     */
+    class AutoLock : public Internal::AutoLock {
+    public:
+      AutoLock(MapperContext ctx, LocalLock &r, int mode = 0, bool excl = true);
+      AutoLock(AutoLock &&rhs) = delete;
+      AutoLock(const AutoLock &rhs) = delete;
+      ~AutoLock(void) { };
+    public:
+      AutoLock& operator=(AutoLock &&rhs) = delete;
+      AutoLock& operator=(const AutoLock &rhs) = delete;
+    public:
+      void reacquire(void);
+    protected:
+      const MapperContext ctx;
+    };
 
   }; // namespace Mapping
 }; // namespace Legion

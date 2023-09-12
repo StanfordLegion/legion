@@ -65,9 +65,6 @@ namespace Legion {
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
-      virtual void speculate(const MapperContext      ctx,
-                             const Task&              task,
-                                   SpeculativeOutput& output);
     public: // Inline mapping calls
       virtual void map_inline(const MapperContext        ctx,
                               const InlineMapping&       inline_op,
@@ -86,9 +83,6 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output);
-      virtual void speculate(const MapperContext      ctx,
-                             const Copy& copy,
-                                   SpeculativeOutput& output);
     public: // Close mapping calls
       virtual void map_close(const MapperContext       ctx,
                              const Close&              close,
@@ -98,18 +92,11 @@ namespace Legion {
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
-    public: // Acquire mapping calls
-      virtual void speculate(const MapperContext         ctx,
-                             const Acquire&              acquire,
-                                   SpeculativeOutput&    output);
     public: // Release mapping calls
       virtual void select_release_sources(const MapperContext       ctx,
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
-      virtual void speculate(const MapperContext         ctx,
-                             const Release&              release,
-                                   SpeculativeOutput&    output);
     public: // Mapping control and stealing
       virtual void select_tasks_to_map(const MapperContext          ctx,
                                        const SelectMappingInput&    input,

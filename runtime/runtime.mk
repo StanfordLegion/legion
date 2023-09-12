@@ -1103,6 +1103,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_constraint.cc \
 		    $(LG_RT_DIR)/legion/legion_mapping.cc \
 		    $(LG_RT_DIR)/legion/legion_redop.cc \
+		    $(LG_RT_DIR)/legion/legion_replication.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \

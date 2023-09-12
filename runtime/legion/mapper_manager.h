@@ -24,19 +24,16 @@ namespace Legion {
 
     class MappingCallInfo {
     public:
-      MappingCallInfo(MapperManager *man, MappingCallKind k,
-                      Operation *op = NULL); 
+      MappingCallInfo(MapperManager *man, MappingCallKind k, Operation *op); 
     public:
       MapperManager*const               manager;
       RtUserEvent                       resume;
-      MappingCallKind                   kind;
-      Operation*                        operation;
+      const MappingCallKind             kind;
+      Operation*const                   operation;
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
-      unsigned                          collective_count;
       bool                              reentrant_disabled;
-      bool                              supports_collectives;
     };
 
     /**
@@ -89,6 +86,10 @@ namespace Legion {
       void invoke_map_task(TaskOp *task, Mapper::MapTaskInput *input,
                            Mapper::MapTaskOutput *output, 
                            MappingCallInfo *info = NULL);
+      void invoke_map_replicate_task(TaskOp *task, Mapper::MapTaskInput *input,
+                                     Mapper::MapTaskOutput *default_output,
+                                     Mapper::MapReplicateTaskOutput *output,
+                                     MappingCallInfo *info = NULL);
       void invoke_select_task_variant(TaskOp *task, 
                                       Mapper::SelectVariantInput *input,
                                       Mapper::SelectVariantOutput *output,
@@ -104,12 +105,13 @@ namespace Legion {
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_task_speculate(TaskOp *task, 
-                                 Mapper::SpeculativeOutput *output,
-                                 MappingCallInfo *info = NULL);
       void invoke_task_report_profiling(TaskOp *task, 
                                         Mapper::TaskProfilingInfo *input,
                                         MappingCallInfo *info = NULL);
+      void invoke_task_select_sharding_functor(TaskOp *task,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Inline mapper calls
       void invoke_map_inline(MapOp *op, Mapper::MapInlineInput *input,
                              Mapper::MapInlineOutput *output, 
@@ -138,11 +140,13 @@ namespace Legion {
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
-                                 MappingCallInfo *info = NULL);
       void invoke_copy_report_profiling(CopyOp *op,
                                         Mapper::CopyProfilingInfo *input,
                                         MappingCallInfo *info = NULL);
+      void invoke_copy_select_sharding_functor(CopyOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Close mapper calls
       void invoke_select_close_sources(CloseOp *op,
                                        Mapper::SelectCloseSrcInput *input,
@@ -155,17 +159,22 @@ namespace Legion {
       void invoke_close_report_profiling(CloseOp *op,
                                          Mapper::CloseProfilingInfo *input,
                                          MappingCallInfo *info = NULL);
+      void invoke_close_select_sharding_functor(CloseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Acquire mapper calls
       void invoke_map_acquire(AcquireOp *op,
                               Mapper::MapAcquireInput *input,
                               Mapper::MapAcquireOutput *output,
                               MappingCallInfo *info = NULL);
-      void invoke_acquire_speculate(AcquireOp *op,
-                                    Mapper::SpeculativeOutput *output,
-                                    MappingCallInfo *info = NULL);
       void invoke_acquire_report_profiling(AcquireOp *op,
                                            Mapper::AcquireProfilingInfo *input,
                                            MappingCallInfo *info = NULL);
+      void invoke_acquire_select_sharding_functor(AcquireOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Release mapper calls
       void invoke_map_release(ReleaseOp *op,
                               Mapper::MapReleaseInput *input,
@@ -179,12 +188,13 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
                                          MappingCallInfo *info = NULL);
-      void invoke_release_speculate(ReleaseOp *op,
-                                    Mapper::SpeculativeOutput *output,
-                                    MappingCallInfo *info = NULL);
       void invoke_release_report_profiling(ReleaseOp *op,
                                            Mapper::ReleaseProfilingInfo *input,
                                            MappingCallInfo *info = NULL);
+      void invoke_release_select_sharding_functor(ReleaseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Partition mapper calls
       void invoke_select_partition_projection(DependentPartitionOp *op,
                           Mapper::SelectPartitionProjectionInput *input,
@@ -205,6 +215,20 @@ namespace Legion {
       void invoke_partition_report_profiling(DependentPartitionOp *op,
                           Mapper::PartitionProfilingInfo *input,
                           MappingCallInfo *info = NULL);
+      void invoke_partition_select_sharding_functor(DependentPartitionOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
+    public: // Fill mapper calls
+      void invoke_fill_select_sharding_functor(FillOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);
+    public: // All reduce 
+      void invoke_map_future_map_reduction(AllReduceOp *op,
+                              Mapper::FutureMapReductionInput *input,
+                              Mapper::FutureMapReductionOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,
@@ -214,6 +238,10 @@ namespace Legion {
                                        Mapper::SelectTunableOutput *output,
                                        MappingCallInfo *info = NULL);
     public: // must epoch and graph mapper calls
+      void invoke_must_epoch_select_sharding_functor(MustEpochOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::MustEpochShardingFunctorOutput *output,
+                              MappingCallInfo *info = NULL);                           
       void invoke_map_must_epoch(MustEpochOp *op,
                                  Mapper::MapMustEpochInput *input,
                                  Mapper::MapMustEpochOutput *output,
@@ -252,6 +280,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info) = 0;
     protected:
       friend class Runtime;
+      friend class Mapping::AutoLock;
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
           Operation *op, RtEvent &precondition, bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
@@ -309,12 +338,15 @@ namespace Legion {
                             VariantID variant_id);
       bool is_idempotent_variant(MappingCallInfo *ctx,
                                  TaskID task_id, VariantID variant_id);
+      bool is_replicable_variant(MappingCallInfo *ctx,
+                                 TaskID task_id, VariantID variant_id);
     public:
       VariantID register_task_variant(MappingCallInfo *ctx,
                                       const TaskVariantRegistrar &registrar,
 				      const CodeDescriptor &codedesc,
 				      const void *user_data,
 				      size_t user_len,
+                                      size_t return_type_size,
                                       bool has_return_type);
     public:
       void filter_variants(MappingCallInfo *ctx, const Task &task,
@@ -400,6 +432,7 @@ namespace Legion {
                                     const std::vector<MappingInstance> &insts);
       void release_instances(       MappingCallInfo *ctx, const std::vector<
                                     std::vector<MappingInstance> > &instances);
+      bool acquire_future(MappingCallInfo *ctx, const Future &f, Memory memory);
     public:
       void record_acquired_instance(MappingCallInfo *info, 
                                     InstanceManager *manager, bool created);
@@ -542,11 +575,17 @@ namespace Legion {
                          const char *&result);
       void retrieve_name(MappingCallInfo *ctx, LogicalPartition handle,
                          const char *&result);
+    public:
+      bool is_MPI_interop_configured(void);
+      const std::map<int,AddressSpace>& find_forward_MPI_mapping(
+                         MappingCallInfo *ctx);
+      const std::map<AddressSpace,int>& find_reverse_MPI_mapping(
+                         MappingCallInfo *ctx);
+      int find_local_MPI_rank(void);
     protected:
       // Both these must be called while holding the lock
-      MappingCallInfo* allocate_call_info(MappingCallKind kind, 
-                                          Operation *op, bool need_lock);
-      void free_call_info(MappingCallInfo *info, bool need_lock);
+      MappingCallInfo* allocate_call_info(MappingCallKind kind, Operation *op);
+      void free_call_info(MappingCallInfo *info);
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
@@ -570,8 +609,6 @@ namespace Legion {
       const bool is_default_mapper;
     protected:
       mutable LocalLock mapper_lock;
-    protected:
-      std::vector<MappingCallInfo*> available_infos;
     protected: // Steal request information
       // Mappers on other processors that we've tried to steal from and failed
       std::set<Processor> steal_blacklist;
@@ -749,6 +786,25 @@ namespace Legion {
       T1 *const arg1;
       T2 *const arg2;
       T3 *const arg3;
+    };
+
+    template<typename T1, typename T2, typename T3, typename T4,
+             void (MapperManager::*CALL)(T1*, T2*, T3*, T4*, 
+                                         MappingCallInfo*)>
+    class MapperContinuation4 : public MapperContinuation {
+    public:
+      MapperContinuation4(MapperManager *man, T1 *a1, T2 *a2, T3 *a3, T4 *a4,
+                          MappingCallInfo *info)
+        : MapperContinuation(man, info), 
+          arg1(a1), arg2(a2), arg3(a3), arg4(a4) { }
+    public:
+      virtual void execute(void)
+      { (manager->*CALL)(arg1, arg2, arg3, arg4, info); }
+    public:
+      T1 *const arg1;
+      T2 *const arg2;
+      T3 *const arg3;
+      T4 *const arg4;
     };
 
   };

@@ -1266,9 +1266,6 @@ namespace Legion {
         if (inst.is_external_instance()) {
           ss << "EXTERNAL,";
         }
-        if (inst.is_collective_instance()) {
-          ss << "COLLECTIVE,";
-        }
         ss << "region=(" << inst.get_tree_id() << ",*,"
            << inst.get_field_space().get_id() << ")";
         ss << ",memory=" << inst.get_location();
@@ -1325,6 +1322,8 @@ namespace Legion {
           ss << "(index_point=" << task.index_point << ")";
         }
         ss << "<" << task.get_unique_id() << ">";
+        if (!task.get_provenance_string().empty())
+          ss << " @ " << task.get_provenance_string();
         return ss.str();
       }
 
@@ -1336,6 +1335,8 @@ namespace Legion {
       {
         std::stringstream ss;
         ss << "InlineMapping" << "<" << inline_op.get_unique_id() << ">";
+        if (!inline_op.get_provenance_string().empty())
+          ss << " @ " << inline_op.get_provenance_string();
         return ss.str();
       }
 
@@ -1352,6 +1353,8 @@ namespace Legion {
           ss << "(index_point=" << copy.index_point << ")";
         }
         ss << "<" << copy.get_unique_id() << ">";
+        if (!copy.get_provenance_string().empty())
+          ss << " @ " << copy.get_provenance_string();
         return ss.str();
       }
     }; // namespace Utilities

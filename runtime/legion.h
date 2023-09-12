@@ -65,9 +65,6 @@
   runtime->print_once(ctx, file, message);                \
 }
 
-// A guard macro that will exist until control replication is available
-#define NO_LEGION_CONTROL_REPLICATION
-
 /**
  * \namespace Legion
  * Namespace for all Legion runtime objects
@@ -1078,8 +1075,9 @@ namespace Legion {
         { return (flags & LEGION_NO_ACCESS_FLAG); }
       inline bool is_restricted(void) const 
         { return (flags & LEGION_RESTRICTED_FLAG); }
+      LEGION_DEPRECATED("Premapping regions is no longer supported.") 
       inline bool must_premap(void) const
-        { return (flags & LEGION_MUST_PREMAP_FLAG); }
+        { return false; }
     public:
       const void* get_projection_args(size_t *size) const;
       void set_projection_args(const void *args, size_t size, bool own = false);
@@ -1106,6 +1104,107 @@ namespace Legion {
     protected:
       void *projection_args; /**< projection arguments buffer*/
       size_t projection_args_size; /**< projection arguments buffer size*/
+    };
+
+    /**
+     * \struct OutputRequirement
+     * Output requirements are a special kind of region requirement to inform
+     * the runtime that the task will be producing new instances as part of its
+     * execution that will be attached to the logical region at the end of the
+     * task, and are therefore not mapped ahead of the task's execution.
+     *
+     * Output region requirements come in two flavors: those that are already
+     * valid region requirements and those which are going to produce variable
+     * sized outputs. Valid region requirements behave like normal region
+     * requirements except they will not be mapped by the task. Alternatively,
+     * for variable-sized output region requirements the runtime
+     * will create fresh region and partition names for output requirements
+     * right after the task is launched. Output requirements still pick
+     * field IDs and the field space for the output regions.
+     *
+     * In case of individual task launch, the dimension of an output region
+     * is chosen by the `dim` argument to the output requirement , and
+     * and no partitions will be created by the runtime. For index space
+     * launches, the runtime gives back a fresh region and partition,
+     * whose construction is controlled by the indexing mode specified
+     * the output requirement:
+     *
+     * 0) For either indexing mode, the output partition is always a disjoint
+     *    complete partition. The color space of the partition is identical to
+     *    to the launch domain by default, but must be explicitly specified
+     *    if the output requirement uses a non-identity projection functor.
+     *    (see `set_projection`) Any projection functor associated with an
+     *    output requirement must be bijective.
+     *
+     * 1) When the global indexing is requested, the dimension of the output
+     *    region must be the same as the color space. The index space is
+     *    constructed such that the extent of each dimension is a sum of
+     *    that dimension's extents of the outputs produced by point tasks;
+     *    i.e., the range of the i-th subregion on dimension k
+     *    is [S, S+n), where S is the sum of the previous i-1 subregions'
+     *    extents on the k dimension and n is the extent of the output of
+     *    the i-th point task on the k dimension. Outputs are well-formed
+     *    only when their extents are aligned with their neighbors'. For
+     *    example, outputs of extents (3, 4) and (5, 4), respectively,
+     *    are valid if the producers' points are (0, 0) and (1, 0),
+     *    respectively, whereas they are not well-formed if the colors
+     *    are (0, 0) and (0, 1); for the former, the bounds of the output
+     *    subregions are ([0, 2], [0, 3]) and ([3, 7], [0, 3]),
+     *    respectively.
+     *
+     * 2) With the local indexing, the output region has an (N+k)-D index
+     *    space for an N-D launch domain, where k is the dimension chosen
+     *    by the output requirement. The range of the subregion produced
+     *    by the point task p (where p is a point in an N-D space) is
+     *    [<p,lo>, <p,hi>] where [lo, hi] is the bounds of the point task p
+     *    and <v1,v2> denotes a concatenation of points v1 and v2.
+     *    The root index space is simply a union of all subspaces.
+     *
+     * 3) In the case of local indexing, the output region can either have a
+     *    "loose" convex hull parent index space or a "tight" index space that
+     *    contains exactly the points in the child space. With the convex hull,
+     *    the runtime computes an upper bound rectangle with as many rows as
+     *    children and as many columns as the extent of the larges child space.
+     *    If convex_hull is set to false, the runtime will compute a more
+     *    expensive sparse index space containing exactly the children points.
+     *
+     * Note that the global indexing has performance consequences since
+     * the runtime needs to perform a global prefix sum to compute the ranges
+     * of subspaces. Similarly the "tight" bounds can be expensive to compute
+     * due to the cost of building the sparsity data structure.
+     *
+     */
+    struct OutputRequirement : public RegionRequirement {
+    public:
+      OutputRequirement(bool valid_requirement = false);
+      OutputRequirement(const RegionRequirement &req);
+      OutputRequirement(FieldSpace field_space,
+                        const std::set<FieldID> &fields,
+                        int dim = 1,
+                        bool global_indexing = false);
+    public:
+      OutputRequirement(const OutputRequirement &rhs);
+      ~OutputRequirement(void);
+      OutputRequirement& operator=(const RegionRequirement &req);
+      OutputRequirement& operator=(const OutputRequirement &req);
+    public:
+      bool operator==(const OutputRequirement &req) const;
+      bool operator<(const OutputRequirement &req) const;
+    public:
+      template <int DIM, typename COORD_T>
+      void set_type_tag();
+      // Specifies a projection functor id for this requirement.
+      // For a projection output requirement, a color space must be specified.
+      // The projection functor must be a bijective mapping from the launch
+      // domain to the color space. This implies that the launch domain's
+      // volume must be the same as the color space's.
+      void set_projection(ProjectionID projection, IndexSpace color_space);
+    public:
+      TypeTag type_tag;
+      FieldSpace field_space; /**< field space for the output region */
+      bool global_indexing; /**< global indexing is used when true */
+      bool valid_requirement; /**< indicate requirement is valid */
+      IndexSpace color_space; /**< color space for the output partition */
     };
 
     /**
@@ -1191,8 +1290,7 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      explicit Future(Internal::FutureImpl *impl,
-                      bool need_reference = true);
+      explicit Future(Internal::FutureImpl *impl);
     public:
       bool operator==(const Future &f) const
         { return impl == f.impl; }
@@ -1242,6 +1340,44 @@ namespace Legion {
       bool is_ready(bool subscribe = false) const;
     public:
       /**
+       * Return a span object representing the data for the future.
+       * The size of the future must be evenly divisible by sizeof(T).
+       * The resulting span object is only good as long as the application
+       * program maintains a handle to the future object that created it.
+       * At the moment the privilege mode must be read-only; no other
+       * values will be accepted. This call will not unpack data serialized
+       * with the legion_serialize method.
+       * @param memory the kind of memory for the allocation, the memory 
+       *    with the best affinity to the executing processor will be used
+       * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
+       * @return a Span object representing the data for the future
+       */
+      template<typename T, PrivilegeMode PM = LEGION_READ_ONLY>
+        Span<T,PM> get_span(Memory::Kind memory,
+                            bool silence_warnings = false,
+                            const char *warning_string = NULL) const;
+
+      /**
+       * Return a pointer and optional size for the data for the future.
+       * The pointer is only valid as long as the application program 
+       * maintains a handle to the future object that produced it. This call 
+       * will not deserialized data packed with the legion_serialize method.
+       * @param memory the kind of memory for the allocation, the memory 
+       *    with the best affinity to the executing processor will be used
+       * @param extent_in_bytes pointer to a location to write the future size
+       * @param check_extent check that the extent matches the future size
+       * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
+       * @return a const pointer to the future data in the specified memory
+       */
+      const void* get_buffer(Memory::Kind memory, 
+                             size_t *extent_in_bytes = NULL,
+                             bool check_extent = false,
+                             bool silence_warnings = false,
+                             const char *warning_string = NULL) const;
+
+      /**
        * Return a const reference to the future.
        * WARNING: these method is unsafe as the underlying
        * buffer containing the future result can be deleted
@@ -1255,6 +1391,7 @@ namespace Legion {
        * @param warning_string a string to be reported with the warning
        */
       template<typename T> 
+        LEGION_DEPRECATED("Use 'Future::get_span' instead")
         inline const T& get_reference(bool silence_warnings = false,
                                       const char *warning_string = NULL) const;
       /**
@@ -1267,12 +1404,24 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        * @param warning_string a string to be reported with the warning
        */
+      LEGION_DEPRECATED("Use 'Future::get_buffer' instead")
       inline const void* get_untyped_pointer(bool silence_warnings = false,
-                                       const char *warning_string = NULL) const;
+                                       const char *warning_string = NULL) const; 
+
       /**
        * Return the number of bytes contained in the future.
        */
       size_t get_untyped_size(void) const;
+
+      /**
+       * Return a pointer to the metadata buffer for this future.
+       * Unlike getting a buffer for the future which can exist on
+       * any memory, the metadata is always guaranteed to be on the
+       * host memory.
+       * @param optional pointer to a place to write the size
+       * @return a pointer to the buffer containing the metadata
+       */
+      const void* get_metadata(size_t *size = NULL) const;
     public:
       // These methods provide partial support the C++ future interface
       template<typename T>
@@ -1288,19 +1437,34 @@ namespace Legion {
        * and to always have concrete values.
        */
       template<typename T>
+      LEGION_DEPRECATED("Use the version without a runtime pointer argument")
       static inline Future from_value(Runtime *rt, const T &value);
+      template<typename T>
+      static inline Future from_value(const T &value);
 
       /**
        * Generates a future from an untyped pointer.  No
        * serialization is performed.
        */
-      static inline Future from_untyped_pointer(Runtime *rt,
-						const void *buffer,
-						size_t bytes);
+      LEGION_DEPRECATED("Use the version without a runtime pointer argument")
+      static Future from_untyped_pointer(Runtime *rt,
+          const void *buffer, size_t bytes, bool take_ownership = false);
+      static Future from_untyped_pointer(
+          const void *buffer, size_t bytes, bool take_ownership = false,
+          const char *provenance = NULL, bool shard_local = false);
+      static Future from_value(const void *buffer, size_t bytes, bool owned,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL,
+          const char *provenance = NULL, bool shard_local = false);
     private:
-      void* get_untyped_result(bool silence_warnings,
-                               const char *warning_string,
-                               bool check_size, size_t future_size = 0) const;
+      // This should only be available for accessor classes
+      template<PrivilegeMode, typename, int, typename, typename, bool>
+      friend class FieldAccessor;
+      Realm::RegionInstance get_instance(Memory::Kind kind,
+          size_t field_size, bool check_field_size,
+          const char *warning_string, bool silence_warnings) const;
+      void report_incompatible_accessor(const char *accessor_kind,
+                             Realm::RegionInstance instance) const;
     };
 
     /**
@@ -1327,8 +1491,7 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      explicit FutureMap(Internal::FutureMapImpl *impl,
-                         bool need_reference = true);
+      explicit FutureMap(Internal::FutureMapImpl *impl);
     public:
       inline bool operator==(const FutureMap &f) const
         { return impl == f.impl; }
@@ -1405,6 +1568,13 @@ namespace Legion {
        */
       void wait_all_results(bool silence_warnings = false,
                             const char *warning_string = NULL) const; 
+    public:
+      /**
+       * This method will return the domain of points that can be 
+       * used to index into this future map.
+       * @return domain of all points in the future map
+       */
+      Domain get_future_map_domain(void) const;
     }; 
 
 
@@ -1608,7 +1778,7 @@ namespace Legion {
       IndexSpace                         launch_space;
       // Will only be used in control replication context. If left
       // unset the runtime will use launch_domain/launch_space
-      IndexSpace                         sharding_space; 
+      IndexSpace                         sharding_space;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
@@ -1621,6 +1791,17 @@ namespace Legion {
       UntypedBuffer                      global_arg;
       ArgumentMap                        argument_map;
       Predicate                          predicate;
+      // Specify that all the point tasks in this index launch be 
+      // able to run concurrently, meaning they all must map to
+      // different processors and they cannot have interfering region
+      // requirements that might lead to dependences. Note that the
+      // runtime guarantees that concurrent index launches will not
+      // deadlock with other concurrent index launches which requires 
+      // additional analysis. Currently concurrent index space launches
+      // will only be allowed to map to leaf task variants currently.
+      bool                               concurrent;
+      // This will convert this index space launch into a must
+      // epoch launch which supports interfering region requirements
       bool                               must_parallelism;
       MapperID                           map_id;
       MappingTagID                       tag;
@@ -1662,6 +1843,9 @@ namespace Legion {
       bool                               elide_future_return;
     public:
       bool                               silence_warnings;
+    public:
+      // Initial value for reduction
+      Future                             initial_value;
     };
 
     /**
@@ -1865,7 +2049,7 @@ namespace Legion {
       IndexSpace                      launch_space;
       // Will only be used in control replication context. If left
       // unset the runtime will use launch_domain/launch_space
-      IndexSpace                      sharding_space; 
+      IndexSpace                      sharding_space;
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
@@ -2036,7 +2220,7 @@ namespace Legion {
       IndexSpace                      launch_space;
       // Will only be used in control replication context. If left
       // unset the runtime will use launch_domain/launch_space
-      IndexSpace                      sharding_space; 
+      IndexSpace                      sharding_space;
       LogicalRegion                   region;
       LogicalPartition                partition;
       LogicalRegion                   parent;
@@ -2051,6 +2235,32 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      const std::vector<StaticDependence> *static_dependences;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
+     * \struct DiscardLauncher
+     * Discard launchers will reset the state of one or more fields
+     * for a particular logical region to an uninitialized state.
+     * @see Runtime
+     */
+    struct DiscardLauncher {
+    public:
+      DiscardLauncher(LogicalRegion handle, LogicalRegion parent);
+    public:
+      inline void add_field(FieldID fid);
+    public:
+      LogicalRegion                   handle;
+      LogicalRegion                   parent;
+      std::set<FieldID>               fields;
     public:
       // Provenance string for the runtime and tools to use
       std::string                     provenance;
@@ -2103,6 +2313,18 @@ namespace Legion {
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
       bool                                          mapped; /*= true*/
+      // Only matters for control replicated parent tasks 
+      // Indicate whether all the shards are providing the same data
+      // or whether they are each providing different data
+      // Collective means that each shard provides its own copy of the
+      // data and non-collective means every shard provides the same data
+      // Defaults to 'true' for external instances and 'false' for files
+      bool                                          collective;
+      // For collective cases, indicate whether the runtime should 
+      // deduplicate data across shards in the same process
+      // This is useful for cases where there is one file or external
+      // instance per process but multiple shards per process
+      bool                                          deduplicate_across_shards;
     public:
       // Provenance string for the runtime and tools to use
       std::string                                   provenance;
@@ -2163,9 +2385,9 @@ namespace Legion {
       LogicalRegion                                 parent;
       // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
-      // Whether the runtime should check for duplicate resources across the 
-      // shards in a control replicated context, it is illegal to pass in the
-      // same resource to different shards if this is set to false
+      // Whether the runtime should check for duplicate resources across 
+      // the shards in a control replicated context, it is illegal to pass
+      // in the same resource to different shards if this is set to false
       bool                                          deduplicate_across_shards;
     public:
       // Provenance string for the runtime and tools to use
@@ -2235,13 +2457,15 @@ namespace Legion {
     public:
       TunableLauncher(TunableID tid,
                       MapperID mapper = 0,
-                      MappingTagID tag = 0);
+                      MappingTagID tag = 0,
+                      size_t return_type_size = SIZE_MAX);
     public:
       TunableID                           tunable;
       MapperID                            mapper;
       MappingTagID                        tag;
       UntypedBuffer                       arg;
       std::vector<Future>                 futures;
+      size_t                              return_type_size;
     public:
       // Provenance string for the runtime and tools to use
       std::string                        provenance;
@@ -2327,6 +2551,7 @@ namespace Legion {
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
       inline void set_replicable(bool is_replicable = true);
+      inline void set_concurrent(bool is_concurrent = true);
     public: // Generator Task IDs
       inline void add_generator_task(TaskID tid);
     public:
@@ -2344,6 +2569,7 @@ namespace Legion {
       bool                              inner_variant;
       bool                              idempotent_variant;
       bool                              replicable_variant;
+      bool                              concurrent_variant;
     };
 
     //==========================================================================
@@ -2655,6 +2881,37 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const AffineTransform<M,N,COORD_T> transform,
                     const Rect<N,COORD_T> bounds,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // Create a field accessor for a Future 
+      // (only with READ-ONLY privileges and AffineAccessors)
+      FieldAccessor(const Future &future,
+                    Memory::Kind kind = Memory::NO_MEMKIND,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // Create a field accessor for a Future
+      // (only with READ-ONLY privileges and AffineAccessors)
+      FieldAccessor(const Future &future,
+                    const Rect<N,COORD_T> bounds,
+                    Memory::Kind kind = Memory::NO_MEMKIND,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -3500,7 +3757,7 @@ namespace Legion {
       __CUDA_HD__
       inline DeferredValue<T>& operator=(T value);
     public:
-      inline void finalize(Runtime *runtime, Context ctx) const;
+      inline void finalize(Context ctx) const;
     protected:
       friend class UntypedDeferredValue;
       DeferredValue(void);
@@ -3552,7 +3809,7 @@ namespace Legion {
       template<typename REDOP, bool EXCLUSIVE>
       inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
     public:
-      void finalize(Runtime *runtime, Context ctx) const;
+      void finalize(Context ctx) const;
       Realm::RegionInstance get_instance() const;
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
@@ -3654,7 +3911,11 @@ namespace Legion {
       inline T* ptr(const Rect<DIM,COORD_T> &r, size_t strides[DIM]) const;
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
+    public:
+      void destroy();
+      Realm::RegionInstance get_instance() const;
     protected:
+      friend class OutputRegion;
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
@@ -3721,7 +3982,81 @@ namespace Legion {
       size_t field_size;
       int dims; 
     };
- 
+
+    /**
+     * \class OutputRegion
+     * An OutputRegion provides an interface for applications to specify
+     * the output instances or allocations of memory to associate with
+     * output region requirements. 
+     */
+    class OutputRegion : public Unserializable<OutputRegion> {
+    public:
+      OutputRegion(void);
+      OutputRegion(const OutputRegion &rhs);
+      ~OutputRegion(void);
+    private:
+      Internal::OutputRegionImpl *impl;
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit OutputRegion(Internal::OutputRegionImpl *impl);
+    public:
+      OutputRegion& operator=(const OutputRegion &rhs);
+    public:
+      Memory target_memory(void) const;
+      // Returns the logical region of this output region.
+      // The call is legal only when the output region is valid and
+      // will raise an error otherwise.
+      LogicalRegion get_logical_region(void) const;
+      bool is_valid_output_region(void) const;
+    public:
+      // Returns a deferred buffer that satisfies the layout constraints of
+      // this output region. The caller still needs to pass this buffer to
+      // a return_data call if the buffer needs to be bound to this output
+      // region. The caller can optionally choose to bind the returned buffer
+      // to the output region; such a call cannot be made more than once.
+      template<typename T,
+               int DIM,
+               typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+               bool CHECK_BOUNDS = true>
+#else
+               bool CHECK_BOUNDS = false>
+#endif
+      DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS>
+      create_buffer(const Point<DIM, COORD_T> &extents,
+                    FieldID field_id,
+                    const T *initial_value = NULL,
+                    bool return_buffer = false);
+    private:
+      void check_type_tag(TypeTag type_tag) const;
+      void check_field_size(FieldID field_id, size_t field_size) const;
+      void get_layout(FieldID field_id,
+                      std::vector<DimensionKind> &ordering,
+                      size_t &alignment) const;
+    public:
+      template<typename T,
+               int DIM,
+               typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+               bool CHECK_BOUNDS = true>
+#else
+               bool CHECK_BOUNDS = false>
+#endif
+      void return_data(const Point<DIM,COORD_T> &extents,
+                       FieldID field_id,
+                       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> &buffer);
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       Realm::RegionInstance instance,
+                       bool check_constraints = true);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       Realm::RegionInstance instance,
+                       const LayoutConstraintSet *constraints,
+                       bool check_constraints);
+    };
+
     //==========================================================================
     //                      Software Coherence Classes
     //==========================================================================
@@ -3758,7 +4093,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
-      // This field is now optional
+      // This field is now optional (but required with control replication)
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -3806,7 +4141,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
-      // This field is now optional
+      // This field is now optional (but required with control replication)
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -4080,6 +4415,23 @@ namespace Legion {
       // task is operating over. This method will only return a
       // valid domain if this is part of an index space task.
       virtual Domain get_slice_domain(void) const = 0;
+      //------------------------------------------------------------------------
+      // Control Replication methods
+      // In general SPMD-style programming in Legion is wrong. If you find
+      // yourself writing SPMD-style code for large fractions of your program
+      // then you're probably doing something wrong. There are a few exceptions:
+      // 1. index attach/detach operations are collective and may need
+      //    to do per-shard work
+      // 2. I/O in general often needs to do per-shard work
+      // 3. interaction with collective frameworks like MPI and NCCL
+      // 4. others?
+      // For these reasons we allow users to get access to sharding information
+      // Please, please, please be careful with how you use it
+      //------------------------------------------------------------------------
+      virtual ShardID get_shard_id(void) const = 0;
+      virtual size_t get_total_shards(void) const = 0;
+      virtual DomainPoint get_shard_point(void) const = 0;
+      virtual Domain get_shard_domain(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_TASK_MAPPABLE; }
@@ -4089,6 +4441,7 @@ namespace Legion {
       TaskID                              task_id; 
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
+      std::vector<OutputRequirement>      output_regions;
       std::vector<Future>                 futures;
       std::vector<Grant>                  grants;
       std::vector<PhaseBarrier>           wait_barriers;
@@ -4098,6 +4451,7 @@ namespace Legion {
     public:
       // Index task argument information
       bool                                is_index_space;
+      bool                                concurrent_task;
       bool                                must_epoch_task; 
       Domain                              index_domain;
       DomainPoint                         index_point;
@@ -4141,6 +4495,7 @@ namespace Legion {
       bool                              is_index_space;
       Domain                            index_domain;
       DomainPoint                       index_point;
+      IndexSpace                        sharding_space;
     };
 
     /**
@@ -4155,6 +4510,7 @@ namespace Legion {
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_INLINE_MAPPABLE; }
       virtual const InlineMapping* as_inline(void) const { return this; }
+      virtual ShardID get_parent_shard(void) const { return 0; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -4253,6 +4609,7 @@ namespace Legion {
       bool                              is_index_space;
       Domain                            index_domain;
       DomainPoint                       index_point;
+      IndexSpace                        sharding_space;
     };
 
     /**
@@ -4299,7 +4656,7 @@ namespace Legion {
     public:
       MustEpoch(void);
     public:
-      virtual MappableType get_mappable_type(void) const
+      virtual MappableType get_mappable_type(void) const 
         { return LEGION_MUST_EPOCH_MAPPABLE; }
       virtual const MustEpoch* as_must_epoch(void) const { return this; }
     public:
@@ -4505,6 +4862,37 @@ namespace Legion {
                           std::vector<DomainPoint> &ordered_points);
       ///@}
       
+      ///@{
+      /**
+       * Indicate to the runtime whether this projection function 
+       * invoked on the given upper bound node in the region tree with
+       * the given index space domain will completely "cover" the
+       * all the upper bound points. Specifically will each point in
+       * the upper bound node exist in at least one logical region that
+       * is projected to be one of the points in the domain. It is always
+       * sound to return 'false' even if the projection will ultimately
+       * turn out to be complete. The only cost will be in additional
+       * runtime analysis overhead. It is unsound to return 'true' if
+       * the resulting projection is not complete. Undefined behavior
+       * in this scenario. In general users only need to worry about 
+       * implementing these functions if they have a projection functor
+       * that has depth greater than zero.
+       * @param mappable the mappable oject for non-functional functors
+       * @param index index of region requirement for non-functional functors
+       * @param upper_bound the upper bound region/partition to consider
+       * @param launch_domain the set of points for the projection
+       * @return bool indicating whether this projection is complete
+       */
+      virtual bool is_complete(LogicalRegion upper_bound, 
+                               const Domain &launch_domain);
+      virtual bool is_complete(LogicalPartition upper_bound,
+                               const Domain &launch_domain);
+      virtual bool is_complete(Mappable *mappable, unsigned index,
+            LogicalRegion upper_bound, const Domain &launch_domain);
+      virtual bool is_complete(Mappable *mappable, unsigned index,
+            LogicalPartition upper_bound, const Domain &launch_domain); 
+      ///@}
+      
       /**
        * Indicate whether calls to this projection functor
        * must be serialized or can be performed in parallel.
@@ -4564,19 +4952,37 @@ namespace Legion {
      */
     class ShardingFunctor {
     public:
-      ShardingFunctor(void) { }
-      virtual ~ShardingFunctor(void) { }
+      ShardingFunctor(void);
+      virtual ~ShardingFunctor(void);
     public:
-      virtual ShardID shard(const DomainPoint &point,
-                            const Domain &full_space,
-                            const size_t total_shards) = 0;
+      // Indicate whether this functor wants to use the ShardID or 
+      // DomainPoint versions of these methods
+      virtual bool use_points(void) const { return false; }
+    public:
+      // The ShardID version of this method
+      virtual ShardID shard(const DomainPoint &index_point,
+                            const Domain &index_domain,
+                            const size_t total_shards);
+      // The DomainPoint version of this method
+      virtual DomainPoint shard_points(const DomainPoint &index_point,
+                            const Domain &index_domain,
+                            const std::vector<DomainPoint> &shard_points,
+                            const Domain &shard_domain);
     public:
       virtual bool is_invertible(void) const { return false; }
+      // The ShardID version of this method
       virtual void invert(ShardID shard,
-                          const Domain &shard_domain,
-                          const Domain &full_domain,
+                          const Domain &sharding_domain,
+                          const Domain &index_domain,
                           const size_t total_shards,
-                          std::vector<DomainPoint> &points) { }
+                          std::vector<DomainPoint> &points);
+      // The DomainPoint version of this method
+      virtual void invert_points(const DomainPoint &shard_point,
+                          const std::vector<DomainPoint> &shard_points,
+                          const Domain &shard_domain,
+                          const Domain &index_domain,
+                          const Domain &sharding_domain,
+                          std::vector<DomainPoint> &index_points);
     };
 
     /**
@@ -4598,9 +5004,36 @@ namespace Legion {
     public:
       virtual ~FutureFunctor(void) { }
     public:
-      virtual size_t callback_get_future_size(void) = 0;
-      virtual void callback_pack_future(void *buffer, size_t size) = 0;
+      virtual const void* callback_get_future(size_t &size, bool &owned,
+          const Realm::ExternalInstanceResource *&resource,
+          void (*&freefunc)(const Realm::ExternalInstanceResource&),
+          const void *&metadata, size_t &metasize) = 0;
       virtual void callback_release_future(void) = 0;
+    };
+
+    /**
+     * \class PointTransformFunctor
+     * A point transform functor provides a virtual function
+     * infterface for transforming points in one coordinate space
+     * into a different coordinate space. Calls to this functor 
+     * must be pure in that the same arguments passed to the 
+     * functor must always yield the same results.
+     */
+    class PointTransformFunctor {
+    public:
+      virtual ~PointTransformFunctor(void) { }
+    public:
+      virtual bool is_invertible(void) const { return false; }
+      // Transform a point from the domain into a point in the range
+      virtual DomainPoint transform_point(const DomainPoint &point,
+                                          const Domain &domain,
+                                          const Domain &range) = 0;
+      // Invert a point from range and convert it into a point in the domain
+      // This is only called if is_invertible returns true
+      virtual DomainPoint invert_point(const DomainPoint &point,
+                                       const Domain &domain,
+                                       const Domain &range)
+        { return DomainPoint(); }
     };
 
     /**
@@ -5581,6 +6014,8 @@ namespace Legion {
        * @param color the color of the result of the partition
        * @param provenance an optional string describing the provenance 
        *                   information for this operation
+       * @param collective whether shards from a control replicated context
+       *                   should work collectively to construct the map
        * @return a new index partition of the parent index space
        */
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
@@ -5593,7 +6028,8 @@ namespace Legion {
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
-                                  const char *provenance = NULL);
+                                  const char *provenance = NULL,
+                                  bool collective = false);
       ///@}
       ///@{
       /**
@@ -6579,6 +7015,30 @@ namespace Legion {
           "logical region or their index spartition are destroyed.")
       void destroy_logical_partition(Context ctx, LogicalPartition handle,
                                      const bool unordered = false);
+
+      /**
+       * Internally the runtime selects sets of disjoint and complete
+       * partitions to use for guiding the dependence analysis that it
+       * performs on region trees. The runtime has heuristics for selecting
+       * these partitions, but users may want to suggest specific regions and
+       * partitions to use to aid improve runtime performance. This method
+       * allows users to suggest specific regions and partitions to use for
+       * this analysis. The suggested regions and partitions must all be from
+       * the same region tree and must constitute a covering of the parent
+       * region. Furthermore all the partitions in the tree must be disjoint
+       * and complete and any ancestor partitions must also be disjoint
+       * and complete. This call will have no bearing on correctness, but
+       * will influence the amount of runtime overhead observed.
+       * @param ctx enclosing task context
+       * @param parent the logical region where privileges are derived from
+       * @param regions recommended analysis regions
+       * @param parts recommended analysis partitions
+       * @param fields the fields for which these should apply
+       */
+      void advise_analysis_subtree(Context ctx, LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &parts,
+                                   const std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
@@ -6914,9 +7374,12 @@ namespace Legion {
        * @see TaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
+       * @param outputs optional output requirements
        * @return a future for the return value of the task
        */
-      Future execute_task(Context ctx, const TaskLauncher &launcher);
+      Future execute_task(Context ctx,
+                          const TaskLauncher &launcher,
+                          std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -6924,11 +7387,13 @@ namespace Legion {
        * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
+       * @param outputs optional output requirements
        * @return a future map for return values of the points
        *    in the index space of tasks
        */
-      FutureMap execute_index_space(Context ctx, 
-                                    const IndexTaskLauncher &launcher);
+      FutureMap execute_index_space(
+                                Context ctx, const IndexTaskLauncher &launcher,
+                                std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -6940,13 +7405,22 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @param redop ID for the reduction op to use for reducing return values
-       * @param deterministic request that the reduced future value be computed 
-       *        in a deterministic way (more expensive than non-deterministic)
+       * @param ordered request that the reduced future value be computed 
+       *        in an ordered way so that all shards see a consistent result,
+       *        this is more expensive than unordered which allows for the 
+       *        creation of a butterfly all-reduce network across the shards,
+       *        integer reductions should be safe to use with the unordered
+       *        mode and still give the same result on each shard whereas
+       *        floating point reductions may produce different answers on 
+       *        each shard if ordered is set to false
+       * @param outputs optional output requirements
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
-      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
-                               ReductionOpID redop, bool deterministic = false);
+      Future execute_index_space(
+                               Context ctx, const IndexTaskLauncher &launcher,
+                               ReductionOpID redop, bool ordered = true,
+                               std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Reduce a future map down to a single future value using 
@@ -6956,16 +7430,26 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param future_map the future map to reduct the value
        * @param redop ID for the reduction op to use for reducing values
-       * @param deterministic request that the reduced future be computed
-       *        in a deterministic way (more expensive than non-deterministic)
+       * @param ordered request that the reduced future value be computed 
+       *        in an ordered way so that all shards see a consistent result,
+       *        this is more expensive than unordered which allows for the 
+       *        creation of a butterfly all-reduce network across the shards,
+       *        integer reductions should be safe to use with the unordered
+       *        mode and still give the same result on each shard whereas
+       *        floating point reductions may produce different answers on 
+       *        each shard if ordered is set to false
+       * @param map_id mapper to use for deciding where to map the output future
+       * @param tag pass-through value to the mapper for application context
        * @param provenance an optional string for describing the provenance
        *        of this invocation
        * @return a future result representing the the reduction of all the
        *         values in the future map
        */
-      Future reduce_future_map(Context ctx, const FutureMap &future_map, 
-                               ReductionOpID redop, bool deterministic = false,
-                               const char *provenance = NULL);
+      Future reduce_future_map(Context ctx, const FutureMap &future_map,
+                               ReductionOpID redop, bool ordered = true,
+                               MapperID map_id = 0, MappingTagID tag = 0,
+                               const char *provenance = NULL,
+                               Future initial_value = Future());
 
       /**
        * Construct a future map from a collection of buffers. The user must
@@ -6990,12 +7474,15 @@ namespace Legion {
        * @param implicit_sharding if collective=true this says whether the
        *                   sharding should be implicitly handled by the
        *                   runtime and the sharding function ID ignored
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain, 
                            const std::map<DomainPoint,UntypedBuffer> &data,
                            bool collective = false, ShardingID sid = 0,
-                           bool implicit_sharding = false);
+                           bool implicit_sharding = false,
+                           const char *provenance = NULL);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,UntypedBuffer> &data,
@@ -7035,6 +7522,53 @@ namespace Legion {
                            const std::map<DomainPoint,Future> &futures,
                            bool collective = false, ShardingID sid = 0,
                            bool implicit_sharding = false);
+
+      /**
+       * Apply a transform to a FutureMap. All points that access the
+       * FutureMap will be transformed by the 'transform' function before
+       * accessing the backing future map. Note that multiple transforms
+       * can be composed this way to create new FutureMaps. This version
+       * takes a function pointer which must take a domain point and the
+       * range of the original future map and returns a new domain point
+       * that must fall within the range.
+       * @param ctx enclosing task context
+       * @param fm future map to apply a new coordinate space to
+       * @param new_domain an index space to describe the domain of points
+       *        for the transformed future map
+       * @param fnptr a function pointer to call to transform points
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
+       * @return a new future map with the coordinate space transformed
+       */
+      typedef DomainPoint (*PointTransformFnptr)(const DomainPoint &point,
+                                                 const Domain &domain,
+                                                 const Domain &range);
+      FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     IndexSpace new_domain,
+                                     PointTransformFnptr fnptr,
+                                     const char *provenance = NULL);
+      /**
+       * Apply a transform to a FutureMap. All points that access the
+       * FutureMap will be transformed by the 'transform' function before
+       * accessing the backing future map. Note that multiple transforms
+       * can be composed this way to create new FutureMaps. This version
+       * takes a pointer PointTransform functor object to invoke to 
+       * transform the coordinate spaces of the points.
+       * @param ctx enclosing task context
+       * @param fm future map to apply a new coordinate space to
+       * @param new_domain an index space to describe the domain of points
+       *        for the transformed future map
+       * @param functor pointer to a functor to transform points
+       * @param take_ownership whether the runtime should delete the functor
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
+       * @return a new future map with the coordinate space transformed
+       */
+      FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     IndexSpace new_domain,
+                                     PointTransformFunctor *functor,
+                                     bool take_ownership = false,
+                                     const char *provenance = NULL);
 
       /**
        * @deprecated
@@ -7208,6 +7742,23 @@ namespace Legion {
       void unmap_all_regions(Context ctx);
     public:
       //------------------------------------------------------------------------
+      // Output Region Operations
+      //------------------------------------------------------------------------
+      /**
+       * Return a single output region of a task.
+       * @param ctx enclosing task context
+       * @param index the output region index to query
+       */
+      OutputRegion get_output_region(Context ctx, unsigned index);
+
+      /**
+       * Return all output regions of a task.
+       * @param ctx enclosing task context
+       * @param regions a vector to which output regions are returned
+       */
+      void get_output_regions(Context ctx, std::vector<OutputRegion> &regions);
+    public:
+      //------------------------------------------------------------------------
       // Fill Field Operations
       //------------------------------------------------------------------------
       /**
@@ -7323,6 +7874,13 @@ namespace Legion {
        * @param launcher the launcher that describes the index fill operation
        */
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
+
+      /**
+       * Discard the data inside the fields of a particular logical region
+       * @param ctx enclosing task context
+       * @param launcher the launcher that describes the discard operation
+       */
+      void discard_fields(Context ctx, const DiscardLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Attach Operations
@@ -7565,9 +8123,12 @@ namespace Legion {
        * Get a future value that will be completed when the predicate triggers
        * @param ctx enclosing task context
        * @param pred the predicate for which to get a future
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a boolean future with the result of the predicate
        */
-      Future get_predicate_future(Context ctx, const Predicate &p);
+      Future get_predicate_future(Context ctx, const Predicate &p,
+                                  const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Lock Operations
@@ -8120,40 +8681,13 @@ namespace Legion {
       void yield(Context ctx);
     public:
       //------------------------------------------------------------------------
-      // Control Replication
-      // In general SPMD-style programming in Legion is wrong. If you find
-      // yourself writing SPMD-style code for large fractions of your program
-      // then you're probably doing something wrong. There are a few exceptions:
-      // 1. index attach/detach operations are collective and may need
-      //    to do per-shard work
-      // 2. I/O in general often needs to do per-shard work
-      // 3. interaction with collective frameworks like MPI and NCCL
-      // 4. others?
-      // For these reasons we allow users to get access to their shard ID and
-      // the total number of shards and to make a future map collectively
-      // Please, please, please be careful with how you use them
-      //------------------------------------------------------------------------
-      /**
-       * Return the ShardID for the execution of this task in a
-       * control-replicated context. If the task is not control
-       * replicated then the ShardID will always be zero.
-       * @param ctx enclosing task context
-       * @return the ShardID for this execution of the task
-       */
-      ShardID local_shard(Context ctx);
-
-      /**
-       * Return the total number of shards for the execution of this task in
-       * a control-replicated context. If the task is not control-replicated
-       * then the total number of shards will always be one.
-       * @param enclosing task context
-       * @return the total number of shards in the execution of the task
-       */
-      size_t total_shards(Context ctx); 
-    public:
-      //------------------------------------------------------------------------
       // MPI Interoperability 
       //------------------------------------------------------------------------
+      /**
+       * @return true if the MPI interop has been established
+       */
+      bool is_MPI_interop_configured(void);
+
       /**
        * Return a reference to the mapping from MPI ranks to address spaces.
        * This method is only valid if the static initialization method
@@ -8176,11 +8710,6 @@ namespace Legion {
        * Return the local MPI rank ID for the current Legion runtime
        */
       int find_local_MPI_rank(void);
-
-      /**
-       * @return true if the MPI interop has been established
-       */
-      bool is_MPI_interop_configured(void);
     public:
       //------------------------------------------------------------------------
       // Semantic Information 
@@ -8694,6 +9223,14 @@ namespace Legion {
        */
       static void preregister_sharding_functor(ShardingID sid,
                                                ShardingFunctor *functor);
+
+      /**
+       * Return a pointer to a given sharding functor object.
+       * The runtime retains ownership of this object.
+       * @param sid ID of the sharding functor to find
+       * @return a pointer o the sharding functor if it exists
+       */
+      static ShardingFunctor* get_sharding_functor(ShardingID sid);
     public:
       /**
        * Dynamically generate a unique reduction ID for use across the machine
@@ -8935,6 +9472,14 @@ namespace Legion {
        *              checks on mapper calls regardless of the 
        *              optimization level. (Default: true in debug mode,
        *              false in release mode.)
+       * -lg:safe_ctrlrepl <level> Perform dynamic checks to verify the 
+       *              correctness of control replication. This will compute a 
+       *              hash of all the arguments to each call into the runtime 
+       *              and perform a collective to compare it across 
+       *              the shards to see if they all align.
+       *              Level 0: no checks
+       *              Level 1: sound but incomplete checks (no false positives)
+       *              Level 2: unsound but complete checks (no false negatives)
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
        * ---------------------
@@ -9110,7 +9655,8 @@ namespace Legion {
                                   const char *task_name = NULL,
                                   bool control_replicable = false,
                                   unsigned shard_per_address_space = 1,
-                                  int shard_id = -1);
+                                  int shard_id = -1,
+                                  DomainPoint shard_point = DomainPoint());
 
       /**
        * Unbind an implicit context from the external thread it is 
@@ -9464,8 +10010,14 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean if this has a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
        * @param vid optional variant ID to use
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @return variant ID for the task
        */
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
@@ -9474,7 +10026,8 @@ namespace Legion {
 				      size_t user_len = 0,
                                       size_t return_type_size = 
                                                       LEGION_MAX_RETURN_SIZE,
-                                      VariantID vid = LEGION_AUTO_GENERATE_ID);
+                                      VariantID vid = LEGION_AUTO_GENERATE_ID,
+                                      bool has_return_type_size = true);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -9562,7 +10115,13 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean indicating a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @param check_task_id verify validity of the task ID
        * @return variant ID for the task
        */
@@ -9574,6 +10133,7 @@ namespace Legion {
 	      const char *task_name = NULL,
               VariantID vid = LEGION_AUTO_GENERATE_ID,
               size_t return_type_size = LEGION_MAX_RETURN_SIZE,
+              bool has_return_type_size = true,
               bool check_task_id = true);
 
       /**
@@ -9598,33 +10158,62 @@ namespace Legion {
        * This is the necessary postamble call to use when registering a task
        * variant with an explicit CodeDescriptor. It passes back the task
        * return value and completes the task. It should be the last thing
-       * called before the task finishes.
-       * @param runtime the runtime pointer
+       * called before the task finishes. Note that if the return value is
+       * not backed by an instance, then it must be in host-visible memory.
        * @param ctx the context for the task
        * @param retvalptr pointer to the return value
        * @param retvalsize the size of the return value in bytes
-       * @param owned whether the runtime now owns this result
+       * @param owned whether the runtime takes ownership of this result
        * @param inst optional Realm instance containing the data that
        *              Legion should take ownership of
+       * @param metadataptr a pointer to host memory that contains metadata
+       *              for the future. The runtime will always make a copy
+       *              of this data if it is not NULL.
+       * @param metadatasize the size of the metadata buffer if non-NULL
        */
-      static void legion_task_postamble(Runtime *runtime, Context ctx,
+      static void legion_task_postamble(Context ctx,
                                         const void *retvalptr = NULL,
                                         size_t retvalsize = 0,
                                         bool owned = false,
                                         Realm::RegionInstance inst = 
-                                          Realm::RegionInstance::NO_INST);
+                                          Realm::RegionInstance::NO_INST,
+                                        const void *metadataptr = NULL,
+                                        size_t metadatasize = 0);
+
+      /**
+       * This variant of the Legion task postamble allows clients to
+       * return data in arbitrary memory locations as a future result.
+       * Realm::ExternalInstanceResource objects provide ways of describing
+       * all kinds of external allocations that Legion can understand
+       * @param ctx the context for the task
+       * @param retvalptr raw pointer for the allocation (can be NULL)
+       * @param retvalsize the size of the return value in bytes
+       * @param owned whether the runtime takes ownership of this result
+       * @param allocation an external instance resource description of 
+       *                   the future result data
+       * @param freefunc optional function pointer to invoke to free the
+       *                 resources associated with an external resource
+       * @param metadataptr a pointer to host memory that contains metadata
+       *              for the future. The runtime will always make a copy
+       *              of this data if it is not NULL.
+       * @param metadatasize the size of the metadata buffer if non-NULL
+       */
+      static void legion_task_postamble(Context ctx,
+            const void *retvalptr, size_t retvalsize, bool owned,
+            const Realm::ExternalInstanceResource &allocation,
+            void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL,
+            const void *metadataptr = NULL, size_t metadatasize = 0);
 
       /**
        * This variant of the Legion task postamble allows users to pass in
        * a future functor object to serve as a callback interface for Legion
        * to query so that it is only invoked in the case where futures actually
        * need to be serialized. 
-       * @param runtime the runtime pointer
        * @param ctx the context for the task
        * @param callback_functor pointer to the callback object
        * @param owned whether Legion should take ownership of the object
        */
-      static void legion_task_postamble(Runtime *runtime, Context ctx,
+      static void legion_task_postamble(Context ctx,
                                         FutureFunctor *callback_functor,
                                         bool owned = false);
     public:
@@ -9779,30 +10368,30 @@ namespace Legion {
                                       const char *provenance);
       IndexSpace create_index_space_union_internal(Context ctx,
                                       IndexPartition parent,
-                                      const void *realm_color, TypeTag type_tag,
-                                      const std::vector<IndexSpace> &handles,
-                                      const char *provenance);
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag, const char *provenance,
+                                      const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_union_internal(Context ctx, 
                                       IndexPartition parent, 
-                                      const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle,
-                                      const char *provenance);
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag, const char *provenance,
+                                      IndexPartition handle);
       IndexSpace create_index_space_intersection_internal(Context ctx,
                                       IndexPartition parent,
-                                      const void *realm_color, TypeTag type_tag,
-                                      const std::vector<IndexSpace> &handles,
-                                      const char *provenance);
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag, const char *provenance,
+                                      const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_intersection_internal(Context ctx, 
                                       IndexPartition parent, 
-                                      const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle,
-                                      const char *provenance);
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag, const char *provenance,
+                                      IndexPartition handle);
       IndexSpace create_index_space_difference_internal(Context ctx,
                                       IndexPartition paretn,
-                                      const void *realm_color, TypeTag type_tag,
+                                      const void *realm_color, size_t color_size,
+                                      TypeTag type_tag, const char *provenance,
                                       IndexSpace initial,
-                                      const std::vector<IndexSpace> &handles,
-                                      const char *provenance);
+                                      const std::vector<IndexSpace> &handles);
       IndexSpace get_index_subspace_internal(IndexPartition handle, 
                                       const void *realm_color,TypeTag type_tag);
       bool has_index_subspace_internal(IndexPartition handle,
@@ -9825,7 +10414,6 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-      Future from_value(const void *value, size_t value_size, bool owned);
     private:
       template<typename T>
       friend class DeferredValue;
@@ -9836,6 +10424,7 @@ namespace Legion {
       friend class UntypedDeferredBuffer;
       Realm::RegionInstance create_task_local_instance(Memory memory,
                                 Realm::InstanceLayoutGeneric *layout);
+      void destroy_task_local_instance(Realm::RegionInstance instance);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some
@@ -9845,6 +10434,26 @@ namespace Legion {
       // We'll also allow users to get the total number of shards in the context
       // if they also ar willing to attest they know what they are doing
       size_t get_num_shards(Context ctx, bool I_know_what_I_am_doing = false);
+      // This is another hidden method for control replication because it's
+      // still somewhat experimental. In some cases there are unavoidable 
+      // sources of randomness that can mess with the needed invariants for
+      // control replication (e.g. garbage collectors). This method will 
+      // allow the application to pass in an array of elements from each shard
+      // and the runtime will fill in an output buffer with an ordered array of 
+      // elements that were passed in by every shard. Each shard will get the 
+      // same elements that were present in all the other shards in the same
+      // order in the output array. The number of elements in the output buffer 
+      // is returned as a future (of type size_t) as the runtime will return 
+      // immediately and the application can continue running ahead. The 
+      // application must keep the input and output buffers allocated until 
+      // the future resolves. By definition the output buffer need be no bigger
+      // than the input buffer since only elements that are in the input buffer
+      // on any shard can appear in the output buffer. Note you can use this 
+      // method safely in contexts that are not control replicated as well: 
+      // the input will just be mem-copied to the output and num_elements 
+      // returned as the future result.
+      Future consensus_match(Context ctx, const void *input, void *output,
+       size_t num_elements, size_t element_size, const char *provenance = NULL);
     private:
       friend class Mapper;
       Internal::Runtime *runtime;

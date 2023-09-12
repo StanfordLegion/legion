@@ -933,7 +933,7 @@ bool spmd_main_task(const Task *task,
       log_app.info() << "resold = " << resold;
   }
 
-  Future f_restarget = Future::from_value<double>(runtime, 1e-10);
+  Future f_restarget = Future::from_value<double>(1e-10);
 
   Predicate p_notdone = Predicate::TRUE_PRED;
 
@@ -1332,6 +1332,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar tvr(TOP_LEVEL_TASK_ID, "top_level_task");
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    tvr.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(tvr, "top_level_task");
     Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   }

@@ -32,12 +32,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MappingCallInfo::MappingCallInfo(MapperManager *man, MappingCallKind k,
-                                     Operation *op /*= NULL*/)
+                                     Operation *op)
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), 
-        start_time(0), collective_count(0), reentrant_disabled(false),
-        supports_collectives(false)
+        start_time(0), reentrant_disabled(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -66,13 +65,6 @@ namespace Legion {
     {
       // We can now delete our mapper
       delete mapper;
-      // Free all the available MappingCallInfo's we were keeping around
-      for (std::vector<MappingCallInfo*>::iterator
-	     it = available_infos.begin(); it != available_infos.end(); it++)
-      {
-	delete *it;
-      }
-      available_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -119,7 +111,6 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(PREMAP_TASK_CALL,
                                  task, continuation_precondition);
-        info->supports_collectives = true;
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
@@ -170,9 +161,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_TASK_CALL,
-                                 task, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_TASK_CALL, task, continuation_precondition,
+                                 false/*prioritize*/);
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
@@ -184,6 +174,35 @@ namespace Legion {
         }
       }
       mapper->map_task(info, *task, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_replicate_task(TaskOp *task,
+                                     Mapper::MapTaskInput *input,
+                                     Mapper::MapTaskOutput *default_output,
+                                     Mapper::MapReplicateTaskOutput *output,
+                                     MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_REPLICATE_TASK_CALL,
+                                 task, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation4<TaskOp,Mapper::MapTaskInput,
+                              Mapper::MapTaskOutput,
+                              Mapper::MapReplicateTaskOutput,
+                              &MapperManager::invoke_map_replicate_task>
+                                continuation(this, task, input, 
+                                    default_output, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
+      }
+      mapper->map_replicate_task(info, *task, *input, *default_output, *output);
       finish_mapper_call(info);
     }
 
@@ -223,9 +242,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(POSTMAP_TASK_CALL,
-                                 task, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(POSTMAP_TASK_CALL, task,
+                                 continuation_precondition,false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<TaskOp,Mapper::PostMapInput,Mapper::PostMapOutput,
@@ -292,30 +310,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_task_speculate(TaskOp *task,
-                                              Mapper::SpeculativeOutput *output,
-                                              MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_SPECULATE_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<TaskOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_task_speculate>
-                                continuation(this, task, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->speculate(info, *task, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_task_report_profiling(TaskOp *task, 
                                               Mapper::TaskProfilingInfo *input,
                                               MappingCallInfo *info)
@@ -340,6 +334,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_task_select_sharding_functor(TaskOp *task,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(TASK_SELECT_SHARDING_FUNCTOR_CALL, task,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_task_select_sharding_functor>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *task, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_inline(MapOp *op, 
                                           Mapper::MapInlineInput *input,
                                           Mapper::MapInlineOutput *output, 
@@ -349,9 +369,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_INLINE_CALL,
-                                 op, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_INLINE_CALL, op, continuation_precondition,
+                                 false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MapOp, 
@@ -452,9 +471,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_COPY_CALL,
-                                 op, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_COPY_CALL, op, continuation_precondition,
+                                 false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CopyOp,Mapper::MapCopyInput,Mapper::MapCopyOutput,
@@ -521,30 +539,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_copy_speculate(CopyOp *op, 
-                                              Mapper::SpeculativeOutput *output,
-                                              MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_SPECULATE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<CopyOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_copy_speculate>
-                                continuation(this, op, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->speculate(info, *op, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_report_profiling(CopyOp *op,
                                              Mapper::CopyProfilingInfo *input,
                                              MappingCallInfo *info)
@@ -565,6 +559,32 @@ namespace Legion {
         }
       }
       mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_copy_select_sharding_functor(CopyOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(COPY_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CopyOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_copy_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -645,6 +665,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_close_select_sharding_functor(CloseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(CLOSE_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CloseOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_close_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_acquire(AcquireOp *op,
                                            Mapper::MapAcquireInput *input,
                                            Mapper::MapAcquireOutput *output,
@@ -654,9 +700,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_ACQUIRE_CALL,
-                                 op, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_ACQUIRE_CALL, op,
+                                 continuation_precondition,false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<AcquireOp, Mapper::MapAcquireInput,
@@ -667,30 +712,6 @@ namespace Legion {
         }
       }
       mapper->map_acquire(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperManager::invoke_acquire_speculate(AcquireOp *op,
-                                             Mapper::SpeculativeOutput *output,
-                                             MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(ACQUIRE_SPECULATE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<AcquireOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_acquire_speculate>
-                                continuation(this, op, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->speculate(info, *op, *output);
       finish_mapper_call(info);
     }
 
@@ -719,6 +740,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_acquire_select_sharding_functor(AcquireOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<AcquireOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_acquire_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_release(ReleaseOp *op,
                                            Mapper::MapReleaseInput *input,
                                            Mapper::MapReleaseOutput *output,
@@ -728,9 +775,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_RELEASE_CALL,
-                                 op, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_RELEASE_CALL, op,
+                                 continuation_precondition,false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<ReleaseOp, Mapper::MapReleaseInput,
@@ -797,30 +843,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_release_speculate(ReleaseOp *op,
-                                             Mapper::SpeculativeOutput *output,
-                                             MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_SPECULATE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<ReleaseOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_release_speculate>
-                                continuation(this, op, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->speculate(info, *op, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_release_report_profiling(ReleaseOp *op,
                                          Mapper::ReleaseProfilingInfo *input,
                                          MappingCallInfo *info)
@@ -841,6 +863,32 @@ namespace Legion {
         }
       }
       mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_release_select_sharding_functor(ReleaseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(RELEASE_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<ReleaseOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_release_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -882,9 +930,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_PARTITION_CALL,
-                                 op, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_PARTITION_CALL, op,
+                                 continuation_precondition,false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<DependentPartitionOp, 
@@ -982,6 +1029,88 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_partition_select_sharding_functor(
+                              DependentPartitionOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+            Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_partition_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_fill_select_sharding_functor(FillOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(FILL_SELECT_SHARDING_FUNCTOR_CALL, op, 
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<FillOp, 
+            Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_fill_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_future_map_reduction(AllReduceOp *op,
+                                       Mapper::FutureMapReductionInput *input,
+                                       Mapper::FutureMapReductionOutput *output,
+                                       MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_FUTURE_MAP_REDUCTION_CALL, op, 
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<AllReduceOp, 
+            Mapper::FutureMapReductionInput,
+            Mapper::FutureMapReductionOutput,
+            &MapperManager::invoke_map_future_map_reduction>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->map_future_map_reduction(info, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
                                          Mapper::ContextConfigOutput *output,
                                          MappingCallInfo *info)
@@ -1032,6 +1161,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_must_epoch_select_sharding_functor(
+                                MustEpochOp *op,
+                                Mapper::SelectShardingFunctorInput *input,
+                                Mapper::MustEpochShardingFunctorOutput *output,
+                                MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<MustEpochOp,
+                      Mapper::SelectShardingFunctorInput, 
+                      Mapper::MustEpochShardingFunctorOutput,
+                      &MapperManager::invoke_must_epoch_select_sharding_functor>
+                            continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_must_epoch(MustEpochOp *op,
                                             Mapper::MapMustEpochInput *input,
                                             Mapper::MapMustEpochOutput *output,
@@ -1041,9 +1198,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_MUST_EPOCH_CALL,
-                                 op, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_MUST_EPOCH_CALL, op,
+                                 continuation_precondition,false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MustEpochOp, Mapper::MapMustEpochInput, 
@@ -1068,9 +1224,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL,
-                                 NULL, continuation_precondition);
-        info->supports_collectives = true;
+        info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL, NULL,
+                                 continuation_precondition,false/*prioritize*/);
         if (continuation_precondition.exists())
         {
           MapperContinuation2<Mapper::MapDataflowGraphInput, 
@@ -1560,16 +1715,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::is_replicable_variant(MappingCallInfo *ctx,
+                                           TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      bool result = impl->is_replicable();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     VariantID MapperManager::register_task_variant(MappingCallInfo *ctx,
-                                      const TaskVariantRegistrar &registrar,
-				      const CodeDescriptor &realm_desc,
-				      const void *user_data, size_t user_len,
-                                      bool has_return_type)
+                                  const TaskVariantRegistrar &registrar,
+                                  const CodeDescriptor &realm_desc,
+                                  const void *user_data, size_t user_len,
+                                  size_t return_type_size, bool has_return_type)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       VariantID result = runtime->register_variant(registrar, user_data,
-                                    user_len, realm_desc, has_return_type);
+                user_len, realm_desc, return_type_size, has_return_type);
       resume_mapper_call(ctx);
       return result;
     }
@@ -1615,7 +1782,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
             InstanceManager *manager = instances[idx].impl;
-            if (manager->conflicts(constraints, DomainPoint(), NULL))
+            if (manager->conflicts(constraints,  NULL))
             {
               conflicts = true;
               break;
@@ -1678,7 +1845,7 @@ namespace Legion {
                 instances.begin(); it != instances.end(); /*nothing*/)
           {
             InstanceManager *manager = it->impl;
-            if (manager->conflicts(constraints, DomainPoint(), NULL))
+            if (manager->conflicts(constraints, NULL))
               it = instances.erase(it);
             else if (!constraints->specialized_constraint.is_virtual() &&
                       (constraints->specialized_constraint.is_exact() ||
@@ -1740,7 +1907,7 @@ namespace Legion {
               instances.begin(); it != instances.end(); /*nothing*/)
         {
           InstanceManager *manager = it->impl;
-          if (manager->conflicts(constraints, DomainPoint(), NULL))
+          if (manager->conflicts(constraints, NULL))
             it = instances.erase(it);
           else if (!constraints->specialized_constraint.is_virtual() &&
                     (constraints->specialized_constraint.is_exact() ||
@@ -1800,82 +1967,10 @@ namespace Legion {
         acquire = false;
       }
       pause_mapper_call(ctx);
-      CollectiveManager *collective = NULL;
-      DomainPoint point;
-      if (constraints.specialized_constraint.is_collective())
-      {
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not support the "
-                "creation of collective instances in this kind of mapper call.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        if (ctx->operation == NULL)
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not have an associated "
-                "mappable. Legion will still attempt to make an instance.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-        else if (unsat != NULL)
-        {
-          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
-          unsigned unsat_index = 0;
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
-          if (collective == NULL)
-            *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
-        }
-        else
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
-        if (collective == NULL)
-        {
-          if (point.get_dim() > 0)
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Failed to create a collective instance for the %d-st/nd/rd/th "
-                "call to create instance in mapper call %s for %s (UID %lld) "
-                "in mapper %s because the constraints did not match.", 
-                ctx->collective_count - 1, get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-            result = MappingInstance();
-            resume_mapper_call(ctx);
-            return false;
-          }
-          else
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring request to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s for %s "
-                "(UID %lld) in mapper %s because the operation is not an index "
-                "space operation. Legion will still try to create the instance",
-                ctx->collective_count - 1, get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-        }
-      }
       bool success = runtime->create_physical_instance(target_memory, 
-        constraints, regions, result, mapper_id, processor, acquire, priority,
+        constraints, regions, result, processor, acquire, priority, 
         tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ? 
-          0 : ctx->operation->get_unique_op_id(), collective, 
-          (collective == NULL) ? NULL : &point);
-      if (collective != NULL)
-      {
-        success = ctx->operation->finalize_collective_instance(ctx->kind, 
-                                      ctx->collective_count - 1, success);
-        if (!success)
-          result = MappingInstance();
-      }
+          0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
@@ -1907,84 +2002,12 @@ namespace Legion {
         acquire = false;
       }
       pause_mapper_call(ctx);
-      DomainPoint point;
-      CollectiveManager *collective = NULL;
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
-      if (cons->specialized_constraint.is_collective())
-      {
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not support the "
-                "creation of collective instances in this kind of mapper call.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        if (ctx->operation == NULL)
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not have an assoicated "
-                "mappable. Legion will still attempt to make an instance.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-        else if (unsat != NULL)
-        {
-          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
-          unsigned unsat_index = 0;
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
-          if (collective == NULL)
-            *unsat = cons->convert_unsatisfied(unsat_kind, unsat_index);
-        }
-        else
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
-        if (collective == NULL)
-        {
-          if (point.get_dim() > 0)
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Failed to create a collective instance for the %d-st/nd/rd/th "
-                "call to create instance in mapper call %s for %s (UID %lld) "
-                "in mapper %s because the constraints did not match.", 
-                ctx->collective_count - 1, get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-            result = MappingInstance();
-            resume_mapper_call(ctx);
-            return false;
-          }
-          else
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring request to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s for %s "
-                "(UID %lld) in mapper %s because the operation is not an index "
-                "space operation. Legion will still try to create the instance",
-                ctx->collective_count - 1, get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-        }
-      }
       bool success = runtime->create_physical_instance(target_memory, cons,
-                      regions, result, mapper_id, processor, acquire, priority,
+                      regions, result, processor, acquire, priority,
                       tight_region_bounds, unsat, footprint,
-                      (ctx->operation == NULL) ? 0 : 
-                        ctx->operation->get_unique_op_id(), collective,
-                        (collective == NULL) ? NULL : &point);
-      if (collective != NULL)
-      {
-        success = ctx->operation->finalize_collective_instance(ctx->kind, 
-                                      ctx->collective_count - 1, success);
-        if (!success)
-          result = MappingInstance();
-      }
+                      (ctx->operation == NULL) ? 0 :
+                        ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
@@ -2017,114 +2040,11 @@ namespace Legion {
         acquire = false;
       }
       pause_mapper_call(ctx);
-      bool success;
-      if (constraints.specialized_constraint.is_collective() &&
-          (ctx->operation != NULL))
-      {
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not support the "
-                "creation of collective instances in this kind of mapper call.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-              "Ignoring request to find a collective instance for the %d-"
-              "st/nd/rd/th  call to find-or-create-instance in mapper call %s "
-              "for %s (UID %lld) in mapper %s. Collective instances can never "
-              "be found, only created. Legion will still attempt to make the "
-              "instance.", ctx->collective_count, 
-              get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(),
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        DomainPoint point;
-        CollectiveManager *collective = NULL;
-        if (unsat != NULL)
-        {
-          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
-          unsigned unsat_index = 0;
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
-          if (collective == NULL)
-            *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
-        }
-        else
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
-        if (collective == NULL)
-        {
-          if (point.get_dim() > 0)
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Failed to create a collective instance for the %d call to "
-                "create instance in mapper call %s for %s (UID %lld) "
-                "in mapper %s because the constraints did not match.", 
-                ctx->collective_count - 1, get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-            result = MappingInstance();
-            resume_mapper_call(ctx);
-            return false;
-          }
-          else
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring request to create a collective instance for the %d-"
-                "st/nd/rd/th call to find-or-create-instance in mapper call %s "
-                "for %s (UID %lld) in mapper %s because the operation is not an"
-                " index space operation. Legion will still try to create the "
-                "instance", ctx->collective_count - 1, 
-                get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-        }
-        success = runtime->create_physical_instance(target_memory, 
-          constraints, regions, result, mapper_id, processor, acquire, priority,
-          tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ? 
-            0 : ctx->operation->get_unique_op_id(), collective,
-            (collective == NULL) ? NULL : &point);
-        if (collective != NULL)
-          success = ctx->operation->finalize_collective_instance(ctx->kind,
-                                        ctx->collective_count - 1, success);
-        if (!success)
-          result = MappingInstance();
-      }
-      else
-      {
-        if (constraints.specialized_constraint.is_collective())
-        {
-          if (!ctx->supports_collectives)
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not support the "
-                "creation of collective instances in this kind of mapper call.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-            resume_mapper_call(ctx);
-            return false;
-          }
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not have an assoicated "
-                "mappable. Legion will still attempt to make an instance.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-        }
-        success = runtime->find_or_create_physical_instance(target_memory,
-                  constraints, regions, result, created, mapper_id, processor, 
-                  acquire, priority, tight_region_bounds, unsat, footprint,
-                  (ctx->operation == NULL) ? 0 :
-                   ctx->operation->get_unique_op_id());
-      }
+      bool success = runtime->find_or_create_physical_instance(target_memory,
+                constraints, regions, result, created, processor, 
+                acquire, priority, tight_region_bounds, unsat, footprint,
+                (ctx->operation == NULL) ? 0 :
+                 ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx);
@@ -2157,116 +2077,12 @@ namespace Legion {
         acquire = false;
       }
       pause_mapper_call(ctx);
-      bool success;
-      DomainPoint point;
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
-      if (cons->specialized_constraint.is_collective() && 
-          (ctx->operation != NULL))
-      {
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not support the "
-                "creation of collective instances in this kind of mapper call.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-              "Ignoring request to find a collective instance for the %d-"
-              "st/nd/rd/th call to find-or-create-instance in mapper call %s "
-              "for %s (UID %lld) in mapper %s. Collective instances can never "
-              "be found, only created. Legion will still attempt to make the "
-              "instance.", ctx->collective_count, 
-              get_mapper_call_name(ctx->kind), 
-              ctx->operation->get_logging_name(),
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        CollectiveManager *collective = NULL;
-        if (unsat != NULL)
-        {
-          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
-          unsigned unsat_index = 0;
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
-          if (collective == NULL)
-            *unsat = cons->convert_unsatisfied(unsat_kind, unsat_index);
-        }
-        else
-          collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
-        if (collective == NULL)
-        {
-          if (point.get_dim() > 0)
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Failed to create a collective instance for the %d call to "
-                "create instance in mapper call %s for %s (UID %lld) "
-                "in mapper %s because the constraints did not match.", 
-                ctx->collective_count - 1, get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-            result = MappingInstance();
-            resume_mapper_call(ctx);
-            return false;
-          }
-          else
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring request to create a collective instance for the %d-"
-                "st/nd/rd/th call to find-or-create-instance in mapper call %s "
-                "for %s (UID %lld) in mapper %s because the operation is not an"
-                " index space operation. Legion will still try to create the "
-                "instance", ctx->collective_count - 1, 
-                get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-        }
-        success = runtime->create_physical_instance(target_memory, cons,
-                      regions, result, mapper_id, processor, acquire, priority,
-                      tight_region_bounds, unsat, footprint,
-                      (ctx->operation == NULL) ? 0 : 
-                        ctx->operation->get_unique_op_id(), collective,
-                        (collective == NULL) ? NULL : &point);
-        if (collective != NULL)
-          success = ctx->operation->finalize_collective_instance(ctx->kind,
-                                        ctx->collective_count - 1, success); 
-        if (!success)
-          result = MappingInstance();
-      }
-      else
-      {
-        if (cons->specialized_constraint.is_collective())
-        {
-          if (!ctx->supports_collectives)
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not support the "
-                "creation of collective instances in this kind of mapper call.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-            resume_mapper_call(ctx);
-            return false;
-          }
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to create a collective instance for the %d-"
-                "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not have an assoicated "
-                "mappable. Legion will still attempt to make an instance.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-        }
-        success = runtime->find_or_create_physical_instance(target_memory,
-                   cons, regions, result, created, mapper_id, processor,
-                   acquire, priority, tight_region_bounds, unsat, footprint,
-                   (ctx->operation == NULL) ? 0 : 
-                    ctx->operation->get_unique_op_id());
-      }
+      bool success = runtime->find_or_create_physical_instance(target_memory,
+                 cons, regions, result, created, processor,
+                 acquire, priority, tight_region_bounds, unsat, footprint,
+                 (ctx->operation == NULL) ? 0 : 
+                  ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx);
@@ -2304,11 +2120,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::find_physical_instance(  
-                                    MappingCallInfo *ctx, Memory target_memory,
-                                    LayoutConstraintID layout_id,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds)
+                                MappingCallInfo *ctx, Memory target_memory,
+                                LayoutConstraintID layout_id,
+                                const std::vector<LogicalRegion> &regions,
+                                MappingInstance &result, bool acquire,
+                                bool tight_region_bounds)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -2325,7 +2141,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       bool success = runtime->find_physical_instance(target_memory, cons,
-                               regions, result, acquire, tight_region_bounds);
+                          regions, result, acquire, tight_region_bounds);
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, false/*created*/);
       resume_mapper_call(ctx);
@@ -2355,7 +2171,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       const size_t initial_size = results.size();
       runtime->find_physical_instances(target_memory, constraints, regions, 
-                                       results, acquire, tight_region_bounds);
+                                    results, acquire, tight_region_bounds);
       if ((initial_size < results.size()) && acquire)
       {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
@@ -2388,7 +2204,7 @@ namespace Legion {
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       const size_t initial_size = results.size();
       runtime->find_physical_instances(target_memory, cons, regions, 
-                                  results, acquire, tight_region_bounds);
+                              results, acquire, tight_region_bounds);
       if ((initial_size < results.size()) && acquire)
       {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
@@ -2408,17 +2224,17 @@ namespace Legion {
       pause_mapper_call(ctx);
       PhysicalManager *manager = man->as_physical_manager();
       // Ignore garbage collection priorities on external instances
-      if (manager->is_external_instance())
-        REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
-            "Ignoring request for mapper %s to set garbage collection "
-            "priority on an external instance", get_mapper_name())
-      else
+      if (!manager->is_external_instance())
       {
         const RtEvent ready = manager->set_garbage_collection_priority(
-                                        mapper_id, processor, priority);
+                mapper_id, processor, runtime->address_space, priority);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
       }
+      else
+        REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
+            "Ignoring request for mapper %s to set garbage collection "
+            "priority on an external instance", get_mapper_name())
       resume_mapper_call(ctx);
     }
 
@@ -2445,7 +2261,7 @@ namespace Legion {
           ctx->acquired_instances->end())
         return true;
       pause_mapper_call(ctx);
-      if (manager->acquire_instance(MAPPING_ACQUIRE_REF, ctx->operation))
+      if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
       {
         record_acquired_instance(ctx, manager, false/*created*/);
         resume_mapper_call(ctx);
@@ -2510,7 +2326,7 @@ namespace Legion {
         }
         return result;
       }
-      pause_mapper_call(ctx); 
+      pause_mapper_call(ctx);
       // Figure out which instances we need to acquire and sort by memories
       std::vector<unsigned> to_erase;
       const bool all_acquired =
@@ -2519,9 +2335,9 @@ namespace Legion {
       if (!to_erase.empty())
       {
         // Erase from the back
-        for (std::vector<unsigned>::const_reverse_iterator it = 
+        for (std::vector<unsigned>::const_reverse_iterator it =
               to_erase.rbegin(); it != to_erase.rend(); it++)
-          instances.erase(instances.begin()+(*it)); 
+          instances.erase(instances.begin()+(*it));
         to_erase.clear();
       }
       resume_mapper_call(ctx);
@@ -2596,9 +2412,9 @@ namespace Legion {
                                   const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalManager*,unsigned> &already_acquired = 
+      std::map<PhysicalManager*,unsigned> &already_acquired =
         *(info->acquired_instances);
-      bool local_acquired = true;
+      bool all_acquired = true;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         const MappingInstance &inst = instances[idx];
@@ -2617,7 +2433,7 @@ namespace Legion {
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
-        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation))
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
@@ -2626,12 +2442,12 @@ namespace Legion {
         }
         else
         {
+          all_acquired = false;
           if ((to_erase != NULL) && !filter_acquired_instances)
             to_erase->push_back(idx);
-          local_acquired = false;
         }
       }
-      return local_acquired;
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
@@ -2695,6 +2511,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::acquire_future(MappingCallInfo *ctx,
+                                       const Future &future, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      if ((future.impl == NULL) || !memory.exists())
+        return false;
+      if ((ctx->kind != MAP_TASK_CALL) && 
+          (ctx->kind != MAP_REPLICATE_TASK_CALL))
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+                        "Ignoring acquire future request in unsupported mapper "
+                        "call %s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      pause_mapper_call(ctx);
+      const bool result = future.impl->find_or_create_application_instance(
+                                memory, ctx->operation->get_unique_op_id()); 
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::record_acquired_instance(MappingCallInfo *ctx,
                                              InstanceManager *man, bool created)
     //--------------------------------------------------------------------------
@@ -2734,8 +2573,7 @@ namespace Legion {
         return;
       // Release the refrences and then keep going, we know there is 
       // a resource reference so no need to check for deletion
-      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
-                                     finder->second);
+      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, finder->second);
       acquired.erase(finder);
     }
 
@@ -2814,7 +2652,8 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), sources[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_union_space(result, did, provenance, sources);
+      AutoProvenance prov(provenance);
+      runtime->forest->create_union_space(result, did, prov, sources);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
@@ -2846,7 +2685,8 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), sources[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_intersection_space(result,did,provenance,sources);
+      AutoProvenance prov(provenance);
+      runtime->forest->create_intersection_space(result, did, prov, sources);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
@@ -2869,7 +2709,8 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), left.get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_difference_space(result, did, provenance,
+      AutoProvenance prov(provenance);
+      runtime->forest->create_difference_space(result, did, prov,
                                                left, right);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
@@ -3582,54 +3423,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
-                                                  Operation *op, bool need_lock)
+    bool MapperManager::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock m_lock(mapper_lock);
-        return allocate_call_info(kind, op, false/*need lock*/);
-      }
-      if (!available_infos.empty())
-      {
-        MappingCallInfo *result = available_infos.back();
-        available_infos.pop_back();
-        result->kind = kind;
-        result->operation = op;
-        if (op != NULL)
-          result->acquired_instances = op->get_acquired_instances_ref();
-        return result;
-      }
+      return runtime->is_MPI_interop_configured();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<int,AddressSpace>& MapperManager::find_forward_MPI_mapping(
+                                                           MappingCallInfo *ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_forward_MPI_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<AddressSpace,int>& MapperManager::find_reverse_MPI_mapping(
+                                                           MappingCallInfo *ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_reverse_MPI_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    int MapperManager::find_local_MPI_rank(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_local_MPI_rank();
+    }
+
+    //--------------------------------------------------------------------------
+    MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
+                                                       Operation *op)
+    //--------------------------------------------------------------------------
+    {
       return new MappingCallInfo(this, kind, op);
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::free_call_info(MappingCallInfo *info, bool need_lock)
+    void MapperManager::free_call_info(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock m_lock(mapper_lock);
-        free_call_info(info, false/*need lock*/);
-        return;
-      }
       if (profile_mapper)
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, info->stop_time); 
-      if (info->supports_collectives && !runtime->unsafe_mapper)
-        info->operation->report_total_collective_instance_calls(
-                              info->kind, info->collective_count);
-      info->resume = RtUserEvent::NO_RT_USER_EVENT;
-      info->operation = NULL;
-      info->acquired_instances = NULL;
-      info->start_time = 0;
-      info->stop_time = 0;
-      info->collective_count = 0;
-      info->reentrant_disabled = false;
-      info->supports_collectives = false;
-      available_infos.push_back(info);
+      delete info;
     }
 
     //--------------------------------------------------------------------------
@@ -3868,10 +3707,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
-      MappingCallInfo *result = NULL;
+      MappingCallInfo *result = allocate_call_info(kind, op);
       {
         AutoLock m_lock(mapper_lock);
-        result = allocate_call_info(kind, op,false/*need lock*/);
         // See if there is a pending call for us to handle
         if (pending_pause_call.load())
           to_trigger = complete_pending_pause_mapper_call();
@@ -3998,12 +3836,11 @@ namespace Legion {
         // We've got the lock, see if we won the race to the flag
         if (pending_finish_call.load())
           to_trigger = complete_pending_finish_mapper_call();  
-        // Return our call info
-        free_call_info(info, false/*need lock*/);
       }
       // Wake up the next task if necessary
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+      free_call_info(info);
     }
 
     //--------------------------------------------------------------------------
@@ -4238,7 +4075,7 @@ namespace Legion {
                           Operation *op, RtEvent &precondition, bool prioritize)
     //--------------------------------------------------------------------------
     {
-      MappingCallInfo *result = allocate_call_info(kind, op, true/*need lock*/);
+      MappingCallInfo *result = allocate_call_info(kind, op);
       // Record our mapper start time when we're ready to run
       if (profile_mapper)
       {
@@ -4282,7 +4119,6 @@ namespace Legion {
           current_holders.erase(finder);
           release_lock(to_trigger);
         }
-        free_call_info(info, false/*need lock*/);
       }
       if (!to_trigger.empty())
       {
@@ -4290,6 +4126,7 @@ namespace Legion {
               to_trigger.begin(); it != to_trigger.end(); it++)
           Runtime::trigger_event(*it);
       }
+      free_call_info(info);
     }
 
     //--------------------------------------------------------------------------

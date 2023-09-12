@@ -119,6 +119,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void NullMapper::map_replicate_task(const MapperContext      ctx,
+                                        const Task&              task,
+                                        const MapTaskInput&      input,
+                                        const MapTaskOutput&     default_output,
+                                        MapReplicateTaskOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
     void NullMapper::select_task_variant(const MapperContext          ctx,
                                          const Task&                  task,
                                          const SelectVariantInput&    input,
@@ -160,18 +171,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext      ctx,
-                               const Task&              task,
-                                     SpeculativeOutput& output)
+    void NullMapper::report_profiling(const MapperContext       ctx,
+                                      const Task&               task,
+                                      const TaskProfilingInfo&  input)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::report_profiling(const MapperContext       ctx,
-                                      const Task&               task,
-                                      const TaskProfilingInfo&  input)
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
@@ -249,18 +262,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext      ctx,
-                               const Copy&              copy,
-                                     SpeculativeOutput& output)
+    void NullMapper::report_profiling(const MapperContext      ctx,
+                                      const Copy&              copy,
+                                      const CopyProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
     }
-
+    
     //--------------------------------------------------------------------------
-    void NullMapper::report_profiling(const MapperContext      ctx,
-                                      const Copy&              copy,
-                                      const CopyProfilingInfo& input)
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
@@ -307,6 +322,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Close&                       close,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
     void NullMapper::map_acquire(const MapperContext         ctx,
                                  const Acquire&              acquire,
                                  const MapAcquireInput&      input,
@@ -317,18 +343,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext         ctx,
-                               const Acquire&              acquire,
-                                     SpeculativeOutput&    output)
+    void NullMapper::report_profiling(const MapperContext         ctx,
+                                      const Acquire&              acquire,
+                                      const AcquireProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::report_profiling(const MapperContext         ctx,
-                                      const Acquire&              acquire,
-                                      const AcquireProfilingInfo& input)
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Acquire&                     acquire,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
@@ -355,15 +383,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext         ctx,
-                               const Release&              release,
-                                     SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::create_release_temporary_instance(
                                    const MapperContext                 ctx,
                                    const Release&                      release,
@@ -378,6 +397,17 @@ namespace Legion {
     void NullMapper::report_profiling(const MapperContext         ctx,
                                       const Release&              release,
                                       const ReleaseProfilingInfo& input)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Release&                     release,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
@@ -435,6 +465,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Partition&                   partition,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
+    void NullMapper::map_future_map_reduction(const MapperContext       ctx,
+                                        const FutureMapReductionInput&  input,
+                                              FutureMapReductionOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
     void NullMapper::configure_context(const MapperContext         ctx,
                                        const Task&                 task,
                                              ContextConfigOutput&  output)
@@ -448,6 +509,17 @@ namespace Legion {
                                           const Task&                 task,
                                           const SelectTunableInput&   input,
                                                 SelectTunableOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
+    void NullMapper::select_sharding_functor(
+                                 const MapperContext                   ctx,
+                                 const MustEpoch&                      epoch,
+                                 const SelectShardingFunctorInput&     input,
+                                       MustEpochShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);

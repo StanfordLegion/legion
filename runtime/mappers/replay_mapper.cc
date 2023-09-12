@@ -232,13 +232,6 @@ namespace Legion {
                                          PremapTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
-      TaskMappingInfo *mapping = find_task_mapping(ctx, task, task.index_point);
-      output.new_target_proc = mapping->target_proc;
-      for (std::map<unsigned,RequirementMapping*>::const_iterator it = 
-            mapping->premappings.begin(); it != 
-            mapping->premappings.end(); it++)
-        it->second->map_requirement(runtime, ctx,task.regions[it->first].parent,
-                                    output.premapped_instances[it->first]);
     }
 
     //--------------------------------------------------------------------------
@@ -302,6 +295,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::map_replicate_task(const MapperContext      ctx,
+                                          const Task&              task,
+                                          const MapTaskInput&      input,
+                                          const MapTaskOutput&     def_output,
+                                          MapReplicateTaskOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::select_task_variant(const MapperContext          ctx,
                                            const Task&                  task,
                                            const SelectVariantInput&    input,
@@ -339,21 +343,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext      ctx,
-                                 const Task&              task,
-                                       SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext       ctx,
                                         const Task&               task,
                                         const TaskProfilingInfo&  input)
     //--------------------------------------------------------------------------
     {
       // Nothing to do here
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
     }
 
     //--------------------------------------------------------------------------
@@ -418,21 +424,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext      ctx,
-                                 const Copy&              copy,
-                                       SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext      ctx,
                                         const Copy&              copy,
                                         const CopyProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
     }
     
     //--------------------------------------------------------------------------
@@ -467,6 +475,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Close&                       close,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::map_acquire(const MapperContext         ctx,
                                    const Acquire&              acquire,
                                    const MapAcquireInput&      input,
@@ -477,21 +496,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext         ctx,
-                                 const Acquire&              acquire,
-                                       SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext         ctx,
                                         const Acquire&              acquire,
                                         const AcquireProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Acquire&                     acquire,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
     }
 
     //--------------------------------------------------------------------------
@@ -515,21 +536,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext         ctx,
-                                 const Release&              release,
-                                       SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext         ctx,
                                         const Release&              release,
                                         const ReleaseProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Release&                     release,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
     }
 
     //--------------------------------------------------------------------------
@@ -573,6 +596,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Partition&                   partition,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::configure_context(const MapperContext         ctx,
                                          const Task&                 task,
                                                ContextConfigOutput&  output)
@@ -598,6 +643,17 @@ namespace Legion {
       assert(mapping->next_tunable < mapping->tunables.size());
       mapping->tunables[mapping->next_tunable++]->set_tunable(output.value,
                                                               output.size);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                   ctx,
+                                 const MustEpoch&                      epoch,
+                                 const SelectShardingFunctorInput&     input,
+                                       MustEpochShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
     }
 
     //--------------------------------------------------------------------------
@@ -948,14 +1004,6 @@ namespace Legion {
       ignore_result(fread(&info->target_proc, sizeof(info->target_proc), 1, f));
       ignore_result(fread(&info->priority, sizeof(info->priority), 1, f));
       ignore_result(fread(&info->variant, sizeof(info->variant), 1, f));
-      unsigned num_premappings;
-      ignore_result(fread(&num_premappings, sizeof(num_premappings), 1, f));
-      for (unsigned idx = 0; idx < num_premappings; idx++)
-      {
-        unsigned index;
-        ignore_result(fread(&index, sizeof(index), 1, f));
-        info->premappings[index] = unpack_requirement(f);
-      }
       unsigned num_mappings;
       ignore_result(fread(&num_mappings, sizeof(num_mappings), 1, f));
       info->mappings.resize(num_mappings);

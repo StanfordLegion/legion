@@ -29,9 +29,9 @@
 #define IS_NO_ACCESS(req) \
   (((req).privilege & LEGION_READ_WRITE) == LEGION_NO_ACCESS)
 #define IS_READ_ONLY(req) \
-  (((req).privilege & LEGION_READ_WRITE) <= LEGION_READ_PRIV)
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_READ_PRIV)
 #define HAS_READ(req) \
-  ((req).privilege & LEGION_READ_PRIV)
+  ((req).privilege & (LEGION_READ_PRIV | LEGION_REDUCE))
 #define HAS_WRITE(req) \
   ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
 #define IS_WRITE(req) \
@@ -115,6 +115,7 @@ namespace Legion {
       inline void serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void serialize(const Domain &domain);
       inline void serialize(const DomainPoint &dp);
+      inline void serialize(const Internal::CopySrcDstField &field);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -142,10 +143,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     class Deserializer {
     public:
-      Deserializer(const void *buf, size_t buffer_size)
+      Deserializer(const void *buf, size_t buffer_size
+#ifdef DEBUG_LEGION
+          , size_t ctx_bytes = 0
+#endif
+          )
         : total_bytes(buffer_size), buffer((const char*)buf), index(0)
 #ifdef DEBUG_LEGION
-          , context_bytes(0)
+          , context_bytes(ctx_bytes)
 #endif
       { }
       Deserializer(const Deserializer &rhs)
@@ -200,6 +205,7 @@ namespace Legion {
       inline void deserialize(CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void deserialize(Domain &domain);
       inline void deserialize(DomainPoint &dp);
+      inline void deserialize(Internal::CopySrcDstField &field);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -214,6 +220,8 @@ namespace Legion {
       size_t index;
 #ifdef DEBUG_LEGION
       size_t context_bytes;
+    public:
+      inline size_t get_context_bytes(void) const { return context_bytes; }
 #endif
     };
 
@@ -291,7 +299,21 @@ namespace Legion {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
         if (u1.redop == u2.redop)
+        {
+          // Exclusive and atomic coherence are effectively the same
+          // thing in these contexts. Similarly simultaneous/relaxed
+          // are also effectively the same thing for reductions.
+          // However, mixing one of those "group modes" with the other
+          // can result in races, so we don't allow that
+          if (u1.prop != u2.prop)
+          {
+            const bool atomic1 = IS_EXCLUSIVE(u1) || IS_ATOMIC(u1);
+            const bool atomic2 = IS_EXCLUSIVE(u2) || IS_ATOMIC(u2);
+            if (atomic1 != atomic2)
+              return LEGION_TRUE_DEPENDENCE;
+          }
           return LEGION_NO_DEPENDENCE;
+        }
         else
           return LEGION_TRUE_DEPENDENCE;
       }
@@ -347,6 +369,83 @@ namespace Legion {
         return LEGION_NO_DEPENDENCE;
       }
     } 
+
+    //--------------------------------------------------------------------------
+    static inline bool configure_collective_settings(const int participants,
+                                                     const int local_space,
+                                                     int &collective_radix,
+                                                     int &collective_log_radix,
+                                                     int &collective_stages,
+                                                     int &participating_spaces,
+                                                     int &collective_last_radix)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participants > 0);
+      assert(collective_radix > 1);
+#endif
+      const int MultiplyDeBruijnBitPosition[32] = 
+      {
+        0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
+          8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
+      };
+      // First adjust the radix based on the number of nodes if necessary
+      if (collective_radix > participants)
+      {
+        if (participants == 1)
+        {
+          // Handle the unsual case of a single participant
+          collective_radix = 0;
+          collective_log_radix = 0;
+          collective_stages = 0;
+          participating_spaces = 1;
+          collective_last_radix = 0;
+          return (local_space == 0);
+        }
+        else
+          collective_radix = participants;
+      }
+      // Adjust the radix to the next smallest power of 2
+      uint32_t radix_copy = collective_radix;
+      for (int i = 0; i < 5; i++)
+        radix_copy |= radix_copy >> (1 << i);
+      collective_log_radix = 
+        MultiplyDeBruijnBitPosition[(uint32_t)(radix_copy * 0x07C4ACDDU) >> 27];
+      if (collective_radix != (1 << collective_log_radix))
+        collective_radix = (1 << collective_log_radix);
+
+      // Compute the number of stages
+      uint32_t node_copy = participants;
+      for (int i = 0; i < 5; i++)
+        node_copy |= node_copy >> (1 << i);
+      // Now we have it log 2
+      int log_nodes = 
+        MultiplyDeBruijnBitPosition[(uint32_t)(node_copy * 0x07C4ACDDU) >> 27];
+
+      // Stages round up in case of incomplete stages
+      collective_stages = 
+        (log_nodes + collective_log_radix - 1) / collective_log_radix;
+      int log_remainder = log_nodes % collective_log_radix;
+      if (log_remainder > 0)
+      {
+        // We have an incomplete last stage
+        collective_last_radix = 1 << log_remainder;
+        // Now we can compute the number of participating stages
+        participating_spaces = 
+          1 << ((collective_stages - 1) * collective_log_radix +
+                 log_remainder);
+      }
+      else
+      {
+        collective_last_radix = collective_radix;
+        participating_spaces = 1 << (collective_stages * collective_log_radix);
+      }
+#ifdef DEBUG_LEGION
+      assert((participating_spaces % collective_radix) == 0);
+#endif
+      const bool participant = (local_space < participating_spaces);
+      return participant;
+    }
 
     /////////////////////////////////////////////////////////////
     // Semantic Info 
@@ -486,6 +585,80 @@ namespace Legion {
     }; 
 
     /////////////////////////////////////////////////////////////
+    // Murmur3Hasher
+    /////////////////////////////////////////////////////////////
+
+    /**
+     * \class Murmur3Hasher
+     * This class implements an object-oriented version of the
+     * MurmurHash3 hashing algorithm for computing a 128-bit 
+     * hash value. It is taken from the public domain here:
+     * https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp
+     */
+    class Murmur3Hasher {
+    public:
+      class HashVerifier {
+      public:
+        virtual bool verify_hash(const uint64_t hash[2],
+            const char *description, Provenance *provenance, bool every) = 0;
+      };
+    public:
+      Murmur3Hasher(HashVerifier *verifier, bool precise,
+                    bool verify_every_call, Provenance *provenance = NULL,
+                    uint64_t seed = 0xCC892563);
+      Murmur3Hasher(const Murmur3Hasher&) = delete;
+      Murmur3Hasher& operator=(const Murmur3Hasher&) = delete;
+    public:
+      template<typename T>
+      inline void hash(const T &value, const char *description);
+      inline void hash(const void *values, size_t size,const char *description);
+      inline bool verify(const char *description, bool every_call = false);
+    protected:
+      template<typename T>
+      inline void hash(const T &value);
+      inline void hash(const void *value, size_t size);
+      inline uint64_t rotl64(uint64_t x, uint8_t r);
+      inline uint64_t fmix64(uint64_t k);
+    public:
+      HashVerifier *const verifier;
+      Provenance *const provenance;
+    protected:
+      uint8_t blocks[16];
+      uint64_t h1, h2, len;
+      uint8_t bytes;
+    public:
+      const bool precise;
+      const bool verify_every_call;
+    public:
+      static constexpr uint64_t c1 = 0x87c37b91114253d5ULL;
+      static constexpr uint64_t c2 = 0x4cf5ad432745937fULL;
+    private:
+      struct IndexSpaceHasher {
+      public:
+        IndexSpaceHasher(const Domain &d, Murmur3Hasher &h)
+          : domain(d), hasher(h) { }
+      public:
+        template<typename N, typename T>
+        static inline void demux(IndexSpaceHasher *functor)
+        {
+          const DomainT<N::N,T> is = functor->domain;
+          for (RectInDomainIterator<N::N,T> itr(is); itr(); itr.step())
+          {
+            const Rect<N::N,T> rect = *itr;
+            for (int d = 0; d < N::N; d++)
+            {
+              functor->hasher.hash(rect.lo[d]);
+              functor->hasher.hash(rect.hi[d]);
+            }
+          }
+        }
+      public:
+        const Domain &domain;
+        Murmur3Hasher &hasher;
+      };
+    };
+
+    /////////////////////////////////////////////////////////////
     // Dynamic Table 
     /////////////////////////////////////////////////////////////
     template<typename IT>
@@ -602,6 +775,52 @@ namespace Legion {
       {
         return new LEAF_TYPE(0/*level*/, first_index, last_index);
       }
+    };
+
+    /////////////////////////////////////////////////////////////
+    // BasicRangeAllocator
+    /////////////////////////////////////////////////////////////
+    // manages a basic free list of ranges (using range type RT) and allocated
+    //  ranges, which are tagged (tag type TT)
+    // NOT thread-safe - must be protected from outside
+    template <typename RT, typename TT>
+    class BasicRangeAllocator {
+    public:
+      struct Range {
+        //Range(RT _first, RT _last);
+
+        RT first, last;  // half-open range: [first, last)
+        unsigned prev, next;  // double-linked list of all ranges (by index)
+        unsigned prev_free, next_free; // double-linked list of just free ranges
+      };
+
+      std::map<TT, unsigned> allocated;// direct lookup allocated ranges by tag
+#ifdef DEBUG_LEGION
+      std::map<RT, unsigned> by_first; // direct lookup of all ranges by first
+      // TODO: sized-based lookup of free ranges
+#endif
+
+      static const unsigned SENTINEL = 0;
+      // TODO: small (medium?) vector opt
+      std::vector<Range> ranges;
+
+      BasicRangeAllocator(void);
+      ~BasicRangeAllocator(void);
+
+      void swap(BasicRangeAllocator<RT, TT>& swap_with);
+
+      void add_range(RT first, RT last);
+      bool can_allocate(TT tag, RT size, RT alignment);
+      bool allocate(TT tag, RT size, RT alignment, RT& first);
+      void deallocate(TT tag, bool missing_ok = false);
+      bool lookup(TT tag, RT& first, RT& size);
+      size_t get_size(TT tag);
+      void dump_all_free_ranges(Realm::Logger logger);
+
+    protected:
+      unsigned first_free_range;
+      unsigned alloc_range(RT first, RT last);
+      void free_range(unsigned index);
     };
   }; // namspace Internal
 
@@ -764,6 +983,32 @@ namespace Legion {
       {
         for (int idx = 0; idx < dp.dim; idx++)
           serialize(dp.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const Internal::CopySrcDstField &field)
+    //--------------------------------------------------------------------------
+    {
+      serialize(field.inst);
+      serialize(field.field_id);
+      serialize(field.redop_id);
+      if (field.redop_id > 0)
+      {
+        serialize<bool>(field.red_fold);
+        serialize<bool>(field.red_exclusive);
+      }
+      serialize(field.serdez_id);
+      serialize(field.subfield_offset);
+      serialize(field.indirect_index);
+      serialize(field.size);
+      // we know if there's a fill value if the field ID is -1
+      if (field.field_id == (Realm::FieldID)-1)
+      {
+        if (field.size <= Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+          serialize(field.fill_data.direct, field.size);
+        else
+          serialize(field.fill_data.indirect, field.size);
       }
     }
 
@@ -1005,6 +1250,40 @@ namespace Legion {
       {
         for (int idx = 0; idx < dp.dim; idx++)
           deserialize(dp.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(Internal::CopySrcDstField &field)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(field.inst);
+      deserialize(field.field_id);
+      deserialize(field.redop_id);
+      if (field.redop_id > 0)
+      {
+        deserialize<bool>(field.red_fold);
+        deserialize<bool>(field.red_exclusive);
+      }
+      deserialize(field.serdez_id);
+      deserialize(field.subfield_offset);
+      deserialize(field.indirect_index);
+      if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+      {
+        free(field.fill_data.indirect);
+        field.fill_data.indirect = NULL;
+      }
+      deserialize(field.size);
+      // we know if there's a fill value if the field ID is -1
+      if (field.field_id == (Realm::FieldID)-1)
+      {
+        if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+        {
+          field.fill_data.indirect = malloc(field.size);
+          deserialize(field.fill_data.indirect, field.size);
+        }
+        else
+          deserialize(field.fill_data.direct, field.size);
       }
     }
       
@@ -1566,6 +1845,187 @@ namespace Legion {
     } 
 
     //-------------------------------------------------------------------------
+    inline Murmur3Hasher::Murmur3Hasher(HashVerifier *v, bool pre, bool every, 
+                                        Provenance *prov, uint64_t seed)
+      : verifier(v), provenance(prov), h1(seed), h2(seed), len(0), bytes(0),
+        precise(pre), verify_every_call(every)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T>
+    inline void Murmur3Hasher::hash(const T &value, const char *description)
+    //-------------------------------------------------------------------------
+    {
+      hash<T>(value);
+      if (verify_every_call)
+        verify(description, true/*verify every call*/);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T>
+    inline void Murmur3Hasher::hash(const T &value)
+    //-------------------------------------------------------------------------
+    {
+      const T *ptr = &value;
+      const uint8_t *data = NULL;
+      static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
+      memcpy(&data, &ptr, sizeof(data));
+      for (unsigned idx = 0; idx < sizeof(T); idx++)
+      {
+        blocks[bytes++] = data[idx];
+        if (bytes == 16)
+        {
+          // body
+          uint64_t k1, k2;
+          memcpy(&k1, blocks, sizeof(k1));
+          memcpy(&k2, blocks+sizeof(k1), sizeof(k2));
+          static_assert(sizeof(blocks) == (sizeof(k1)+sizeof(k2)), "sanity");
+          k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
+          h1 = rotl64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+          k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+          h2 = rotl64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+          len += 16;
+          bytes = 0;
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<Domain>(const Domain &value,
+                                            const char *description)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < 2*value.dim; i++)
+        hash(value.rect_data[i]);
+      if (!value.dense() && precise)
+      {
+        IndexSpaceHasher functor(value, *this);
+        Internal::NT_TemplateHelper::demux<IndexSpaceHasher>(value.is_type,
+                                                             &functor);
+      }
+      if (verify_every_call)
+        verify(description, true/*verify every call*/);
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value,
+                                                 const char *description)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < value.dim; i++)
+        hash(value.point_data[i]);
+      if (verify_every_call)
+        verify(description, true/*verify every call*/);
+    }
+
+    //-------------------------------------------------------------------------
+    inline void Murmur3Hasher::hash(const void *value, size_t size,
+                                    const char *description)
+    //-------------------------------------------------------------------------
+    {
+      hash(value, size);
+      if (verify_every_call)
+        verify(description, true/*verify every call*/);
+    }
+
+    //-------------------------------------------------------------------------
+    inline void Murmur3Hasher::hash(const void *value, size_t size)
+    //-------------------------------------------------------------------------
+    {
+      const uint8_t *data = NULL;
+      static_assert(sizeof(data) == sizeof(value), "Fuck c++");
+      memcpy(&data, &value, sizeof(data));
+      for (unsigned idx = 0; idx < size; idx++)
+      {
+        blocks[bytes++] = data[idx];
+        if (bytes == 16)
+        {
+          // body
+          uint64_t k1, k2;
+          memcpy(&k1, blocks, sizeof(k1));
+          memcpy(&k2, blocks+sizeof(k1), sizeof(k2));
+          static_assert(sizeof(blocks) == (sizeof(k1)+sizeof(k2)), "sanity");
+          k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
+          h1 = rotl64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+          k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+          h2 = rotl64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+          len += 16;
+          bytes = 0;
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    inline bool Murmur3Hasher::verify(const char *description, bool every_call)
+    //-------------------------------------------------------------------------
+    {
+      // tail
+      uint64_t k1 = 0;
+      uint64_t k2 = 0;
+      switch (bytes)
+      {
+        case 15: k2 ^= ((uint64_t)blocks[14]) << 48;
+        case 14: k2 ^= ((uint64_t)blocks[13]) << 40;
+        case 13: k2 ^= ((uint64_t)blocks[12]) << 32;
+        case 12: k2 ^= ((uint64_t)blocks[11]) << 24;
+        case 11: k2 ^= ((uint64_t)blocks[10]) << 16;
+        case 10: k2 ^= ((uint64_t)blocks[ 9]) << 8;
+        case  9: k2 ^= ((uint64_t)blocks[ 8]) << 0;
+                 k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+
+        case  8: k1 ^= ((uint64_t)blocks[ 7]) << 56;
+        case  7: k1 ^= ((uint64_t)blocks[ 6]) << 48;
+        case  6: k1 ^= ((uint64_t)blocks[ 5]) << 40;
+        case  5: k1 ^= ((uint64_t)blocks[ 4]) << 32;
+        case  4: k1 ^= ((uint64_t)blocks[ 3]) << 24;
+        case  3: k1 ^= ((uint64_t)blocks[ 2]) << 16;
+        case  2: k1 ^= ((uint64_t)blocks[ 1]) << 8;
+        case  1: k1 ^= ((uint64_t)blocks[ 0]) << 0;
+                 k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
+      }
+      
+      // finalization
+      len += bytes;
+
+      h1 ^= len; h2 ^= len;
+
+      h1 += h2;
+      h2 += h1;
+
+      h1 = fmix64(h1);
+      h2 = fmix64(h2);
+
+      h1 += h2;
+      h2 += h1;
+
+      uint64_t hash[2] = { h1, h2 };
+      return verifier->verify_hash(hash, description, provenance, every_call);
+    }
+
+    //-------------------------------------------------------------------------
+    inline uint64_t Murmur3Hasher::rotl64(uint64_t x, uint8_t r)
+    //-------------------------------------------------------------------------
+    {
+      return (x << r) | (x >> (64 - r));
+    }
+
+    //-------------------------------------------------------------------------
+    inline uint64_t Murmur3Hasher::fmix64(uint64_t k)
+    //-------------------------------------------------------------------------
+    {
+      k ^= k >> 33;
+      k *= 0xff51afd7ed558ccdULL;
+      k ^= k >> 33;
+      k *= 0xc4ceb9fe1a85ec53ULL;
+      k ^= k >> 33;
+      return k;
+    }
+
+    //-------------------------------------------------------------------------
     template<typename ALLOCATOR>
     DynamicTable<ALLOCATOR>::DynamicTable(void)
     //-------------------------------------------------------------------------
@@ -1628,10 +2088,11 @@ namespace Legion {
     size_t DynamicTable<ALLOCATOR>::max_entries(void) const
     //-------------------------------------------------------------------------
     {
-      if (root.load() == NULL)
+      NodeBase *r = root.load();
+      if (r == NULL)
         return 0;
       size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      for (int i = 0; i < root.load()->level; i++)
+      for (int i = 0; i < r->level; i++)
         elems_addressable <<= ALLOCATOR::INNER_BITS;
       return elems_addressable;
     }
@@ -1700,15 +2161,15 @@ namespace Legion {
       {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
-        if (leaf->elems[offset].load() == NULL)
-        {
-          ET *elem = new ET();
-          leaf->elems[offset].store(elem);
-        }
         result = leaf->elems[offset].load();
+        if (result == NULL)
+        {
+          result = new ET();
+          leaf->elems[offset].store(result);
+        }
       }
 #ifdef DEBUG_LEGION
-      assert(result != NULL);
+      assert(result != 0);
 #endif
       return result;
     }
@@ -1729,15 +2190,15 @@ namespace Legion {
       {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
-        if (leaf->elems[offset].load() == NULL)
-        {
-          ET *elem = new ET(arg);
-          leaf->elems[offset].store(elem);
-        }
         result = leaf->elems[offset].load();
+        if (result == NULL)
+        {
+          result = new ET(arg);
+          leaf->elems[offset].store(result);
+        }
       }
 #ifdef DEBUG_LEGION
-      assert(result != NULL);
+      assert(result != 0);
 #endif
       return result;
     }
@@ -1759,15 +2220,15 @@ namespace Legion {
       {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
-        if (leaf->elems[offset].load() == NULL)
-        {
-          ET *elem = new ET(arg1, arg2);
-          leaf->elems[offset].store(elem);
-        }
         result = leaf->elems[offset].load();
+        if (result == NULL)
+        {
+          result = new ET(arg1, arg2);
+          leaf->elems[offset].store(result);
+        }
       }
 #ifdef DEBUG_LEGION
-      assert(result != NULL);
+      assert(result != 0);
 #endif
       return result;
     }
@@ -1794,7 +2255,7 @@ namespace Legion {
       {
         AutoLock l(lock); 
         n = root.load();
-        if (n != NULL)
+        if (n)
         {
           // some of the tree exists - add new layers on top
           while (n->level < level_needed)
@@ -1838,7 +2299,8 @@ namespace Legion {
         {
           AutoLock l(inner->lock);
           // Now that the lock is held, check to see if we lost the race
-          if (inner->elems[i].load() == NULL)
+          child = inner->elems[i].load();
+          if (child == NULL)
           {
             int child_level = inner->level - 1;
             int child_shift = 
@@ -1846,14 +2308,12 @@ namespace Legion {
             IT child_first = inner->first_index + (i << child_shift);
             IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
 
-            NodeBase *next = new_tree_node(child_level, 
-                                           child_first, child_last);
-            inner->elems[i].store(next);
+            child = new_tree_node(child_level, child_first, child_last);
+            inner->elems[i].store(child);
           }
-          child = inner->elems[i].load();
         }
 #ifdef DEBUG_LEGION
-        assert((child != NULL) &&
+        assert((child != 0) &&
                (child->level == (n->level - 1)) &&
                (index >= child->first_index) &&
                (index <= child->last_index));
@@ -1864,6 +2324,359 @@ namespace Legion {
       assert(n->level == 0);
 #endif
       return n;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline BasicRangeAllocator<RT,TT>::BasicRangeAllocator(void)
+    //-------------------------------------------------------------------------
+      : first_free_range(SENTINEL)
+    {
+      ranges.resize(1);
+      Range& s = ranges[SENTINEL];
+      s.first = RT(-1);
+      s.last = 0;
+      s.prev = s.next = s.prev_free = s.next_free = SENTINEL;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline BasicRangeAllocator<RT,TT>::~BasicRangeAllocator(void)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline void BasicRangeAllocator<RT,TT>::swap(
+                                        BasicRangeAllocator<RT, TT>& swap_with)
+    //-------------------------------------------------------------------------
+    {
+      allocated.swap(swap_with.allocated);
+#ifdef DEBUG_LEGION
+      by_first.swap(swap_with.by_first);
+#endif
+      ranges.swap(swap_with.ranges);
+      std::swap(first_free_range, swap_with.first_free_range);
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline void BasicRangeAllocator<RT,TT>::add_range(RT first, RT last)
+    //-------------------------------------------------------------------------
+    {
+      // ignore empty ranges
+      if(first == last)
+        return;
+
+      int new_idx = alloc_range(first, last);
+
+      Range& newr = ranges[new_idx];
+      Range& sentinel = ranges[SENTINEL];
+
+      // simple case - starting range
+      if(sentinel.next == SENTINEL) {
+        // all block list
+        newr.prev = newr.next = SENTINEL;
+        sentinel.prev = sentinel.next = new_idx;
+        // free block list
+        newr.prev_free = newr.next_free = SENTINEL;
+        sentinel.prev_free = sentinel.next_free = new_idx;
+
+#ifdef DEBUG_LEGION
+        by_first[first] = new_idx;
+#endif
+        return;
+      }
+
+      assert(0);
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline unsigned BasicRangeAllocator<RT,TT>::alloc_range(RT first, RT last)
+    //-------------------------------------------------------------------------
+    {
+      // find/make a free index in the range list for this range
+      int new_idx;
+      if(first_free_range != SENTINEL) {
+        new_idx = first_free_range;
+        first_free_range = ranges[new_idx].next;
+      } else {
+        new_idx = ranges.size();
+        ranges.resize(new_idx + 1);
+      }
+      ranges[new_idx].first = first;
+      ranges[new_idx].last = last;
+      return new_idx;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline void BasicRangeAllocator<RT,TT>::free_range(unsigned index)
+    //-------------------------------------------------------------------------
+    {
+      ranges[index].next = first_free_range;
+      first_free_range = index;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline bool BasicRangeAllocator<RT,TT>::can_allocate(TT tag,
+                                                         RT size, RT alignment)
+    //-------------------------------------------------------------------------
+    {
+      // empty allocation requests are trivial
+      if(size == 0) {
+        return true;
+      }
+
+      // walk free ranges and just take the first that fits
+      unsigned idx = ranges[SENTINEL].next_free;
+      while(idx != SENTINEL) {
+        Range *r = &ranges[idx];
+
+        RT ofs = 0;
+        if(alignment) {
+          RT rem = r->first % alignment;
+          if(rem > 0)
+            ofs = alignment - rem;
+        }
+        // do we have enough space?
+        if((r->last - r->first) >= (size + ofs))
+          return true;
+
+        // no, go to next one
+        idx = r->next_free;
+      }
+
+      // allocation failed
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline bool BasicRangeAllocator<RT,TT>::allocate(TT tag, RT size, 
+                                                 RT alignment, RT& alloc_first)
+    //-------------------------------------------------------------------------
+    {
+      // empty allocation requests are trivial
+      if(size == 0) {
+        allocated[tag] = SENTINEL;
+        return true;
+      }
+
+      // walk free ranges and just take the first that fits
+      unsigned idx = ranges[SENTINEL].next_free;
+      while(idx != SENTINEL) {
+        Range *r = &ranges[idx];
+
+        RT ofs = 0;
+        if(alignment) {
+          RT rem = r->first % alignment;
+          if(rem > 0)
+            ofs = alignment - rem;
+        }
+        // do we have enough space?
+        if((r->last - r->first) >= (size + ofs)) {
+          // yes, but we may need to chop things up to make the exact range 
+          alloc_first = r->first + ofs;
+          RT alloc_last = alloc_first + size;
+
+          // do we need to carve off a new (free) block before us?
+          if(alloc_first != r->first) {
+            unsigned new_idx = alloc_range(r->first, alloc_first);
+            Range *new_prev = &ranges[new_idx];
+            r = &ranges[idx];  // alloc may have moved this!
+
+            r->first = alloc_first;
+            // insert into all-block dllist
+            new_prev->prev = r->prev;
+            new_prev->next = idx;
+            ranges[r->prev].next = new_idx;
+            r->prev = new_idx;
+            // insert into free-block dllist
+            new_prev->prev_free = r->prev_free;
+            new_prev->next_free = idx;
+            ranges[r->prev_free].next_free = new_idx;
+            r->prev_free = new_idx;
+
+#ifdef DEBUG_LEGION
+            // fix up by_first entries
+            by_first[r->first] = new_idx;
+            by_first[alloc_first] = idx;
+#endif
+          }
+
+          // two cases to deal with
+          if(alloc_last == r->last) {
+            // case 1 - exact fit
+            //
+            // all we have to do here is remove this range from the free range 
+            // dlist and add to the allocated lookup map
+            ranges[r->prev_free].next_free = r->next_free;
+            ranges[r->next_free].prev_free = r->prev_free;
+          } else {
+            // case 2 - leftover at end - put in new range
+            unsigned after_idx = alloc_range(alloc_last, r->last);
+            Range *r_after = &ranges[after_idx];
+            r = &ranges[idx];  // alloc may have moved this!
+
+#ifdef DEBUG_LEGION
+            by_first[alloc_last] = after_idx;
+#endif
+            r->last = alloc_last;
+
+            // r_after goes after r in all block list
+            r_after->prev = idx;
+            r_after->next = r->next;
+            r->next = after_idx;
+            ranges[r_after->next].prev = after_idx;
+
+            // r_after replaces r in the free block list
+            r_after->prev_free = r->prev_free;
+            r_after->next_free = r->next_free;
+            ranges[r_after->next_free].prev_free = after_idx;
+            ranges[r_after->prev_free].next_free = after_idx;
+          }
+
+          // tie this off because we use it to detect allocated-ness
+          r->prev_free = r->next_free = idx;
+
+          allocated[tag] = idx;
+          return true;
+        }
+
+        // no, go to next one
+        idx = r->next_free;
+      }
+      // allocation failed
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline void BasicRangeAllocator<RT,TT>::deallocate(TT tag,
+                                                   bool missing_ok /*= false*/)
+    //-------------------------------------------------------------------------
+    {
+      typename std::map<TT, unsigned>::iterator it = allocated.find(tag);
+      if(it == allocated.end()) {
+        assert(missing_ok);
+        return;
+      }
+      unsigned del_idx = it->second;
+      allocated.erase(it);
+
+      // if there was no Range associated with this tag, it was an zero-size
+      //  allocation, and there's nothing to add to the free list
+      if(del_idx == SENTINEL)
+        return;
+
+      Range& r = ranges[del_idx];
+
+      unsigned pf_idx = r.prev;
+      while((pf_idx != SENTINEL) && (ranges[pf_idx].prev_free == pf_idx)) {
+        pf_idx = ranges[pf_idx].prev;
+        assert(pf_idx != del_idx);  // wrapping around would be bad
+      }
+      unsigned nf_idx = r.next;
+      while((nf_idx != SENTINEL) && (ranges[nf_idx].next_free == nf_idx)) {
+        nf_idx = ranges[nf_idx].next;
+        assert(nf_idx != del_idx);
+      }
+
+      // do we need to merge?
+      bool merge_prev = (pf_idx == r.prev) && (pf_idx != SENTINEL);
+      bool merge_next = (nf_idx == r.next) && (nf_idx != SENTINEL);
+
+      // four cases - ordered to match the allocation cases
+      if(!merge_next) {
+        if(!merge_prev) {
+          // case 1 - no merging (exact match)
+          // just add ourselves to the free list
+          r.prev_free = pf_idx;
+          r.next_free = nf_idx;
+          ranges[pf_idx].next_free = del_idx;
+          ranges[nf_idx].prev_free = del_idx;
+        } else {
+          // case 2 - merge before
+          // merge ourselves into the range before
+          Range& r_before = ranges[pf_idx];
+
+          r_before.last = r.last;
+          r_before.next = r.next;
+          ranges[r.next].prev = pf_idx;
+          // r_before was already in free list, so no changes to that
+
+#ifdef DEBUG_LEGION
+          by_first.erase(r.first);
+#endif
+          free_range(del_idx);
+        }
+      } else {
+        if(!merge_prev) {
+          // case 3 - merge after
+          // merge ourselves into the range after
+          Range& r_after = ranges[nf_idx];
+
+#ifdef DEBUG_LEGION
+          by_first[r.first] = nf_idx;
+          by_first.erase(r_after.first);
+#endif
+
+          r_after.first = r.first;
+          r_after.prev = r.prev;
+          ranges[r.prev].next = nf_idx;
+          // r_after was already in the free list, so no changes to that
+
+          free_range(del_idx);
+        } else {
+          // case 4 - merge both
+          // merge both ourselves and range after into range before
+          Range& r_before = ranges[pf_idx];
+          Range& r_after = ranges[nf_idx];
+
+          r_before.last = r_after.last;
+#ifdef DEBUG_LEGION
+          by_first.erase(r.first);
+          by_first.erase(r_after.first);
+#endif
+
+          // adjust both normal list and free list
+          r_before.next = r_after.next;
+          ranges[r_after.next].prev = pf_idx;
+
+          r_before.next_free = r_after.next_free;
+          ranges[r_after.next_free].prev_free = pf_idx;
+
+          free_range(del_idx);
+          free_range(nf_idx);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline bool BasicRangeAllocator<RT,TT>::lookup(TT tag, RT& first, RT& size)
+    //-------------------------------------------------------------------------
+    {
+      typename std::map<TT, unsigned>::iterator it = allocated.find(tag);
+
+      if(it != allocated.end()) {
+        // if there was no Range associated with this tag, it was an zero-size
+        //  allocation
+        if(it->second == SENTINEL) {
+          first = 0;
+          size = 0;
+        } else {
+          const Range& r = ranges[it->second];
+          first = r.first;
+          size = r.last - r.first;
+        }
+        return true;
+      } else
+        return false;
     }
 
     /**
@@ -1881,6 +2694,38 @@ namespace Legion {
       FieldMask set_mask;
       std::set<T> elements;
     };
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline size_t BasicRangeAllocator<RT,TT>::get_size(TT tag)
+    //-------------------------------------------------------------------------
+    {
+      typename std::map<TT, unsigned>::iterator it = allocated.find(tag);
+      if(it == allocated.end()) {
+        assert(false);
+        return 0;
+      }
+      unsigned idx = it->second;
+      if (idx == SENTINEL) return 0;
+
+      Range& r = ranges[idx];
+      return r.last - r.first;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline void BasicRangeAllocator<RT,TT>::dump_all_free_ranges(
+                                                          Realm::Logger logger)
+    //-------------------------------------------------------------------------
+    {
+      unsigned idx = ranges[SENTINEL].next_free;
+      while (idx != SENTINEL) {
+        Range &r = ranges[idx];
+        logger.debug("range %u: %zd bytes [%zx,%zx)",
+                     idx, r.last - r.first, r.first, r.last);
+        idx = r.next_free;
+      }
+    }
 
     //--------------------------------------------------------------------------
     template<typename T>
@@ -1990,9 +2835,21 @@ namespace Legion {
      * A template helper class for tracking collections of 
      * objects associated with different sets of fields
      */
-    template<typename T, AllocationType A = UNTRACKED_ALLOC>
+    template<typename T, AllocationType A = UNTRACKED_ALLOC,
+             bool DETERMINISTIC = false>
     class FieldMaskSet : 
       public LegionHeapify<FieldMaskSet<T> > {
+    private:
+      // Call the deterministic pointer less method for
+      // any types that have asked for deterministic sets
+      template<typename U>
+      struct DeterministicComparator {
+      public:
+        inline bool operator()(const U *one, const U *two) const
+          { return one->deterministic_pointer_less(two); }
+      };
+      using Comparator = typename std::conditional<DETERMINISTIC,
+            DeterministicComparator<T>, std::less<const T*> >::type;
     public:
       // forward declaration
       class const_iterator;
@@ -2009,7 +2866,7 @@ namespace Legion {
             std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         iterator(FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask,A>::iterator _it,
+            typename LegionMap<T*,FieldMask,A,Comparator>::iterator _it,
             bool end = false)
           : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
@@ -2094,7 +2951,7 @@ namespace Legion {
             result->second.clear();
           }
       public:
-        inline void erase(LegionMap<T*,FieldMask,A> &target)
+        inline void erase(LegionMap<T*,FieldMask,A,Comparator> &target)
         {
 #ifdef DEBUG_LEGION
           assert(!single);
@@ -2109,7 +2966,7 @@ namespace Legion {
         friend class const_iterator;
         FieldMaskSet *set;
         std::pair<T*const,FieldMask> *result;
-        typename LegionMap<T*,FieldMask,A>::iterator it;
+        typename LegionMap<T*,FieldMask,A,Comparator>::iterator it;
         bool single;
       };
     public:
@@ -2126,7 +2983,7 @@ namespace Legion {
             const std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         const_iterator(const FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask,A>::const_iterator _it,
+            typename LegionMap<T*,FieldMask,A,Comparator>::const_iterator _it,
             bool end = false)
           : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
@@ -2202,16 +3059,21 @@ namespace Legion {
       private:
         const FieldMaskSet *set;
         const std::pair<T*const,FieldMask> *result;
-        typename LegionMap<T*,FieldMask,A>::const_iterator it;
+        typename LegionMap<T*,FieldMask,A,Comparator>::const_iterator it;
         bool single;
       };
     public:
       FieldMaskSet(void)
         : single(true) { entries.single_entry = NULL; }
-      inline FieldMaskSet(const FieldMaskSet &rhs);
+      inline FieldMaskSet(T *init, const FieldMask &m, bool no_null = true);
+      inline FieldMaskSet(const FieldMaskSet<T,A,DETERMINISTIC> &rhs);
+      inline FieldMaskSet(FieldMaskSet<T,A,DETERMINISTIC> &&rhs);
+      // If copy is set to false then this is a move constructor
+      inline FieldMaskSet(FieldMaskSet<T,A,DETERMINISTIC> &rhs, bool copy);
       ~FieldMaskSet(void) { clear(); }
     public:
-      inline FieldMaskSet& operator=(const FieldMaskSet &rhs);
+      inline FieldMaskSet& operator=(const FieldMaskSet<T,A,DETERMINISTIC> &rh);
+      inline FieldMaskSet& operator=(FieldMaskSet<T,A,DETERMINISTIC> &&rhs);
     public:
       inline bool empty(void) const 
         { return single && (entries.single_entry == NULL); }
@@ -2226,7 +3088,7 @@ namespace Legion {
     public:
       // Return true if we actually added the entry, false if it already existed
       inline bool insert(T *entry, const FieldMask &mask); 
-      inline void filter(const FieldMask &filter);
+      inline void filter(const FieldMask &filter, bool tighten = true);
       inline void erase(T *to_erase);
       inline void clear(void);
       inline size_t size(void) const;
@@ -2245,13 +3107,16 @@ namespace Legion {
       inline void compute_field_sets(FieldMask universe_mask,
                     LegionList<FieldSet<T*> > &output_sets) const;
     protected:
+      template<typename T2, AllocationType A2, bool D2>
+      friend class FieldMaskSet; 
+
       // Fun with C, keep these two fields first and in this order
       // so that a FieldMaskSet of size 1 looks the same as an entry
       // in the STL Map in the multi-entries case, 
       // provides goodness for the iterator
       union {
         T *single_entry;
-        LegionMap<T*,FieldMask,A> *multi_entries;
+        LegionMap<T*,FieldMask,A,Comparator> *multi_entries;
       } entries;
       // This can be an overapproximation if we have multiple entries
       FieldMask valid_fields;
@@ -2259,23 +3124,79 @@ namespace Legion {
     };
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>::FieldMaskSet(const FieldMaskSet<T,A> &rhs)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(T *init, const FieldMask &mask, 
+                                             bool no_null)
+      : single(true)
+    //--------------------------------------------------------------------------
+    {
+      if (!no_null || (init != NULL))
+      {
+        entries.single_entry = init;
+        valid_fields = mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(const FieldMaskSet<T,A,D> &rhs)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
       if (single)
         entries.single_entry = rhs.entries.single_entry;
       else
-        entries.multi_entries = new LegionMap<T*,FieldMask,A>(
+        entries.multi_entries = new LegionMap<T*,FieldMask,A,Comparator>(
             rhs.entries.multi_entries->begin(),
             rhs.entries.multi_entries->end());
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>& FieldMaskSet<T,A>::operator=(
-                                                   const FieldMaskSet<T,A> &rhs)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(FieldMaskSet<T,A,D> &&rhs)
+      : valid_fields(rhs.valid_fields), single(rhs.single)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+        entries.single_entry = rhs.entries.single_entry;
+      else
+        entries.multi_entries = rhs.entries.multi_entries;
+      rhs.valid_fields.clear();
+      rhs.single = true;
+      rhs.entries.single_entry = NULL;
+    }
+    
+    //--------------------------------------------------------------------------
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(FieldMaskSet<T,A,D> &rhs,bool copy)
+      : valid_fields(rhs.valid_fields), single(rhs.single)
+    //--------------------------------------------------------------------------
+    {
+      if (copy)
+      {
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+          entries.multi_entries = new LegionMap<T*,FieldMask,A,Comparator>(
+              rhs.entries.multi_entries->begin(),
+              rhs.entries.multi_entries->end());
+      }
+      else
+      {
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+          entries.multi_entries = rhs.entries.multi_entries;
+        rhs.entries.single_entry = NULL;
+        rhs.valid_fields.clear();
+        rhs.single = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>& FieldMaskSet<T,A,D>::operator=(
+                                                 const FieldMaskSet<T,A,D> &rhs)
     //--------------------------------------------------------------------------
     {
       // Check our current state
@@ -2284,7 +3205,7 @@ namespace Legion {
         // Different data structures
         if (single)
         {
-          entries.multi_entries = new LegionMap<T*,FieldMask,A>(
+          entries.multi_entries = new LegionMap<T*,FieldMask,A,Comparator>(
               rhs.entries.multi_entries->begin(),
               rhs.entries.multi_entries->end());
         }
@@ -2314,15 +3235,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline const FieldMask& FieldMaskSet<T,A>::tighten_valid_mask(void)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>& FieldMaskSet<T,A,D>::operator=(
+                                                      FieldMaskSet<T,A,D> &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Check our current state
+      if (single != rhs.single)
+      {
+        // Different data structures
+        if (single)
+        {
+          entries.multi_entries = rhs.entries.multi_entries;
+        }
+        else
+        {
+          // Free our map
+          delete entries.multi_entries;
+          entries.single_entry = rhs.entries.single_entry;
+        }
+        single = rhs.single;
+      }
+      else
+      {
+        // Same data structures so we can just copy things over
+        if (single)
+        {
+          entries.single_entry = rhs.entries.single_entry;
+        }
+        else
+        {
+          delete entries.multi_entries;
+          entries.multi_entries = rhs.entries.multi_entries;
+        }
+      }
+      valid_fields = rhs.valid_fields;
+      rhs.valid_fields.clear();
+      rhs.single = true;
+      rhs.entries.single_entry = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, AllocationType A, bool D>
+    inline const FieldMask& FieldMaskSet<T,A,D>::tighten_valid_mask(void)
     //--------------------------------------------------------------------------
     {
       // If we're single then there is nothing to do as we're already tight
       if (single)
         return valid_fields;
       valid_fields.clear();
-      for (typename LegionMap<T*,FieldMask,A>::const_iterator it = 
+      for (typename LegionMap<T*,FieldMask,A,Comparator>::const_iterator it = 
             entries.multi_entries->begin(); it !=
             entries.multi_entries->end(); it++)
         valid_fields |= it->second;
@@ -2330,32 +3293,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::relax_valid_mask(const FieldMask &m)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::relax_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
+      if (single && (entries.single_entry != NULL))
+      {
+        if (!(m - valid_fields))
+          return;
+        // have to avoid the aliasing case
+        T *entry = entries.single_entry;
+        entries.multi_entries = new LegionMap<T*,FieldMask,A,Comparator>();
+        entries.multi_entries->insert(std::make_pair(entry, valid_fields));
+        single = false;
+      }
       valid_fields |= m;
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::filter_valid_mask(const FieldMask &m)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::filter_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
       valid_fields -= m;
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::restrict_valid_mask(const FieldMask &m)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::restrict_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
       valid_fields &= m;
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline const FieldMask& FieldMaskSet<T,A>::operator[](T *entry) const
+    template<typename T, AllocationType A, bool D>
+    inline const FieldMask& FieldMaskSet<T,A,D>::operator[](T *entry) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2367,7 +3340,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask,A>::const_iterator finder =
+        typename LegionMap<T*,FieldMask,A,Comparator>::const_iterator finder =
           entries.multi_entries->find(entry);
 #ifdef DEBUG_LEGION
         assert(finder != entries.multi_entries->end());
@@ -2377,8 +3350,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline bool FieldMaskSet<T,A>::insert(T *entry, const FieldMask &mask)
+    template<typename T, AllocationType A, bool D>
+    inline bool FieldMaskSet<T,A,D>::insert(T *entry, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       bool result = true;
@@ -2387,7 +3360,7 @@ namespace Legion {
         if (entries.single_entry == NULL)
         {
           entries.single_entry = entry;
-          valid_fields = mask;
+          valid_fields |= mask;
         }
         else if (entries.single_entry == entry)
         {
@@ -2397,7 +3370,8 @@ namespace Legion {
         else
         {
           // Go to multi
-          LegionMap<T*,FieldMask,A> *multi = new LegionMap<T*,FieldMask,A>();
+          LegionMap<T*,FieldMask,A,Comparator> *multi =
+            new LegionMap<T*,FieldMask,A,Comparator>();
           (*multi)[entries.single_entry] = valid_fields;
           (*multi)[entry] = mask;
           entries.multi_entries = multi;
@@ -2410,7 +3384,7 @@ namespace Legion {
  #ifdef DEBUG_LEGION
         assert(entries.multi_entries != NULL);
 #endif   
-        typename LegionMap<T*,FieldMask,A>::iterator finder = 
+        typename LegionMap<T*,FieldMask,A,Comparator>::iterator finder = 
           entries.multi_entries->find(entry);
         if (finder == entries.multi_entries->end())
           (*entries.multi_entries)[entry] = mask;
@@ -2425,23 +3399,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::filter(const FieldMask &filter)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::filter(const FieldMask &filter,
+                                            bool tighten)
     //--------------------------------------------------------------------------
     {
       if (single)
       {
         if (entries.single_entry != NULL)
         {
-          valid_fields -= filter;
+          if (tighten)
+            valid_fields -= filter;
           if (!valid_fields)
             entries.single_entry = NULL;
         }
       }
       else
       {
-        valid_fields -= filter;
-        if (!valid_fields)
+        if (tighten)
+          valid_fields -= filter;
+        if (!valid_fields || (!tighten && (filter == valid_fields)))
         {
           // No fields left so just clean everything up
           delete entries.multi_entries;
@@ -2452,7 +3429,7 @@ namespace Legion {
         {
           // Manually remove entries
           typename std::vector<T*> to_delete;
-          for (typename LegionMap<T*,FieldMask,A>::iterator it = 
+          for (typename LegionMap<T*,FieldMask,A,Comparator>::iterator it =
                 entries.multi_entries->begin(); it !=
                 entries.multi_entries->end(); it++)
           {
@@ -2462,23 +3439,32 @@ namespace Legion {
           }
           if (!to_delete.empty())
           {
-            for (typename std::vector<T*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              entries.multi_entries->erase(*it);
-            if (entries.multi_entries->empty())
+            if (to_delete.size() < entries.multi_entries->size())
+            {
+              for (typename std::vector<T*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+                entries.multi_entries->erase(*it);
+              if (entries.multi_entries->empty())
+              {
+                delete entries.multi_entries;
+                entries.multi_entries = NULL;
+                single = true;
+              }
+              else if ((entries.multi_entries->size() == 1) &&
+                  (entries.multi_entries->begin()->second == valid_fields))
+              {
+                typename LegionMap<T*,FieldMask,A,Comparator>::iterator last =
+                  entries.multi_entries->begin();     
+                T *temp = last->first; 
+                delete entries.multi_entries;
+                entries.single_entry = temp;
+                single = true;
+              }
+            }
+            else
             {
               delete entries.multi_entries;
               entries.multi_entries = NULL;
-              single = true;
-            }
-            else if (entries.multi_entries->size() == 1)
-            {
-              typename LegionMap<T*,FieldMask,A>::iterator last = 
-                entries.multi_entries->begin();     
-              T *temp = last->first; 
-              valid_fields = last->second;
-              delete entries.multi_entries;
-              entries.single_entry = temp;
               single = true;
             }
           }
@@ -2487,8 +3473,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::erase(T *to_erase)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::erase(T *to_erase)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2501,7 +3487,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask,A>::iterator finder = 
+        typename LegionMap<T*,FieldMask,A,Comparator>::iterator finder = 
           entries.multi_entries->find(to_erase);
 #ifdef DEBUG_LEGION
         assert(finder != entries.multi_entries->end());
@@ -2521,8 +3507,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::clear(void)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::clear(void)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2540,8 +3526,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline size_t FieldMaskSet<T,A>::size(void) const
+    template<typename T, AllocationType A, bool D>
+    inline size_t FieldMaskSet<T,A,D>::size(void) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2556,8 +3542,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::swap(FieldMaskSet &other)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::swap(FieldMaskSet &other)
     //--------------------------------------------------------------------------
     {
       // Just use single, doesn't matter for swap
@@ -2575,8 +3561,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::iterator FieldMaskSet<T,A>::begin(void)
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::iterator 
+                                                FieldMaskSet<T,A,D>::begin(void)
     //--------------------------------------------------------------------------
     {
       // Scariness!
@@ -2596,8 +3583,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::iterator FieldMaskSet<T,A>::find(T *e)
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::iterator
+                                                 FieldMaskSet<T,A,D>::find(T *e)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2612,7 +3600,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask,A>::iterator finder = 
+        typename LegionMap<T*,FieldMask,A,Comparator>::iterator finder = 
           entries.multi_entries->find(e);
         if (finder == entries.multi_entries->end())
           return end();
@@ -2621,8 +3609,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::erase(iterator &it)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::erase(iterator &it)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2642,7 +3630,7 @@ namespace Legion {
         if (entries.multi_entries->size() == 1)
         {
           // go back to single
-          typename LegionMap<T*,FieldMask,A>::iterator finder = 
+          typename LegionMap<T*,FieldMask,A,Comparator>::iterator finder =
             entries.multi_entries->begin();
           valid_fields = finder->second;
           T *first = finder->first;
@@ -2654,8 +3642,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::iterator FieldMaskSet<T,A>::end(void)
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::iterator FieldMaskSet<T,A,D>::end(void)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2665,9 +3653,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::const_iterator 
-                                            FieldMaskSet<T,A>::begin(void) const
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::const_iterator 
+                                          FieldMaskSet<T,A,D>::begin(void) const
     //--------------------------------------------------------------------------
     {
       // Scariness!
@@ -2687,9 +3675,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::const_iterator 
-                                             FieldMaskSet<T,A>::find(T *e) const
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::const_iterator 
+                                           FieldMaskSet<T,A,D>::find(T *e) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2704,7 +3692,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask,A>::const_iterator finder = 
+        typename LegionMap<T*,FieldMask,A,Comparator>::const_iterator finder =
           entries.multi_entries->find(e);
         if (finder == entries.multi_entries->end())
           return end();
@@ -2713,9 +3701,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::const_iterator 
-                                              FieldMaskSet<T,A>::end(void) const
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::const_iterator 
+                                            FieldMaskSet<T,A,D>::end(void) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -2725,8 +3713,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::compute_field_sets(FieldMask universe_mask,
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::compute_field_sets(FieldMask universe_mask,
                                    LegionList<FieldSet<T*> > &output_sets) const
     //--------------------------------------------------------------------------
     {
@@ -2850,6 +3838,145 @@ namespace Legion {
       // no elements so it can start right away!
       if (!!universe_mask)
         output_sets.push_front(FieldSet<T*>(universe_mask));
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T1, typename T2>
+    inline void unique_join_on_field_mask_sets(
+                   const FieldMaskSet<T1> &left, const FieldMaskSet<T2> &right,
+                   LegionMap<std::pair<T1*,T2*>,FieldMask> &results)
+    //--------------------------------------------------------------------------
+    {
+      if (left.empty() || right.empty())
+        return;
+      if (left.get_valid_mask() * right.get_valid_mask())
+        return;
+#ifdef DEBUG_LEGION
+      FieldMask unique_test;
+#endif
+      if (left.size() == 1)
+      {
+        typename FieldMaskSet<T1>::const_iterator first = left.begin();
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          const FieldMask overlap = first->second & it->second;
+          if (!overlap)
+            continue;
+          const std::pair<T1*,T2*> key(first->first, it->first);
+          results[key] = overlap;
+        }
+        return;
+      }
+      if (right.size() == 1)
+      {
+        typename FieldMaskSet<T2>::const_iterator first = right.begin();
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+          const FieldMask overlap = first->second & it->second;
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          if (!overlap)
+            continue;
+          const std::pair<T1*,T2*> key(it->first, first->first);
+          results[key] = overlap;
+        }
+        return;
+      }
+      // Build the lookup table for the one with fewer fields
+      // since it is probably more costly to allocate memory
+      if (left.get_valid_mask().pop_count() < 
+          right.get_valid_mask().pop_count())
+      {
+        // Build the hash table for left
+        std::map<unsigned,T1*> hash_table;
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            hash_table[fidx] = it->first;
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+#ifdef DEBUG_LEGION
+        unique_test.clear();
+#endif
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            typename std::map<unsigned,T1*>::const_iterator
+              finder = hash_table.find(fidx);
+            if (finder != hash_table.end())
+            {
+              const std::pair<T1*,T2*> key(finder->second,it->first);
+              results[key].set_bit(fidx);
+            }
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+      }
+      else
+      {
+        // Build the hash table for the right
+        std::map<unsigned,T2*> hash_table;
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            hash_table[fidx] = it->first;
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+#ifdef DEBUG_LEGION
+        unique_test.clear();
+#endif
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            typename std::map<unsigned,T2*>::const_iterator
+              finder = hash_table.find(fidx);
+            if (finder != hash_table.end())
+            {
+              const std::pair<T1*,T2*> key(it->first,finder->second);
+              results[key].set_bit(fidx);
+            }
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+      }
     }
 
   }; // namespace Internal
