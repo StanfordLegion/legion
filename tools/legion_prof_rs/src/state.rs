@@ -2010,12 +2010,20 @@ pub struct Copy {
     chan_id: Option<ChanID>,
     pub op_id: OpID,
     pub size: u64,
+    pub collective: u32,
     pub copy_kind: Option<CopyKind>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
 impl Copy {
-    fn new(base: Base, time_range: TimeRange, op_id: OpID, size: u64, fevent: EventID) -> Self {
+    fn new(
+        base: Base,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        fevent: EventID,
+        collective: u32,
+    ) -> Self {
         Copy {
             base,
             fevent,
@@ -2023,6 +2031,7 @@ impl Copy {
             chan_id: None,
             op_id,
             size,
+            collective,
             copy_kind: None,
             copy_inst_infos: Vec::new(),
         }
@@ -2471,13 +2480,21 @@ impl State {
         op_id: OpID,
         size: u64,
         fevent: EventID,
+        collective: u32,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         assert_eq!(copies.contains_key(&fevent), false);
-        copies
-            .entry(fevent)
-            .or_insert_with(|| Copy::new(Base::new(alloc), time_range, op_id, size, fevent))
+        copies.entry(fevent).or_insert_with(|| {
+            Copy::new(
+                Base::new(alloc),
+                time_range,
+                op_id,
+                size,
+                fevent,
+                collective,
+            )
+        })
     }
 
     fn create_fill<'a>(
@@ -3546,10 +3563,11 @@ fn process_record(
             start,
             stop,
             fevent,
+            collective,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_op(*op_id);
-            state.create_copy(time_range, *op_id, *size, *fevent, copies);
+            state.create_copy(time_range, *op_id, *size, *fevent, *collective, copies);
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
