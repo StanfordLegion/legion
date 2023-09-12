@@ -1292,6 +1292,10 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       module_registrar.create_network_modules(network_modules,
 					      &local_argc, &local_argv);
+
+      for (NodeSetIterator it = Network::shared_peers.begin(); it != Network::shared_peers.end(); ++it) {
+        log_runtime.debug() << Network::my_node_id << " is shareable with " << *it;
+      }
       
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...

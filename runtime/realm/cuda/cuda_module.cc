@@ -4968,7 +4968,7 @@ namespace Realm {
 
       // ask any ipc-able nodes to share handles with us
       if(config->cfg_use_cuda_ipc) {
-        NodeSet ipc_peers = Network::all_peers;
+        NodeSet ipc_peers = Network::shared_peers;
 
 #ifdef REALM_ON_LINUX
         if(!ipc_peers.empty()) {

@@ -233,6 +233,8 @@ else()
   set(CXX_BUILD_WARNING_FLAGS "")
 endif()
 
+include(CheckFunctionExists)
+
 #------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#
@@ -400,6 +402,12 @@ if("${Legion_NETWORKS}" MATCHES .*ucx.*)
   # define variable for realm_defines.h
   set(REALM_USE_UCX ON)
   set(Legion_MPI_INTEROP ON)
+endif()
+
+if (MPI_FOUND)
+  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_C_LIB_NAMES})
+  # Check if MPI has comm split type available
+  check_function_exists(MPI_Comm_split_type REALM_MPI_HAS_COMM_SPLIT_TYPE)
 endif()
 
 #------------------------------------------------------------------------------#
