@@ -5914,6 +5914,41 @@ extern "C" {
     legion_projection_functor_logical_partition_t partition_functor);
 
   /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_args_t region_functor,
+    legion_projection_functor_logical_partition_args_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::preregister_projection_functor()
+   */
+  void
+  legion_runtime_preregister_projection_functor_args(
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_args_t region_functor,
+    legion_projection_functor_logical_partition_args_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor_args(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
    * @see Legion::Runtime::preregister_projection_functor()
    */
   void
@@ -5923,18 +5958,6 @@ extern "C" {
     unsigned depth,
     legion_projection_functor_logical_region_mappable_t region_functor,
     legion_projection_functor_logical_partition_mappable_t partition_functor);
-
-  /**
-   * @see Legion::Runtime::register_projection_functor()
-   */
-  void
-  legion_runtime_register_projection_functor(
-    legion_runtime_t runtime,
-    legion_projection_id_t id,
-    bool exclusive,
-    unsigned depth,
-    legion_projection_functor_logical_region_t region_functor,
-    legion_projection_functor_logical_partition_t partition_functor);
 
   /**
    * @see Legion::Runtime::register_projection_functor()
