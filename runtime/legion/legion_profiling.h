@@ -306,7 +306,6 @@ namespace Legion {
         UniqueID op_id;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
-        unsigned request_type;
         LgEvent fevent;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;

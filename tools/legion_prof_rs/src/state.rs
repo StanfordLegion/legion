@@ -2010,7 +2010,6 @@ pub struct Copy {
     chan_id: Option<ChanID>,
     pub op_id: OpID,
     pub size: u64,
-    _request_type: u32,
     pub copy_kind: Option<CopyKind>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
@@ -2021,7 +2020,6 @@ impl Copy {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        request_type: u32,
         fevent: EventID,
     ) -> Self {
         Copy {
@@ -2031,7 +2029,6 @@ impl Copy {
             chan_id: None,
             op_id,
             size,
-            _request_type: request_type,
             copy_kind: None,
             copy_inst_infos: Vec::new(),
         }
@@ -2479,7 +2476,6 @@ impl State {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        request_type: u32,
         fevent: EventID,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
@@ -2491,7 +2487,6 @@ impl State {
                 time_range,
                 op_id,
                 size,
-                request_type,
                 fevent,
             )
         })
@@ -3562,12 +3557,11 @@ fn process_record(
             ready,
             start,
             stop,
-            request_type,
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_op(*op_id);
-            state.create_copy(time_range, *op_id, *size, *request_type, *fevent, copies);
+            state.create_copy(time_range, *op_id, *size, *fevent, copies);
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
