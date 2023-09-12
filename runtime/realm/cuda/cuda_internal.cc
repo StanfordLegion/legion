@@ -630,15 +630,11 @@ namespace Realm {
 
             AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
             if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu) ||
-               !needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
+               needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
                                 copy_info.dst.strides[0], copy_info.dst.strides[2])) {
               break;
             }
 
-            if (transpose_copy.width > 0) {  // TODO: batch up the transposes
-              log_gpudma.info() << "\tFound a transpose copy (width=" << transpose_copy.width << ')';
-              break;
-            }
             log_gpudma.info() << "\tAdded " << bytes_to_copy
                               << " Bytes left= " << (bytes_left - bytes_to_copy);
             assert(bytes_to_copy <= bytes_left);
