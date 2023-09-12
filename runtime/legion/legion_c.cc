@@ -7916,7 +7916,7 @@ public:
     legion_domain_point_t point_ = CObjectWrapper::wrap(point);
     legion_domain_t launch_domain_ = CObjectWrapper::wrap(launch_domain);
 
-    assert(region_functor);
+    assert(region_functor_args);
     legion_logical_region_t result =
       region_functor_args(
         runtime_, upper_bound_, point_, launch_domain_, args, size);
@@ -7933,7 +7933,7 @@ public:
     legion_domain_point_t point_ = CObjectWrapper::wrap(point);
     legion_domain_t launch_domain_ = CObjectWrapper::wrap(launch_domain);
 
-    assert(partition_functor);
+    assert(partition_functor_args);
     legion_logical_region_t result =
       partition_functor_args(
         runtime_, upper_bound_, point_, launch_domain_, args, size);
