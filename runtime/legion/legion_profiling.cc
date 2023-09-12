@@ -31,8 +31,7 @@ namespace Legion {
 
     // Keep a thread-local profiler instance so we can always
     // be thread safe no matter what Realm decides to do 
-    __thread LegionProfInstance *thread_local_profiling_instance = NULL;
-
+    thread_local LegionProfInstance *thread_local_profiling_instance = NULL;
 
     //--------------------------------------------------------------------------
     template<size_t ENTRIES>
