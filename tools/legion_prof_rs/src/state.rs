@@ -2015,13 +2015,7 @@ pub struct Copy {
 }
 
 impl Copy {
-    fn new(
-        base: Base,
-        time_range: TimeRange,
-        op_id: OpID,
-        size: u64,
-        fevent: EventID,
-    ) -> Self {
+    fn new(base: Base, time_range: TimeRange, op_id: OpID, size: u64, fevent: EventID) -> Self {
         Copy {
             base,
             fevent,
@@ -2481,15 +2475,9 @@ impl State {
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         assert_eq!(copies.contains_key(&fevent), false);
-        copies.entry(fevent).or_insert_with(|| {
-            Copy::new(
-                Base::new(alloc),
-                time_range,
-                op_id,
-                size,
-                fevent,
-            )
-        })
+        copies
+            .entry(fevent)
+            .or_insert_with(|| Copy::new(Base::new(alloc), time_range, op_id, size, fevent))
     }
 
     fn create_fill<'a>(
