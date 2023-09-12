@@ -8008,6 +8008,23 @@ legion_runtime_preregister_projection_functor(
   FunctorWrapper *functor =
     new FunctorWrapper(exclusive, true, depth,
                        region_functor, partition_functor,
+                       NULL, NULL,
+                       NULL, NULL);
+  Runtime::preregister_projection_functor(id, functor);
+}
+
+void
+legion_runtime_preregister_projection_functor_args(
+  legion_projection_id_t id,
+  bool exclusive,
+  unsigned depth,
+  legion_projection_functor_logical_region_args_t region_functor,
+  legion_projection_functor_logical_partition_args_t partition_functor)
+{
+  FunctorWrapper *functor =
+    new FunctorWrapper(exclusive, true, depth,
+                       NULL, NULL,
+                       region_functor, partition_functor,
                        NULL, NULL);
   Runtime::preregister_projection_functor(id, functor);
 }
@@ -8022,6 +8039,7 @@ legion_runtime_preregister_projection_functor_mappable(
 {
   FunctorWrapper *functor =
     new FunctorWrapper(exclusive, false, depth,
+                       NULL, NULL,
                        NULL, NULL,
                        region_functor, partition_functor);
   Runtime::preregister_projection_functor(id, functor);
@@ -8041,6 +8059,26 @@ legion_runtime_register_projection_functor(
   FunctorWrapper *functor =
     new FunctorWrapper(runtime, exclusive, true, depth,
                        region_functor, partition_functor,
+                       NULL, NULL,
+                       NULL, NULL);
+  runtime->register_projection_functor(id, functor);
+}
+
+void
+legion_runtime_register_projection_functor_args(
+  legion_runtime_t runtime_,
+  legion_projection_id_t id,
+  bool exclusive,
+  unsigned depth,
+  legion_projection_functor_logical_region_args_t region_functor,
+  legion_projection_functor_logical_partition_args_t partition_functor)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  FunctorWrapper *functor =
+    new FunctorWrapper(runtime, exclusive, true, depth,
+                       NULL, NULL,
+                       region_functor, partition_functor,
                        NULL, NULL);
   runtime->register_projection_functor(id, functor);
 }
@@ -8058,6 +8096,7 @@ legion_runtime_register_projection_functor_mappable(
 
   FunctorWrapper *functor =
     new FunctorWrapper(runtime, exclusive, false, depth,
+                       NULL, NULL,
                        NULL, NULL,
                        region_functor, partition_functor);
   runtime->register_projection_functor(id, functor);
