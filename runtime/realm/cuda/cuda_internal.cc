@@ -611,13 +611,14 @@ namespace Realm {
             // Either src or dst can't be accessed with a kernel, so just break out and perform a standard cuMemcpy
 
             AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
-            if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
-              break;
-            }
 
             if(needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
                                copy_info.dst.strides[0], copy_info.dst.strides[2])) {
               needs_transpose_copy = true;
+              break;
+            }
+
+            if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
               break;
             }
 
@@ -708,7 +709,7 @@ namespace Realm {
     // transpose copies, make this a default path and remove the
     // underlying implementation in the else branch.
 #ifdef ENABLE_2D_TRANSPOSE
-          if(!needs_transpose_copy) {
+          if (!needs_transpose_copy) {
 #endif
             // Split the 3D copy into 2D copies
             cuda_copy.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
