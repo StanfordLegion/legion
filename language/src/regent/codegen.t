@@ -2936,8 +2936,8 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   local value = codegen.expr(cx, index):read(cx)
 
   -- Closure, generate projection functor with args.
-  if proj_args_raw and free_vars_setup then
-    free_vars_setup:insert(as_quote(value.actions))
+  if proj_args_raw and free_vars and not free_vars:is_empty() then
+    assert(free_vars_setup)
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
     local base_type = std.as_read(util.get_base_indexed_node(expr).expr_type)
@@ -2975,6 +2975,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
                                   [point],
                                   launch : c.legion_domain_t)
       [symbol_setup];
+      [free_vars_setup or empty_quote];
       [value.actions];
       var index : index_type = [value.value];
       var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
@@ -3287,6 +3288,10 @@ local function expr_call_setup_list_of_regions_arg(
 end
 
 local function index_launch_free_var_setup(free_vars)
+  if free_vars:is_empty() then
+    return terralib.newlist(), nil, nil
+  end
+
   local free_vars_struct = terralib.types.newstruct()
   free_vars_struct.entries = terralib.newlist()
   for _, symbol in free_vars:keys() do
