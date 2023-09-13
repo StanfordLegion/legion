@@ -22546,7 +22546,7 @@ namespace Legion {
       {
         LocalLock *tree_lock = NULL;
         EqKDTree *tree = 
-         find_equivalence_set_kd_tree(req_index,IndexSpace::NO_SPACE,tree_lock);
+          find_equivalence_set_kd_tree(req_index, root_space, tree_lock);
         std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
         node->invalidate_shard_equivalence_set_kd_tree(tree, tree_lock,
             refinement_mask, applied_events, remote_shard_rects,
