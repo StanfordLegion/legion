@@ -16,6 +16,8 @@ use nom::{
     IResult,
 };
 
+use serde::Serialize;
+
 use crate::state::{
     EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID,
     NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
@@ -70,14 +72,14 @@ type MemKind = i32;
 type ProcKind = i32;
 type UniqueID = u64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Array(pub Vec<u64>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Point(pub Vec<u64>);
 
 #[rustfmt::skip]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Record {
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },

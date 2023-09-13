@@ -18,7 +18,7 @@ use legion_prof::backend::archiver;
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
 use legion_prof::backend::viewer;
-use legion_prof::backend::{analyze, trace_viewer, visualize};
+use legion_prof::backend::{analyze, dump, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
 use legion_prof::spy;
 use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
@@ -54,6 +54,9 @@ struct Cli {
 
     #[arg(long, hide = true, help = "emit JSON for Google Trace Viewer")]
     trace: bool,
+
+    #[arg(long, help = "dump parsed log files in a JSON format")]
+    dump: bool,
 
     #[arg(long, help = "start time in microseconds to trim the profile")]
     start_trim: Option<u64>,
@@ -230,6 +233,20 @@ fn main() -> io::Result<()> {
             )
         })
         .collect();
+    if cli.dump {
+        for record in records? {
+            match record {
+                Records::Prof(r) => {
+                    dump::dump_record(&r)?;
+                }
+                Records::Spy(r) => {
+                    dump::dump_spy_record(&r)?;
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let mut state = State::default();
     state.visible_nodes = node_list;
     let mut spy_state = SpyState::default();

@@ -9,6 +9,7 @@ pub mod common;
     feature = "viewer"
 ))]
 pub mod data_source;
+pub mod dump;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod trace_viewer;

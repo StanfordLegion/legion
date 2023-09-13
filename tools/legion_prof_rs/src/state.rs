@@ -9,6 +9,8 @@ use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
 
+use serde::Serialize;
+
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
@@ -198,7 +200,9 @@ macro_rules! conditional_assert {
     )
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+)]
 pub struct Timestamp(pub u64 /* ns */);
 
 impl Timestamp {
@@ -423,10 +427,10 @@ impl ContainerEntry for ProcEntry {
 
 pub type ProcPoint = TimePoint<ProfUID, u64>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct ProcID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct NodeID(pub u64);
 
 impl ProcID {
@@ -674,7 +678,7 @@ pub type MemEntry = Inst;
 
 pub type MemPoint = TimePoint<InstUID, u64>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
 
 impl MemID {
@@ -1161,7 +1165,7 @@ pub struct ISpaceSize {
     pub is_sparse: bool,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct ISpaceID(pub u64);
 
 #[derive(Debug)]
@@ -1232,7 +1236,7 @@ impl ISpace {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct IPartID(pub u64);
 
 #[derive(Debug)]
@@ -1276,7 +1280,7 @@ impl IPart {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FSpaceID(pub u64);
 
 #[derive(Debug)]
@@ -1302,7 +1306,7 @@ impl FSpace {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FieldID(pub u32);
 
 #[derive(Debug)]
@@ -1324,7 +1328,7 @@ impl Field {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TreeID(pub u32);
 
 #[derive(Debug)]
@@ -1414,10 +1418,10 @@ impl Align {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Dim(pub u32);
 
 #[derive(Debug)]
@@ -1606,7 +1610,7 @@ impl Color {
     pub const GRAY: Color = Color(0x808080);
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -1630,7 +1634,7 @@ impl MapperCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -1654,7 +1658,7 @@ impl RuntimeCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
@@ -1677,7 +1681,7 @@ impl TaskKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct VariantID(pub u32);
 
 #[derive(Debug)]
@@ -1835,7 +1839,7 @@ impl Waiters {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct OpID(pub u64);
 
 impl From<spy::serialize::UniqueID> for OpID {
@@ -1936,10 +1940,10 @@ impl Operation {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct EventID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstUID(pub u64);
 
 impl From<spy::serialize::EventID> for EventID {
