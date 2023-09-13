@@ -284,6 +284,13 @@ namespace Realm {
       }
     }
 
+    static bool needs_transpose(size_t in_lstride, size_t in_pstride, size_t out_lstride,
+                                size_t out_pstride)
+    {
+      return !((in_lstride < in_pstride && out_lstride < out_pstride) ||
+               (in_lstride > in_pstride && out_lstride > out_pstride));
+    }
+
     // Calculates the maximum alignment native type alignment the GPU supports that will
     // work with the given size.
     static size_t calculate_type_alignment(size_t v)
@@ -576,6 +583,7 @@ namespace Realm {
         size_t min_align = 16;  // Hope for the highest type alignment we can get, 16 bytes
         copy_infos.num_rects = 0;
         size_t bytes_left = std::min(flow_control_bytes - total_bytes, max_bytes);
+        bool needs_transpose_copy = false;
 
         if(cuda_copy.WidthInBytes != 0) {
           memset(&cuda_copy, 0, sizeof(cuda_copy));
@@ -602,16 +610,17 @@ namespace Realm {
             const size_t bytes_to_copy = populate_affine_copy_info(copy_infos, min_align, transpose_copy, in_alc, in_base, in_gpu, out_alc, out_base, out_gpu, bytes_left);
             // Either src or dst can't be accessed with a kernel, so just break out and perform a standard cuMemcpy
 
-            AffineCopyPair<3> copy_info =
-                copy_infos.subrects[copy_infos.num_rects - 1];
-            if ((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu) ||
-                copy_info.src.strides[2] == copy_info.dst.strides[0]) {
+            AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
+            if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
               break;
             }
-            if (transpose_copy.width > 0) {  // TODO: batch up the transposes
-              log_gpudma.info() << "\tFound a transpose copy (width=" << transpose_copy.width << ')';
+
+            if(needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
+                               copy_info.dst.strides[0], copy_info.dst.strides[2])) {
+              needs_transpose_copy = true;
               break;
             }
+
             log_gpudma.info() << "\tAdded " << bytes_to_copy
                               << " Bytes left= " << (bytes_left - bytes_to_copy);
             assert(bytes_to_copy <= bytes_left);
@@ -699,13 +708,8 @@ namespace Realm {
     // transpose copies, make this a default path and remove the
     // underlying implementation in the else branch.
 #ifdef ENABLE_2D_TRANSPOSE
-          if (((copy_info.src.strides[0] > copy_info.src.strides[2] &&
-                copy_info.dst.strides[0] > copy_info.dst.strides[2]) ||
-               (copy_info.src.strides[0] < copy_info.src.strides[2] &&
-                copy_info.dst.strides[0] < copy_info.dst.strides[2]))) {
+          if(!needs_transpose_copy) {
 #endif
-
-
             // Split the 3D copy into 2D copies
             cuda_copy.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
             cuda_copy.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
