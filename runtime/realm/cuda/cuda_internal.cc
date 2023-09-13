@@ -458,17 +458,14 @@ namespace Realm {
       const size_t planes =
           std::min(std::min(icount, ocount), (bytes_left / (contig_bytes * lines)));
       copy_info.dst.strides[0] = out_lstride;
-      copy_info.dst.strides[1] = out_pstride / out_lstride;
+      copy_info.dst.strides[1] = out_pstride;
 
       copy_info.extents[0] = contig_bytes;
       copy_info.extents[1] = lines;
       copy_info.extents[2] = planes;
 
       copy_info.src.strides[0] = in_lstride;
-      copy_info.src.strides[1] = in_pstride / in_lstride;
-
-      copy_info.src.strides[2] = in_pstride;
-      copy_info.dst.strides[2] = out_pstride;
+      copy_info.src.strides[1] = in_pstride;
 
       copy_info.volume = planes * lines * contig_bytes;
 
@@ -612,8 +609,8 @@ namespace Realm {
 
             AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
 
-            if(needs_transpose(copy_info.src.strides[0], copy_info.src.strides[2],
-                               copy_info.dst.strides[0], copy_info.dst.strides[2])) {
+            if(needs_transpose(copy_info.src.strides[0], copy_info.src.strides[1],
+                               copy_info.dst.strides[0], copy_info.dst.strides[1])) {
               needs_transpose_copy = true;
               break;
             }
@@ -689,9 +686,13 @@ namespace Realm {
           assert((in_gpu != NULL) && in_gpu->can_access_peer(out_gpu));
           // Adjust all the rectangles' sizes to account for the element size based on the calculated alignment
           for (size_t i = 0; (min_align > 1) && (i < copy_infos.num_rects); i++) {
+            copy_infos.subrects[i].dst.strides[1] /=
+                copy_infos.subrects[i].dst.strides[0];
+            copy_infos.subrects[i].src.strides[1] /=
+                copy_infos.subrects[i].src.strides[0];
             copy_infos.subrects[i].dst.strides[0] /= min_align;
-            copy_infos.subrects[i].extents[0]     /= min_align;
             copy_infos.subrects[i].src.strides[0] /= min_align;
+            copy_infos.subrects[i].extents[0]     /= min_align;
             copy_infos.subrects[i].volume /= min_align;
           }
           // TODO: add some heuristics here, like if some rectangles are very large, do a cuMemcpy
@@ -718,9 +719,9 @@ namespace Realm {
             cuda_copy.Height = copy_info.extents[1];
             cuda_copy.Depth = copy_info.extents[2];
             cuda_copy.srcPitch = copy_info.src.strides[0];
-            cuda_copy.srcHeight = copy_info.src.strides[1];
+            cuda_copy.srcHeight = copy_info.src.strides[1] / copy_info.src.strides[0];
             cuda_copy.dstPitch = copy_info.dst.strides[0];
-            cuda_copy.dstHeight = copy_info.dst.strides[1];
+            cuda_copy.dstHeight = copy_info.dst.strides[1] / copy_info.dst.strides[0];
 
             cuda_copy.dstDevice = copy_info.dst.addr;
             cuda_copy.srcDevice = copy_info.src.addr;
@@ -759,9 +760,9 @@ namespace Realm {
               }
 
               d2_copy_info.dstDevice =
-                  copy_info.dst.addr + act_planes * copy_info.dst.strides[2];
+                  copy_info.dst.addr + act_planes * copy_info.dst.strides[1];
               d2_copy_info.srcDevice =
-                  copy_info.src.addr + act_planes * copy_info.src.strides[2];
+                  copy_info.src.addr + act_planes * copy_info.src.strides[1];
 
               CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(
                   &d2_copy_info, stream->get_stream()));
