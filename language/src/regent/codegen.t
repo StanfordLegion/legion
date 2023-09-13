@@ -2932,9 +2932,6 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end
   end
 
-  -- Generate a projection functor that evaluates `expr`.
-  local value = codegen.expr(cx, index):read(cx)
-
   -- Closure, generate projection functor with args.
   if proj_args_raw and free_vars and not free_vars:is_empty() then
     assert(free_vars_setup)
@@ -2970,6 +2967,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- No closure, create projection functor without args.
   else
+    -- Note: partition value comes through functor arguments. Only need
+    -- codegen for index expression.
+    local value = codegen.expr(cx, index):read(cx)
+
     local terra partition_functor(runtime : c.legion_runtime_t,
                                   parent : c.legion_logical_partition_t,
                                   [point],
