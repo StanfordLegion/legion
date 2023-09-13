@@ -2195,7 +2195,7 @@ namespace Legion {
         ApEvent ready = escape_task_local_instance(deferred_result_instance);
         instance = new FutureInstance(res, res_size, ready, runtime,
             true/*eager*/, false/*external*/, true/*own alloc*/,
-            deferred_result_instance);
+            ready, deferred_result_instance);
       }
       else if (resource != NULL)
       {

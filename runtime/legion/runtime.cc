@@ -2756,18 +2756,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureInstance::FutureInstance(const void *d, size_t s, ApEvent r,
                               Runtime *rt, bool eager, bool external, bool own,
-                              PhysicalInstance inst, Processor p, RtEvent use,
-                              ApUserEvent remote_read)
+                              LgEvent unique, PhysicalInstance inst,
+                              Processor p, RtEvent use, ApUserEvent remote_read)
       : runtime(rt), size(s),
         memory(inst.exists() ? inst.get_location() : rt->runtime_system_memory),
-        ready_event(init_ready(r, rt, inst)), resource(inst.exists() ? NULL : 
+        ready_event(r), resource(inst.exists() ? NULL : 
             new Realm::ExternalMemoryResource(reinterpret_cast<uintptr_t>(d),
               s, false/*read only*/)), freefunc(inst.exists() || !p.exists() ? 
               NULL : free_host_memory), freeproc(p),
         eager_allocation(eager), external_allocation(external),
         is_meta_visible(check_meta_visible(rt, memory, !external || !own)),
         own_allocation(own), data(d), instance(inst), use_event(use),
-        own_instance(own && inst.exists())
+        unique_event(unique), own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2778,6 +2778,8 @@ namespace Legion {
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
       assert(instance.exists() || external_allocation);
       assert((data != NULL) || instance.exists());
+      assert(unique_event.exists() || !instance.exists() || 
+          (runtime->profiler == NULL));
 #endif
       if (remote_read.exists())
       {
@@ -2793,16 +2795,15 @@ namespace Legion {
                           Runtime *rt, bool own,
                           const Realm::ExternalInstanceResource *allocation,
                           void (*func)(const Realm::ExternalInstanceResource&),
-                          Processor proc, PhysicalInstance inst, RtEvent use,
-                          ApUserEvent remote_read)
+                          Processor proc, LgEvent unique, PhysicalInstance inst,
+                          RtEvent use, ApUserEvent remote_read)
       : runtime(rt), size(s), memory(inst.exists() ?
           inst.get_location() : allocation->suggested_memory()),
-        ready_event(init_ready(r, rt, inst)), resource(allocation), 
-        freefunc(func), freeproc(proc),
+        ready_event(r), resource(allocation), freefunc(func), freeproc(proc),
         eager_allocation(false), external_allocation(true),
         is_meta_visible(check_meta_visible(rt, memory, !own)), 
         own_allocation(own), data(d), instance(inst), use_event(use),
-        own_instance(own && inst.exists())
+        unique_event(unique), own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2814,6 +2815,8 @@ namespace Legion {
       assert(instance.exists() || external_allocation);
       assert((data != NULL) || instance.exists());
       assert((resource != NULL) || inst.exists());
+      assert(unique_event.exists() || !instance.exists() || 
+          (runtime->profiler == NULL));
 #endif
       if (remote_read.exists())
       {
@@ -2822,21 +2825,6 @@ namespace Legion {
         else
           remote_reads_done = remote_read;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ApEvent FutureInstance::init_ready(ApEvent ready,
-                                        Runtime *runtime, PhysicalInstance inst)
-    //--------------------------------------------------------------------------
-    {
-      if (ready.exists() || (runtime->profiler == NULL))
-        return ready;
-#ifdef DEBUG_LEGION
-      assert(!inst.exists());
-#endif
-      const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
-      Runtime::trigger_event(NULL, ready_event);
-      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2984,7 +2972,7 @@ namespace Legion {
         if (runtime->profiler != NULL)
         {
           SmallNameClosure<1> *closure = new SmallNameClosure<1>();
-          closure->record_instance_name(dst_inst, ready_event);
+          closure->record_instance_name(dst_inst, unique_event);
           runtime->profiler->add_fill_request(requests, closure, op);
         }
         const Point<1,coord_t> zero(0);
@@ -3042,8 +3030,8 @@ namespace Legion {
         if (runtime->profiler != NULL)
         {
           SmallNameClosure<2> *closure = new SmallNameClosure<2>();
-          closure->record_instance_name(src_inst, source->ready_event);
-          closure->record_instance_name(dst_inst, ready_event);
+          closure->record_instance_name(src_inst, source->unique_event);
+          closure->record_instance_name(dst_inst, unique_event);
           runtime->profiler->add_copy_request(requests, closure, op);
         }
         const Point<1,coord_t> zero(0);
@@ -3118,8 +3106,8 @@ namespace Legion {
         if (runtime->profiler != NULL)
         {
           SmallNameClosure<2> *closure = new SmallNameClosure<2>();
-          closure->record_instance_name(src_inst, source->ready_event);
-          closure->record_instance_name(dst_inst, ready_event);
+          closure->record_instance_name(src_inst, source->unique_event);
+          closure->record_instance_name(dst_inst, unique_event);
           runtime->profiler->add_copy_request(requests, closure, op);
         }
         const Point<1,coord_t> zero(0);
@@ -3269,12 +3257,6 @@ namespace Legion {
         if (alt_resource == NULL)
         {
           const PhysicalInstance inst = get_instance(size, own_inst); 
-          // Need to make sure the instance is valid before we use it
-          if (use_event.exists() && !use_event.has_triggered())
-          {
-            use_event.wait();
-            use_event = RtEvent::NO_RT_EVENT;
-          }
           alt_resource =
             inst.generate_resource_info(rect_space,0/*fid*/,false/*read only*/);
 #ifdef DEBUG_LEGION
@@ -3296,7 +3278,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_inst_request(requests, 
-                      implicit_provenance, ready_event);
+                      implicit_provenance, unique_event);
         PhysicalInstance result;
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
              result, external_allocation ? alt_resource->suggested_memory() :
@@ -3314,6 +3296,7 @@ namespace Legion {
         assert(!own_instance);
         assert(external_allocation);
         assert(resource != NULL);
+        assert(!unique_event.exists());
 #endif
         RtEvent wait_on;
         // Make our instance and see if we lost the race
@@ -3329,8 +3312,18 @@ namespace Legion {
               rect_space, constraints, dim_order);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
-          runtime->profiler->add_inst_request(requests, 
-                      implicit_provenance, ready_event);
+        {
+          // Need to try to find a unique event
+          unique_event = ready_event;
+          if (!unique_event.exists())
+          {
+            RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            unique_event = unique;
+          }
+          runtime->profiler->add_inst_request(requests,
+                      implicit_provenance, unique_event);
+        }
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
         use_event = RtEvent(PhysicalInstance::create_external_instance(instance,
@@ -3380,6 +3373,7 @@ namespace Legion {
         rez.serialize(data.load());
         bool dummy_owner = true;
         rez.serialize(get_instance(size, dummy_owner));
+        rez.serialize(unique_event);
 #ifdef DEBUG_LEGION
         // should never end up owning this instance
         assert(!dummy_owner);
@@ -3447,6 +3441,8 @@ namespace Legion {
       derez.deserialize(data);
       PhysicalInstance instance;
       derez.deserialize(instance);
+      LgEvent unique_event;
+      derez.deserialize(unique_event);
       RtEvent use_event;
       if (instance.exists())
         use_event = RtEvent(instance.fetch_metadata(
@@ -3465,14 +3461,15 @@ namespace Legion {
         Processor proc;
         derez.deserialize(proc);
         return new FutureInstance(data, size, ready, runtime, own_allocation,
-           NULL/*resource*/, freefunc, proc, instance, use_event, remote_reads);
+            NULL/*resource*/, freefunc, proc, unique_event, instance, 
+            use_event, remote_reads);
       }
       else
       {
         bool eager_alloc;
         derez.deserialize<bool>(eager_alloc);
-        return new FutureInstance(data, size, ready, runtime,
-                    eager_alloc, false/*external*/, own_allocation,
+        return new FutureInstance(data, size, ready, runtime, eager_alloc,
+                    false/*external*/, own_allocation, unique_event,
                     instance, Processor::NO_PROC, use_event, remote_reads);
       }
     }
@@ -10519,17 +10516,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       RtEvent use_event;
+      LgEvent unique_event = ready_event;
       PhysicalInstance instance = PhysicalInstance::NO_INST;
       if ((runtime->legion_spy_enabled || (runtime->profiler != NULL)) &&
-          !ready_event.exists())
+          !unique_event.exists())
       {
-        ApUserEvent ready = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, ready);
-        ready_event = ready;
+        RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
       }
       if (eager)
       {
-        use_event = create_eager_instance(instance, ready_event, ilg);
+        use_event = create_eager_instance(instance, unique_event, ilg);
         if (!instance.exists())
         {
           if (op != NULL)
@@ -10590,7 +10588,7 @@ namespace Legion {
             Realm::ProfilingMeasurements::InstanceAllocResult>(); 
           if (runtime->profiler != NULL)
             runtime->profiler->add_inst_request(requests, 
-                                                creator_uid, ready_event);
+                                                creator_uid, unique_event);
           use_event = RtEvent(PhysicalInstance::create_instance(instance,
                     memory, ilg->clone(), requests, alloc_precondition));
           if (allocator.succeeded())
@@ -10657,8 +10655,8 @@ namespace Legion {
         }
       }
       return new FutureInstance(NULL/*data*/, size, ready_event, runtime,
-              eager, false/*external*/, true/*own allocation*/, instance,
-              Processor::NO_PROC, use_event);
+              eager, false/*external*/, true/*own allocation*/, unique_event,
+              instance, Processor::NO_PROC, use_event);
     }
 
     //--------------------------------------------------------------------------

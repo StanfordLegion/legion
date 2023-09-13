@@ -545,6 +545,7 @@ namespace Legion {
       FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool eager, 
                      bool external, bool own_allocation = true,
+                     LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      Processor free_proc = Processor::NO_PROC,
                      RtEvent use_event = RtEvent::NO_RT_EVENT,
@@ -555,6 +556,7 @@ namespace Legion {
                      void (*freefunc)(
                        const Realm::ExternalInstanceResource&) = NULL,
                      Processor free_proc = Processor::NO_PROC,
+                     LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      RtEvent use_event = RtEvent::NO_RT_EVENT,
                      ApUserEvent remote_read = ApUserEvent::NO_AP_USER_EVENT);
@@ -590,7 +592,6 @@ namespace Legion {
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
-      static ApEvent init_ready(ApEvent r, Runtime *rt, PhysicalInstance inst);
       static bool check_meta_visible(Runtime *runtime, Memory memory,
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
@@ -618,6 +619,8 @@ namespace Legion {
       PhysicalInstance instance;
       // Event for when it is safe to use the instance
       RtEvent use_event;
+      // Unique event to identiy the instance for profiling
+      LgEvent unique_event;
       // Events for operations reading from this instance
       std::vector<ApEvent> read_events;
       // If we don't own our instance then we have an event to trigger
