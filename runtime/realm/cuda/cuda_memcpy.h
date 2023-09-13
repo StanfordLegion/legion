@@ -39,9 +39,6 @@ namespace Realm {
     struct alignas(AffineSubRect<N, Offset_t>) AffineCopyPair {
       AffineSubRect<N, Offset_t> src;
       AffineSubRect<N, Offset_t> dst;
-
-      Offset_t in_pstride;
-      Offset_t out_pstride;
       // Extent of the ND sub-rect
       Offset_t extents[N];
       // Product of the extents for fast lookup, which is the same across
