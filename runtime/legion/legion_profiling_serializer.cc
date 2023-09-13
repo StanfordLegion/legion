@@ -77,7 +77,8 @@ namespace Legion {
       ss << "ProcDesc {" 
          << "id:" << PROC_DESC_ID                 << delim
          << "proc_id:ProcID:" << sizeof(ProcID)   << delim
-         << "kind:ProcKind:"  << sizeof(ProcKind)
+         << "kind:ProcKind:"  << sizeof(ProcKind) << delim
+         << "cuda_device_info:CudaDeviceInfo:"  << sizeof(Realm::Cuda::CudaDeviceInfo)
          << "}" << std::endl;
 
       ss << "MaxDimDesc {"
@@ -86,9 +87,17 @@ namespace Legion {
          << "}" << std::endl;
 
       ss << "MachineDesc {"
-         << "id:" << MACHINE_DESC_ID                 << delim
-         << "node_id:unsigned:" << sizeof(unsigned)  << delim
-         << "num_nodes:unsigned:" << sizeof(unsigned)
+         << "id:" << MACHINE_DESC_ID                  << delim
+         << "node_id:unsigned:" << sizeof(unsigned)   << delim
+         << "num_nodes:unsigned:" << sizeof(unsigned) << delim
+         << "hostname:string:" << "-1"                << delim
+         << "hostid::uint64_t" << sizeof(uint64_t)    << delim
+         << "processid::uint32_t" << sizeof(uint32_t)
+         << "}" << std::endl;
+
+      ss << "CalibrationErr {"
+         << "id:" << CALIBRATION_ERR_ID                << delim
+         << "calibration_err:long long:" << sizeof(long long)
          << "}" << std::endl;
 
       ss << "ZeroTime {"
@@ -512,6 +521,24 @@ namespace Legion {
 		sizeof(machine_desc.node_id));
       lp_fwrite(f, (char*)&(machine_desc.num_nodes),
 		sizeof(machine_desc.num_nodes));
+      lp_fwrite(f, (char*)&(machine_desc.process_info.hostname),
+                sizeof(machine_desc.process_info.hostname));
+      lp_fwrite(f, (char*)&(machine_desc.process_info.hostid),
+                sizeof(machine_desc.process_info.hostid));
+      lp_fwrite(f, (char*)&(machine_desc.process_info.processid),
+                sizeof(machine_desc.process_info.processid));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                      const LegionProfDesc::CalibrationErr
+				      &calibration_err)
+    //--------------------------------------------------------------------------
+    {
+      int ID = CALIBRATION_ERR_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(calibration_err.calibration_err),
+		sizeof(calibration_err.calibration_err));
     }
 
     //--------------------------------------------------------------------------
@@ -1104,6 +1131,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
+      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info),    sizeof(proc_desc.cuda_device_info));
     }
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -1610,8 +1638,19 @@ namespace Legion {
 				      &machine_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Machine Desc %d %d",
-                     machine_desc.node_id, machine_desc.num_nodes);
+      log_prof.print("Machine Desc %d %d %s %ld %d",
+                     machine_desc.node_id, machine_desc.num_nodes,
+                     machine_desc.process_info.hostname, machine_desc.process_info.hostid,
+                     machine_desc.process_info.processid);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                      const LegionProfDesc::CalibrationErr
+				      &calibration_err)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Calibration Err %lld", calibration_err.calibration_err);
     }
 
     //--------------------------------------------------------------------------
@@ -1891,6 +1930,12 @@ namespace Legion {
     {
       log_prof.print("Prof Proc Desc " IDFMT " %d",
                      proc_desc.proc_id, proc_desc.kind);
+#ifdef LEGION_USE_CUDA
+      log_prof.print("Prof Proc Desc %s %s %d %d",
+                    (char *)proc_desc.cuda_device_info.uuid, proc_desc.cuda_device_info.name,
+                    proc_desc.cuda_device_info.driver_version,
+                    proc_desc.cuda_device_info.compute_capability);
+#endif
     }
 
     //--------------------------------------------------------------------------
