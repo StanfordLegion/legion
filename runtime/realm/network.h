@@ -55,6 +55,10 @@ namespace Realm {
     extern NodeID my_node_id;
     extern NodeID max_node_id;
     extern NodeSet all_peers;
+    // all peers that can access shared memory from this node
+    // NOTE: This is an over-estimation.  Users should be robust to the fact that this may
+    //       include peers that are not able to access shared memory.
+    extern NodeSet shared_peers;
 
     // in most cases, there will be a single network module - if so, we set
     //  this so we don't have to do a per-node lookup
