@@ -3557,9 +3557,8 @@ namespace Realm {
       config_map.insert({"fbmem", &cfg_fb_mem_size});
       config_map.insert({"ib_fbmem", &cfg_fb_ib_size});
       config_map.insert({"ib_zcmem", &cfg_zc_ib_size});
-      config_map.insert({"uvmem", &cfg_uvm_mem_size});
-      config_map.insert({"use_fynfbmem", &cfg_use_dynamic_fb});
-      config_map.insert({"dynfbmem_max", &cfg_dynfb_max_size});
+      config_map.insert({"use_dynamic_fb", &cfg_use_dynamic_fb});
+      config_map.insert({"dynfb_max_size", &cfg_dynfb_max_size});
       config_map.insert({"task_streams", &cfg_task_streams});
       config_map.insert({"d2d_streams", &cfg_d2d_streams});
       res_fbmem_sizes.push_back(0);
@@ -3901,7 +3900,7 @@ namespace Realm {
         }
         // if num_gpus was specified, they should match
         if(config->cfg_num_gpus > 0) {
-          if(config->cfg_num_gpus != fixed_indices.size()) {
+          if(config->cfg_num_gpus != static_cast<int>(fixed_indices.size())) {
             log_gpu.fatal() << "mismatch between '-ll:gpu' and '-ll:gpu_ids'";
             abort();
           }
@@ -3917,7 +3916,7 @@ namespace Realm {
       unsigned gpu_count = 0;
       // try to get cfg_num_gpus, working through the list in order
       for(size_t i = config->cfg_skip_gpu_count;
-          (i < gpu_info.size()) && (gpu_count < config->cfg_num_gpus);
+          (i < gpu_info.size()) && (static_cast<int>(gpu_count) < config->cfg_num_gpus);
           i++) {
         int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
 
@@ -3985,7 +3984,7 @@ namespace Realm {
       }
       
       // did we actually get the requested number of GPUs?
-      if(gpu_count < config->cfg_num_gpus) {
+      if(static_cast<int>(gpu_count) < config->cfg_num_gpus) {
 	      log_gpu.fatal() << config->cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
 	      assert(false);
       }

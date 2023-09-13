@@ -16,6 +16,8 @@ use nom::{
     IResult,
 };
 
+use serde::Serialize;
+
 use crate::state::{
     EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID,
     NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
@@ -70,14 +72,14 @@ type MemKind = i32;
 type ProcKind = i32;
 type UniqueID = u64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Array(pub Vec<u64>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Point(pub Vec<u64>);
 
 #[rustfmt::skip]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Record {
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
@@ -113,7 +115,7 @@ pub enum Record {
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
-    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, request_type: u32, fevent: EventID },
+    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, collective: u32 },
     CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_hops: u32, indirect: bool },
     FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID },
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
@@ -742,8 +744,8 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, request_type) = le_u32(input)?;
     let (input, fevent) = parse_event_id(input)?;
+    let (input, collective) = le_u32(input)?;
     Ok((
         input,
         Record::CopyInfo {
@@ -753,8 +755,8 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             ready,
             start,
             stop,
-            request_type,
             fevent,
+            collective,
         },
     ))
 }

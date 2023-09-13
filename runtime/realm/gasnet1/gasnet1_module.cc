@@ -605,6 +605,8 @@ namespace Realm {
     Network::max_node_id = gasnet_nodes() - 1;
     Network::all_peers.add_range(0, gasnet_nodes() - 1);
     Network::all_peers.remove(gasnet_mynode());
+    // TODO: do an all gather on the hostname to discover the shared peers.
+    Network::shared_peers = Network::all_peers;
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];

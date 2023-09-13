@@ -25,6 +25,7 @@
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
 #include "realm/threads.h"
 #include "realm/runtime_impl.h"
 #include "realm/utils.h"

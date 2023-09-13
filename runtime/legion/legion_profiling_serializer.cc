@@ -329,8 +329,8 @@ namespace Legion {
          << "ready:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "start:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"        << sizeof(timestamp_t)        << delim
-         << "request_type:unsigned:"   << sizeof(unsigned)           << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent)
+         << "fevent:unsigned long long:" << sizeof(LgEvent)          << delim
+         << "collective:unsigned:"     << sizeof(CollectiveKind)
 #ifdef LEGION_PROF_PROVENANCE
          << delim
          << "provenance:"              << sizeof(LgEvent)
@@ -922,8 +922,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&(copy_info.ready),  sizeof(copy_info.ready));
       lp_fwrite(f, (char*)&(copy_info.start),  sizeof(copy_info.start));
       lp_fwrite(f, (char*)&(copy_info.stop),   sizeof(copy_info.stop));
-      lp_fwrite(f, (char*)&(copy_info.request_type), sizeof(copy_info.request_type));
       lp_fwrite(f, (char*)&(copy_info.fevent),sizeof(copy_info.fevent.id));
+      lp_fwrite(f, (char*)&(copy_info.collective),sizeof(copy_info.collective));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(copy_info.provenance),sizeof(copy_info.provenance));
 #endif
@@ -1739,16 +1739,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu %u " IDFMT " " 
+      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu " IDFMT " %u "
                      IDFMT, copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.request_type, copy_info.fevent.id,
+                     copy_info.fevent.id, copy_info.collective,
                      copy_info.provenance.id);
 #else
       log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu %u " IDFMT,
                      copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.request_type, copy_info.fevent.id);
+                     copy_info.collective, copy_info.fevent.id);
 #endif
       for (std::vector<LegionProfInstance::CopyInstInfo>::const_iterator it =
            copy_info.inst_infos.begin(); it != copy_info.inst_infos.end(); it++)
