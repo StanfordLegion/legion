@@ -96,7 +96,7 @@ namespace Realm {
       fd = shm_open(path.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     } else {
       // Create anonymous shared memory
-#if 0 && defined(REALM_HAS_MEMFD)
+#if defined(REALM_HAS_MEMFD)
       fd = memfd_create("", MFD_CLOEXEC);
 #else
       // There's no real portable way across *nixes to share anonymous memory by fd
