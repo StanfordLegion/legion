@@ -1405,6 +1405,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent ReplIndexTask::pre_launch_collective_kernel(size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_send;
+      {
+        AutoLock o_lock(op_lock);
+        if (!collective_kernel_precondition.exists())
+          collective_kernel_precondition = Runtime::create_rt_user_event();
+        pre_launch_collective_kernel_arrivals += points;
+#ifdef DEBUG_LEGION
+        assert(pre_launch_collective_kernel_arrivals <= total_points);
+#endif
+        if (pre_launch_collective_kernel_arrivals < total_points)
+          return collective_kernel_precondition;
+        to_send = collective_kernel_precondition;
+        // Reset for the next iteration
+        collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
+        pre_launch_collective_kernel_arrivals = 0;
+      }
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Send it off to the shard manager
+      repl_ctx->shard_manager->pre_launch_collective_kernel(context_index,
+          to_send, sharding_function, launch_space, sharding_space);
+      return to_send;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::post_launch_collective_kernel(size_t points)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock o_lock(op_lock);
+        post_launch_collective_kernel_arrivals += points;
+#ifdef DEBUG_LEGION
+        assert(post_launch_collective_kernel_arrivals <= total_points);
+#endif
+        if (post_launch_collective_kernel_arrivals < total_points)
+          return;
+        // Reset for the next iteration
+        post_launch_collective_kernel_arrivals = 0;
+      }
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Send the message off to the shard manager
+      repl_ctx->shard_manager->post_launch_collective_kernel(context_index);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
@@ -10689,6 +10746,166 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::pre_launch_collective_kernel(size_t ctx_index,
+                                                    RtUserEvent to_trigger,
+                                                    ShardingFunction *sharding,
+                                                    IndexSpaceNode *full_space,
+                                                    IndexSpace sharding_space)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock m_lock(manager_lock);
+        CollectiveKernelLaunch &launch = collective_kernel_launches[ctx_index];
+        if (!launch.collective_kernel_precondition.exists())
+        {
+          launch.collective_kernel_precondition = to_trigger;
+#ifdef DEBUG_LEGION
+          assert(launch.collective_kernel_arrivals == 0);
+#endif
+          // Count how many expected arrivals we have from our local shards
+          // plus any shards from address spaces above us in the collective tree
+          // We have to compute this because not all shards might end up having
+          // points mapped to that shard from the collective index space task
+          // so we can't just assume we'll get arrivals from all shards
+          for (std::vector<ShardTask*>::const_iterator it =
+                local_shards.begin(); it != local_shards.end(); it++)
+            if (sharding->has_participants((*it)->shard_id, full_space, 
+                                            sharding_space))
+              launch.collective_kernel_arrivals++;
+          if (collective_mapping != NULL)
+          {
+            std::vector<AddressSpaceID> children;
+            collective_mapping->get_children(owner_space, local_space,children);
+            if (!children.empty())
+            {
+              for (std::vector<AddressSpaceID>::const_iterator it =
+                    children.begin(); it != children.end(); it++)
+                if (!has_empty_shard_subtree(*it, sharding, full_space, 
+                                              sharding_space))
+                  launch.collective_kernel_arrivals++;
+            }
+          }
+          launch.remaining_pre_launch_arrivals = 
+            launch.collective_kernel_arrivals;
+        }
+        else
+          Runtime::trigger_event(to_trigger,
+              launch.collective_kernel_precondition);
+#ifdef DEBUG_LEGION
+        assert(launch.remaining_pre_launch_arrivals > 0);
+#endif
+        if (--launch.remaining_pre_launch_arrivals == 0)
+        {
+          // Last arrivals so now we can pass this on down the tree
+          to_trigger = launch.collective_kernel_precondition; 
+          launch.collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
+          // Switch over to doing the post arrivals for this task
+          launch.remaining_post_launch_arrivals = 
+            launch.collective_kernel_arrivals;
+          launch.collective_kernel_arrivals = 0;
+        }
+        else
+          to_trigger = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      if (to_trigger.exists())
+      {
+        if (!is_owner())
+        {
+#ifdef DEBUG_LEGION
+          assert(collective_mapping != NULL);
+#endif
+          const AddressSpaceID parent = 
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(ctx_index);
+            rez.serialize(to_trigger);
+            rez.serialize(sharding->sharding_id);
+            rez.serialize(full_space->handle);
+            rez.serialize(sharding_space);
+          }
+          runtime->send_control_replicate_collective_kernel_launch(parent, rez);
+        }
+        else // Send the message off to the global queue
+          runtime->pre_launch_collective_kernel(to_trigger);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardManager::has_empty_shard_subtree(AddressSpaceID space,
+                                               ShardingFunction *sharding,
+                                               IndexSpaceNode *full_space,
+                                               IndexSpace sharding_space)
+    //--------------------------------------------------------------------------
+    {
+      // First check to see if any shards with the space are non-empty
+      const ShardMapping &mapping = *address_spaces;
+      for (ShardID shard = 0; shard < total_shards; shard++)
+      {
+        if (mapping[shard] != space)
+          continue;
+        if (sharding->has_participants(shard, full_space, sharding_space))
+          return false;
+      }
+      // Check any children of this space
+      if (collective_mapping != NULL)
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          if (!has_empty_shard_subtree(*it, sharding,full_space,sharding_space))
+            return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::post_launch_collective_kernel(size_t ctx_index)
+    //--------------------------------------------------------------------------
+    {
+      bool send_notification = false;
+      {
+        AutoLock m_lock(manager_lock);
+        std::map<size_t,CollectiveKernelLaunch>::iterator finder =
+          collective_kernel_launches.find(ctx_index);
+#ifdef DEBUG_LEGION
+        assert(finder != collective_kernel_launches.end());
+        assert(finder->second.remaining_post_launch_arrivals > 0);
+#endif
+        if (--finder->second.remaining_post_launch_arrivals == 0)
+        {
+          send_notification = true;
+          if (finder->second.collective_kernel_arrivals == 0)
+            collective_kernel_launches.erase(finder);
+        }
+      }
+      if (send_notification)
+      {
+        if (!is_owner())
+        {
+#ifdef DEBUG_LEGION
+          assert(collective_mapping != NULL);
+#endif
+          const AddressSpaceID parent = 
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(ctx_index);
+            rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+          }
+          runtime->send_control_replicate_collective_kernel_launch(parent, rez);
+        }
+        else // Send the message off to the global queue
+          runtime->post_launch_collective_kernel();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::broadcast_message(ShardTask *source, Serializer &rez,
                    BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -11273,6 +11490,35 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_find_or_create_collective_view(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_collective_kernel_launch(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      size_t ctx_index;
+      derez.deserialize(ctx_index);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      if (to_trigger.exists())
+      {
+        ShardingID sid;
+        derez.deserialize(sid);
+        ShardingFunction *sharding = manager->find_sharding_function(sid);
+        IndexSpace handle, sharding_space;
+        derez.deserialize(handle);
+        derez.deserialize(sharding_space);
+        IndexSpaceNode *full_space = runtime->forest->get_node(handle);
+        manager->pre_launch_collective_kernel(ctx_index, to_trigger, sharding,
+                                              full_space, sharding_space);
+      }
+      else
+        manager->post_launch_collective_kernel(ctx_index);
     }
 
     //--------------------------------------------------------------------------

@@ -8686,6 +8686,28 @@ namespace Legion {
        * this processor.
        */
       void yield(Context ctx);
+
+      /**
+       * Launching collective kernels on a GPU is currently an unsafe thing
+       * to do (see this section of the CUDA programming guide:
+       * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
+       * "for example, inter-kernel communication is undefined") which means
+       * that technically using collective kernel libraries such as NCCL is
+       * illegal in CUDA programs. To help make this safer, we provide these two 
+       * methods for users to use which should make using collective kernel 
+       * libraries such as NCCL safer. These methods can only be used inside of 
+       * concurrent index space task launches. Calling them in any other tasks
+       * will result in an error. It is the user's responsibility to make sure
+       * that these calls are matched (one before the collective kernel launch
+       * and one after the collective kernel launch). Furthermore, it is the 
+       * user's responsibility to make sure that the kernel has actually been
+       * issued to GPU driver (be very careful with non-blocking communicators).
+       * The pre-method will incur a wait with latency O(log N) in the number 
+       * of tasks N to ensure that it is safe to issue the collective kernel,
+       * while the post-method will execute asynchronously in the background.
+       */
+      void pre_launch_collective_kernel(Context ctx);
+      void post_launch_collective_kernel(Context ctx);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 

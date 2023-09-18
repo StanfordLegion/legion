@@ -815,6 +815,8 @@ namespace Legion {
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
+      SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL,
+      SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_DOWNGRADE_REQUEST,
       DISTRIBUTED_DOWNGRADE_RESPONSE,
@@ -898,6 +900,7 @@ namespace Legion {
       SEND_REPL_IMPLICIT_REQUEST,
       SEND_REPL_IMPLICIT_RESPONSE,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
+      SEND_REPL_COLLECTIVE_KERNEL_LAUNCH,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -1003,6 +1006,8 @@ namespace Legion {
       SEND_REMOTE_DISTRIBUTED_ID_RESPONSE,
       SEND_CONCURRENT_RESERVATION_CREATION,
       SEND_CONCURRENT_EXECUTION_ANALYSIS,
+      SEND_PRE_LAUNCH_COLLECTIVE_KERNEL,
+      SEND_POST_LAUNCH_COLLECTIVE_KERNEL,
       SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE,
       SEND_CONTROL_REPLICATION_FUTURE_BROADCAST,
       SEND_CONTROL_REPLICATION_FUTURE_REDUCTION,
@@ -1119,6 +1124,8 @@ namespace Legion {
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
+        "Slice Remote Pre Launch Collective Kernel",                  \
+        "Slice Remote Post Launch Collective Kernel",                 \
         "Distributed Remote Registration",                            \
         "Distributed Downgrade Request",                              \
         "Distributed Downgrade Response",                             \
@@ -1202,6 +1209,7 @@ namespace Legion {
         "Send Replicate Implicit Request",                            \
         "Send Replicate Implicit Response",                           \
         "Send Replicate Find or Create Collective View",              \
+        "Send Replicate Collective Kernel Launch",                    \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1307,6 +1315,8 @@ namespace Legion {
         "Send Remote Distributed ID Response",                        \
         "Send Concurrent Reservation Creation",                       \
         "Send Concurrent Execution Analysis",                         \
+        "Send Pre Launch Collective Kernel",                          \
+        "Send Post Launch Collective Kernel",                         \
         "Control Replication Collective Future All-Reduce",           \
         "Control Replication Collective Future Broadcast",            \
         "Control Replication Collective Future Reduction",            \

@@ -5174,6 +5174,9 @@ namespace Legion {
       first_mapping = true;
       concurrent_precondition = RtEvent::NO_RT_EVENT;
       concurrent_verified = RtUserEvent::NO_RT_USER_EVENT;
+      collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
+      pre_launch_collective_kernel_arrivals = 0;
+      post_launch_collective_kernel_arrivals = 0;
       children_complete_invoked = false;
       children_commit_invoked = false;
       predicate_false_result = NULL;
@@ -6572,6 +6575,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::pre_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      // No-op
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::post_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      // No-op
+    }
+
+    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -7509,6 +7526,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::pre_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      // Check that this is a concurrent index space task launch
+      if (!concurrent_fence_event.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_COLLECTIVE_KERNEL_LAUNCH,
+            "Illegal collective kernel launch in task %s (UID %lld) which is "
+            "not part of a concurrent index space task. Collective kernel "
+            "launches are only permitted in concurrent index space tasks.",
+            get_task_name(), get_unique_id())
+      const RtEvent wait_on = slice_owner->pre_launch_collective_kernel();
+      wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::post_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      // Check that this is a concurrent index space task launch
+      if (!concurrent_fence_event.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_COLLECTIVE_KERNEL_LAUNCH,
+            "Illegal collective kernel launch in task %s (UID %lld) which is "
+            "not part of a concurrent index space task. Collective kernel "
+            "launches are only permitted in concurrent index space tasks.",
+            get_task_name(), get_unique_id())
+      slice_owner->post_launch_collective_kernel();
+    }
+
+    //--------------------------------------------------------------------------
     const DomainPoint& PointTask::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
@@ -8059,6 +8105,28 @@ namespace Legion {
     {
       // TODO: figure out how misspeculation works with control replication
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::pre_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_COLLECTIVE_KERNEL_LAUNCH,
+          "Illegal collective kernel launch performed in replicated task %s "
+          "(UID %lld). Collective kernel launches are not permitted in "
+          "replicated tasks. They can only be performed in concurrent index "
+          "space tasks.", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::post_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_COLLECTIVE_KERNEL_LAUNCH,
+          "Illegal collective kernel launch performed in replicated task %s "
+          "(UID %lld). Collective kernel launches are not permitted in "
+          "replicated tasks. They can only be performed in concurrent index "
+          "space tasks.", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -10318,6 +10386,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent IndexTask::pre_launch_collective_kernel(size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_send;
+      {
+        AutoLock o_lock(op_lock);
+        if (!collective_kernel_precondition.exists())
+          collective_kernel_precondition = Runtime::create_rt_user_event();
+        pre_launch_collective_kernel_arrivals += points;
+#ifdef DEBUG_LEGION
+        assert(pre_launch_collective_kernel_arrivals <= total_points);
+#endif
+        if (pre_launch_collective_kernel_arrivals < total_points)
+          return collective_kernel_precondition;
+        to_send = collective_kernel_precondition;
+        // Reset for the next iteration
+        collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
+        pre_launch_collective_kernel_arrivals = 0;
+      }
+      // Send the message off to the global queue
+      runtime->pre_launch_collective_kernel(to_send);
+      return to_send;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::post_launch_collective_kernel(size_t points)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock o_lock(op_lock);
+        post_launch_collective_kernel_arrivals += points;
+#ifdef DEBUG_LEGION
+        assert(post_launch_collective_kernel_arrivals <= total_points);
+#endif
+        if (post_launch_collective_kernel_arrivals < total_points)
+          return;
+        // Reset for the next iteration
+        post_launch_collective_kernel_arrivals = 0;
+      }
+      // Send the message off to the global queue
+      runtime->post_launch_collective_kernel();
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::return_slice_commit(unsigned points, 
                                         RtEvent commit_precondition)
     //--------------------------------------------------------------------------
@@ -11939,6 +12051,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent SliceTask::pre_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_send;
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+        if (!collective_kernel_precondition.exists())
+          collective_kernel_precondition = Runtime::create_rt_user_event();
+#ifdef DEBUG_LEGION
+        assert(pre_launch_collective_kernel_arrivals < points.size());
+#endif
+        if ((++pre_launch_collective_kernel_arrivals) < points.size())
+          return collective_kernel_precondition;
+        to_send = collective_kernel_precondition;
+        // Reset for the next iteration
+        collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
+        pre_launch_collective_kernel_arrivals = 0;
+      }
+      else
+        return index_owner->pre_launch_collective_kernel(1/*count*/);
+      // Send it off to the owner
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        rez.serialize<size_t>(points.size());
+        rez.serialize(to_send);
+      }
+      runtime->send_slice_pre_launch_collective_kernel(orig_proc, rez);
+      return to_send;
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::post_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(post_launch_collective_kernel_arrivals < points.size());
+#endif
+        if ((++post_launch_collective_kernel_arrivals) < points.size())
+          return;
+        // Reset for the next iteration
+        post_launch_collective_kernel_arrivals = 0;
+      }
+      else
+      {
+        index_owner->post_launch_collective_kernel(1/*count*/);
+        return;
+      }
+      // Send it to the owner
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        rez.serialize<size_t>(points.size());
+      }
+      runtime->send_slice_post_launch_collective_kernel(orig_proc, rez);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void SliceTask::handle_verify_concurrent_execution(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -11960,6 +12136,35 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
       Runtime::trigger_event(done, verified);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_pre_launch_collective_kernel(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *owner;
+      derez.deserialize(owner);
+      size_t points;
+      derez.deserialize(points);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      Runtime::trigger_event(to_trigger, 
+          owner->pre_launch_collective_kernel(points)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_post_launch_collective_kernel(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *owner;
+      derez.deserialize(owner);
+      size_t points;
+      derez.deserialize(points);
+      owner->post_launch_collective_kernel(points);
     }
 
     //--------------------------------------------------------------------------

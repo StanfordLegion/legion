@@ -2463,6 +2463,8 @@ namespace Legion {
           IndexSpace sharding_space, Provenance *provenance);
       bool find_shard_participants(IndexSpaceNode *full_space,
           IndexSpace sharding_space, std::vector<ShardID> &participants);
+      bool has_participants(ShardID shard, IndexSpaceNode *full_space,
+                            IndexSpace sharding_space);
     public:
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
@@ -3202,6 +3204,10 @@ namespace Legion {
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
+      void send_slice_pre_launch_collective_kernel(Processor target,
+                                                   Serializer &rez);
+      void send_slice_post_launch_collective_kernel(Processor target,
+                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_request(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
@@ -3344,6 +3350,8 @@ namespace Legion {
                                                     Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
                                                        Serializer &rez);
+      void send_control_replicate_collective_kernel_launch(
+                                AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -3594,6 +3602,10 @@ namespace Legion {
       void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
+      void handle_slice_remote_pre_launch_collective_kernel(
+                                                     Deserializer &derez);
+      void handle_slice_remote_post_launch_collective_kernel(
+                                                     Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_downgrade_request(Deserializer &derez,
@@ -3830,6 +3842,8 @@ namespace Legion {
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
+      void handle_control_replicate_collective_kernel_launch(
+                                                        Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -3865,6 +3879,8 @@ namespace Legion {
       void handle_concurrent_reservation_creation(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_concurrent_execution_analysis(Deserializer &derez);
+      void handle_pre_launch_collective_kernel(Deserializer &derez);
+      void handle_post_launch_collective_kernel(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -3951,6 +3967,10 @@ namespace Legion {
       RtEvent find_concurrent_fence_event(Processor target, ApEvent next,
                                 ApEvent &previous, RtEvent precondition);
       static void handle_concurrent_analysis(const void *args);
+    public:
+      // Support for concurrent kernel launches
+      void pre_launch_collective_kernel(RtUserEvent to_trigger);
+      void post_launch_collective_kernel(void);
     public:
       DistributedID get_available_distributed_id(void); 
       DistributedID get_remote_distributed_id(AddressSpaceID from);
@@ -4290,6 +4310,10 @@ namespace Legion {
       // that it is safe to perform collective analysis. This reservation
       // is made on demand on node 0 and gradually spread to other nodes
       std::atomic<Reservation> concurrent_reservation;
+    protected:
+      // Support for collective kernel launches
+      mutable LocalLock collective_kernel_lock;
+      std::deque<RtUserEvent> collective_kernel_queue;
     public:
       // Internal runtime state 
       // The local processor managed by this runtime
@@ -5863,6 +5887,10 @@ namespace Legion {
           break;
         case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
           break;
+        case SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL:
+          break;
+        case SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL:
+          break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           break;
         // Low priority so reference counting doesn't starve
@@ -6048,6 +6076,8 @@ namespace Legion {
         case SEND_REPL_IMPLICIT_RESPONSE:
           return TASK_VIRTUAL_CHANNEL;
         case SEND_REPL_FIND_COLLECTIVE_VIEW:
+          break;
+        case SEND_REPL_COLLECTIVE_KERNEL_LAUNCH:
           break;
         case SEND_MAPPER_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;
@@ -6260,6 +6290,10 @@ namespace Legion {
         case SEND_CONCURRENT_RESERVATION_CREATION:
           break;
         case SEND_CONCURRENT_EXECUTION_ANALYSIS:
+          break;
+        case SEND_PRE_LAUNCH_COLLECTIVE_KERNEL:
+          break;
+        case SEND_POST_LAUNCH_COLLECTIVE_KERNEL:
           break;
         case SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE:
         case SEND_CONTROL_REPLICATION_FUTURE_BROADCAST:

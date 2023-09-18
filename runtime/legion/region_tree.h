@@ -2284,6 +2284,11 @@ namespace Legion {
                               const std::vector<DomainPoint> &shard_points,
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards) = 0;
+      virtual bool has_shard_participants(ShardingFunction *func,
+                                          ShardID shard,
+                                          IndexSpace shard_space,
+                              const std::vector<DomainPoint> &shard_points,
+                                          const Domain &shard_domain) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2586,6 +2591,11 @@ namespace Legion {
                                   const std::vector<DomainPoint> &shard_points,
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards);
+      virtual bool has_shard_participants(ShardingFunction *func,
+                                          ShardID shard,
+                                          IndexSpace shard_space,
+                                  const std::vector<DomainPoint> &shard_points,
+                                          const Domain &shard_domain);
     public:
       bool contains_point(const Point<DIM,T> &point);
     protected:

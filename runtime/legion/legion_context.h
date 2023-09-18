@@ -691,6 +691,8 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
+      void pre_launch_collective_kernel(void);
+      void post_launch_collective_kernel(void);
       void release_task_local_instances(void);
     protected:
       Future predicate_task_false(const TaskLauncher &launcher,

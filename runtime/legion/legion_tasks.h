@@ -489,6 +489,9 @@ namespace Legion {
                           RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
     public:
+      virtual void pre_launch_collective_kernel(void) = 0;
+      virtual void post_launch_collective_kernel(void) = 0;
+    public:
       // From Memoizable
       virtual ApEvent replay_mapping(void);
       virtual void find_completion_effects(std::set<ApEvent> &effects,
@@ -706,6 +709,11 @@ namespace Legion {
       RtUserEvent concurrent_verified;
       std::map<DomainPoint,Processor> concurrent_processors;
     protected:
+      // Collective kernel launch 
+      RtUserEvent collective_kernel_precondition;
+      size_t pre_launch_collective_kernel_arrivals;
+      size_t post_launch_collective_kernel_arrivals;
+    protected:
       bool children_complete_invoked;
       bool children_commit_invoked;
     protected:
@@ -802,6 +810,9 @@ namespace Legion {
       virtual bool is_implicit_top_level_task(void) const 
         { return implicit_top_level_task; }
 #endif
+    public:
+      virtual void pre_launch_collective_kernel(void);
+      virtual void post_launch_collective_kernel(void);
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -909,6 +920,9 @@ namespace Legion {
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
+    public:
+      virtual void pre_launch_collective_kernel(void);
+      virtual void post_launch_collective_kernel(void);
     public:
       // ProjectionPoint methods
       virtual const DomainPoint& get_domain_point(void) const;
@@ -1025,6 +1039,9 @@ namespace Legion {
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
+    public:
+      virtual void pre_launch_collective_kernel(void);
+      virtual void post_launch_collective_kernel(void);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
@@ -1213,6 +1230,9 @@ namespace Legion {
       virtual void finish_index_task_reduction(void);
       virtual RtEvent finish_index_task_complete(void);
     public:
+      virtual RtEvent pre_launch_collective_kernel(size_t points);
+      virtual void post_launch_collective_kernel(size_t points);
+    public:
       void return_slice_mapped(unsigned points, RtEvent applied_condition,
                                ApEvent slice_complete);
       void return_slice_complete(unsigned points, RtEvent applied_condition,
@@ -1374,6 +1394,9 @@ namespace Legion {
                                const std::vector<OutputRegion> &output_regions);
       RtEvent verify_concurrent_execution(const DomainPoint &point,
                                           Processor target);
+    public:
+      RtEvent pre_launch_collective_kernel(void);
+      void post_launch_collective_kernel(void);
     protected:
       void trigger_slice_mapped(void);
       void trigger_slice_complete(void);
@@ -1428,6 +1451,8 @@ namespace Legion {
       static void handle_collective_rendezvous(Deserializer &derez,
                                        Runtime *runtime, AddressSpaceID source);
       static void handle_verify_concurrent_execution(Deserializer &derez);
+      static void handle_pre_launch_collective_kernel(Deserializer &derez);
+      static void handle_post_launch_collective_kernel(Deserializer &derez);
     protected:
       friend class IndexTask;
       friend class PointTask;

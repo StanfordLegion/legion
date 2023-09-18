@@ -1675,6 +1675,9 @@ namespace Legion {
       virtual void finish_index_task_reduction(void);
       virtual RtEvent finish_index_task_complete(void);
     public:
+      virtual RtEvent pre_launch_collective_kernel(size_t points);
+      virtual void post_launch_collective_kernel(size_t points);
+    public:
       // Have to override this too for doing output in the
       // case that we misspeculate
       virtual void predicate_false(void);
@@ -2942,6 +2945,16 @@ namespace Legion {
     public:
       void broadcast_created_region_contexts(ShardTask *source, Serializer &rez,
                                              std::set<RtEvent> &applied_events);
+    public:
+      void pre_launch_collective_kernel(size_t ctx_index, 
+                                        RtUserEvent to_trigger,
+                                        ShardingFunction *sharding_function,
+                                        IndexSpaceNode *full_space,
+                                        IndexSpace sharding_space);
+      void post_launch_collective_kernel(size_t ctx_index);
+      bool has_empty_shard_subtree(AddressSpaceID space, 
+          ShardingFunction *sharding, IndexSpaceNode *full_space,
+          IndexSpace sharding_space);
     protected:
       void broadcast_message(ShardTask *source, Serializer &rez,
                 BroadcastMessageKind kind, std::set<RtEvent> &applied_events);
@@ -2994,6 +3007,8 @@ namespace Legion {
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
       static void handle_find_collective_view(Deserializer &derez, Runtime *rt);
+      static void handle_collective_kernel_launch(Deserializer &derez,
+                                                  Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid, 
                                                bool skip_check = false);
@@ -3074,6 +3089,19 @@ namespace Legion {
       std::map<std::pair<size_t,size_t>,ShardLocalData> shard_local_data;
     protected:
       AttachDeduplication *attach_deduplication;
+    protected:
+      // Support for collective kernel launches
+      struct CollectiveKernelLaunch {
+      public:
+        CollectiveKernelLaunch(void) : collective_kernel_arrivals(0),
+         remaining_pre_launch_arrivals(0), remaining_post_launch_arrivals(0) { }
+      public:
+        RtUserEvent collective_kernel_precondition;
+        size_t collective_kernel_arrivals;
+        size_t remaining_pre_launch_arrivals;
+        size_t remaining_post_launch_arrivals;
+      };
+      std::map<size_t,CollectiveKernelLaunch> collective_kernel_launches;
     };
 
   }; // namespace Internal

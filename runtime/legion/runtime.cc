@@ -12296,6 +12296,16 @@ namespace Legion {
                                                   remote_address_space);
               break;
             }
+          case SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL:
+            {
+              runtime->handle_slice_remote_pre_launch_collective_kernel(derez);
+              break;
+            }
+          case SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL:
+            {
+              runtime->handle_slice_remote_post_launch_collective_kernel(derez);
+              break;
+            }
           case DISTRIBUTED_REMOTE_REGISTRATION:
             {
               runtime->handle_did_remote_registration(derez, 
@@ -12739,6 +12749,11 @@ namespace Legion {
           case SEND_REPL_FIND_COLLECTIVE_VIEW:
             {
               runtime->handle_control_replicate_find_collective_view(derez);
+              break;
+            }
+          case SEND_REPL_COLLECTIVE_KERNEL_LAUNCH:
+            {
+              runtime->handle_control_replicate_collective_kernel_launch(derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -13306,6 +13321,16 @@ namespace Legion {
           case SEND_CONCURRENT_EXECUTION_ANALYSIS:
             {
               runtime->handle_concurrent_execution_analysis(derez);
+              break;
+            }
+          case SEND_PRE_LAUNCH_COLLECTIVE_KERNEL:
+            {
+              runtime->handle_pre_launch_collective_kernel(derez);
+              break;
+            }
+          case SEND_POST_LAUNCH_COLLECTIVE_KERNEL:
+            {
+              runtime->handle_post_launch_collective_kernel(derez);
               break;
             }
           case SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE:
@@ -16615,6 +16640,25 @@ namespace Legion {
       AutoLock s_lock(sharding_lock);
       shard_participants[key] = participants;
       return participants.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardingFunction::has_participants(ShardID shard, 
+                                            IndexSpaceNode *full_space,
+                                            IndexSpace shard_space)
+    //--------------------------------------------------------------------------
+    {
+      const ShardKey key(shard, full_space->handle, shard_space);
+      // Check to see if we already have it
+      {
+        AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
+        std::map<ShardKey,IndexSpace>::const_iterator 
+          finder = shard_index_spaces.find(key);
+        if (finder != shard_index_spaces.end())
+          return finder->second.exists();
+      }
+      return full_space->has_shard_participants(this, shard, shard_space,
+          manager->shard_points, manager->shard_domain);
     }
 
     /////////////////////////////////////////////////////////////
@@ -21921,6 +21965,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_pre_launch_collective_kernel(Processor target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL,
+          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_post_launch_collective_kernel(Processor target,
+                                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL,
+          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_remote_registration(AddressSpaceID target, 
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22655,6 +22719,15 @@ namespace Legion {
     {
       find_messenger(target)->send_message(SEND_REPL_FIND_COLLECTIVE_VIEW,
                                                           rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_collective_kernel_launch(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_COLLECTIVE_KERNEL_LAUNCH,
+                                        rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24307,6 +24380,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_remote_pre_launch_collective_kernel(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_pre_launch_collective_kernel(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_remote_post_launch_collective_kernel(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_post_launch_collective_kernel(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_did_remote_registration(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -24892,6 +24981,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_find_collective_view(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_collective_kernel_launch(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_collective_kernel_launch(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -26532,6 +26629,78 @@ namespace Legion {
         (const DeferConcurrentAnalysisArgs*)args;
       Runtime::trigger_event(NULL, dargs->result,
           dargs->manager->find_concurrent_fence_event(dargs->next));
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::pre_launch_collective_kernel(RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger_now = false;
+      if (address_space > 0)
+      {
+        // Send a message to node 0 to add the launch to the queue
+        Serializer rez;
+        rez.serialize(to_trigger);
+        find_messenger(0)->send_message(SEND_PRE_LAUNCH_COLLECTIVE_KERNEL,
+            rez, true/*flush*/, true/*response*/);
+      }
+      else
+      {
+        AutoLock q_lock(collective_kernel_lock);
+        if (collective_kernel_queue.empty())
+          trigger_now = true;
+        collective_kernel_queue.push_back(to_trigger);
+      }
+      if (trigger_now)
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::post_launch_collective_kernel(void)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent trigger_next;
+      if (address_space > 0)
+      {
+        // Send a message to node 0 to pop the queue
+        Serializer rez;
+        find_messenger(0)->send_message(SEND_POST_LAUNCH_COLLECTIVE_KERNEL,
+            rez, true/*flush*/, true/*response*/);
+      }
+      else
+      {
+        AutoLock q_lock(collective_kernel_lock);
+#ifdef DEBUG_LEGION
+        assert(collective_kernel_queue.empty());
+#endif
+        collective_kernel_queue.pop_front();
+        if (!collective_kernel_queue.empty())
+          trigger_next = collective_kernel_queue.front();
+      }
+      if (trigger_next.exists())
+        Runtime::trigger_event(trigger_next);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_pre_launch_collective_kernel(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_space == 0);
+#endif
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      pre_launch_collective_kernel(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_post_launch_collective_kernel(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_space == 0);
+#endif
+      post_launch_collective_kernel();
     }
 
     //--------------------------------------------------------------------------

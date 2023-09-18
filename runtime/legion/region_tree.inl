@@ -5137,6 +5137,50 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::has_shard_participants(ShardingFunction *func,
+                                  ShardID shard, IndexSpace shard_space,
+                                  const std::vector<DomainPoint> &shard_points,
+                                  const Domain &shard_domain)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      Domain sharding_domain;
+      if (shard_space != handle)
+        context->find_domain(shard_space, sharding_domain);
+      else
+        sharding_domain = local_space;
+      if (!func->functor->is_invertible())
+      {
+        for (Realm::IndexSpaceIterator<DIM,T> rect_itr(local_space); 
+              rect_itr.valid; rect_itr.step())
+        {
+          for (Realm::PointInRectIterator<DIM,T> itr(rect_itr.rect);
+                itr.valid; itr.step())
+          {
+            const ShardID point_shard = 
+             func->find_owner(DomainPoint(Point<DIM,T>(itr.p)),sharding_domain);
+            if (point_shard == shard)
+              return true;
+          }
+        }
+        return false;
+      }
+      else
+      {
+        std::vector<DomainPoint> domain_points;
+        if (func->use_points)
+          func->functor->invert_points(shard_points[shard], shard_points,
+             shard_domain, Domain(local_space), sharding_domain, domain_points);
+        else
+          func->functor->invert(shard, sharding_domain, Domain(local_space),
+                                shard_points.size(), domain_points);
+        return !domain_points.empty();
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Templated Linearized Color Space
     /////////////////////////////////////////////////////////////
