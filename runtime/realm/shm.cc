@@ -96,7 +96,7 @@ namespace Realm {
       fd = shm_open(path.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     } else {
       // Create anonymous shared memory
-#if defined(REALM_HAS_MEMFD)
+#if 0 && defined(REALM_HAS_MEMFD)
       fd = memfd_create("", MFD_CLOEXEC);
 #else
       // There's no real portable way across *nixes to share anonymous memory by fd
@@ -107,7 +107,7 @@ namespace Realm {
       for(size_t i = 0; i < REALM_SHM_MAX_TRIES; i++) {
         std::string tmpname("/realm-shm.");
         tmpname += std::to_string(Clock::current_time_in_nanoseconds(true));
-        if(SharedMemoryInfo::create_shm(info, tmpname.c_str(), size, numa_node)) {
+        if(SharedMemoryInfo::create(info, size, tmpname.c_str(), numa_node)) {
           return true;
         }
       }
