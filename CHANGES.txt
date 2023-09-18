@@ -1,6 +1,11 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 23.09.0 (September ??, 2023)
+  * Regent
+    - Elide future maps in index launches
+    - Improvements to Pygion interop
+
 Version 23.06.0 (June 28, 2023)
   * Build
     - Fixes for CMake build on macOS
