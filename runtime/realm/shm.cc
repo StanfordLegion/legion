@@ -74,8 +74,8 @@ namespace Realm {
 #if defined(REALM_ON_WINDOWS)
     numa_node = numa_node < 0 ? NUMA_NO_PREFERRED_NODE : numa_node;
     HANDLE hMapFile = CreateFileMappingNuma(
-        INVALID_HANDLE_VALUE, info.name.c_str(), PAGE_READWRITE, (size >> 32ULL),
-        (size & ~(1ULL << 32ULL)), name.c_str(), numa_node);
+        INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (size >> 32ULL),
+        (size & ~(1ULL << 32ULL)), info.name.c_str(), numa_node);
     if(hMapFile == nullptr) {
       log_shm.error("Failed to create shm %s", name.c_str());
       return false;
