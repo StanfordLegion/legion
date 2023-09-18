@@ -736,6 +736,12 @@ if(NOT WIN32)
   option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
 endif()
 
+if (UNIX)
+  # Look for memfd_create to see if we can use anonymous memory sharing
+  check_function_exists(memfd_create REALM_HAS_MEMFD)
+  check_function_exists(posix_fallocate64 REALM_HAS_POSIX_FALLOCATE64)
+endif ()
+
 #------------------------------------------------------------------------------#
 # Hacks for building only Realm
 #------------------------------------------------------------------------------#
