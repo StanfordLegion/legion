@@ -77,7 +77,7 @@ namespace Realm {
         INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (size >> 32ULL),
         (size & ~(1ULL << 32ULL)), info.name.c_str(), numa_node);
     if(hMapFile == nullptr) {
-      log_shm.error("Failed to create shm %s", name.c_str());
+      log_shm.error("Failed to create shm %s", info.name.c_str());
       return false;
     }
     info.base = MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, size);
