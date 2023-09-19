@@ -971,7 +971,6 @@ namespace Realm {
 
         uintptr_t dst_ind_base = 0;
         if(out_port->indirect_port_idx >= 0) {
-          // TODO(apryakhin@): Handle return value.
           size_t iter_bytes = out_port->iter->step(max_bytes, address_info, 0, 0);
           assert(iter_bytes == 0);
           dst_ind_base = reinterpret_cast<uintptr_t>(
@@ -1074,26 +1073,36 @@ namespace Realm {
     static bool supports_scatter_gather_path(ChannelCopyInfo channel_copy_info,
                                              NodeID node)
     {
-      if(channel_copy_info.ind_mem == Memory::NO_MEMORY ||
-         channel_copy_info.addr_size != sizeof(size_t) || channel_copy_info.is_ranges) {
-        return 0;
+      // TODO(apryakhin): remove this condition when it's supported.
+      if(channel_copy_info.addr_size != sizeof(size_t) ||
+         channel_copy_info.is_ranges == true || channel_copy_info.is_direct == false) {
+        log_gpudma.debug() << "gpu scatter/gather is not supported addr_size="
+                           << channel_copy_info.addr_size
+                           << " is_ranges=" << channel_copy_info.is_ranges
+                           << " is_direct=" << channel_copy_info.is_direct;
+        return false;
       }
 
-      // TODO(apriakhin@): Check for peer access.
       if(channel_copy_info.src_mem.kind() != Memory::GPU_FB_MEM ||
-         channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM)
-        return 0;
-
-      /*NodeID src_node_id =
-          NodeID(ID(channel_copy_info.src_mem).memory_owner_node());
+         channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM ||
+         channel_copy_info.ind_mem.kind() != Memory::GPU_FB_MEM) {
+        log_gpudma.debug() << "gpu scatter/gather is not supported on none device memory";
+        return false;
+      }
 
       GPU *src_gpu =
           mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.src_mem));
-      if (!src_gpu || !dst_gpu || !src_gpu->can_access_peer(dst_gpu)) {
-        //return false;
-      }*/
+      GPU *dst_gpu =
+          mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.dst_mem));
 
-      return true;
+      if(src_gpu == nullptr || dst_gpu == nullptr) {
+        log_gpudma.debug() << "could not access get src/dst gpus has_src_gpu="
+                           << (src_gpu == nullptr)
+                           << " has_dst_gpu=" << (dst_gpu == nullptr);
+        return false;
+      }
+
+      return src_gpu->can_access_peer(dst_gpu);
     }
 
     GPUScatterGatherChannel::GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,

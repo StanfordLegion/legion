@@ -2955,6 +2955,7 @@ namespace Realm {
       XferDesKind kind;
       ChannelCopyInfo copy_info = channel_copy_info;
       copy_info.dst_mem = partials[i].ib_mem;
+      copy_info.is_direct = false;
       if(best_channel_for_mem_pair(copy_info,
                                    serdez_id, 0 /*no dst serdez*/,
                                    0 /*no redop on not-last hops*/,
@@ -2992,6 +2993,7 @@ namespace Realm {
         ChannelCopyInfo copy_info = channel_copy_info;
         copy_info.src_mem = partials[src_idx].ib_mem;
         copy_info.dst_mem = partials[dst_idx].ib_mem;
+        copy_info.is_direct = false;
         if(best_channel_for_mem_pair(copy_info,
                                      0, 0, 0, // no serdez or redop on interhops
                                      total_bytes, 0, 0, // no fragmentation also
@@ -3030,6 +3032,7 @@ namespace Realm {
       XferDesKind kind;
       ChannelCopyInfo copy_info = channel_copy_info;
       copy_info.src_mem = partials[i].ib_mem;
+      copy_info.is_direct = false;
       if(best_channel_for_mem_pair(copy_info,
                                    0 /*no src serdez*/, serdez_id, redop_id,
                                    total_bytes, 0 /*no src_frags*/, dst_frags,
