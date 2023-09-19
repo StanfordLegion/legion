@@ -804,7 +804,7 @@ namespace Realm {
                        uintptr_t dst_ind_base, bool do_scatter = false)
     {
       MemcpyUnstructuredInfo<N> memcpy_info;
-      memset(&memcpy_info, 0, sizeof(MemcpyUnstructuredInfo<3>));
+      memset(&memcpy_info, 0, sizeof(MemcpyUnstructuredInfo<N>));
       memcpy_info.src_ind = src_ind_base;
       memcpy_info.dst_ind = dst_ind_base;
       memcpy_info.src.addr = in_base;
