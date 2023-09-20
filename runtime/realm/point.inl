@@ -31,11 +31,6 @@ namespace Realm {
 
   template <int N, typename T>
   REALM_CUDA_HD
-  inline Point<N,T>::Point(void)
-  {}
-
-  template <int N, typename T>
-  REALM_CUDA_HD
   inline Point<N,T>::Point(T val)
   {
     for(int i = 0; i < N; i++)

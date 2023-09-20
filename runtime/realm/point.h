@@ -59,7 +59,7 @@ namespace Realm {
     T x, y, z, w;  T rest[N - 4];
 
     REALM_CUDA_HD
-    Point(void);
+    Point(void) = default;
     REALM_CUDA_HD
     explicit Point(T val);
     // construct from any integral value
