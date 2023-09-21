@@ -2351,6 +2351,7 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
+        _fevent: EventID,
     ) -> &mut ProcEntry {
         // Hack: we have to do this in two places, because we don't know what
         // order the logger calls are going to come in. If the operation gets
@@ -2387,6 +2388,7 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
+        _fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
@@ -2416,6 +2418,7 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
+        _fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
@@ -2436,6 +2439,7 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
+        _fevent : EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
@@ -3502,9 +3506,10 @@ fn process_record(
             ready,
             start,
             stop,
+            fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
+            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range, *fevent);
             state.update_last_time(*stop);
         }
         Record::GPUTaskInfo {
@@ -3516,6 +3521,7 @@ fn process_record(
             ready,
             gpu_start,
             gpu_stop,
+            fevent,
             ..
         } => {
             // it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled,
@@ -3526,7 +3532,7 @@ fn process_record(
                 gpu_start.0 = gpu_stop.0 - 1;
             }
             let time_range = TimeRange::new_full(*create, *ready, gpu_start, *gpu_stop);
-            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
+            state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range, *fevent);
             state.update_last_time(*gpu_stop);
         }
         Record::MetaInfo {
@@ -3537,9 +3543,10 @@ fn process_record(
             ready,
             start,
             stop,
+            fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_meta(*op_id, *lg_id, *proc_id, time_range);
+            state.create_meta(*op_id, *lg_id, *proc_id, time_range, *fevent);
             state.update_last_time(*stop);
         }
         Record::CopyInfo {
@@ -3649,13 +3656,14 @@ fn process_record(
             start,
             stop,
             proc_id,
+            fevent,
         } => {
             assert!(state.mapper_call_kinds.contains_key(kind));
             assert!(*start <= *stop);
             // For now we'll only add very expensive mapper calls (more than 100 us)
             if *stop - *start >= Timestamp::from_us(100) {
                 let time_range = TimeRange::new_start(*start, *stop);
-                state.create_mapper_call(*kind, *proc_id, *op_id, time_range);
+                state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
                 state.update_last_time(*stop);
             };
         }
@@ -3664,10 +3672,11 @@ fn process_record(
             start,
             stop,
             proc_id,
+            fevent,
         } => {
             assert!(state.runtime_call_kinds.contains_key(kind));
             let time_range = TimeRange::new_start(*start, *stop);
-            state.create_runtime_call(*kind, *proc_id, time_range);
+            state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
             state.update_last_time(*stop);
         }
         Record::ProfTaskInfo {

@@ -3678,7 +3678,7 @@ class State(object):
     def log_task_info(self, op_id: int, task_id: int, 
                       variant_id: int, proc_id: int,
                       create: int, ready: int, 
-                      start: int, stop: int
+                      start: int, stop: int, fevent: int
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, start, stop)
@@ -3693,7 +3693,8 @@ class State(object):
                           variant_id: int, proc_id: int,
                           create: int, ready: int, 
                           start: int, stop: int, 
-                          gpu_start: int, gpu_stop: int
+                          gpu_start: int, gpu_stop: int,
+                          fevent: int
     ) -> None:
         # it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled, 
         # because the cuda event completions of these two timestamp may be out of order when
@@ -3713,7 +3714,8 @@ class State(object):
     def log_meta_info(self, op_id: int, lg_id: int, 
                       proc_id: int, 
                       create: int, ready: int, 
-                      start: int, stop: int
+                      start: int, stop: int,
+                      fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
@@ -3971,7 +3973,7 @@ class State(object):
     # MapperCallInfo
     @typecheck
     def log_mapper_call_info(self, kind: int, proc_id: int, 
-                             op_id: int, start: int, stop: int
+                             op_id: int, start: int, stop: int, fevent: int
     ) -> None:
         assert start <= stop
         assert kind in self.mapper_call_kinds
@@ -3996,7 +3998,7 @@ class State(object):
     # RuntimeCallInfo
     @typecheck
     def log_runtime_call_info(self, kind: int, proc_id: int, 
-                              start: int, stop: int
+                              start: int, stop: int, fevent: int
     ) -> None:
         assert start <= stop
         assert kind in self.runtime_call_kinds

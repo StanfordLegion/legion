@@ -173,8 +173,9 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
 #ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance, finish_event;
+        LgEvent provenance;
 #endif
+        LgEvent finish_event;
       };
       struct GPUTaskInfo {
       public:
@@ -186,8 +187,9 @@ namespace Legion {
         timestamp_t gpu_start, gpu_stop;
         std::deque<WaitInfo> wait_intervals;
 #ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance, finish_event;
+        LgEvent provenance;
 #endif
+        LgEvent finish_event;
       };
       struct IndexSpacePointDesc {
       public:
@@ -290,8 +292,9 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
 #ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance, finish_event;
+        LgEvent provenance;
 #endif
+        LgEvent finish_event;
       };
       struct CopyInstInfo {
       public:
@@ -353,12 +356,14 @@ namespace Legion {
         UniqueID op_id;
         timestamp_t start, stop;
         ProcID proc_id;
+        LgEvent finish_event;
       };
       struct RuntimeCallInfo {
       public:
         RuntimeCallKind kind;
         timestamp_t start, stop;
         ProcID proc_id;
+        LgEvent finish_event;
       };
       struct ProcDesc {
       public:
@@ -482,7 +487,8 @@ namespace Legion {
                              const Realm::ProfilingResponse &response);
       void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
           long long start, long long stop, 
-          const std::vector<std::pair<long long,long long> > &waits);
+          const std::vector<std::pair<long long,long long> > &waits,
+          LgEvent finish_event);
       void process_mem_desc(const Memory &m);
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
@@ -490,9 +496,10 @@ namespace Legion {
     public:
       void record_mapper_call(Processor proc, MappingCallKind kind, 
                               UniqueID uid, timestamp_t start,
-                              timestamp_t stop);
+                              timestamp_t stop, LgEvent finish_event);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
-                               timestamp_t start, timestamp_t stop);
+                               timestamp_t start, timestamp_t stop,
+                               LgEvent finish_event);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -680,7 +687,8 @@ namespace Legion {
     public:
       void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
                            long long start, long long stop,
-           const std::vector<std::pair<long long,long long> > &waits);
+           const std::vector<std::pair<long long,long long> > &waits,
+                           LgEvent finish_event);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,

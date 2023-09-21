@@ -22673,6 +22673,7 @@ namespace Legion {
                                 false/*track parent*/,true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
+      top_task->select_task_options(false/*prioritize*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
@@ -22680,10 +22681,7 @@ namespace Legion {
       ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
-      
-      // Put the task in the ready queue, make sure that the runtime is all
-      // set up across the machine before we launch it as well
-      top_task->enqueue_ready_task(false/*target*/);
+      add_to_ready_queue(target, top_task);
       // Now we can restore the previous implicit context
       implicit_context = previous_implicit;
       return result;
