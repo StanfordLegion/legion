@@ -460,27 +460,18 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
         } else {
           const size_t block_cols = TestConfig::block_cols;
           const size_t block_rows = TestConfig::block_rows;
-          for (size_t xscale = 2; xscale <= 2; xscale *= 2) {
-            for (size_t yscale = 2; yscale <= 2; yscale *= 2) {
-              {
-                size_t zscale = 2;
-                for (int pad_x = -1; pad_x <= 1; pad_x++) {
-                  for (int pad_y = -1; pad_y <= 1; pad_y++) {
-                    do_single_dim_field_size<3>(
-                        *src_it, *dst_it, log2_buffer_size,
-                        TestConfig::narrow_dim, p, {}, {},
-                        Rect<3>(Point<3>(0, 0, 0),
-                                Point<3>((xscale * block_cols) + pad_x,
-                                         (yscale * block_rows) + pad_y,
-                                         zscale * block_rows)),
-                        Rect<3>(Point<3>(0, 0, 0),
-                                Point<3>((xscale * block_cols) + pad_x,
-                                         (yscale * block_rows) + pad_y,
-                                         zscale * block_rows)),
-                        TestConfig::field_size);
-                  }
-                }
-              }
+          for (int pad_x = -1; pad_x <= 1; pad_x++) {
+            for (int pad_y = -1; pad_y <= 1; pad_y++) {
+              do_single_dim_field_size<3>(
+                  *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p,
+                  {}, {},
+                  Rect<3>(Point<3>(0, 0, 0),
+                          Point<3>((2 * block_cols) + pad_x,
+                                   (2 * block_rows) + pad_y, 2 * block_rows)),
+                  Rect<3>(Point<3>(0, 0, 0),
+                          Point<3>((2 * block_cols) + pad_x,
+                                   (2 * block_rows) + pad_y, 2 * block_rows)),
+                  TestConfig::field_size);
             }
           }
         }
