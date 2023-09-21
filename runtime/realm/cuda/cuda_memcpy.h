@@ -30,7 +30,7 @@ namespace Realm {
     template <size_t N, typename Offset_t = size_t>
     struct alignas(8) AffineSubRect {
       // Extent of the ND array
-      Offset_t strides[N];
+      Offset_t strides[N - 1];
       // Address of the ND array
       uintptr_t addr;
     };
