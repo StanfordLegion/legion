@@ -92,7 +92,7 @@ TESTARGS_scatter := -p1 2 -p2 2
 TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose
 TESTARGS_task_stream := -ll:gpu 1
-TESTARGS_machine_config_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin 1
+TESTARGS_machine_config_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2
 ifeq ($(strip $(USE_CUDA)),1)
 TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
 endif
