@@ -3182,9 +3182,14 @@ namespace Realm {
     Network::my_node_id = prim_rank;
     Network::max_node_id = prim_size - 1;
     Network::all_peers.add_range(0, prim_size - 1);
-    Network::all_peers.remove(prim_rank);
-    // TODO: do an all gather on the hostname to discover the shared peers.
-    Network::shared_peers = Network::all_peers;
+    Network::all_peers.remove(prim_rank);  
+    gex_RankInfo_t *neighbor_array = nullptr;
+    gex_Rank_t neighbor_array_size = 0;
+
+    gex_System_QueryNbrhdInfo(&neighbor_array, &neighbor_array_size, nullptr);
+    for (gex_Rank_t r = 0; r < neighbor_array_size; r++) {
+      Network::shared_peers.add(neighbor_array[r].gex_jobrank);
+    }
 
     // stick a pointer to ourselves in the endpoint CData so that handlers
     //  can find us
