@@ -5,6 +5,13 @@ Version 23.09.0 (September ??, 2023)
   * Regent
     - Elide future maps in index launches
     - Improvements to Pygion interop
+  * Realm
+    - Machine configuration API that allows applications to configure the machine model without using the command line
+    - Expose Realm managed CUDA/HIP stream to applications to launch GPU tasks without device-wise synchronization when hijack is disabled
+    - Update the timer to use of rdtsc for different processors
+    - Performance improvement for getting highest priority task available from any task queue
+    - Implementation of framebuffer memory with cuMemMap
+    - Initial work for moving STL dependencies to header only
 
 Version 23.06.0 (June 28, 2023)
   * Build
