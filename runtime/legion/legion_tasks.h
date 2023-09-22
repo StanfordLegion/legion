@@ -251,6 +251,8 @@ namespace Legion {
       // From Memoizable
       virtual const RegionRequirement& get_requirement(unsigned idx) const
         { return logical_regions[idx]; }
+      virtual unsigned get_output_offset() const
+        { return regions.size(); }
     public: // helper for mapping, here because of inlining
       void validate_variant_selection(MapperManager *local_mapper,
                           VariantImpl *impl, Processor::Kind kind, 

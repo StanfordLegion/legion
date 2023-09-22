@@ -1266,6 +1266,38 @@ namespace Legion {
       return 0;
     }
 
+    void
+    Operation::analyze_region_requirements(
+      IndexSpaceNode *launch_space,
+      ShardingFunction *func,
+      IndexSpace shard_space)
+    {
+      LogicalAnalysis logical_analysis(this, get_output_offset());
+
+      unsigned req_count = get_region_count();
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        const RegionRequirement &req = get_requirement(i);
+
+        ProjectionInfo projection_info(runtime,
+                                       &req,
+                                       launch_space,
+                                       func,
+                                       shard_space);
+
+        runtime->forest->perform_dependence_analysis(this,
+                                                     i,
+                                                     req,
+                                                     projection_info,
+                                                     logical_analysis);
+      }
+    }
+
+    unsigned Operation::get_output_offset() const
+    {
+      return LogicalAnalysis::NO_OUTPUT_OFFSET;
+    }
+
     //--------------------------------------------------------------------------
     Mappable* Operation::get_mappable(void)
     //--------------------------------------------------------------------------
@@ -4251,12 +4283,7 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -5904,6 +5931,31 @@ namespace Legion {
       }
     }
 
+    /* static */
+    void CopyOp::req_vector_reduce_to_readwrite(
+      std::vector<RegionRequirement> &reqs,
+      std::vector<unsigned> &changed_idxs)
+    {
+      changed_idxs.clear();
+      for (unsigned idx = 0; idx < reqs.size(); idx++)
+      {
+        if (IS_REDUCE(reqs[idx]))
+        {
+          reqs[idx].privilege = LEGION_READ_WRITE;
+          changed_idxs.push_back(idx);
+        }
+      }
+    }
+
+    /* static */
+    void CopyOp::req_vector_reduce_restore(
+      std::vector<RegionRequirement> &reqs,
+      const std::vector<unsigned> &changed_idxs)
+    {
+      for (unsigned idx : changed_idxs)
+        reqs[idx].privilege = LEGION_REDUCE;
+    }
+
     //--------------------------------------------------------------------------
     void CopyOp::activate(void)
     //--------------------------------------------------------------------------
@@ -5972,7 +6024,7 @@ namespace Legion {
     size_t CopyOp::get_region_count(void) const
     //--------------------------------------------------------------------------
     {
-      return src_requirements.size() + dst_requirements.size();
+      return operands.size();
     }
 
     //--------------------------------------------------------------------------
@@ -6077,48 +6129,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     { 
       perform_base_dependence_analysis(false/*permit projection*/);
-      ProjectionInfo projection_info;
-      LogicalAnalysis logical_analysis(this);
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        runtime->forest->perform_dependence_analysis(this, idx, 
-                                                     src_requirements[idx],
-                                                     projection_info,
-                                                     logical_analysis);
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        unsigned index = src_requirements.size()+idx;
-        // Perform this dependence analysis as if it was READ_WRITE
-        // so that we can get the version numbers correct
-        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-        if (is_reduce_req)
-          dst_requirements[idx].privilege = LEGION_READ_WRITE;
-        runtime->forest->perform_dependence_analysis(this, index, 
-                                                     dst_requirements[idx],
-                                                     projection_info,
-                                                     logical_analysis);
-        // Switch the privileges back when we are done
-        if (is_reduce_req)
-          dst_requirements[idx].privilege = LEGION_REDUCE;
-      }
-      if (!src_indirect_requirements.empty())
-      {
-        const size_t offset = src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 src_indirect_requirements[idx],
-                                                 projection_info,
-                                                 logical_analysis);
-      }
-      if (!dst_indirect_requirements.empty())
-      {
-        const size_t offset = src_requirements.size() +
-          dst_requirements.size() + src_indirect_requirements.size();
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 dst_indirect_requirements[idx],
-                                                 projection_info,
-                                                 logical_analysis);
-      }
+
+      // Perform reduce dependence analysis as if it was READ_WRITE
+      // so that we can get the version numbers correct
+      std::vector<unsigned> changed_idxs;
+      req_vector_reduce_to_readwrite(dst_requirements, changed_idxs);
+      analyze_region_requirements();
+      req_vector_reduce_restore(dst_requirements, changed_idxs);
     }
 
     //--------------------------------------------------------------------------
@@ -8086,60 +8103,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis(true/*permit projection*/);
-      LogicalAnalysis logical_analysis(this);
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        ProjectionInfo src_info(runtime, src_requirements[idx], launch_space); 
-        runtime->forest->perform_dependence_analysis(this, idx, 
-                                                     src_requirements[idx],
-                                                     src_info,
-                                                     logical_analysis);
-      }
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        ProjectionInfo dst_info(runtime, dst_requirements[idx], launch_space); 
-        unsigned index = src_requirements.size()+idx;
-        // Perform this dependence analysis as if it was READ_WRITE
-        // so that we can get the version numbers correct
-        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-        if (is_reduce_req)
-          dst_requirements[idx].privilege = LEGION_READ_WRITE;
-        runtime->forest->perform_dependence_analysis(this, index, 
-                                                     dst_requirements[idx],
-                                                     dst_info,
-                                                     logical_analysis);
-        // Switch the privileges back when we are done
-        if (is_reduce_req)
-          dst_requirements[idx].privilege = LEGION_REDUCE;
-      }
-      if (!src_indirect_requirements.empty())
-      {
-        const unsigned offset = 
-          src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-        {
-          ProjectionInfo gather_info(runtime, src_indirect_requirements[idx], 
-                                     launch_space);
-          runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 src_indirect_requirements[idx],
-                                                 gather_info,
-                                                 logical_analysis);
-        }
-      }
-      if (!dst_indirect_requirements.empty())
-      {
-        const unsigned offset = src_requirements.size() + 
-          dst_requirements.size() + src_indirect_requirements.size();
-        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-        {
-          ProjectionInfo scatter_info(runtime, dst_indirect_requirements[idx],
-                                      launch_space);
-          runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 dst_indirect_requirements[idx],
-                                                 scatter_info,
-                                                 logical_analysis);
-        }
-      }
+
+      // Change reduce to readwrite so that version info is correct
+      std::vector<unsigned> changed_idxs;
+      req_vector_reduce_to_readwrite(dst_requirements, changed_idxs);
+      analyze_region_requirements(launch_space);
+      req_vector_reduce_restore(dst_requirements, changed_idxs);
     }
 
     //--------------------------------------------------------------------------
@@ -10085,34 +10054,11 @@ namespace Legion {
       // region tree to serve as mapping dependences on things that might
       // use these data structures in the case of recycling, e.g. in the
       // case that we recycle a field index
-      const RegionTreeContext ctx = parent_ctx->get_context();
-      if (!deletion_requirements.empty())
-      {
-        LogicalAnalysis logical_analysis(this);
-        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = deletion_requirements[idx];
-#ifdef DEBUG_LEGION
-          assert(req.parent == req.region);
-#endif
-          if (req.privilege_fields.empty())
-          {
-#ifdef DEBUG_LEGION
-            // Only full region deletions shouldn't have any fields
-            assert(kind == LOGICAL_REGION_DELETION);
-#endif
-            continue;
-          }
-          ProjectionInfo proj_info;
-          runtime->forest->perform_dependence_analysis(this, idx, req,
-              proj_info, logical_analysis);
-        }
-        // By closing the scope here, we make sure the logical analysis
-        // has applied any close operations to the tree so now we can
-        // safely perform the invalidation of the context
-      }
+      analyze_region_requirements();
+
       // Now we can invalidate the context since all internal operations
       // have been recorded in the tree
+      const RegionTreeContext ctx = parent_ctx->get_context();
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         runtime->forest->invalidate_current_context(ctx,
             deletion_requirements[idx], (kind == FIELD_DELETION));
@@ -10975,12 +10921,7 @@ namespace Legion {
       // close operations is done inline in the region tree traversal
       // for other kinds of operations 
       // see RegionTreeNode::register_logical_node
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -11322,12 +11263,7 @@ namespace Legion {
       // Just doing the dependence analysis will precipitate any
       // close operations necessary for the virtual close op to
       // do its job, so it needs to do nothing else
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -12111,14 +12047,10 @@ namespace Legion {
     void ResetOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      LogicalAnalysis logical_analysis(this);
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      ProjectionInfo projection_info;
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, requirement,
-                                                   projection_info,
-                                                   logical_analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -12438,12 +12370,7 @@ namespace Legion {
       if (runtime->check_privileges)
         check_acquire_privilege();
       // First register any mapping dependences that we have
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -12661,13 +12588,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const RegionRequirement& AcquireOp::get_requirement(void) const
-    //--------------------------------------------------------------------------
-    {
-      return requirement;
-    }
-
-    //--------------------------------------------------------------------------
     void AcquireOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
@@ -12712,7 +12632,7 @@ namespace Legion {
     const RegionRequirement& AcquireOp::get_requirement(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      return get_requirement();
+      return requirement;
     }
 
     //--------------------------------------------------------------------------
@@ -13270,13 +13190,7 @@ namespace Legion {
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
       // First register any mapping dependences that we have
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      // Register any mapping dependences that we have
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -13520,13 +13434,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const RegionRequirement& ReleaseOp::get_requirement(void) const
-    //--------------------------------------------------------------------------
-    {
-      return requirement;
-    }
-
-    //--------------------------------------------------------------------------
     void ReleaseOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
@@ -13571,7 +13478,7 @@ namespace Legion {
     const RegionRequirement& ReleaseOp::get_requirement(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      return get_requirement();
+      return requirement;
     }
 
     //--------------------------------------------------------------------------
@@ -16942,7 +16849,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const RegionRequirement& DependentPartitionOp::get_requirement(void) const
+    const RegionRequirement&
+    DependentPartitionOp::get_requirement(unsigned idx) const
     //--------------------------------------------------------------------------
     {
       return requirement;
@@ -16976,14 +16884,8 @@ namespace Legion {
       // Do thise now that we've picked our region requirement
       if (runtime->legion_spy_enabled)
         log_requirement();
-      ProjectionInfo projection_info;
-      if (is_index_space)
-        projection_info = ProjectionInfo(runtime, requirement, launch_space); 
-      LogicalAnalysis logical_analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   logical_analysis);
+      analyze_region_requirements(is_index_space ? launch_space
+                                                 : nullptr);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit_creation(this);
@@ -18689,12 +18591,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -19259,12 +19156,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      ProjectionInfo projection_info(runtime, requirement, launch_space);
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(launch_space);
     }
 
     //--------------------------------------------------------------------------
@@ -19946,12 +19838,7 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_privilege();
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -20459,12 +20346,7 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_privilege();
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -21179,12 +21061,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         log_requirement();
-      LogicalAnalysis analysis(this);
-      ProjectionInfo projection_info(runtime, requirement, launch_space);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(launch_space);
     }
 
     //--------------------------------------------------------------------------
@@ -21896,12 +21773,7 @@ namespace Legion {
     void DetachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement, 
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -22262,12 +22134,7 @@ namespace Legion {
       requirement.projection = resources.impl->get_projection();
       if (runtime->legion_spy_enabled)
         log_requirement();
-      LogicalAnalysis analysis(this);
-      ProjectionInfo projection_info(runtime, requirement, launch_space);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(launch_space);
     }
 
     //--------------------------------------------------------------------------

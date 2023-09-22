@@ -16533,7 +16533,11 @@ namespace Legion {
       // done everything else
       if (!refinements.empty())
       {
-        const ProjectionInfo no_projection_info;
+        const ProjectionInfo no_projection_info(nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                IndexSpace::NO_SPACE);
         const RegionUsage ref_usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
         for (FieldMaskSet<RefinementOp>::const_iterator it =
               refinements.begin(); it != refinements.end(); it++)

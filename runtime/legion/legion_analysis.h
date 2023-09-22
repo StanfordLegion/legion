@@ -811,12 +811,11 @@ namespace Legion {
      */
     class ProjectionInfo {
     public:
-      ProjectionInfo(void)
-        : projection(NULL), projection_type(LEGION_SINGULAR_PROJECTION),
-          projection_space(NULL),sharding_function(NULL),sharding_space(NULL){ }
-      ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
-                     IndexSpaceNode *launch_space,ShardingFunction *func = NULL,
-                     IndexSpace shard_space = IndexSpace::NO_SPACE);
+      ProjectionInfo(Runtime *runtime,
+                     const RegionRequirement *req,
+                     IndexSpaceNode *launch_space,
+                     ShardingFunction *func,
+                     IndexSpace shard_space);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline bool is_sharding(void) const { return (sharding_function != NULL); }
@@ -1895,7 +1894,8 @@ namespace Legion {
         const unsigned req_idx;
       };
     public:
-      LogicalAnalysis(Operation *op, unsigned output_offset = UINT_MAX);
+      static constexpr unsigned NO_OUTPUT_OFFSET = UINT_MAX;
+      LogicalAnalysis(Operation *op, unsigned output_offset = NO_OUTPUT_OFFSET);
       LogicalAnalysis(const LogicalAnalysis &rhs) = delete;
       ~LogicalAnalysis(void);
     public:

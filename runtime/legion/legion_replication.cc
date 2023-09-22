@@ -635,18 +635,10 @@ namespace Legion {
         analysis_sharding_function = 
           repl_ctx->get_universal_sharding_function();
       }
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-      {
-        RegionRequirement &req = logical_regions[idx];
-        // Treat these as a special kind of projection requirement since we
-        // need the logical analysis to look at sharding to determine if any
-        // kind of close operations are required. 
-        ProjectionInfo projection_info(runtime, req, launch_space,
-            analysis_sharding_function, sharding_space);
-        runtime->forest->perform_dependence_analysis(this, idx, req,
-                                                     projection_info,
-                                                     logical_analysis);
-      }
+
+      analyze_region_requirements(launch_space,
+                                  analysis_sharding_function,
+                                  sharding_space);
     }
 
     //--------------------------------------------------------------------------
@@ -1256,7 +1248,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this, regions.size());
       ShardingFunction *analysis_sharding_function = sharding_function;
       if (must_epoch_task)
       {
@@ -1275,15 +1266,11 @@ namespace Legion {
         analysis_sharding_function = 
           repl_ctx->get_universal_sharding_function();
       }
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-      {
-        RegionRequirement &req = logical_regions[idx];
-        ProjectionInfo projection_info(runtime, req, launch_space,
-            analysis_sharding_function, sharding_space);
-        runtime->forest->perform_dependence_analysis(this, idx, req, 
-                                                     projection_info,
-                                                     logical_analysis);
-      }
+
+      analyze_region_requirements(launch_space,
+                                  analysis_sharding_function,
+                                  sharding_space);
+
       // Generate any collective view rendezvous that we will need
       for (std::vector<unsigned>::const_iterator it =
             check_collective_regions.begin(); it != 
@@ -2951,13 +2938,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis analysis(this);
-      ProjectionInfo projection_info(runtime, requirement, launch_space, 
-                                     sharding_function, sharding_space);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(launch_space,
+                                  sharding_function,
+                                  sharding_space);
     }
 
     //--------------------------------------------------------------------------
@@ -3351,64 +3334,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis(false/*permit projection*/);
-      LogicalAnalysis logical_analysis(this);
+
+      // Perform reudciton dependence analysis as if it was READ_WRITE
+      // so that we can get the version numbers correct
+      std::vector<unsigned> changed_idxs;
+      req_vector_reduce_to_readwrite(dst_requirements, changed_idxs);
+
       // Make these requirements look like projection requirmeents since we
       // need the logical analysis to look at sharding to determine if any
       // kind of close operations are required
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        const RegionRequirement &req = src_requirements[idx];
-        ProjectionInfo projection_info(runtime, req, launch_space,
-                                       sharding_function, sharding_space);
-        runtime->forest->perform_dependence_analysis(this, idx, req, 
-                                                     projection_info,
-                                                     logical_analysis);
-      }
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        unsigned index = src_requirements.size()+idx;
-        RegionRequirement &req = dst_requirements[idx];
-        ProjectionInfo projection_info(runtime, req, launch_space,
-                                       sharding_function, sharding_space);
-        // Perform this dependence analysis as if it was READ_WRITE
-        // so that we can get the version numbers correct
-        const bool is_reduce_req = IS_REDUCE(req);
-        if (is_reduce_req)
-          req.privilege = LEGION_READ_WRITE;
-        runtime->forest->perform_dependence_analysis(this, index, req, 
-                                                     projection_info,
-                                                     logical_analysis);
-        // Switch the privileges back when we are done
-        if (is_reduce_req)
-          req.privilege = LEGION_REDUCE;
-      }
-      if (!src_indirect_requirements.empty())
-      {
-        const size_t offset = src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = src_indirect_requirements[idx];
-          ProjectionInfo projection_info(runtime, req, launch_space,
-                                         sharding_function, sharding_space); 
-          runtime->forest->perform_dependence_analysis(this, offset + idx, req,
-                                                 projection_info,
-                                                 logical_analysis);
-        }
-      }
-      if (!dst_indirect_requirements.empty())
-      {
-        const size_t offset = src_requirements.size() +
-          dst_requirements.size() + src_indirect_requirements.size();
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = dst_indirect_requirements[idx];
-          ProjectionInfo projection_info(runtime, req, launch_space,
-                                         sharding_function, sharding_space);
-          runtime->forest->perform_dependence_analysis(this, offset + idx, req,
-                                                 projection_info,
-                                                 logical_analysis);
-        }
-      }
+      analyze_region_requirements(launch_space,
+                                  sharding_function,
+                                  sharding_space);
+
+      req_vector_reduce_restore(dst_requirements, changed_idxs);
     }
 
     //--------------------------------------------------------------------------
@@ -3611,62 +3550,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis(true/*permit projection*/);
-      LogicalAnalysis logical_analysis(this);
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        ProjectionInfo projection_info (runtime, src_requirements[idx], 
-                       launch_space, sharding_function, sharding_space);
-        runtime->forest->perform_dependence_analysis(this, idx, 
-                                                     src_requirements[idx],
-                                                     projection_info,
-                                                     logical_analysis);
-      }
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        ProjectionInfo projection_info(runtime, dst_requirements[idx], 
-                       launch_space, sharding_function, sharding_space);
-        unsigned index = src_requirements.size()+idx;
-        // Perform this dependence analysis as if it was READ_WRITE
-        // so that we can get the version numbers correct
-        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-        if (is_reduce_req)
-          dst_requirements[idx].privilege = LEGION_READ_WRITE;
-        runtime->forest->perform_dependence_analysis(this, index, 
-                                                     dst_requirements[idx],
-                                                     projection_info,
-                                                     logical_analysis);
-        // Switch the privileges back when we are done
-        if (is_reduce_req)
-          dst_requirements[idx].privilege = LEGION_REDUCE;
-      }
-      if (!src_indirect_requirements.empty())
-      {
-        const unsigned offset = 
-          src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-        {
-          ProjectionInfo gather_info(runtime, src_indirect_requirements[idx], 
-                             launch_space, sharding_function, sharding_space);
-          runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 src_indirect_requirements[idx],
-                                                 gather_info,
-                                                 logical_analysis);
-        }
-      }
-      if (!dst_indirect_requirements.empty())
-      {
-        const unsigned offset = src_requirements.size() + 
-          dst_requirements.size() + src_indirect_requirements.size();
-        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-        {
-          ProjectionInfo scatter_info(runtime, dst_indirect_requirements[idx],
-                              launch_space, sharding_function, sharding_space);
-          runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 dst_indirect_requirements[idx],
-                                                 scatter_info,
-                                                 logical_analysis);
-        }
-      }
+
+      // Perform REDUCE dependence analysis as if it was READ_WRITE
+      // so that we can get the version numbers correct
+      std::vector<unsigned> changed_idxs;
+      req_vector_reduce_to_readwrite(dst_requirements, changed_idxs);
+
+      analyze_region_requirements(launch_space,
+                                  sharding_function,
+                                  sharding_space);
+
+      req_vector_reduce_restore(dst_requirements, changed_idxs);
     }
 
     //--------------------------------------------------------------------------
@@ -4817,8 +4711,6 @@ namespace Legion {
       // Do thise now that we've picked our region requirement
       if (runtime->legion_spy_enabled)
         log_requirement();
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
       if (is_index_space)
       {
 #ifdef DEBUG_LEGION
@@ -4851,8 +4743,6 @@ namespace Legion {
               repl_ctx->get_next_collective_index(COLLECTIVE_LOC_62,
                 true/*logical*/), deppart_results);
         }
-        projection_info = ProjectionInfo(runtime, requirement, 
-                                         launch_space, sharding_function);
       }
       else
       {
@@ -4861,10 +4751,9 @@ namespace Legion {
         sharding_collective->elide_collective();
 #endif
       }
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(is_index_space ? launch_space : nullptr,
+                                  is_index_space ? sharding_function : nullptr);
+
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit_creation(this);
@@ -6682,12 +6571,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
       // If this a write requirement then we need to perform syncs on the
       // way in and the way out of the physical analysis across the shards
       // to ensure we don't do any exclusive updates out of order
@@ -6965,12 +6849,7 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_privilege();
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -7414,12 +7293,7 @@ namespace Legion {
     void ReplDetachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements();
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -7675,13 +7549,8 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         log_requirement();
-      LogicalAnalysis analysis(this);
-      ProjectionInfo projection_info(runtime, requirement, 
-                                     launch_space, sharding_function);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(launch_space,
+                                  sharding_function);
       // Always perform a collective rendezvous for these points
       create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
     }
@@ -7900,13 +7769,8 @@ namespace Legion {
       requirement.projection = resources.impl->get_projection();
       if (runtime->legion_spy_enabled)
         log_requirement();
-      LogicalAnalysis analysis(this);
-      ProjectionInfo projection_info(runtime, requirement,
-                                     launch_space, sharding_function);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   projection_info,
-                                                   analysis);
+      analyze_region_requirements(launch_space,
+                                  sharding_function);
       create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
       // If we're flushing we need a second analysis rendezvous
       if (flush)

@@ -399,6 +399,13 @@ namespace Legion {
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { exec_fence = false; return true; }
       virtual Operation* get_origin_operation(void) { return this; }
+      virtual unsigned get_output_offset() const;
+      virtual const RegionRequirement &get_requirement(unsigned idx) const
+        { assert(false); return *(new RegionRequirement()); }
+      void analyze_region_requirements(
+        IndexSpaceNode *launch_space = nullptr,
+        ShardingFunction *func = nullptr,
+        IndexSpace shard_space = IndexSpace::NO_SPACE);
     public:
       inline GenerationID get_generation(void) const { return gen; }
       inline RtEvent get_mapped_event(void) const { return mapped_event; }
@@ -1191,7 +1198,7 @@ namespace Legion {
                                 Provenance *provenance);
       void initialize(InnerContext *ctx, const PhysicalRegion &region,
                       Provenance *provenance);
-      inline const RegionRequirement& get_requirement(void) const
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const
         { return requirement; }
     public:
       virtual void activate(void);
@@ -1428,6 +1435,13 @@ namespace Legion {
                                std::set<RtEvent> &applied_conditions,
                                const bool compute_preimages);
       void finalize_copy_profiling(void);
+    protected:
+      static void req_vector_reduce_to_readwrite(
+        std::vector<RegionRequirement> &reqs,
+        std::vector<unsigned> &changed_idxs);
+      static void req_vector_reduce_restore(
+        std::vector<RegionRequirement> &reqs,
+        const std::vector<unsigned> &changed_idxs);
     public:
       static void handle_deferred_across(const void *args);
     public:
@@ -1892,6 +1906,10 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual size_t get_region_count(void) const
+        { return deletion_requirements.size(); }
+      virtual const RegionRequirement &get_requirement(unsigned idx) const
+        { return deletion_requirements[idx]; }
     protected:
       void log_deletion_requirements(void);
     public:
@@ -2022,6 +2040,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const = 0;
       virtual size_t get_region_count(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
+      virtual const RegionRequirement &get_requirement(unsigned idx = 0) const
+      { return requirement; }
     public:
       virtual void trigger_commit(void);
     protected:
@@ -2295,6 +2315,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
+      virtual const RegionRequirement &get_requirement(unsigned idx) const
+        { return requirement; }
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -2369,15 +2391,13 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
     public:
-      const RegionRequirement& get_requirement(void) const;
-    public:
       // From MemoizableOp
       virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual void complete_replay(ApEvent pre, ApEvent acquire_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-      virtual const RegionRequirement& get_requirement(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const;
     public:
       // These are helper methods for ReplAcquireOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
@@ -2485,15 +2505,13 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
     public:
-      const RegionRequirement& get_requirement(void) const;
-    public:
       // From MemoizableOp
       virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual void complete_replay(ApEvent pre, ApEvent release_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-      virtual const RegionRequirement& get_requirement(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const;
     public:
       // These are helper methods for ReplReleaseOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
@@ -3463,7 +3481,7 @@ namespace Legion {
                                Provenance *provenance);
       void perform_logging(void) const;
       void log_requirement(void) const;
-      const RegionRequirement& get_requirement(void) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const;
     protected:
       void check_by_field(IndexPartition pid, IndexSpace color_space,
           LogicalRegion handle, LogicalRegion parent, FieldID fid) const;
@@ -3658,8 +3676,6 @@ namespace Legion {
       void initialize(InnerContext *ctx, const FillLauncher &launcher,
                       Provenance *provenance);
       void perform_base_dependence_analysis(void);
-      inline const RegionRequirement& get_requirement(void) const 
-        { return requirement; }
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -3707,8 +3723,8 @@ namespace Legion {
       // From Memoizable
       virtual const VersionInfo& get_version_info(unsigned idx) const
         { return version_info; }
-      virtual const RegionRequirement& get_requirement(unsigned idx) const
-        { return get_requirement(); }
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const
+        { return requirement; }
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -3840,7 +3856,7 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx, const DiscardLauncher &launcher,
                       Provenance *provenance);
-      inline const RegionRequirement& get_requirement(void) const
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const
         { return requirement; }
     public:
       virtual void activate(void);
@@ -3886,7 +3902,7 @@ namespace Legion {
       PhysicalRegion initialize(InnerContext *ctx,
                                 const AttachLauncher &launcher,
                                 Provenance *provenance);
-      inline const RegionRequirement& get_requirement(void) const 
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const 
         { return requirement; }
     public:
       virtual void activate(void);
@@ -3964,7 +3980,7 @@ namespace Legion {
                                    const std::vector<unsigned> &indexes,
                                    Provenance *provenance,
                                    const bool replicated);
-      inline const RegionRequirement& get_requirement(void) const
+      virtual const RegionRequirement& get_requirement(unsigned idx = 0) const
         { return requirement; }
     public:
       virtual void activate(void);
@@ -4087,6 +4103,8 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
       virtual void detach_external_instance(PhysicalManager *manager);
       virtual bool is_point_detach(void) const { return false; }
+      virtual const RegionRequirement &get_requirement(unsigned idx = 0) const
+      { return requirement; }
     protected:
       void compute_parent_index(void);
       void log_requirement(void);
@@ -4144,6 +4162,8 @@ namespace Legion {
       void complete_detach(void);
       void handle_point_complete(ApEvent point_effects);
       void handle_point_commit(void);
+      virtual const RegionRequirement &get_requirement(unsigned idx = 0) const
+      { return requirement; }
     protected:
       void compute_parent_index(void);
       void log_requirement(void);
