@@ -2439,7 +2439,7 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-        _fevent : EventID,
+        _fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
