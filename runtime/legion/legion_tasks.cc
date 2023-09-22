@@ -2321,6 +2321,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool SingleTask::is_concurrent(void) const
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl *var = runtime->find_variant_impl(task_id, selected_variant);
+      return var->is_concurrent();
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::is_created_region(unsigned index) const
     //--------------------------------------------------------------------------
     {
@@ -7530,7 +7538,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check that this is a concurrent index space task launch
-      if (!concurrent_fence_event.exists())
+      if (!is_concurrent())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_COLLECTIVE_KERNEL_LAUNCH,
             "Illegal collective kernel launch in task %s (UID %lld) which is "
             "not part of a concurrent index space task. Collective kernel "
@@ -7545,7 +7553,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check that this is a concurrent index space task launch
-      if (!concurrent_fence_event.exists())
+      if (!is_concurrent())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_COLLECTIVE_KERNEL_LAUNCH,
             "Illegal collective kernel launch in task %s (UID %lld) which is "
             "not part of a concurrent index space task. Collective kernel "

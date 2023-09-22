@@ -381,6 +381,7 @@ namespace Legion {
       // the task has had its variant selected
       bool is_leaf(void) const;
       bool is_inner(void) const;
+      bool is_concurrent(void) const;
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
       void clone_single_from(SingleTask *task);

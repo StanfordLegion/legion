@@ -5097,7 +5097,7 @@ namespace Legion {
       DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
-      if (shard_space.exists() && shard_space != handle)
+      if (shard_space.exists() && (shard_space != handle))
         context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
@@ -5148,7 +5148,7 @@ namespace Legion {
       DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
-      if (shard_space != handle)
+      if (shard_space.exists() && (shard_space != handle))
         context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;

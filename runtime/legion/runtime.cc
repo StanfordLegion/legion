@@ -26671,7 +26671,7 @@ namespace Legion {
       {
         AutoLock q_lock(collective_kernel_lock);
 #ifdef DEBUG_LEGION
-        assert(collective_kernel_queue.empty());
+        assert(!collective_kernel_queue.empty());
 #endif
         collective_kernel_queue.pop_front();
         if (!collective_kernel_queue.empty())
