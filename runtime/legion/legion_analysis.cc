@@ -2008,15 +2008,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
-                                   const RegionRequirement &req, 
+                                   const RegionRequirement *req,
                                    IndexSpaceNode *launch_space, 
-                                   ShardingFunction *func/*=NULL*/,
-                                   IndexSpace shard_space/*=NO_SPACE*/)
-      : sharding_function(func), sharding_space(shard_space.exists() ? 
-            runtime->forest->get_node(shard_space) : 
-              (func == NULL) ? NULL : launch_space)
+                                   ShardingFunction *func,
+                                   IndexSpace shard_space)
+      : projection(nullptr),
+        projection_type(LEGION_SINGULAR_PROJECTION),
+        projection_space(nullptr),
+        sharding_function(func),
+        sharding_space(nullptr)
     //--------------------------------------------------------------------------
     {
+      if (launch_space == nullptr)
+        return;
+
+      if (shard_space.exists())
+        sharding_space = runtime->forest->get_node(shard_space);
+      else if (func != nullptr) {
+        sharding_space = launch_space;
+      }
+
       // There is special logic here to handle the case of singular region 
       // requirements with sharding functions which we still want to treat as
       // projection region requirements for the logical analysis
@@ -2024,7 +2035,7 @@ namespace Legion {
       // Should always have a launch space with a sharding function
       assert((func == NULL) || (launch_space != NULL));
 #endif
-      if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+      if (req->handle_type == LEGION_SINGULAR_PROJECTION)
       {
         if (func != NULL)
         {
@@ -2037,14 +2048,14 @@ namespace Legion {
         else
         {
           projection = NULL;
-          projection_type = req.handle_type;
+          projection_type = req->handle_type;
           projection_space = NULL;
         }
       }
       else
       {
-        projection = runtime->find_projection_function(req.projection);
-        projection_type = req.handle_type;
+        projection = runtime->find_projection_function(req->projection);
+        projection_type = req->handle_type;
         projection_space = launch_space;
       }
     }

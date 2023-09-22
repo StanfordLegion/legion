@@ -6044,13 +6044,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      ProjectionInfo projection_info;
-      LogicalAnalysis logical_analysis(this, regions.size());
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-        runtime->forest->perform_dependence_analysis(this, idx, 
-                                                     logical_regions[idx], 
-                                                     projection_info,
-                                                     logical_analysis);
+      analyze_region_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -9206,15 +9200,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this, regions.size());
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-      {
-        RegionRequirement &req = logical_regions[idx];
-        ProjectionInfo projection_info(runtime, req, launch_space);
-        runtime->forest->perform_dependence_analysis(this, idx, req,
-                                                     projection_info,
-                                                     logical_analysis);
-      }
+      analyze_region_requirements(launch_space);
     }
 
     //--------------------------------------------------------------------------
