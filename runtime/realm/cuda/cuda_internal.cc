@@ -726,8 +726,6 @@ namespace Realm {
             CHECK_CU(
                 CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(&d2_copy_info, stream->get_stream()));
             act_planes++;
-            if(act_planes == 0)
-              break;
           }
         }
 
