@@ -757,7 +757,6 @@ namespace Realm {
           cuda_copy.Height = copy_info.extents[1];
           cuda_copy.Depth = copy_info.extents[2];
 
-          // TODO: This needs to be rolled back.
           cuda_copy.srcPitch = copy_info.src.strides[0];
           cuda_copy.srcHeight = copy_info.src.strides[1];
           cuda_copy.dstPitch = copy_info.dst.strides[0];
