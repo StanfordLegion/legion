@@ -344,7 +344,6 @@ namespace Realm {
       // catch simple 1D case first
       if((contig_bytes == bytes_left) || ((contig_bytes == icount) && (in_dim == 1)) ||
          ((contig_bytes == ocount) && (out_dim == 1))) {
-
         copy_info.extents[0] = contig_bytes;
         copy_info.src.strides[0] = contig_bytes;
         copy_info.dst.strides[0] = contig_bytes;
@@ -408,7 +407,6 @@ namespace Realm {
       if(((contig_bytes * lines) == bytes_left) ||
          ((lines == icount) && (id == (in_dim - 1))) ||
          ((lines == ocount) && (od == (out_dim - 1)))) {
-
         copy_info.src.strides[0] = in_lstride;
         copy_info.src.strides[1] = lines;
         copy_info.dst.strides[0] = out_lstride;
@@ -457,17 +455,35 @@ namespace Realm {
 
       const size_t planes =
           std::min(std::min(icount, ocount), (bytes_left / (contig_bytes * lines)));
-      copy_info.dst.strides[0] = out_lstride;
-      copy_info.dst.strides[1] = out_pstride;
 
-      copy_info.extents[0] = contig_bytes;
-      copy_info.extents[1] = lines;
-      copy_info.extents[2] = planes;
+      if(needs_transpose(in_lstride, in_pstride, out_lstride, out_pstride)) {
+        transpose_info.src = static_cast<uintptr_t>(in_base + in_offset);
+        transpose_info.dst = static_cast<uintptr_t>(out_base + out_offset);
 
-      copy_info.src.strides[0] = in_lstride;
-      copy_info.src.strides[1] = in_pstride;
+        transpose_info.src_strides[0] = in_lstride;
+        transpose_info.src_strides[1] = in_pstride;
 
-      copy_info.volume = planes * lines * contig_bytes;
+        transpose_info.dst_strides[0] = out_lstride;
+        transpose_info.dst_strides[1] = out_pstride;
+
+        transpose_info.extents[0] = contig_bytes;
+        transpose_info.extents[1] = lines;
+        transpose_info.extents[2] = planes;
+
+        copy_infos.num_rects--;
+      } else {
+        copy_info.dst.strides[0] = out_lstride;
+        copy_info.dst.strides[1] = out_pstride / out_lstride;
+
+        copy_info.extents[0] = contig_bytes;
+        copy_info.extents[1] = lines;
+        copy_info.extents[2] = planes;
+
+        copy_info.src.strides[0] = in_lstride;
+        copy_info.src.strides[1] = in_pstride / in_lstride;
+
+        copy_info.volume = planes * lines * contig_bytes;
+      }
 
       in_alc.advance(id, planes * iscale);
       out_alc.advance(od, planes * oscale);
@@ -580,7 +596,6 @@ namespace Realm {
         size_t min_align = 16;  // Hope for the highest type alignment we can get, 16 bytes
         copy_infos.num_rects = 0;
         size_t bytes_left = std::min(flow_control_bytes - total_bytes, max_bytes);
-        bool needs_transpose_copy = false;
 
         if(cuda_copy.WidthInBytes != 0) {
           memset(&cuda_copy, 0, sizeof(cuda_copy));
@@ -604,17 +619,13 @@ namespace Realm {
             if(!in_gpu || (!out_gpu && !out_is_ipc)) {
               bytes_left = std::min(bytes_left, (size_t)(4U << 20U));
             }
-            const size_t bytes_to_copy = populate_affine_copy_info(copy_infos, min_align, transpose_copy, in_alc, in_base, in_gpu, out_alc, out_base, out_gpu, bytes_left);
-            // Either src or dst can't be accessed with a kernel, so just break out and perform a standard cuMemcpy
+            const size_t bytes_to_copy = populate_affine_copy_info(
+                copy_infos, min_align, transpose_copy, in_alc, in_base, in_gpu, out_alc,
+                out_base, out_gpu, bytes_left);
+            // Either src or dst can't be accessed with a kernel, so just break out and
+            // perform a standard cuMemcpy
 
-            AffineCopyPair<3> copy_info = copy_infos.subrects[copy_infos.num_rects - 1];
-
-            if(needs_transpose(copy_info.src.strides[0], copy_info.src.strides[1],
-                               copy_info.dst.strides[0], copy_info.dst.strides[1])) {
-              needs_transpose_copy = true;
-              break;
-            }
-
+            if (transpose_copy.extents[0] != 0) break;
             if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
               break;
             }
@@ -682,14 +693,47 @@ namespace Realm {
           bytes_to_fence += bytes;
         }
 
+        if(transpose_copy.extents[0] != 0) {
+          CUDA_MEMCPY2D d2_copy_info;
+          memset(&d2_copy_info, 0, sizeof(d2_copy_info));
+          d2_copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+          d2_copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+          d2_copy_info.srcPitch = transpose_copy.src_strides[0];
+          d2_copy_info.dstPitch = transpose_copy.dst_strides[0];
+          d2_copy_info.WidthInBytes = transpose_copy.extents[0];
+          d2_copy_info.Height = transpose_copy.extents[1];
+
+          log_gpudma.info() << "\t Launching 2D CE transpose srcPitch="
+                            << d2_copy_info.srcPitch
+                            << " dstpitch=" << d2_copy_info.dstPitch
+                            << " WidthInBytes=" << d2_copy_info.WidthInBytes
+                            << " Height=" << d2_copy_info.Height;
+
+          size_t planes = transpose_copy.extents[2];
+          size_t act_planes = 0;
+          while(act_planes < planes) {
+            if(!stream->ok_to_submit_copy(d2_copy_info.WidthInBytes * d2_copy_info.Height,
+                                          this)) {
+              break;
+            }
+
+            d2_copy_info.dstDevice =
+                transpose_copy.dst + act_planes * transpose_copy.dst_strides[1];
+            d2_copy_info.srcDevice =
+                transpose_copy.src + act_planes * transpose_copy.src_strides[1];
+
+            CHECK_CU(
+                CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(&d2_copy_info, stream->get_stream()));
+            act_planes++;
+            if(act_planes == 0)
+              break;
+          }
+        }
+
         if (copy_infos.num_rects > 1) {
           assert((in_gpu != NULL) && in_gpu->can_access_peer(out_gpu));
           // Adjust all the rectangles' sizes to account for the element size based on the calculated alignment
           for (size_t i = 0; (min_align > 1) && (i < copy_infos.num_rects); i++) {
-            copy_infos.subrects[i].dst.strides[1] /=
-                copy_infos.subrects[i].dst.strides[0];
-            copy_infos.subrects[i].src.strides[1] /=
-                copy_infos.subrects[i].src.strides[0];
             copy_infos.subrects[i].dst.strides[0] /= min_align;
             copy_infos.subrects[i].src.strides[0] /= min_align;
             copy_infos.subrects[i].extents[0]     /= min_align;
@@ -706,75 +750,27 @@ namespace Realm {
           AffineCopyPair<3> &copy_info = copy_infos.subrects[0];
           assert(copy_infos.num_rects == 1);
 
-    // TODO(apryakhin@): Once we make sure that cuMemcpy3DAsync handles
-    // transpose copies, make this a default path and remove the
-    // underlying implementation in the else branch.
-#ifdef ENABLE_2D_TRANSPOSE
-          if (!needs_transpose_copy) {
-#endif
-            // Split the 3D copy into 2D copies
-            cuda_copy.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
-            cuda_copy.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
-            cuda_copy.WidthInBytes = copy_info.extents[0];
-            cuda_copy.Height = copy_info.extents[1];
-            cuda_copy.Depth = copy_info.extents[2];
-            cuda_copy.srcPitch = copy_info.src.strides[0];
-            cuda_copy.srcHeight = copy_info.src.strides[1] / copy_info.src.strides[0];
-            cuda_copy.dstPitch = copy_info.dst.strides[0];
-            cuda_copy.dstHeight = copy_info.dst.strides[1] / copy_info.dst.strides[0];
+          // Split the 3D copy into 2D copies
+          cuda_copy.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+          cuda_copy.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+          cuda_copy.WidthInBytes = copy_info.extents[0];
+          cuda_copy.Height = copy_info.extents[1];
+          cuda_copy.Depth = copy_info.extents[2];
 
-            cuda_copy.dstDevice = copy_info.dst.addr;
-            cuda_copy.srcDevice = copy_info.src.addr;
+          // TODO: This needs to be rolled back.
+          cuda_copy.srcPitch = copy_info.src.strides[0];
+          cuda_copy.srcHeight = copy_info.src.strides[1];
+          cuda_copy.dstPitch = copy_info.dst.strides[0];
+          cuda_copy.dstHeight = copy_info.dst.strides[1];
 
-            log_gpudma.info() << "\tLaunching CE for "
-                              << copy_info.extents[0] * copy_info.extents[1] *
-                                     copy_info.extents[2]
-                              << "bytes";
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy,
-                                                        stream->get_stream()));
-#ifdef ENABLE_2D_TRANSPOSE
-          } else {
-            CUDA_MEMCPY2D d2_copy_info;
-            memset(&d2_copy_info, 0, sizeof(d2_copy_info));
-            d2_copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
-            d2_copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
-            d2_copy_info.srcPitch = copy_info.src.strides[0];
-            d2_copy_info.dstPitch = copy_info.dst.strides[0];
-            d2_copy_info.WidthInBytes = copy_info.extents[0];
-            d2_copy_info.Height = copy_info.extents[1];
+          cuda_copy.dstDevice = copy_info.dst.addr;
+          cuda_copy.srcDevice = copy_info.src.addr;
 
-            log_gpudma.info() << "\t Launching CE for 2D transpose srcPitch="
-                              << d2_copy_info.srcPitch
-                              << " dstPitch=" << d2_copy_info.dstPitch
-                              << " WidthInBytes=" << d2_copy_info.WidthInBytes
-                              << " Height=" << d2_copy_info.Height
-                              << " planes=" << copy_info.extents[2];
-
-            size_t planes = copy_info.extents[2];
-            size_t act_planes = 0;
-
-            while (act_planes < planes) {
-              if (!stream->ok_to_submit_copy(
-                      d2_copy_info.WidthInBytes * d2_copy_info.Height, this)) {
-                break;
-              }
-
-              d2_copy_info.dstDevice =
-                  copy_info.dst.addr + act_planes * copy_info.dst.strides[1];
-              d2_copy_info.srcDevice =
-                  copy_info.src.addr + act_planes * copy_info.src.strides[1];
-
-              CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(
-                  &d2_copy_info, stream->get_stream()));
-              act_planes++;
-
-              // TODO(apryakhin@)
-              // if (work_until.is_expired()) break;
-
-              if (act_planes == 0) break;
-            }
-          }
-#endif
+          log_gpudma.info() << "\tLaunching 3D CE for "
+                            << copy_info.extents[0] * copy_info.extents[1] *
+                                   copy_info.extents[2]
+                            << "bytes";
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
 
           bytes_to_fence += copy_info.extents[0] * copy_info.extents[1] * copy_info.extents[2];
         }
