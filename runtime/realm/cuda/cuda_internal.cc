@@ -728,6 +728,9 @@ namespace Realm {
                 CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(&d2_copy_info, stream->get_stream()));
             act_planes++;
           }
+          // transpose sets up all 3 dims for extents.
+          bytes_to_fence += transpose_copy.extents[0] * transpose_copy.extents[1] *
+                            transpose_copy.extents[2];
         }
 
         if (copy_infos.num_rects > 1) {
