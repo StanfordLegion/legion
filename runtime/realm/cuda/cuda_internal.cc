@@ -467,7 +467,8 @@ namespace Realm {
         transpose_info.extents[0] = contig_bytes;
         transpose_info.extents[1] = lines;
         transpose_info.extents[2] = planes;
-
+        // Remove this rectangle from the copy info, since we've put
+        // this in the transpose info.
         copy_infos.num_rects--;
       } else {
         copy_info.dst.strides[0] = out_lstride;
@@ -692,8 +693,8 @@ namespace Realm {
         }
 
         // TODO(apryakhin@): Once we make sure that cuMemcpy3DAsync handles
-        // transpose copies, make this a default path and remove the
-        // underlying implementation in the else branch.
+        // transpose copies, make it a default path and remove the
+        // underlying implementation.
         if(transpose_copy.extents[0] != 0) {
           CUDA_MEMCPY2D d2_copy_info;
           memset(&d2_copy_info, 0, sizeof(d2_copy_info));
