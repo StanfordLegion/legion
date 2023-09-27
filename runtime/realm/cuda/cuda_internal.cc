@@ -691,6 +691,9 @@ namespace Realm {
           bytes_to_fence += bytes;
         }
 
+        // TODO(apryakhin@): Once we make sure that cuMemcpy3DAsync handles
+        // transpose copies, make this a default path and remove the
+        // underlying implementation in the else branch.
         if(transpose_copy.extents[0] != 0) {
           CUDA_MEMCPY2D d2_copy_info;
           memset(&d2_copy_info, 0, sizeof(d2_copy_info));
