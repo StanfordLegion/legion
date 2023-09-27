@@ -18,8 +18,6 @@
 #include "realm/cuda/cuda_access.h"
 #include "realm/cuda/cuda_memcpy.h"
 
-#define ENABLE_2D_TRANSPOSE
-
 namespace Realm {
 
   extern Logger log_xd;
@@ -625,8 +623,8 @@ namespace Realm {
             // Either src or dst can't be accessed with a kernel, so just break out and
             // perform a standard cuMemcpy
 
-            if (transpose_copy.extents[0] != 0) break;
-            if((in_gpu == NULL) || !in_gpu->can_access_peer(out_gpu)) {
+            if(transpose_copy.extents[0] != 0 || (in_gpu == NULL) ||
+               !in_gpu->can_access_peer(out_gpu)) {
               break;
             }
 
@@ -750,7 +748,6 @@ namespace Realm {
           AffineCopyPair<3> &copy_info = copy_infos.subrects[0];
           assert(copy_infos.num_rects == 1);
 
-          // Split the 3D copy into 2D copies
           cuda_copy.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
           cuda_copy.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
           cuda_copy.WidthInBytes = copy_info.extents[0];
