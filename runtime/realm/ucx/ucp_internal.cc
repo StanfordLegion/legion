@@ -1880,7 +1880,7 @@ err:
   {
     const SegmentInfo *segment_info = internal->find_segment(src_payload_addr);
     const UCPContext *context       = internal->get_context(segment_info);
-    uint8_t priority                = (header_size + _max_payload_size <=
+    uint8_t priority                = (_header_size + _max_payload_size <=
                                        internal->config.priority_size_max) ?
                                       internal->config.num_priorities - 1 : 0;
 
