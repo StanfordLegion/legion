@@ -99,16 +99,14 @@ namespace Realm {
       unsigned short num_rects;
     };
 
-    template<typename Offset_t>
+    template <typename Offset_t>
     struct MemcpyTransposeInfo {
-      size_t width;
-      size_t height;
-      size_t src_stride;
-      size_t dst_stride;
-      size_t field_size;
-      size_t tile_size;
-      void *dst;
-      void *src;
+      Offset_t extents[3];
+      Offset_t src_strides[2];
+      Offset_t dst_strides[2];
+      Offset_t tile_size;
+      uintptr_t dst;
+      uintptr_t src;
     };
 
     template <size_t N, typename Offset_t = size_t>
