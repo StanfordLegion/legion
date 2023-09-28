@@ -62,17 +62,18 @@ namespace Realm {
 #ifdef USE_PYGILSTATE_CALLS
     get_symbol(this->PyGILState_Ensure, "PyGILState_Ensure");
     get_symbol(this->PyGILState_Release, "PyGILState_Release");
-    get_symbol(this->PyGILState_Check, "PyGILState_Check");
 #else
     get_symbol(this->PyThreadState_New, "PyThreadState_New");
     get_symbol(this->PyThreadState_Clear, "PyThreadState_Clear");
     get_symbol(this->PyThreadState_Delete, "PyThreadState_Delete");
 #endif
+    get_symbol(this->PyGILState_GetThisThreadState, "PyGILState_GetThisThreadState");
     get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
     get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
 
     get_symbol(this->PyThreadState_Swap, "PyThreadState_Swap");
     get_symbol(this->PyThreadState_Get, "PyThreadState_Get");
+    get_symbol(this->PyThreadState_GetDict, "PyThreadState_GetDict");
 
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 
@@ -84,10 +85,11 @@ namespace Realm {
     get_symbol(this->PyObject_CallFunction, "PyObject_CallFunction");
     get_symbol(this->PyObject_CallObject, "PyObject_CallObject");
     get_symbol(this->PyObject_GetAttrString, "PyObject_GetAttrString");
-    get_symbol(this->PyObject_Print, "PyObject_Print");
+    // PyObject_Print is not abi3 compatible and is used exclusively for debugging
+    // get_symbol(this->PyObject_Print, "PyObject_Print");
 
-    get_symbol(this->PyRun_SimpleString, "PyRun_SimpleString");
-    get_symbol(this->PyRun_String, "PyRun_String");
+    get_symbol(this->Py_CompileString, "Py_CompileString");
+    get_symbol(this->PyEval_EvalCode, "PyEval_EvalCode");
 
     get_symbol(this->PyTuple_New, "PyTuple_New");
     get_symbol(this->PyTuple_SetItem, "PyTuple_SetItem");
@@ -287,22 +289,33 @@ namespace Realm {
     assert(mainmod != 0);
     PyObject *globals = (api->PyModule_GetDict)(mainmod);
     assert(globals != 0);
-    PyObject *res = (api->PyRun_String)(script_text.c_str(),
-					Py_file_input,
-					globals,
-					globals);
-    if(!res) {
-      log_py.fatal() << "unable to run python string:" << script_text;
+
+    PyObject *compiled = (api->Py_CompileString)(script_text.c_str(), "realm", Py_file_input);
+    if(!compiled) {
+      log_py.fatal() << "unable to compile python string: " << script_text;
       (api->PyErr_PrintEx)(0);
       (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
-      assert(0);
+      abort();
+    }
+
+    PyObject *res = (api->PyEval_EvalCode)(compiled, globals, globals);
+    if(!res) {
+      log_py.fatal() << "unable to run python string: " << script_text;
+      (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
+      abort();
     }
     (api->Py_DecRef)(res);
-    (api->Py_DecRef)(globals);
+    (api->Py_DecRef)(compiled);
     (api->Py_DecRef)(mainmod);
   }
 
-  
+  int PythonInterpreter::check_gil_state()
+  {
+    return (api->PyThreadState_GetDict)() != NULL &&
+           (api->PyGILState_GetThisThreadState)() == (api->PyThreadState_Get)();
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class PythonThreadTaskScheduler
@@ -592,7 +605,7 @@ namespace Realm {
     //  restore each python thread on the OS thread that owned it intially, the
     //  PyGILState TLS stuff should remain consistent
     PyThreadState *saved = 0;
-    if((pyproc->interpreter->api->PyGILState_Check)() == 1) {
+    if(pyproc->interpreter->check_gil_state() == 1) {
       log_py.info() << "python worker sleeping - releasing GIL";
       // would like to sanity-check that this returns the expected thread state,
       //  but that would require taking the PythonThreadTaskScheduler's lock
@@ -606,7 +619,7 @@ namespace Realm {
     if(saved) {
       log_py.info() << "python worker awake - acquiring GIL";
       log_py.debug() << "RestoreThread <- " << saved;
-      assert( (pyproc->interpreter->api->PyGILState_Check)() == 0 );
+      assert( pyproc->interpreter->check_gil_state() == 0);
       (pyproc->interpreter->api->PyEval_RestoreThread)(saved);
     } else
       log_py.info() << "python worker awake - not acquiring GIL";
@@ -756,7 +769,7 @@ namespace Realm {
     interpreter = new PythonInterpreter;
     // the call to PyEval_InitThreads in the PythonInterpreter constructor
     //  acquired the GIL on our behalf already
-    assert( (interpreter->api->PyGILState_Check)() == 1 );
+    assert( interpreter->check_gil_state() == 1);
     master_thread = (interpreter->api->PyThreadState_Get)();
 
     // always need the python threading module
@@ -804,7 +817,7 @@ namespace Realm {
     //  we'll get a KeyError in threading.py
     // resolve this by calling threading.current_thread() here, using __import__
     //  to deal with the case where 'import threading' never got called
-    (interpreter->api->PyRun_SimpleString)("__import__('threading').current_thread()");
+    interpreter->run_string("__import__('threading').current_thread()");
 
     // Python > 3.9.7 requires the main thread to collapse the threading module,
     // but we're in a non-master thread when tearing down the interpreter here,
@@ -813,7 +826,7 @@ namespace Realm {
     // module tries to lock and unlock it to emulate the thread join, there won't
     // be a deadlock. See this GitHub issue for the detail:
     //   https://github.com/nv-legate/cunumeric/issues/187
-    (interpreter->api->PyRun_SimpleString)(
+    interpreter->run_string(
       "[main_thread._tstate_lock.release() "
       "if (v.major > 3 or v.major == 3 and (v.minor > 10 or (v.minor == 10 and v.micro > 0) or (v.minor == 9 and v.micro > 7))) "
       "and main_thread != curr_thread "
