@@ -1734,6 +1734,11 @@ namespace Legion {
 
       serializer->serialize(machine_desc);
 
+      LegionProfDesc::ZeroTime zero_time;
+      zero_time.zero_time = Legion::Runtime::get_zero_time();
+
+      serializer->serialize(zero_time);
+
       for (unsigned idx = 0; idx < num_meta_tasks; idx++)
       {
         LegionProfDesc::MetaDesc meta_desc;

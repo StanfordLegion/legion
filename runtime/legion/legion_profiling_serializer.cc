@@ -91,6 +91,11 @@ namespace Legion {
          << "num_nodes:unsigned:" << sizeof(unsigned)
          << "}" << std::endl;
 
+      ss << "ZeroTime {"
+         << "id:" << ZERO_TIME_ID  << delim
+         << "zero_time:long long:" << sizeof(long long)
+         << "}" << std::endl;
+
       ss << "MemDesc {" 
          << "id:" << MEM_DESC_ID                               << delim
          << "mem_id:MemID:"                << sizeof(MemID)    << delim
@@ -507,6 +512,18 @@ namespace Legion {
 		sizeof(machine_desc.node_id));
       lp_fwrite(f, (char*)&(machine_desc.num_nodes),
 		sizeof(machine_desc.num_nodes));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                      const LegionProfDesc::ZeroTime
+				      &zero_time)
+    //--------------------------------------------------------------------------
+    {
+      int ID = ZERO_TIME_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(zero_time.zero_time),
+		sizeof(zero_time.zero_time));
     }
 
     //--------------------------------------------------------------------------
@@ -1589,6 +1606,15 @@ namespace Legion {
     {
       log_prof.print("Machine Desc %d %d",
                      machine_desc.node_id, machine_desc.num_nodes);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                      const LegionProfDesc::ZeroTime
+				      &zero_time)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Zero Time %lld", zero_time.zero_time);
     }
 
     //--------------------------------------------------------------------------

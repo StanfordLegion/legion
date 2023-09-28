@@ -134,6 +134,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+)'),
+        "ZeroTime": re.compile(prefix + r'Zero Time (?P<zero_time>[0-9]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
         "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<bandwidth>[0-9]+) (?P<latency>[0-9]+)'),
@@ -242,6 +243,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "provenance": lambda x: x,
         "node_id": int,
         "num_nodes": int,
+        "zero_time": int,
     }
 
     def __init__(self, state: State, callbacks: Dict[str, Callable]) -> None:
