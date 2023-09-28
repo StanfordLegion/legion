@@ -22534,7 +22534,7 @@ namespace Legion {
     void IndexDetachOp::complete_detach(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(get_completion_event(), NULL, 0, true/*own*/);
+      result.impl->set_result(get_complete_effects(), NULL, 0, true/*own*/);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
       {
