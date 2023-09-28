@@ -554,15 +554,15 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
+                      const void *metadataptr, size_t metadatasize, 
+                      ApEvent effects);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
       bool is_task_local_instance(PhysicalInstance instance);
-      ApEvent escape_task_local_instance(PhysicalInstance instance);
-      FutureInstance* copy_to_future_inst(const void *value, size_t size,
-                                          RtEvent &done);
+      void escape_task_local_instance(PhysicalInstance instance);
+      FutureInstance* copy_to_future_inst(const void *value, size_t size);
       FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
       void begin_misspeculation(void);
       void end_misspeculation(FutureInstance *instance,
@@ -691,7 +691,6 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
-      void release_task_local_instances(void);
     protected:
       Future predicate_task_false(const TaskLauncher &launcher,
                                   Provenance *provenance);
@@ -770,7 +769,7 @@ namespace Legion {
     protected:
       // Map of task local instances including their unique events
       // from the profilters perspective
-      std::map<PhysicalInstance,ApEvent> task_local_instances;
+      std::map<PhysicalInstance,LgEvent> task_local_instances;
     protected:
       bool task_executed;
       bool has_inline_accessor;
@@ -1709,7 +1708,8 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
+                      const void *metadataptr, size_t metadatasize,
+                      ApEvent effects);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
@@ -2831,7 +2831,8 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_future,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
+                      const void *metadataptr, size_t metadatasize,
+                      ApEvent effects);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
@@ -3835,7 +3836,8 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
+                      const void *metadataptr, size_t metadatasize,
+                      ApEvent effects);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,

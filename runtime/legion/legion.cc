@@ -7738,10 +7738,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finish_implicit_task(Context ctx)
+    void Runtime::finish_implicit_task(Context ctx, Realm::Event effects)
     //--------------------------------------------------------------------------
     {
-      runtime->finish_implicit_task(ctx);
+      runtime->finish_implicit_task(ctx, Internal::ApEvent(effects));
     } 
 
     //--------------------------------------------------------------------------
@@ -8076,7 +8076,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
-          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize);
+          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8085,7 +8086,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST,
-          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0);
+          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8097,7 +8099,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(ptr, size, owned, Realm::RegionInstance::NO_INST,
-          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize);
+          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------

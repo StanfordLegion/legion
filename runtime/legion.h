@@ -9684,12 +9684,16 @@ namespace Legion {
 
       /**
        * This is the final method for marking the end of an 
-       * implicit top-level task. Note that it executes asychronously
-       * and it is still the responsibility of the user to wait for 
-       * the runtime to shutdown when all of it's effects are done.
+       * implicit top-level task. If there are any asynchronous effects
+       * that were launched during the implicit top-level task (such as
+       * a CUDA kernel launch) then users are required to capture all 
+       * those effects as a Realm event to tell Legion when all those
+       * effects are completed. Finishing an implicit top-level task
+       * still requires waiting explicitly for the runtime to shutdown.
        * The Context object is no longer valid after this call.
        */
-      void finish_implicit_task(Context ctx); 
+      void finish_implicit_task(Context ctx,
+                                Realm::Event effects = Realm::Event::NO_EVENT);
 
       /**
        * Return the maximum number of dimensions that Legion was

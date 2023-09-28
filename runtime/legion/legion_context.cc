@@ -166,7 +166,6 @@ namespace Legion {
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       // Set the future result
-      RtEvent done;
       FutureInstance *instance = NULL;
       if (size > 0)
       {
@@ -179,11 +178,9 @@ namespace Legion {
               FutureInstance::free_host_memory, executing_processor);
         }
         else
-          instance = copy_to_future_inst(value, size, done);
+          instance = copy_to_future_inst(value, size);
       }
       result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
-      if (done.exists() && !done.has_triggered())
-        done.wait();
       return result;
     }
 
@@ -2092,12 +2089,12 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
-      ApEvent unique_event(Processor::get_current_finish_event());
+      RtEvent unique_event(Processor::get_current_finish_event());
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
-        const ApUserEvent unique = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, unique, unique_event);
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique, unique_event);
         unique_event = unique;
       }
       const ApEvent wait_on(manager->create_eager_instance(instance, 
@@ -2134,7 +2131,7 @@ namespace Legion {
     void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalInstance,ApEvent>::iterator finder =
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
@@ -2155,13 +2152,21 @@ namespace Legion {
                                FutureFunctor *callback_functor,
                                const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                               const void *metadataptr, size_t metadatasize)
+                  const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
       if (!output_regions.empty())
         finalize_output_regions();
+      const bool internal_task = Processor::get_executing_processor().exists();
+      if (internal_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(!effects.exists());
+#endif
+        effects = ApEvent(Processor::get_current_finish_event());
+      }
       // See if we need to pull the data in from a callback in the case
       // where we are going to be doing a reduction immediately, if we
       // are then we're going to overwrite 'owned' so save it to callback_owned
@@ -2183,7 +2188,6 @@ namespace Legion {
         }
       }
       // If we have a deferred result instance we need to escape that too
-      RtEvent copy_future;
       FutureInstance *instance = NULL;
       if (deferred_result_instance.exists())
       {
@@ -2192,25 +2196,23 @@ namespace Legion {
         assert(freefunc == NULL);
 #endif
         // escape this task local instance
-        ApEvent ready = escape_task_local_instance(deferred_result_instance);
-        instance = new FutureInstance(res, res_size, ready, runtime,
+        escape_task_local_instance(deferred_result_instance);
+        instance = new FutureInstance(res, res_size, effects, runtime,
             true/*eager*/, false/*external*/, true/*own alloc*/,
-            ready, deferred_result_instance);
+            effects, deferred_result_instance);
       }
       else if (resource != NULL)
       {
         if (!owned)
         {
-          FutureInstance source(res, res_size, 
-             ApEvent(Processor::get_current_finish_event()), runtime,
+          FutureInstance source(res, res_size, effects, runtime,
              false/*own allocation*/, resource->clone(), 
              freefunc, executing_processor);
           instance = copy_to_future_inst(
               runtime->runtime_system_memory, &source);
         }
         else
-          instance = new FutureInstance(res, res_size, 
-              ApEvent(Processor::get_current_finish_event()), runtime,
+          instance = new FutureInstance(res, res_size, effects, runtime, 
               true/*own allocation*/, resource->clone(), 
               freefunc, executing_processor);
       }
@@ -2223,12 +2225,21 @@ namespace Legion {
         {
           const Realm::ExternalMemoryResource resource(
               reinterpret_cast<uintptr_t>(res), res_size, true/*read only*/);
-          instance = new FutureInstance(res, res_size, ApEvent::NO_AP_EVENT,
+          instance = new FutureInstance(res, res_size, effects,
               runtime, true/*own allocation*/, resource.clone(),
               FutureInstance::free_host_memory, executing_processor);
         }
         else
-          instance = copy_to_future_inst(res, res_size, copy_future);
+        {
+          // Wait for any effects for immediate values if necessary
+          if (!internal_task && effects.exists())
+            effects.wait_faultignorant();
+          instance = copy_to_future_inst(res, res_size);
+          // Since we don't own the buffer, we need to wait for the copy
+          // to be done before we can safely return
+          if (instance->ready_event.exists())
+            instance->ready_event.wait_faultignorant();
+        }
       }
       // If we did an eager callback, restore whether we own it now
       bool release_callback = false;
@@ -2241,7 +2252,25 @@ namespace Legion {
       }
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
-        release_task_local_instances();
+      {
+        RtEvent done;
+        if (effects.exists())
+          done = Runtime::protect_event(effects);
+        for (std::map<PhysicalInstance,LgEvent>::iterator it =
+             task_local_instances.begin(); it !=
+             task_local_instances.end(); ++it)
+        {
+          PhysicalInstance inst = it->first;
+          MemoryManager *manager =
+            runtime->find_memory_manager(inst.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
+          manager->free_legion_instance(done, inst);
+#else
+          manager->free_eager_instance(inst, done);
+#endif
+        }
+        task_local_instances.clear();
+      }
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2251,24 +2280,11 @@ namespace Legion {
       Runtime *runtime_ptr = runtime;
       // Tell the parent context that we are ready for post-end
       InnerContext *parent_ctx = owner_task->get_context();
-      const bool internal_task = Processor::get_executing_processor().exists();
-      RtEvent effects_done(internal_task && !inline_task ?
-          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
-      if (last_registration.exists() && !last_registration.has_triggered())
-      {
-        if (copy_future.exists() && !copy_future.has_triggered())
-          effects_done = 
-            Runtime::merge_events(effects_done, last_registration, copy_future);
-        else
-          effects_done = Runtime::merge_events(effects_done, last_registration);
-      }
-      else if (copy_future.exists() && !copy_future.has_triggered())
-        effects_done = Runtime::merge_events(effects_done, copy_future);
       if (release_callback)
-        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+        parent_ctx->add_to_post_task_queue(this, last_registration, instance,
               NULL/*no functor here*/, owned, metadataptr, metadatasize);
       else
-        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+        parent_ctx->add_to_post_task_queue(this, last_registration, instance,
                      callback_functor, owned, metadataptr, metadatasize);
       if (!inline_task)
 #ifdef DEBUG_LEGION
@@ -2277,10 +2293,6 @@ namespace Legion {
 #else
         runtime_ptr->decrement_total_outstanding_tasks();
 #endif
-      // If we have a copy future, but don't own the source data we must wait
-      // before returning to ensure the copy is done before source is deleted
-      if (!owned && copy_future.exists() && !copy_future.has_triggered())
-        copy_future.wait();
       // See if we can release our callback down
       if (release_callback)
       {
@@ -2292,7 +2304,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* TaskContext::copy_to_future_inst(const void *value,
-                                                     size_t size, RtEvent &done)
+                                                     size_t size)
     //--------------------------------------------------------------------------
     {
       // See if we need to make an eager instance for this or not
@@ -2303,7 +2315,7 @@ namespace Legion {
         MemoryManager *manager = runtime->find_memory_manager(memory);
         const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
         FutureInstance *instance = manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), ready,size, true/*eager*/);
+            owner_task->get_unique_op_id(), ready, size, true/*eager*/);
         // create an external instance for the current allocation
         const Realm::ExternalMemoryResource resource(
             reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
@@ -2362,18 +2374,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    void TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalInstance,ApEvent>::iterator finder =
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
-      const ApEvent result = finder->second;
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2546,27 +2556,6 @@ namespace Legion {
       const RtEvent wait_for = 
         runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
       wait_for.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::release_task_local_instances(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtEvent done(Processor::get_current_finish_event());
-      for (std::map<PhysicalInstance,ApEvent>::iterator it =
-           task_local_instances.begin(); it !=
-           task_local_instances.end(); ++it)
-      {
-        PhysicalInstance inst = it->first;
-        MemoryManager *manager =
-          runtime->find_memory_manager(inst.get_location());
-#ifdef LEGION_MALLOC_INSTANCES
-        manager->free_legion_instance(done, inst);
-#else
-        manager->free_eager_instance(inst, done);
-#endif
-      }
-      task_local_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -11325,7 +11314,8 @@ namespace Legion {
                                 FutureFunctor *callback_functor,
                                 const Realm::ExternalInstanceResource *resource,
                        void (*freefunc)(const Realm::ExternalInstanceResource&),
-                                const void *metadataptr, size_t metadatasize)
+                                const void *metadataptr, size_t metadatasize,
+                                ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // See if we have any local regions or fields that need to be deallocated
@@ -11501,7 +11491,7 @@ namespace Legion {
       // physical regions so we can clear them at this point
       physical_regions.clear();
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
-          callback_functor, resource, freefunc, metadataptr, metadatasize);
+          callback_functor, resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------
@@ -19377,7 +19367,7 @@ namespace Legion {
                                 FutureFunctor *callback_functor,
                                 const Realm::ExternalInstanceResource *resource,
               void (*freefunc)(const Realm::ExternalInstanceResource &resource),
-                       const void *metadataptr, size_t metadatasize)
+                  const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // We have an extra one of these here to handle the case where some
@@ -19393,7 +19383,7 @@ namespace Legion {
           break;
       }
       InnerContext::end_task(res, res_size, owned, deferred_result_instance,
-            callback_functor, resource, freefunc, metadataptr, metadatasize);
+           callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------
@@ -24071,7 +24061,7 @@ namespace Legion {
                                FutureFunctor *callback_functor,
                                const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                               const void *metadataptr, size_t metadatasize)
+                  const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
@@ -24097,7 +24087,7 @@ namespace Legion {
         wait_on.wait();
       } 
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
-          callback_functor, resource, freefunc, metadataptr, metadatasize); 
+          callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------

@@ -30620,7 +30620,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finish_implicit_task(TaskContext *ctx)
+    void Runtime::finish_implicit_task(TaskContext *ctx, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       if (!ctx->implicit_task)
@@ -30631,7 +30631,7 @@ namespace Legion {
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
           NULL/*callback functor*/, NULL/*resource*/,  NULL/*freefunc*/,
-          NULL/*metadataptr*/, 0/*metadatasize*/);
+          NULL/*metadataptr*/, 0/*metadatasize*/, effects);
       implicit_context = NULL;
     }
 
