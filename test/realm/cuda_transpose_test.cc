@@ -99,7 +99,7 @@ namespace TestConfig {
   size_t narrow_dim = 0;        // should one dimension be a fixed (narrow) size?
   unsigned dim_mask = 3;        // i.e. all the dimensions
   bool all_mems = true;
-  size_t pad_width = 0;
+  size_t pad_width = 32;
   size_t max_perms = 10;
   unsigned random_seed = 12345; // used to sample permutations if needed
   bool wait_after = false;      // wait after each copy?
@@ -252,6 +252,16 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     }
   }
 
+  if (bounds_pad.empty()) {
+    for (int i = 0; i < N; i++) {
+      bounds_pad.lo[i] = 0;
+      bounds_pad.hi[i] = bounds.hi[i] + (((narrow_size > 0) &&
+                                          (narrow_size < TestConfig::pad_width))
+                                             ? narrow_size
+                                             : TestConfig::pad_width);
+    }
+  }
+
   log_app.info() << "bounds=" << bounds;
   IndexSpace<N> is(bounds);
 
@@ -381,7 +391,11 @@ void do_single_dim_field_size(Memory src_mem, Memory dst_mem, int log2_size,
                               Rect<N, T> bounds = Rect<N, T>::make_empty(),
                               Rect<N, T> bounds_pad = Rect<N, T>::make_empty(),
                               size_t field_size = 8, int pad = 0) {
-  if (TestConfig::field_size == 8) {
+  if (TestConfig::field_size == 4) {
+    do_single_dim<N, T, int>(src_mem, dst_mem, log2_size,
+                                TestConfig::narrow_dim, prof_proc, src_perms, dst_perms,
+                                bounds, bounds_pad, pad);
+  } else if (TestConfig::field_size == 8) {
     do_single_dim<N, T, double>(src_mem, dst_mem, log2_size,
                                 TestConfig::narrow_dim, prof_proc, src_perms, dst_perms,
                                 bounds, bounds_pad, pad);
@@ -455,8 +469,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
       } else if (TestConfig::dim_mask == 3) {
         if (!TestConfig::do_unit_test) {
           do_single_dim_field_size<3, int>(*src_it, *dst_it, log2_buffer_size,
-                                           TestConfig::narrow_dim, p, {"XYZ"},
-                                           {"YXZ"});
+                                           TestConfig::narrow_dim, p, {"XY"},
+                                           {"YX"});
         } else {
           const size_t block_cols = TestConfig::block_cols;
           const size_t block_rows = TestConfig::block_rows;
