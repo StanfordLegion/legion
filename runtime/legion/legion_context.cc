@@ -47,7 +47,7 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
-        total_tunable_count(0), overhead_profiler(NULL), 
+        total_tunable_count(0), inlined_tasks(0), overhead_profiler(NULL), 
         implicit_profiler(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
@@ -2286,12 +2286,13 @@ namespace Legion {
       else
         parent_ctx->add_to_post_task_queue(this, last_registration, instance,
                      callback_functor, owned, metadataptr, metadatasize);
-      if (!inline_task)
+      if (inline_task)
+        parent_ctx->decrement_inlined();
 #ifdef DEBUG_LEGION
-        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                       false/*meta*/);
+      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                     false/*meta*/);
 #else
-        runtime_ptr->decrement_total_outstanding_tasks();
+      runtime_ptr->decrement_total_outstanding_tasks();
 #endif
       // See if we can release our callback down
       if (release_callback)
@@ -2556,6 +2557,49 @@ namespace Legion {
       const RtEvent wait_for = 
         runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
       wait_for.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::increment_inlined(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inline_lock);
+      inlined_tasks++;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::decrement_inlined(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inline_lock);
+#ifdef DEBUG_LEGION
+      assert(inlined_tasks > 0);
+#endif
+      if ((--inlined_tasks == 0) && inlining_done.exists())
+      {
+        Runtime::trigger_event(inlining_done);
+        inlining_done = RtUserEvent::NO_RT_USER_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::wait_for_inlined(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent wait_on;
+      {
+        AutoLock i_lock(inline_lock);
+        if (inlined_tasks > 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(!inlining_done.exists());
+#endif
+          inlining_done = Runtime::create_rt_user_event();
+          wait_on = inlining_done;
+        }
+      }
+      if (wait_on.exists())
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -11804,18 +11848,15 @@ namespace Legion {
         }
       }
       register_executing_child(child);
-      const ApEvent child_done = child->get_completion_event();
       // Now select the variant for task based on the regions 
       std::deque<InstanceSet> physical_instances(child_regions.size());
       VariantImpl *variant = 
         select_inline_variant(child, child_regions, physical_instances); 
       child->perform_inlining(variant, physical_instances);
-      // Then wait for the child operation to be finished
-      bool poisoned = false;
-      if (!child_done.has_triggered_faultaware(poisoned))
-        child_done.wait_faultaware(poisoned);
-      if (poisoned)
-        raise_poison_exception();
+      // Finish the inlining of the child task to execute, note this doesn't
+      // wait for the effects of the children to be done, it just blocks to
+      // make sure the code for the children are done running on this processor
+      wait_for_inlined();
       return true;
     } 
 
@@ -11897,12 +11938,12 @@ namespace Legion {
                              bool silence_warnings, bool inlining_enabled)
     //--------------------------------------------------------------------------
     {
-      bool inline_task = false;
+      bool perform_inlining = false;
       if (inlining_enabled)
-        inline_task = task->select_task_options(true/*prioritize*/);
+        perform_inlining = task->select_task_options(true/*prioritize*/);
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
-      if (!inline_task || !inline_child_task(task))
+      if (!perform_inlining || !inline_child_task(task))
       {
         // Normal task launch, iterate over the context task's
         // regions and see if we need to unmap any of them
@@ -22505,8 +22546,10 @@ namespace Legion {
       VariantImpl *variant = 
         select_inline_variant(child, child_regions, physical_instances); 
       child->perform_inlining(variant, physical_instances);
-      // No need to wait here, we know everything are leaves all the way
-      // down from here so there is no way for there to be effects
+      // Finish the inlining of the child task to execute, note this doesn't
+      // wait for the effects of the children to be done, it just blocks to
+      // make sure the code for the children are done running on this processor
+      wait_for_inlined();
     }
 
     //--------------------------------------------------------------------------

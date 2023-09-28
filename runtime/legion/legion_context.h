@@ -691,6 +691,10 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
+    public:
+      void increment_inlined(void);
+      void decrement_inlined(void);
+      void wait_for_inlined(void);
     protected:
       Future predicate_task_false(const TaskLauncher &launcher,
                                   Provenance *provenance);
@@ -737,6 +741,11 @@ namespace Legion {
     protected:
       Processor                             executing_processor;
       size_t                                total_tunable_count;
+    public:
+      // Support for inlining
+      mutable LocalLock                           inline_lock;
+      unsigned                                    inlined_tasks;
+      RtUserEvent                                 inlining_done;
     protected:
       class OverheadProfiler : 
         public Mapping::ProfilingMeasurements::RuntimeOverhead {
@@ -1845,7 +1854,6 @@ namespace Legion {
       // this data structure requires the inline lock because
       // unordered detach operations can touch it without synchronizing
       // with the executing task
-      mutable LocalLock inline_lock;
       LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC> inline_regions;
     protected:
       mutable LocalLock                     child_op_lock;
