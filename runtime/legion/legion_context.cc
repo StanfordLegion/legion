@@ -2089,12 +2089,12 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
-      RtEvent unique_event(Processor::get_current_finish_event());
+      LgEvent unique_event;
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
         const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique, unique_event);
+        Runtime::trigger_event(unique);
         unique_event = unique;
       }
       const ApEvent wait_on(manager->create_eager_instance(instance, 
