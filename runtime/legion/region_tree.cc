@@ -20002,7 +20002,14 @@ namespace Legion {
                                   user.idx, this, &prev, overlap);
                     it.filter(overlap);
                     if (!it->second)
+                    {
                       to_delete.push_back(it->first);
+                      // If we're already going to be deleting this
+                      // then we continue to avoid adding this to the
+                      // timeouts data structure and potentially
+                      // creating a double deletion
+                      continue;
+                    }
                   }
                   break;
                 }
