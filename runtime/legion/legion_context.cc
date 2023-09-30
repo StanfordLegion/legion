@@ -2819,7 +2819,6 @@ namespace Legion {
         total_children_count(0), executing_children_count(0),
         executed_children_count(0), total_close_count(0), 
         total_summary_count(0), outstanding_children_count(0),
-        outstanding_dependence(false),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -7459,27 +7458,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::progress_unordered_operations(void)
+    void InnerContext::progress_unordered_operations(bool end_task)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
-      Operation *op = NULL;
+      AutoLock d_lock(dependence_lock);
+      if (end_task)
       {
-        AutoLock d_lock(dependence_lock);
-        // If we have any unordered ops and we're not in the middle of
-        // a trace then add them into the queue
-        if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops(d_lock, false/*end task*/, true/*progress*/);
-        if (dependence_queue.empty() || outstanding_dependence)
-          return;
-        outstanding_dependence = true;
-        precondition = dependence_precondition;
-        dependence_precondition = RtEvent::NO_RT_EVENT;
-        op = dependence_queue.front();
+        // This is the end of this parent task so mark that we're done
+#ifdef DEBUG_LEGION
+        assert(!finished_execution);
+        assert(current_trace == NULL);
+#endif
+        finished_execution = true;
       }
-      DependenceArgs args(op, this);
-      const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
-      runtime->issue_runtime_meta_task(args, priority, precondition);
+      // No progress can occur inside of a trace
+      else if (current_trace != NULL)
+        return;
+      insert_unordered_ops(d_lock);
     }
 
     //--------------------------------------------------------------------------
@@ -7832,9 +7827,6 @@ namespace Legion {
                                                bool outermost)
     //--------------------------------------------------------------------------
     {
-      // Launch the task to perform the prepipeline stage for the operation
-      if (op->has_prepipeline_stage())
-        add_to_prepipeline_queue(op);
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
       // If this is tracking, add it to our data structure first
       if (op->is_tracking_parent())
@@ -7856,14 +7848,16 @@ namespace Legion {
         if (!currently_active_context)
           priority = LG_THROUGHPUT_DEFERRED_PRIORITY;
       }
-      
-      bool issue_task = false;
+      // Launch the task to perform the prepipeline stage for the operation
+      if (op->has_prepipeline_stage())
+        add_to_prepipeline_queue(op);
       RtEvent precondition;
       ApEvent term_event;
+      bool issue_task = false;
       // We disable program order execution when we are replaying a
       // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
-          !is_replaying_physical_trace())
+          outermost && !is_replaying_physical_trace())
         term_event = op->get_completion_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -7876,29 +7870,32 @@ namespace Legion {
           unordered_ops.push_back(op);
           return true;
         }
-        // Put this in first to maintain context order
-        dependence_queue.push_back(op);
-        // Insert any unordered operations into the stream
-        insert_unordered_ops(d_lock, false/*end task*/, false/*progress*/);
-        if (!outstanding_dependence)
+        if (dependence_queue.empty())
         {
           issue_task = true;
-          outstanding_dependence = true;
           precondition = dependence_precondition;
-          dependence_precondition = RtEvent::NO_RT_EVENT;
         }
+        dependence_queue.push_back(op);
+        // Insert any unordered operations now as long as we aren't
+        // doing program order execution, if we're doing program order
+        // execution then we'll do that after running this operation
+        if (!runtime->program_order_execution && !is_replaying_physical_trace())
+          insert_unordered_ops(d_lock);
       }
       if (issue_task)
       {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      if (term_event.exists() && outermost) 
+      if (term_event.exists())
       {
         bool poisoned = false;
         term_event.wait_faultaware(poisoned);
         if (poisoned)
           raise_poison_exception();
+        // Now do our insertion of any unordered operations
+        AutoLock d_lock(dependence_lock);
+        insert_unordered_ops(d_lock);
       }
       return true;
     }
@@ -7920,16 +7917,10 @@ namespace Legion {
           to_perform.push_back(dependence_queue.front());
           dependence_queue.pop_front();
         }
-#ifdef DEBUG_LEGION
-        assert(outstanding_dependence);
-#endif
         if (dependence_queue.empty())
-        {
-          outstanding_dependence = false;
           // Guard ourselves against tasks running after us
           dependence_precondition = 
             RtEvent(Processor::get_current_finish_event());
-        }
         else
           launch_next_op = dependence_queue.front();
       }
@@ -8596,39 +8587,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(AutoLock &d_lock, 
-                                       const bool end_task, const bool progress)
+    void InnerContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
-      // If there are no unordered ops then we're done
-      if (unordered_ops.empty())
-        return;
-      // If we're still in the middle of a trace then don't do any insertions
+      // No progressing of unordered operations inside a trace
       if (current_trace != NULL)
         return;
-      // We need the child op lock here so we can add these to this
-      // list of executing children as well
-      AutoLock child_lock(child_op_lock);
-      for (std::list<Operation*>::const_iterator it = 
-            unordered_ops.begin(); it != unordered_ops.end(); it++)
+      // If we don't have any unordered operations then we are done
+      if (unordered_ops.empty())
+        return;
+      issue_unordered_operations(d_lock, unordered_ops); 
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_unordered_operations(AutoLock &d_lock,
+                                      std::vector<Operation*> &ready_operations)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->program_order_execution)
       {
-        const size_t op_index = total_children_count++;
-        (*it)->set_tracking_parent(op_index);
+        while (!ready_operations.empty())
+        {
+          Operation *op = ready_operations.back();
+          ready_operations.pop_back();
+          // Record it in the reorder buffer
+          {
+            AutoLock child_lock(child_op_lock);
+            const size_t op_index = total_children_count++;
+            op->set_tracking_parent(op_index);
 #ifdef DEBUG_LEGION
-        assert(reorder_buffer.empty() || 
-            (reorder_buffer.back().operation_index < op_index));
+            assert(reorder_buffer.empty() || 
+                (reorder_buffer.back().operation_index < op_index));
 #endif       
-        // Pad the reorder buffer for missing entries if necessary
-        while (!reorder_buffer.empty() &&
-            ((reorder_buffer.back().operation_index+1) < op_index))
-          reorder_buffer.emplace_back(
-              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
-        reorder_buffer.emplace_back(ReorderBufferEntry(*it));
-        executing_children_count++;
-        dependence_queue.push_back(*it);
+            // Pad the reorder buffer for missing entries if necessary
+            while (!reorder_buffer.empty() &&
+                ((reorder_buffer.back().operation_index+1) < op_index))
+              reorder_buffer.emplace_back(
+                 ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+            reorder_buffer.emplace_back(ReorderBufferEntry(op));
+            executing_children_count++;
+          }
+#ifdef DEBUG_LEGION
+          assert(dependence_queue.empty());
+#endif
+          dependence_queue.push_back(op);
+          outstanding_children_count.fetch_add(1);
+          RtEvent precondition = dependence_precondition;
+          // Release the lock and launch the meta-task
+          d_lock.release();
+          const ApEvent term_event = op->get_completion_event();
+          DependenceArgs args(op, this);
+          const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+          runtime->issue_runtime_meta_task(args, priority, precondition);
+          bool poisoned = false;
+          term_event.wait_faultaware(poisoned);
+          if (poisoned)
+            raise_poison_exception();
+          // Reacquire the lock before doing the next operation
+          d_lock.reacquire();
+        }
       }
-      outstanding_children_count.fetch_add(unordered_ops.size());
-      unordered_ops.clear();
+      else
+      {
+        // Common path for normal execution where we don't need to
+        // execute each of these things in program order
+        // We need the child op lock here so we can add these to this
+        // list of executing children as well
+        AutoLock child_lock(child_op_lock);
+        for (std::vector<Operation*>::const_iterator it = 
+              ready_operations.begin(); it != ready_operations.end(); it++)
+        {
+          const size_t op_index = total_children_count++;
+          (*it)->set_tracking_parent(op_index);
+#ifdef DEBUG_LEGION
+          assert(reorder_buffer.empty() || 
+              (reorder_buffer.back().operation_index < op_index));
+#endif       
+          // Pad the reorder buffer for missing entries if necessary
+          while (!reorder_buffer.empty() &&
+              ((reorder_buffer.back().operation_index+1) < op_index))
+            reorder_buffer.emplace_back(
+                ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+          reorder_buffer.emplace_back(ReorderBufferEntry(*it));
+          executing_children_count++;
+          if (dependence_queue.empty())
+          {
+            DependenceArgs args(*it, this);
+            const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+            runtime->issue_runtime_meta_task(args, priority, 
+                                    dependence_precondition);
+          }
+          dependence_queue.push_back(*it);
+        }
+        outstanding_children_count.fetch_add(unordered_ops.size());
+        unordered_ops.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11515,22 +11568,7 @@ namespace Legion {
         }
       }
       // Check to see if we have any unordered operations that we need to inject
-      {
-        AutoLock d_lock(dependence_lock);
-#ifdef DEBUG_LEGION
-        assert(!finished_execution);
-#endif
-        finished_execution = true;
-        insert_unordered_ops(d_lock, true/*end task*/, false/*progress*/);
-        if (!dependence_queue.empty() && !outstanding_dependence)
-        {
-          outstanding_dependence = true;
-          DependenceArgs args(dependence_queue.front(), this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_WORK_PRIORITY, dependence_precondition);
-          dependence_precondition = RtEvent::NO_RT_EVENT;
-        }
-      }
+      progress_unordered_operations(true/*end task*/);
       // At this point we should have grabbed any references to these
       // physical regions so we can clear them at this point
       physical_regions.clear();
@@ -12143,7 +12181,8 @@ namespace Legion {
         equivalence_set_allocator_shard(0), next_available_collective_index(0),
         next_logical_collective_index(1), next_physical_template_index(0), 
         next_replicate_bar_index(0), next_logical_bar_index(0),
-        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH),
+        unordered_collective(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -12169,6 +12208,9 @@ namespace Legion {
     ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(unordered_collective == NULL);
+#endif
       if (shard_manager->remove_nested_resource_ref(did))
         delete shard_manager;
       if (returned_resource_ready_barrier.exists())
@@ -17441,8 +17483,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::insert_unordered_ops(AutoLock &d_lock,
-                                       const bool end_task, const bool progress)
+    void ReplicateContext::initialize_unordered_collective(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(unordered_collective == NULL);
+#endif
+      unordered_ops_counter = 0;
+      unordered_collective = 
+        new UnorderedExchange(this, COLLECTIVE_LOC_88);
+      unordered_collective->start_unordered_exchange(unordered_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::finalize_unordered_collective(AutoLock &d_lock)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(unordered_collective != NULL);
+#endif
+      const RtEvent ready =
+        unordered_collective->perform_collective_wait(false/*block*/);
+      if (ready.exists() && !ready.has_triggered())
+      {
+        d_lock.release();
+        ready.wait();
+        d_lock.reacquire();
+      }
+      std::vector<Operation*> ready_operations;
+      if (!unordered_ops.empty())
+        unordered_collective->find_ready_operations(ready_operations);
+      delete unordered_collective;
+      unordered_collective = NULL;
+      if (!ready_operations.empty())
+      {
+        // Filter out the ready operations
+        for (std::vector<Operation*>::iterator it = unordered_ops.begin();
+              it != unordered_ops.end(); /*nothing*/)
+        {
+          bool filter = false;
+          for (unsigned idx = 0; idx < ready_operations.size(); idx++)
+          {
+            if ((*it) != ready_operations[idx])
+              continue;
+            filter = true;
+            break;
+          }
+          if (filter)
+            it = unordered_ops.erase(it);
+          else
+            it++;
+        }
+        // Now we can do the insertion
+        issue_unordered_operations(d_lock, ready_operations);
+        // Reset the epoch counter back to the minimum since we found some
+        // matches so we should probably be doing this more often
+        unordered_ops_epoch = MIN_UNORDERED_OPS_EPOCH;
+      }
+      else if (unordered_ops_epoch < MAX_UNORDERED_OPS_EPOCH)
+        // If there were no ready unordered ops then we double the epoch
+        unordered_ops_epoch *= 2;
+#ifdef DEBUG_LEGION
+      assert(MIN_UNORDERED_OPS_EPOCH <= unordered_ops_epoch);
+      assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
       // If we have a trace then we're definitely not inserting operations
@@ -17454,114 +17562,57 @@ namespace Legion {
       // We employ a sampling based algorithm here with exponential backoff
       // to detect when we are doing unordered ops since it's likely a 
       // binary state where either we are or we aren't doing unordered ops
-      if (!end_task)
-      {
 #ifdef DEBUG_LEGION
-        assert(unordered_ops_counter < unordered_ops_epoch);
+      assert(unordered_ops_counter < unordered_ops_epoch);
 #endif
-        // If we're doing progress then we can skip this check and
-        // reset the counter back to zero since we're doing an exchange
-        if (!progress)
-        {
-          if (++unordered_ops_counter < unordered_ops_epoch)
-            return;
-        }
-        else
-          unordered_ops_counter = 0;
-      }
-      // else we always do a match at the end of the replicated task 
+      // If we're doing progress then we can skip this check and
+      // reset the counter back to zero since we're doing an exchange
+      if (++unordered_ops_counter < unordered_ops_epoch)
+        return;
+      // Check to see if the previous exchange had any matching unordered
+      // operations for us to perform
+      if (unordered_collective != NULL)
+        finalize_unordered_collective(d_lock);
+      // Start the next exchange
+      initialize_unordered_collective();
+    }
 
-      // If we make it here then all the shards are agreed that they are
-      // going to do the sync up and will exchange information 
-      // We're going to release the lock so we need to grab a local copy
-      // of all our unordered operations.
-      std::list<Operation*> local_unordered;
-      local_unordered.swap(unordered_ops);
-      // Now we can release the lock and do the exchange
-      d_lock.release();
-      UnorderedExchange exchange(this, COLLECTIVE_LOC_88); 
-      std::vector<Operation*> ready_ops;
-      const bool any_unordered_ops = 
-        exchange.exchange_unordered_ops(local_unordered, ready_ops);
-      // We can do this part before we reacquire the d_lock
-      if (!ready_ops.empty())
+    //--------------------------------------------------------------------------
+    void ReplicateContext::progress_unordered_operations(bool end_task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(dependence_lock);
+      if (end_task)
       {
-        // We need the child op lock here so we can add these to this
-        // list of executing children as well
-        AutoLock child_lock(child_op_lock);
-        for (std::vector<Operation*>::const_iterator it = 
-              ready_ops.begin(); it != ready_ops.end(); it++)
-        {
-          const size_t op_index = total_children_count++;
-          (*it)->set_tracking_parent(op_index);
+        // This is the end of this parent task so mark that we're done
 #ifdef DEBUG_LEGION
-          assert(reorder_buffer.empty() || 
-            ((reorder_buffer.back().operation_index+1) == op_index));
-#endif       
-          reorder_buffer.emplace_back(ReorderBufferEntry(*it));
-          executing_children_count++;
-        }
-      }
-      // Reacquire the lock and handle the operations
-      d_lock.reacquire();
-      if (!ready_ops.empty())
-      {
-        for (std::vector<Operation*>::const_iterator it = 
-              ready_ops.begin(); it != ready_ops.end(); it++)
-          dependence_queue.push_back(*it);
-        outstanding_children_count.fetch_add(ready_ops.size());
-        if (ready_ops.size() != local_unordered.size())
-        {
-          // For any operations which we aren't in the ready ops
-          // then we need to put them back on the unordered list
-          for (std::list<Operation*>::const_reverse_iterator it = 
-                local_unordered.rbegin(); it != local_unordered.rend(); it++)
-          {
-            bool found = false;
-            for (unsigned idx = 0; idx < ready_ops.size(); idx++)
-            {
-              if (ready_ops[idx] != (*it))
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              unordered_ops.push_front(*it);
-          }
-        }
-      }
-      else if (!local_unordered.empty())
-      {
-        // Put all our of items back on the unordered list
-        if (!unordered_ops.empty())
-          unordered_ops.insert(unordered_ops.begin(),
-              local_unordered.begin(), local_unordered.end());
-        else
-          unordered_ops.swap(local_unordered);
-      }
-      if (!end_task)
-      {
-        // Reset the count
-        unordered_ops_counter = 0;
-        // Check to see how to adjust the epoch size
-        if (!any_unordered_ops)
-        {
-          // If there were no ready unordered ops then we double the epoch
-          if (unordered_ops_epoch < MAX_UNORDERED_OPS_EPOCH)
-            unordered_ops_epoch *= 2;
-        }
-        else // Otherwise reset to min epoch size
-          unordered_ops_epoch = MIN_UNORDERED_OPS_EPOCH;
-#ifdef DEBUG_LEGION
-        assert(MIN_UNORDERED_OPS_EPOCH <= unordered_ops_epoch);
-        assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
+        assert(!finished_execution);
+        assert(current_trace == NULL);
 #endif
+        finished_execution = true;
       }
-      else if (!unordered_ops.empty())
-        REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS,
-            "Control replicated task %s (UID %lld) had %zd mismatched unordered"
-            " operations at the end of its execution that are now leaked.",
-            get_task_name(), get_unique_id(), unordered_ops.size())
+      // No progress can occur inside of a trace
+      else if (current_trace != NULL)
+        return;
+      // With control replication we're always doing half phases for detecting
+      // when we have unordered operations across all shards that are ready to
+      // be performed, but in this case the user has asked us to actually
+      // perform a full phase, so finish the previous one and then start a 
+      // new phase if we're not the end last phase
+      if (unordered_collective != NULL)
+        finalize_unordered_collective(d_lock);
+      initialize_unordered_collective();
+      finalize_unordered_collective(d_lock);
+      if (end_task)
+      {
+        if (!unordered_ops.empty())
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS,
+              "Control replicated task %s (UID %lld) had %zd mismatched "
+              "unordered operations at the end of its execution that are now "
+              "leaked.", get_task_name(), get_unique_id(), unordered_ops.size())
+      }
+      else
+        initialize_unordered_collective();
     }
 
     //--------------------------------------------------------------------------
@@ -19592,20 +19643,19 @@ namespace Legion {
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered &&
-          !is_replaying_physical_trace())
+           outermost && !is_replaying_physical_trace())
       {
-        ApEvent term_event = op->get_completion_event();
+        const ApEvent term_event = op->get_completion_event();
         InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
         const ApBarrier inorder_bar = inorder_barrier.next(this);
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
-        term_event = inorder_bar;
-        if (outermost)
-        {
-          bool poisoned = false;
-          term_event.wait_faultaware(poisoned);
-          if (poisoned)
-            raise_poison_exception(); 
-        }
+        bool poisoned = false;
+        inorder_bar.wait_faultaware(poisoned);
+        if (poisoned)
+          raise_poison_exception();
+        // Issue any unordered operations now
+        AutoLock d_lock(dependence_lock);
+        insert_unordered_ops(d_lock);
         // Not unordered so it must have succeeded
         return true;
       }
@@ -23765,7 +23815,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::progress_unordered_operations(void)
+    void LeafContext::progress_unordered_operations(bool end_task)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,

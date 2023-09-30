@@ -490,7 +490,7 @@ namespace Legion {
       virtual Future detach_resources(ExternalResources resources,
                                     const bool flush, const bool unordered,
                                     Provenance *provenance) = 0;
-      virtual void progress_unordered_operations(void) = 0;
+      virtual void progress_unordered_operations(bool end_task = false) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
@@ -1523,7 +1523,7 @@ namespace Legion {
       virtual Future detach_resources(ExternalResources resources,
                                       const bool flush, const bool unordered,
                                       Provenance *provenance);
-      virtual void progress_unordered_operations(void);
+      virtual void progress_unordered_operations(bool end_task = false);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
@@ -1549,8 +1549,9 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       void register_new_internal_operation(InternalOp *op);
       // Must be called while holding the dependence lock
-      virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
-                                        const bool progress);
+      virtual void insert_unordered_ops(AutoLock &d_lock);
+      void issue_unordered_operations(AutoLock &d_lock, 
+                std::vector<Operation*> &ready_operations);
       size_t register_new_close_operation(CloseOp *op);
       size_t register_new_summary_operation(TraceSummaryOp *op);
     public:
@@ -1868,7 +1869,7 @@ namespace Legion {
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted
       // into the stream of operations from the task
-      std::list<Operation*> unordered_ops;
+      std::vector<Operation*> unordered_ops;
 #ifdef LEGION_SPY
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
@@ -1884,8 +1885,6 @@ namespace Legion {
       mutable LocalLock                               dependence_lock;
       std::deque<Operation*>                          dependence_queue;
       RtEvent                                         dependence_precondition;
-      // Only one of these ever to keep things in order
-      bool                                            outstanding_dependence;
     protected: 
       mutable LocalLock                               ready_lock;
       std::list<QueueEntry<Operation*> >              ready_queue;
@@ -2770,8 +2769,10 @@ namespace Legion {
       virtual void destroy_field_allocator(FieldSpaceNode *node,
                                            bool from_application = true);
     public:
-      virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
-                                        const bool progress);
+      void initialize_unordered_collective(void);
+      void finalize_unordered_collective(AutoLock &d_lock);
+      virtual void insert_unordered_ops(AutoLock &d_lock);
+      virtual void progress_unordered_operations(bool end_task = false);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -3271,6 +3272,7 @@ namespace Legion {
       static const unsigned MAX_UNORDERED_OPS_EPOCH = 32768;
       unsigned unordered_ops_counter;
       unsigned unordered_ops_epoch;
+      UnorderedExchange *unordered_collective;
     };
 
     /**
@@ -3789,7 +3791,7 @@ namespace Legion {
       virtual Future detach_resources(ExternalResources resources,
                                       const bool flush, const bool unordered,
                                       Provenance *provenance);
-      virtual void progress_unordered_operations(void);
+      virtual void progress_unordered_operations(bool end_task = false);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
