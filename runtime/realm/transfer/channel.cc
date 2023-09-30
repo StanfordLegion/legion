@@ -5136,6 +5136,21 @@ namespace Realm {
       }
 
 
+
+  static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
+  {
+    RuntimeImpl *runtime = get_runtime();
+    size_t idx = 0;
+    mems.resize(runtime->remote_shared_memory_mappings.size(), Memory::NO_MEMORY);
+    for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+            runtime->remote_shared_memory_mappings.begin();
+        it != runtime->remote_shared_memory_mappings.end(); ++it) {
+      Memory m;
+      m.id = it->first;
+      mems[idx++] = m;
+    }
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class MemcpyChannel
@@ -5154,13 +5169,21 @@ namespace Realm {
         // all local cpu memories are valid sources and dests
         std::vector<Memory> local_cpu_mems;
         enumerate_local_cpu_memories(local_cpu_mems);
+        std::vector<Memory> remote_shared_mems;
+        enumerate_remote_shared_mems(remote_shared_mems);
 
         add_path(local_cpu_mems, local_cpu_mems,
                  bw, latency, frag_overhead, XFER_MEM_CPY)
           .set_max_dim(3)
           .allow_serdez();
 
-	xdq.add_to_manager(bgwork);
+        if (remote_shared_mems.size() > 0) {
+          add_path(local_cpu_mems, remote_shared_mems, bw, latency, frag_overhead,
+                   XFER_MEM_CPY)
+              .set_max_dim(3);
+        }
+
+        xdq.add_to_manager(bgwork);
       }
 
       MemcpyChannel::~MemcpyChannel()
@@ -5718,10 +5741,18 @@ namespace Realm {
     // all local cpu memories are valid dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(Memory::NO_MEMORY, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_FILL)
       .set_max_dim(3);
+
+    if (remote_shared_mems.size() > 0) {
+      add_path(Memory::NO_MEMORY, remote_shared_mems,
+             bw, latency, frag_overhead, XFER_MEM_FILL)
+      .set_max_dim(3);
+    }
 
     xdq.add_to_manager(bgwork);
   }
@@ -5773,11 +5804,20 @@ namespace Realm {
     // all local cpu memories are valid sources and dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(local_cpu_mems, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_CPY)
       .set_max_dim(3)
       .allow_redops();
+
+    if (remote_shared_mems.size() > 0) {
+      add_path(local_cpu_mems, remote_shared_mems,
+              bw, latency, frag_overhead, XFER_MEM_CPY)
+        .set_max_dim(3)
+        .allow_redops();
+    }
 
     xdq.add_to_manager(bgwork);
   }

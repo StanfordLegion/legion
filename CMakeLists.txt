@@ -736,6 +736,17 @@ if(NOT WIN32)
   option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
 endif()
 
+# Only enable shm on linux and if GASNET1 is not available.
+# OSX is not well tested yet, so disable by default for the time being
+# GASNET1 does not allow communication before network attach, which is needed
+# in order to coordinate a job identifier required to set up named system
+# resources
+if (UNIX AND NOT APPLE AND NOT REALM_USE_GASNET1)
+  option(REALM_USE_SHM "Enable shared memory usage" ON)  
+else()
+  option(REALM_USE_SHM "Enable shared memory usage" OFF)
+endif()
+
 if (UNIX)
   # Look for memfd_create to see if we can use anonymous memory sharing
   check_function_exists(memfd_create REALM_HAS_MEMFD)
