@@ -7879,7 +7879,7 @@ namespace Legion {
         // Insert any unordered operations now as long as we aren't
         // doing program order execution, if we're doing program order
         // execution then we'll do that after running this operation
-        if (!runtime->program_order_execution && !is_replaying_physical_trace())
+        if (!term_event.exists())
           insert_unordered_ops(d_lock);
       }
       if (issue_task)
