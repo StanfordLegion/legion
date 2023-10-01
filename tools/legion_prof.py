@@ -3438,7 +3438,7 @@ class LFSR(object):
 
 class State(object):
     __slots__ = [
-        'max_dim', 'num_nodes', 'processors', 'memories', 'mem_proc_affinity', 'channels',
+        'max_dim', 'num_nodes', 'zero_time', 'processors', 'memories', 'mem_proc_affinity', 'channels',
         'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
         'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
@@ -3449,6 +3449,7 @@ class State(object):
     def __init__(self) -> None:
         self.max_dim = 3
         self.num_nodes = 0
+        self.zero_time = 0
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
@@ -3485,6 +3486,7 @@ class State(object):
             "OpDesc": self.log_op_desc,
             "MaxDimDesc": self.log_max_dim,
             "MachineDesc": self.log_machine_desc,
+            "ZeroTime": self.log_zero_time,
             "ProcDesc": self.log_proc_desc,
             "MemDesc": self.log_mem_desc,
             "TaskKind": self.log_kind,
@@ -3544,6 +3546,11 @@ class State(object):
             assert self.num_nodes == num_nodes
         self.current_node_id = node_id
         return node_id
+
+    # ZeroTime
+    @typecheck
+    def log_zero_time(self, zero_time: int) -> None:
+        self.zero_time = zero_time
 
     # IndexSpacePointDesc
     @typecheck

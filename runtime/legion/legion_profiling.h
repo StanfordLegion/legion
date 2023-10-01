@@ -127,6 +127,11 @@ namespace Legion {
         unsigned node_id;
 	unsigned num_nodes;
       };
+      struct ZeroTime {
+      public:
+        long long zero_time;
+      };
+
     };
 
     class LegionProfInstance {
