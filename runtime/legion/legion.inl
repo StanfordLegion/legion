@@ -15781,7 +15781,9 @@ namespace Legion {
       // Construct a Region of size 1 in the zero copy memory for now
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      Runtime *runtime = Runtime::get_runtime();
+      finder.has_affinity_to(
+          runtime->get_executing_processor(Runtime::get_context()));
       finder.only_kind(Memory::Z_COPY_MEM);
       if (finder.count() == 0)
       {
@@ -15801,7 +15803,6 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
       instance = runtime->create_task_local_instance(memory, layout);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
@@ -16286,12 +16287,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
+      const Processor executing_processor =
+        Runtime::get_runtime()->get_executing_processor(Runtime::get_context());
+      finder.best_affinity_to(executing_processor);
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
         finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.has_affinity_to(executing_processor);
         finder.only_kind(kind);
       }
       if (finder.count() == 0)
@@ -16789,12 +16792,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
+      const Processor executing_processor =
+        Runtime::get_runtime()->get_executing_processor(Runtime::get_context());
+      finder.best_affinity_to(executing_processor);
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
         finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.has_affinity_to(executing_processor);
         finder.only_kind(kind);
       }
       if (finder.count() == 0)
@@ -17112,7 +17117,9 @@ namespace Legion {
       assert(dims <= LEGION_MAX_DIM);
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      const Processor exec_proc = Processor::get_executing_processor();
+      Runtime *runtime = Runtime::get_runtime();
+      const Processor exec_proc = 
+        runtime->get_executing_processor(Runtime::get_context());
       finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
       if (finder.count() == 0)
@@ -17121,7 +17128,6 @@ namespace Legion {
         finder.has_affinity_to(exec_proc);
         finder.only_kind(memkind);
       }
-      Runtime *runtime = Runtime::get_runtime();
       if (finder.count() == 0)
       {
         const char *mem_names[] = {
@@ -17220,7 +17226,9 @@ namespace Legion {
       assert(dims <= LEGION_MAX_DIM);
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      const Processor exec_proc = Processor::get_executing_processor();
+      Runtime *runtime = Runtime::get_runtime();
+      const Processor exec_proc =
+        runtime->get_executing_processor(Runtime::get_context());
       finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
       if (finder.count() == 0)
@@ -17229,7 +17237,6 @@ namespace Legion {
         finder.has_affinity_to(exec_proc);
         finder.only_kind(memkind);
       }
-      Runtime *runtime = Runtime::get_runtime();
       if (finder.count() == 0)
       {
         const char *mem_names[] = {
