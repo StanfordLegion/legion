@@ -75,6 +75,7 @@ list(APPEND REALM_SRC
   realm/tasks.h             realm/tasks.cc
   realm/threads.h           realm/threads.cc
   realm/threads.inl
+  realm/shm.h               realm/shm.cc
 )
 
 if(Legion_USE_CUDA)
