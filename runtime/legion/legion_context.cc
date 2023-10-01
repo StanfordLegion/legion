@@ -2280,14 +2280,14 @@ namespace Legion {
       Runtime *runtime_ptr = runtime;
       // Tell the parent context that we are ready for post-end
       InnerContext *parent_ctx = owner_task->get_context();
+      if (inline_task)
+        parent_ctx->decrement_inlined();
       if (release_callback)
         parent_ctx->add_to_post_task_queue(this, last_registration, instance,
               NULL/*no functor here*/, owned, metadataptr, metadatasize);
       else
         parent_ctx->add_to_post_task_queue(this, last_registration, instance,
-                     callback_functor, owned, metadataptr, metadatasize);
-      if (inline_task)
-        parent_ctx->decrement_inlined();
+                     callback_functor, owned, metadataptr, metadatasize); 
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
