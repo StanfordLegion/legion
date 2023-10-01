@@ -11934,11 +11934,9 @@ namespace Legion {
                                     config.slow_config_ok);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
-#ifdef DETAILED_LEGION_PROF
       RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
       profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
-#endif
     }
 
     //--------------------------------------------------------------------------
