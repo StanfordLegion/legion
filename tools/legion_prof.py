@@ -474,7 +474,7 @@ class HasInitiationDependencies(Dependencies):
         """
         Add the dependencies from the initiation to us
         """
-        if isinstance(self, (MetaTask, MapperCall, Copy, Fill, DepPart, Instance)):
+        if isinstance(self, (MetaTask, MapperCall, Copy, Fill, DepPart, Instance, RuntimeCall)):
             unique_tuple = self.get_unique_tuple()
             if self.initiation in state.operations:
                 op = state.find_or_create_op(self.initiation)
@@ -2673,7 +2673,7 @@ class TimePoint(object):
     @typecheck
     def __init__(self, 
                  time: int, 
-                 thing: Union[Task, ProfTask, MetaTask, Instance, DepPart, MapperCall, Copy, Fill], 
+                 thing: Union[Task, ProfTask, MetaTask, Instance, DepPart, MapperCall, Copy, Fill, RuntimeCall], 
                  first: bool, 
                  secondary_sort_key: int
     ) -> None:
@@ -3459,7 +3459,7 @@ class State(object):
         self.meta_variants: Dict[int, Variant] = {}
         self.op_kinds: Dict[int, str] = {}
         self.operations: Dict[int, Operation] = {}
-        self.prof_uid_map: Dict[int, Union[MapperCall, Operation, Task, MetaTask, Copy, Fill, DepPart, UserMarker, Instance]] = {}
+        self.prof_uid_map: Dict[int, Union[MapperCall, Operation, Task, MetaTask, Copy, Fill, DepPart, UserMarker, Instance, RuntimeCall]] = {}
         self.multi_tasks: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.first_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.last_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
