@@ -20,6 +20,7 @@ archiver = ["dep:legion_prof_viewer"]
 client = ["dep:legion_prof_viewer", "legion_prof_viewer?/client"]
 server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
 viewer = ["dep:legion_prof_viewer"]
+nvtxw = ["dep:legion_prof_viewer", "legion_prof_viewer?/nvtxw"]
 
 [dependencies]
 clap = { version = "4", features = ["cargo", "derive"] }
