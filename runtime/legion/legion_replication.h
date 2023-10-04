@@ -1045,8 +1045,8 @@ namespace Legion {
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      bool exchange_unordered_ops(const std::list<Operation*> &unordered_ops,
-                                  std::vector<Operation*> &ready_ops);
+      void start_unordered_exchange(const std::vector<Operation*> &operations);
+      void find_ready_operations(std::vector<Operation*> &ready_operations);
     protected:
       template<typename T>
       void update_future_counts(const int stage,

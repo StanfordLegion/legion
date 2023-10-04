@@ -47,7 +47,7 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
-        total_tunable_count(0), overhead_profiler(NULL), 
+        total_tunable_count(0), inlined_tasks(0), overhead_profiler(NULL), 
         implicit_profiler(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
@@ -163,7 +163,6 @@ namespace Legion {
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       // Set the future result
-      RtEvent done;
       FutureInstance *instance = NULL;
       if (size > 0)
       {
@@ -176,11 +175,9 @@ namespace Legion {
               FutureInstance::free_host_memory, executing_processor);
         }
         else
-          instance = copy_to_future_inst(value, size, done);
+          instance = copy_to_future_inst(value, size);
       }
       result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
-      if (done.exists() && !done.has_triggered())
-        done.wait();
       return result;
     }
 
@@ -804,8 +801,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::finalize_output_regions(
-                                          std::vector<RtEvent> &executed_events)
+    void TaskContext::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -822,9 +818,7 @@ namespace Legion {
             owner_task->get_task_name(), owner_task->get_unique_id(),
             unbound_field, idx);
         }
-        RtEvent executed = output_region.impl->finalize();
-        if (executed.exists())
-          executed_events.push_back(executed);
+        output_region.impl->finalize();
       }
       // Clear this to remove references in output region data structures
       output_regions.clear();
@@ -2019,12 +2013,12 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
-      ApEvent unique_event(Processor::get_current_finish_event());
+      LgEvent unique_event;
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
-        const ApUserEvent unique = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, unique, unique_event);
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
         unique_event = unique;
       }
       const ApEvent wait_on(manager->create_eager_instance(instance, 
@@ -2061,7 +2055,7 @@ namespace Legion {
     void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalInstance,ApEvent>::iterator finder =
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
@@ -2082,14 +2076,21 @@ namespace Legion {
                                FutureFunctor *callback_functor,
                                const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                               const void *metadataptr, size_t metadatasize)
+                  const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
-      std::vector<RtEvent> executed_events;
       if (!output_regions.empty())
-        finalize_output_regions(executed_events);
+        finalize_output_regions();
+      const bool internal_task = Processor::get_executing_processor().exists();
+      if (internal_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(!effects.exists());
+#endif
+        effects = ApEvent(Processor::get_current_finish_event());
+      }
       // See if we need to pull the data in from a callback in the case
       // where we are going to be doing a reduction immediately, if we
       // are then we're going to overwrite 'owned' so save it to callback_owned
@@ -2111,7 +2112,6 @@ namespace Legion {
         }
       }
       // If we have a deferred result instance we need to escape that too
-      RtEvent copy_future;
       FutureInstance *instance = NULL;
       if (deferred_result_instance.exists())
       {
@@ -2120,25 +2120,23 @@ namespace Legion {
         assert(freefunc == NULL);
 #endif
         // escape this task local instance
-        ApEvent ready = escape_task_local_instance(deferred_result_instance);
-        instance = new FutureInstance(res, res_size, ready, runtime,
+        escape_task_local_instance(deferred_result_instance);
+        instance = new FutureInstance(res, res_size, effects, runtime,
             true/*eager*/, false/*external*/, true/*own alloc*/,
-            ready, deferred_result_instance);
+            effects, deferred_result_instance);
       }
       else if (resource != NULL)
       {
         if (!owned)
         {
-          FutureInstance source(res, res_size, 
-             ApEvent(Processor::get_current_finish_event()), runtime,
+          FutureInstance source(res, res_size, effects, runtime,
              false/*own allocation*/, resource->clone(), 
              freefunc, executing_processor);
           instance = copy_to_future_inst(
               runtime->runtime_system_memory, &source);
         }
         else
-          instance = new FutureInstance(res, res_size, 
-              ApEvent(Processor::get_current_finish_event()), runtime,
+          instance = new FutureInstance(res, res_size, effects, runtime, 
               true/*own allocation*/, resource->clone(), 
               freefunc, executing_processor);
       }
@@ -2151,12 +2149,21 @@ namespace Legion {
         {
           const Realm::ExternalMemoryResource resource(
               reinterpret_cast<uintptr_t>(res), res_size, true/*read only*/);
-          instance = new FutureInstance(res, res_size, ApEvent::NO_AP_EVENT,
+          instance = new FutureInstance(res, res_size, effects,
               runtime, true/*own allocation*/, resource.clone(),
               FutureInstance::free_host_memory, executing_processor);
         }
         else
-          instance = copy_to_future_inst(res, res_size, copy_future);
+        {
+          // Wait for any effects for immediate values if necessary
+          if (!internal_task && effects.exists())
+            effects.wait_faultignorant();
+          instance = copy_to_future_inst(res, res_size);
+          // Since we don't own the buffer, we need to wait for the copy
+          // to be done before we can safely return
+          if (instance->ready_event.exists())
+            instance->ready_event.wait_faultignorant();
+        }
       }
       // If we did an eager callback, restore whether we own it now
       bool release_callback = false;
@@ -2169,7 +2176,25 @@ namespace Legion {
       }
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
-        release_task_local_instances();
+      {
+        RtEvent done;
+        if (effects.exists())
+          done = Runtime::protect_event(effects);
+        for (std::map<PhysicalInstance,LgEvent>::iterator it =
+             task_local_instances.begin(); it !=
+             task_local_instances.end(); ++it)
+        {
+          PhysicalInstance inst = it->first;
+          MemoryManager *manager =
+            runtime->find_memory_manager(inst.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
+          manager->free_legion_instance(done, inst);
+#else
+          manager->free_eager_instance(inst, done);
+#endif
+        }
+        task_local_instances.clear();
+      }
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2179,34 +2204,20 @@ namespace Legion {
       Runtime *runtime_ptr = runtime;
       // Tell the parent context that we are ready for post-end
       InnerContext *parent_ctx = owner_task->get_context();
-      const bool internal_task = Processor::get_executing_processor().exists();
-      if (internal_task && !inline_task)
-        executed_events.push_back(
-            RtEvent(Processor::get_current_finish_event()));
-      if (last_registration.exists() && !last_registration.has_triggered())
-        executed_events.push_back(last_registration);
-      if (copy_future.exists() && !copy_future.has_triggered())
-        executed_events.push_back(copy_future);
-      RtEvent effects_done;
-      if (!executed_events.empty())
-        effects_done = Runtime::merge_events(executed_events);
+      if (inline_task)
+        parent_ctx->decrement_inlined();
       if (release_callback)
-        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+        parent_ctx->add_to_post_task_queue(this, last_registration, instance,
               NULL/*no functor here*/, owned, metadataptr, metadatasize);
       else
-        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
-                     callback_functor, owned, metadataptr, metadatasize);
-      if (!inline_task)
+        parent_ctx->add_to_post_task_queue(this, last_registration, instance,
+                     callback_functor, owned, metadataptr, metadatasize); 
 #ifdef DEBUG_LEGION
-        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                       false/*meta*/);
+      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                     false/*meta*/);
 #else
-        runtime_ptr->decrement_total_outstanding_tasks();
+      runtime_ptr->decrement_total_outstanding_tasks();
 #endif
-      // If we have a copy future, but don't own the source data we must wait
-      // before returning to ensure the copy is done before source is deleted
-      if (!owned && copy_future.exists() && !copy_future.has_triggered())
-        copy_future.wait();
       // See if we can release our callback down
       if (release_callback)
       {
@@ -2218,7 +2229,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* TaskContext::copy_to_future_inst(const void *value,
-                                                     size_t size, RtEvent &done)
+                                                     size_t size)
     //--------------------------------------------------------------------------
     {
       // See if we need to make an eager instance for this or not
@@ -2229,7 +2240,7 @@ namespace Legion {
         MemoryManager *manager = runtime->find_memory_manager(memory);
         const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
         FutureInstance *instance = manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), ready,size, true/*eager*/);
+            owner_task->get_unique_op_id(), ready, size, true/*eager*/);
         // create an external instance for the current allocation
         const Realm::ExternalMemoryResource resource(
             reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
@@ -2288,18 +2299,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    void TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalInstance,ApEvent>::iterator finder =
+      std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
-      const ApEvent result = finder->second;
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2466,24 +2475,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::release_task_local_instances(void)
+    void TaskContext::increment_inlined(void)
     //--------------------------------------------------------------------------
     {
-      const RtEvent done(Processor::get_current_finish_event());
-      for (std::map<PhysicalInstance,ApEvent>::iterator it =
-           task_local_instances.begin(); it !=
-           task_local_instances.end(); ++it)
-      {
-        PhysicalInstance inst = it->first;
-        MemoryManager *manager =
-          runtime->find_memory_manager(inst.get_location());
-#ifdef LEGION_MALLOC_INSTANCES
-        manager->free_legion_instance(done, inst);
-#else
-        manager->free_eager_instance(inst, done);
+      AutoLock i_lock(inline_lock);
+      inlined_tasks++;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::decrement_inlined(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inline_lock);
+#ifdef DEBUG_LEGION
+      assert(inlined_tasks > 0);
 #endif
+      if ((--inlined_tasks == 0) && inlining_done.exists())
+      {
+        Runtime::trigger_event(inlining_done);
+        inlining_done = RtUserEvent::NO_RT_USER_EVENT;
       }
-      task_local_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::wait_for_inlined(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent wait_on;
+      {
+        AutoLock i_lock(inline_lock);
+        if (inlined_tasks > 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(!inlining_done.exists());
+#endif
+          inlining_done = Runtime::create_rt_user_event();
+          wait_on = inlining_done;
+        }
+      }
+      if (wait_on.exists())
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -2702,7 +2733,7 @@ namespace Legion {
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
         total_children_count(0), executing_children_count(0),
         executed_children_count(0), total_summary_count(0),
-        outstanding_children_count(0), outstanding_dependence(false),
+        outstanding_children_count(0),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -8091,27 +8122,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::progress_unordered_operations(void)
+    void InnerContext::progress_unordered_operations(bool end_task)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
-      Operation *op = NULL;
+      AutoLock d_lock(dependence_lock);
+      if (end_task)
       {
-        AutoLock d_lock(dependence_lock);
-        // If we have any unordered ops and we're not in the middle of
-        // a trace then add them into the queue
-        if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops(d_lock, false/*end task*/, true/*progress*/);
-        if (dependence_queue.empty() || outstanding_dependence)
-          return;
-        outstanding_dependence = true;
-        precondition = dependence_precondition;
-        dependence_precondition = RtEvent::NO_RT_EVENT;
-        op = dependence_queue.front();
+        // This is the end of this parent task so mark that we're done
+#ifdef DEBUG_LEGION
+        assert(!finished_execution);
+        assert(current_trace == NULL);
+#endif
+        finished_execution = true;
       }
-      DependenceArgs args(op, this);
-      const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
-      runtime->issue_runtime_meta_task(args, priority, precondition);
+      // No progress can occur inside of a trace
+      else if (current_trace != NULL)
+        return;
+      insert_unordered_ops(d_lock);
     }
 
     //--------------------------------------------------------------------------
@@ -8464,9 +8491,6 @@ namespace Legion {
                                                bool outermost)
     //--------------------------------------------------------------------------
     {
-      // Launch the task to perform the prepipeline stage for the operation
-      if (op->has_prepipeline_stage())
-        add_to_prepipeline_queue(op);
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
       // If this is tracking, add it to our data structure first
       if (op->is_tracking_parent())
@@ -8488,14 +8512,16 @@ namespace Legion {
         if (!currently_active_context)
           priority = LG_THROUGHPUT_DEFERRED_PRIORITY;
       }
-      
-      bool issue_task = false;
+      // Launch the task to perform the prepipeline stage for the operation
+      if (op->has_prepipeline_stage())
+        add_to_prepipeline_queue(op);
       RtEvent precondition;
       ApEvent term_event;
+      bool issue_task = false;
       // We disable program order execution when we are replaying a
       // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
-          !is_replaying_physical_trace())
+          outermost && !is_replaying_physical_trace())
         term_event = op->get_completion_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -8508,29 +8534,32 @@ namespace Legion {
           unordered_ops.push_back(op);
           return true;
         }
-        // Put this in first to maintain context order
-        dependence_queue.push_back(op);
-        // Insert any unordered operations into the stream
-        insert_unordered_ops(d_lock, false/*end task*/, false/*progress*/);
-        if (!outstanding_dependence)
+        if (dependence_queue.empty())
         {
           issue_task = true;
-          outstanding_dependence = true;
           precondition = dependence_precondition;
-          dependence_precondition = RtEvent::NO_RT_EVENT;
         }
+        dependence_queue.push_back(op);
+        // Insert any unordered operations now as long as we aren't
+        // doing program order execution, if we're doing program order
+        // execution then we'll do that after running this operation
+        if (!term_event.exists())
+          insert_unordered_ops(d_lock);
       }
       if (issue_task)
       {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      if (term_event.exists() && outermost) 
+      if (term_event.exists())
       {
         bool poisoned = false;
         term_event.wait_faultaware(poisoned);
         if (poisoned)
           raise_poison_exception();
+        // Now do our insertion of any unordered operations
+        AutoLock d_lock(dependence_lock);
+        insert_unordered_ops(d_lock);
       }
       return true;
     }
@@ -8552,16 +8581,10 @@ namespace Legion {
           to_perform.push_back(dependence_queue.front());
           dependence_queue.pop_front();
         }
-#ifdef DEBUG_LEGION
-        assert(outstanding_dependence);
-#endif
         if (dependence_queue.empty())
-        {
-          outstanding_dependence = false;
           // Guard ourselves against tasks running after us
           dependence_precondition = 
             RtEvent(Processor::get_current_finish_event());
-        }
         else
           launch_next_op = dependence_queue.front();
       }
@@ -9221,39 +9244,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(AutoLock &d_lock, 
-                                       const bool end_task, const bool progress)
+    void InnerContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
-      // If there are no unordered ops then we're done
-      if (unordered_ops.empty())
-        return;
-      // If we're still in the middle of a trace then don't do any insertions
+      // No progressing of unordered operations inside a trace
       if (current_trace != NULL)
         return;
-      // We need the child op lock here so we can add these to this
-      // list of executing children as well
-      AutoLock child_lock(child_op_lock);
-      for (std::list<Operation*>::const_iterator it = 
-            unordered_ops.begin(); it != unordered_ops.end(); it++)
+      // If we don't have any unordered operations then we are done
+      if (unordered_ops.empty())
+        return;
+      issue_unordered_operations(d_lock, unordered_ops); 
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_unordered_operations(AutoLock &d_lock,
+                                      std::vector<Operation*> &ready_operations)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->program_order_execution)
       {
-        const size_t op_index = total_children_count++;
-        (*it)->set_tracking_parent(op_index);
+        while (!ready_operations.empty())
+        {
+          Operation *op = ready_operations.back();
+          ready_operations.pop_back();
+          // Record it in the reorder buffer
+          {
+            AutoLock child_lock(child_op_lock);
+            const size_t op_index = total_children_count++;
+            op->set_tracking_parent(op_index);
 #ifdef DEBUG_LEGION
-        assert(reorder_buffer.empty() || 
-            (reorder_buffer.back().operation_index < op_index));
+            assert(reorder_buffer.empty() || 
+                (reorder_buffer.back().operation_index < op_index));
 #endif       
-        // Pad the reorder buffer for missing entries if necessary
-        while (!reorder_buffer.empty() &&
-            ((reorder_buffer.back().operation_index+1) < op_index))
-          reorder_buffer.emplace_back(
-              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
-        reorder_buffer.emplace_back(ReorderBufferEntry(*it));
-        executing_children_count++;
-        dependence_queue.push_back(*it);
+            // Pad the reorder buffer for missing entries if necessary
+            while (!reorder_buffer.empty() &&
+                ((reorder_buffer.back().operation_index+1) < op_index))
+              reorder_buffer.emplace_back(
+                 ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+            reorder_buffer.emplace_back(ReorderBufferEntry(op));
+            executing_children_count++;
+          }
+#ifdef DEBUG_LEGION
+          assert(dependence_queue.empty());
+#endif
+          dependence_queue.push_back(op);
+          outstanding_children_count.fetch_add(1);
+          RtEvent precondition = dependence_precondition;
+          // Release the lock and launch the meta-task
+          d_lock.release();
+          const ApEvent term_event = op->get_completion_event();
+          DependenceArgs args(op, this);
+          const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+          runtime->issue_runtime_meta_task(args, priority, precondition);
+          bool poisoned = false;
+          term_event.wait_faultaware(poisoned);
+          if (poisoned)
+            raise_poison_exception();
+          // Reacquire the lock before doing the next operation
+          d_lock.reacquire();
+        }
       }
-      outstanding_children_count.fetch_add(unordered_ops.size());
-      unordered_ops.clear();
+      else
+      {
+        // Common path for normal execution where we don't need to
+        // execute each of these things in program order
+        // We need the child op lock here so we can add these to this
+        // list of executing children as well
+        AutoLock child_lock(child_op_lock);
+        for (std::vector<Operation*>::const_iterator it = 
+              ready_operations.begin(); it != ready_operations.end(); it++)
+        {
+          const size_t op_index = total_children_count++;
+          (*it)->set_tracking_parent(op_index);
+#ifdef DEBUG_LEGION
+          assert(reorder_buffer.empty() || 
+              (reorder_buffer.back().operation_index < op_index));
+#endif       
+          // Pad the reorder buffer for missing entries if necessary
+          while (!reorder_buffer.empty() &&
+              ((reorder_buffer.back().operation_index+1) < op_index))
+            reorder_buffer.emplace_back(
+                ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+          reorder_buffer.emplace_back(ReorderBufferEntry(*it));
+          executing_children_count++;
+          if (dependence_queue.empty())
+          {
+            DependenceArgs args(*it, this);
+            const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+            runtime->issue_runtime_meta_task(args, priority, 
+                                    dependence_precondition);
+          }
+          dependence_queue.push_back(*it);
+        }
+        outstanding_children_count.fetch_add(unordered_ops.size());
+        unordered_ops.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12085,7 +12170,8 @@ namespace Legion {
                                 FutureFunctor *callback_functor,
                                 const Realm::ExternalInstanceResource *resource,
                        void (*freefunc)(const Realm::ExternalInstanceResource&),
-                                const void *metadataptr, size_t metadatasize)
+                                const void *metadataptr, size_t metadatasize,
+                                ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // See if we have any local regions or fields that need to be deallocated
@@ -12241,27 +12327,12 @@ namespace Legion {
         }
       }
       // Check to see if we have any unordered operations that we need to inject
-      {
-        AutoLock d_lock(dependence_lock);
-#ifdef DEBUG_LEGION
-        assert(!finished_execution);
-#endif
-        finished_execution = true;
-        insert_unordered_ops(d_lock, true/*end task*/, false/*progress*/);
-        if (!dependence_queue.empty() && !outstanding_dependence)
-        {
-          outstanding_dependence = true;
-          DependenceArgs args(dependence_queue.front(), this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_WORK_PRIORITY, dependence_precondition);
-          dependence_precondition = RtEvent::NO_RT_EVENT;
-        }
-      }
+      progress_unordered_operations(true/*end task*/);
       // At this point we should have grabbed any references to these
       // physical regions so we can clear them at this point
       physical_regions.clear();
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
-          callback_functor, resource, freefunc, metadataptr, metadatasize);
+          callback_functor, resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------
@@ -12574,18 +12645,15 @@ namespace Legion {
         }
       }
       register_executing_child(child);
-      const ApEvent child_done = child->get_completion_event();
       // Now select the variant for task based on the regions 
       std::deque<InstanceSet> physical_instances(child_regions.size());
       VariantImpl *variant = 
         select_inline_variant(child, child_regions, physical_instances); 
       child->perform_inlining(variant, physical_instances);
-      // Then wait for the child operation to be finished
-      bool poisoned = false;
-      if (!child_done.has_triggered_faultaware(poisoned))
-        child_done.wait_faultaware(poisoned);
-      if (poisoned)
-        raise_poison_exception();
+      // Finish the inlining of the child task to execute, note this doesn't
+      // wait for the effects of the children to be done, it just blocks to
+      // make sure the code for the children are done running on this processor
+      wait_for_inlined();
       return true;
     } 
 
@@ -12667,12 +12735,12 @@ namespace Legion {
                             bool silence_warnings, bool inlining_enabled)
     //--------------------------------------------------------------------------
     {
-      bool inline_task = false;
+      bool perform_inlining = false;
       if (inlining_enabled)
-        inline_task = task->select_task_options(true/*prioritize*/);
+        perform_inlining = task->select_task_options(true/*prioritize*/);
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
-      if (!inline_task || !inline_child_task(task))
+      if (!perform_inlining || !inline_child_task(task))
       {
         // Normal task launch, iterate over the context task's
         // regions and see if we need to unmap any of them
@@ -12885,7 +12953,8 @@ namespace Legion {
         equivalence_set_allocator_shard(0), next_available_collective_index(0),
         next_logical_collective_index(1), next_physical_template_index(0), 
         next_replicate_bar_index(0), next_logical_bar_index(0),
-        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH),
+        unordered_collective(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -12911,6 +12980,9 @@ namespace Legion {
     ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(unordered_collective == NULL);
+#endif
       if (shard_manager->remove_nested_resource_ref(did))
         delete shard_manager;
       if (returned_resource_ready_barrier.exists())
@@ -18347,8 +18419,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::insert_unordered_ops(AutoLock &d_lock,
-                                       const bool end_task, const bool progress)
+    void ReplicateContext::initialize_unordered_collective(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(unordered_collective == NULL);
+#endif
+      unordered_ops_counter = 0;
+      unordered_collective = 
+        new UnorderedExchange(this, COLLECTIVE_LOC_88);
+      unordered_collective->start_unordered_exchange(unordered_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::finalize_unordered_collective(AutoLock &d_lock)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(unordered_collective != NULL);
+#endif
+      const RtEvent ready =
+        unordered_collective->perform_collective_wait(false/*block*/);
+      if (ready.exists() && !ready.has_triggered())
+      {
+        d_lock.release();
+        ready.wait();
+        d_lock.reacquire();
+      }
+      std::vector<Operation*> ready_operations;
+      if (!unordered_ops.empty())
+        unordered_collective->find_ready_operations(ready_operations);
+      delete unordered_collective;
+      unordered_collective = NULL;
+      if (!ready_operations.empty())
+      {
+        // Filter out the ready operations
+        for (std::vector<Operation*>::iterator it = unordered_ops.begin();
+              it != unordered_ops.end(); /*nothing*/)
+        {
+          bool filter = false;
+          for (unsigned idx = 0; idx < ready_operations.size(); idx++)
+          {
+            if ((*it) != ready_operations[idx])
+              continue;
+            filter = true;
+            break;
+          }
+          if (filter)
+            it = unordered_ops.erase(it);
+          else
+            it++;
+        }
+        // Now we can do the insertion
+        issue_unordered_operations(d_lock, ready_operations);
+        // Reset the epoch counter back to the minimum since we found some
+        // matches so we should probably be doing this more often
+        unordered_ops_epoch = MIN_UNORDERED_OPS_EPOCH;
+      }
+      else if (unordered_ops_epoch < MAX_UNORDERED_OPS_EPOCH)
+        // If there were no ready unordered ops then we double the epoch
+        unordered_ops_epoch *= 2;
+#ifdef DEBUG_LEGION
+      assert(MIN_UNORDERED_OPS_EPOCH <= unordered_ops_epoch);
+      assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
       // If we have a trace then we're definitely not inserting operations
@@ -18360,114 +18498,57 @@ namespace Legion {
       // We employ a sampling based algorithm here with exponential backoff
       // to detect when we are doing unordered ops since it's likely a 
       // binary state where either we are or we aren't doing unordered ops
-      if (!end_task)
-      {
 #ifdef DEBUG_LEGION
-        assert(unordered_ops_counter < unordered_ops_epoch);
+      assert(unordered_ops_counter < unordered_ops_epoch);
 #endif
-        // If we're doing progress then we can skip this check and
-        // reset the counter back to zero since we're doing an exchange
-        if (!progress)
-        {
-          if (++unordered_ops_counter < unordered_ops_epoch)
-            return;
-        }
-        else
-          unordered_ops_counter = 0;
-      }
-      // else we always do a match at the end of the replicated task 
+      // If we're doing progress then we can skip this check and
+      // reset the counter back to zero since we're doing an exchange
+      if (++unordered_ops_counter < unordered_ops_epoch)
+        return;
+      // Check to see if the previous exchange had any matching unordered
+      // operations for us to perform
+      if (unordered_collective != NULL)
+        finalize_unordered_collective(d_lock);
+      // Start the next exchange
+      initialize_unordered_collective();
+    }
 
-      // If we make it here then all the shards are agreed that they are
-      // going to do the sync up and will exchange information 
-      // We're going to release the lock so we need to grab a local copy
-      // of all our unordered operations.
-      std::list<Operation*> local_unordered;
-      local_unordered.swap(unordered_ops);
-      // Now we can release the lock and do the exchange
-      d_lock.release();
-      UnorderedExchange exchange(this, COLLECTIVE_LOC_88); 
-      std::vector<Operation*> ready_ops;
-      const bool any_unordered_ops = 
-        exchange.exchange_unordered_ops(local_unordered, ready_ops);
-      // We can do this part before we reacquire the d_lock
-      if (!ready_ops.empty())
+    //--------------------------------------------------------------------------
+    void ReplicateContext::progress_unordered_operations(bool end_task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(dependence_lock);
+      if (end_task)
       {
-        // We need the child op lock here so we can add these to this
-        // list of executing children as well
-        AutoLock child_lock(child_op_lock);
-        for (std::vector<Operation*>::const_iterator it = 
-              ready_ops.begin(); it != ready_ops.end(); it++)
-        {
-          const size_t op_index = total_children_count++;
-          (*it)->set_tracking_parent(op_index);
+        // This is the end of this parent task so mark that we're done
 #ifdef DEBUG_LEGION
-          assert(reorder_buffer.empty() || 
-            ((reorder_buffer.back().operation_index+1) == op_index));
-#endif       
-          reorder_buffer.emplace_back(ReorderBufferEntry(*it));
-          executing_children_count++;
-        }
-      }
-      // Reacquire the lock and handle the operations
-      d_lock.reacquire();
-      if (!ready_ops.empty())
-      {
-        for (std::vector<Operation*>::const_iterator it = 
-              ready_ops.begin(); it != ready_ops.end(); it++)
-          dependence_queue.push_back(*it);
-        outstanding_children_count.fetch_add(ready_ops.size());
-        if (ready_ops.size() != local_unordered.size())
-        {
-          // For any operations which we aren't in the ready ops
-          // then we need to put them back on the unordered list
-          for (std::list<Operation*>::const_reverse_iterator it = 
-                local_unordered.rbegin(); it != local_unordered.rend(); it++)
-          {
-            bool found = false;
-            for (unsigned idx = 0; idx < ready_ops.size(); idx++)
-            {
-              if (ready_ops[idx] != (*it))
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              unordered_ops.push_front(*it);
-          }
-        }
-      }
-      else if (!local_unordered.empty())
-      {
-        // Put all our of items back on the unordered list
-        if (!unordered_ops.empty())
-          unordered_ops.insert(unordered_ops.begin(),
-              local_unordered.begin(), local_unordered.end());
-        else
-          unordered_ops.swap(local_unordered);
-      }
-      if (!end_task)
-      {
-        // Reset the count
-        unordered_ops_counter = 0;
-        // Check to see how to adjust the epoch size
-        if (!any_unordered_ops)
-        {
-          // If there were no ready unordered ops then we double the epoch
-          if (unordered_ops_epoch < MAX_UNORDERED_OPS_EPOCH)
-            unordered_ops_epoch *= 2;
-        }
-        else // Otherwise reset to min epoch size
-          unordered_ops_epoch = MIN_UNORDERED_OPS_EPOCH;
-#ifdef DEBUG_LEGION
-        assert(MIN_UNORDERED_OPS_EPOCH <= unordered_ops_epoch);
-        assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
+        assert(!finished_execution);
+        assert(current_trace == NULL);
 #endif
+        finished_execution = true;
       }
-      else if (!unordered_ops.empty())
-        REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS,
-            "Control replicated task %s (UID %lld) had %zd mismatched unordered"
-            " operations at the end of its execution that are now leaked.",
-            get_task_name(), get_unique_id(), unordered_ops.size())
+      // No progress can occur inside of a trace
+      else if (current_trace != NULL)
+        return;
+      // With control replication we're always doing half phases for detecting
+      // when we have unordered operations across all shards that are ready to
+      // be performed, but in this case the user has asked us to actually
+      // perform a full phase, so finish the previous one and then start a 
+      // new phase if we're not the end last phase
+      if (unordered_collective != NULL)
+        finalize_unordered_collective(d_lock);
+      initialize_unordered_collective();
+      finalize_unordered_collective(d_lock);
+      if (end_task)
+      {
+        if (!unordered_ops.empty())
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS,
+              "Control replicated task %s (UID %lld) had %zd mismatched "
+              "unordered operations at the end of its execution that are now "
+              "leaked.", get_task_name(), get_unique_id(), unordered_ops.size())
+      }
+      else
+        initialize_unordered_collective();
     }
 
     //--------------------------------------------------------------------------
@@ -20311,7 +20392,7 @@ namespace Legion {
                                 FutureFunctor *callback_functor,
                                 const Realm::ExternalInstanceResource *resource,
               void (*freefunc)(const Realm::ExternalInstanceResource &resource),
-                       const void *metadataptr, size_t metadatasize)
+                  const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // We have an extra one of these here to handle the case where some
@@ -20327,7 +20408,7 @@ namespace Legion {
           break;
       }
       InnerContext::end_task(res, res_size, owned, deferred_result_instance,
-            callback_functor, resource, freefunc, metadataptr, metadatasize);
+           callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------
@@ -20483,20 +20564,19 @@ namespace Legion {
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered &&
-          !is_replaying_physical_trace())
+           outermost && !is_replaying_physical_trace())
       {
-        ApEvent term_event = op->get_completion_event();
+        const ApEvent term_event = op->get_completion_event();
         InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
         const ApBarrier inorder_bar = inorder_barrier.next(this);
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
-        term_event = inorder_bar;
-        if (outermost)
-        {
-          bool poisoned = false;
-          term_event.wait_faultaware(poisoned);
-          if (poisoned)
-            raise_poison_exception(); 
-        }
+        bool poisoned = false;
+        inorder_bar.wait_faultaware(poisoned);
+        if (poisoned)
+          raise_poison_exception();
+        // Issue any unordered operations now
+        AutoLock d_lock(dependence_lock);
+        insert_unordered_ops(d_lock);
         // Not unordered so it must have succeeded
         return true;
       }
@@ -24395,8 +24475,10 @@ namespace Legion {
       VariantImpl *variant = 
         select_inline_variant(child, child_regions, physical_instances); 
       child->perform_inlining(variant, physical_instances);
-      // No need to wait here, we know everything are leaves all the way
-      // down from here so there is no way for there to be effects
+      // Finish the inlining of the child task to execute, note this doesn't
+      // wait for the effects of the children to be done, it just blocks to
+      // make sure the code for the children are done running on this processor
+      wait_for_inlined();
     }
 
     //--------------------------------------------------------------------------
@@ -25611,7 +25693,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::progress_unordered_operations(void)
+    void LeafContext::progress_unordered_operations(bool end_task)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -25942,7 +26024,7 @@ namespace Legion {
                                FutureFunctor *callback_functor,
                                const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                               const void *metadataptr, size_t metadatasize)
+                  const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
@@ -25968,7 +26050,7 @@ namespace Legion {
         wait_on.wait();
       } 
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
-          callback_functor, resource, freefunc, metadataptr, metadatasize); 
+          callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------

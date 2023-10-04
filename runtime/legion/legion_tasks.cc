@@ -4624,7 +4624,9 @@ namespace Legion {
       }
       // STEP 3: Finally we get to launch the task
       // Mark that we have an outstanding task in this context 
-      if (!inline_task)
+      if (inline_task)
+        parent_ctx->increment_inlined();
+      else
         parent_ctx->increment_pending();
       // Note there is a potential scary race condition to be aware of here: 
       // once we launch this task it's possible for this task to run and 
@@ -4718,65 +4720,31 @@ namespace Legion {
       }
       else // We're going to trigger this right now with no precondition
         single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
-      ApEvent task_launch_event;
-      if (inline_task)
+      ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
+         execution_context, start_condition, task_priority, profiling_requests);
+      // Release any reservations that we took on behalf of this task
+      // Note this happens before protection of the event for predication
+      // because the acquires were also subject to poisoning so we either
+      // want all the releases to be done or poisoned the same as the acquires
+      if (!to_release.empty())
       {
-        bool poisoned = false;
-        if (start_condition.exists() && 
-            !start_condition.has_triggered_faultaware(poisoned))
-          start_condition.wait_faultaware(poisoned);
-        if (poisoned)
-        {
-          // Check to see if we were poisoned because of prediation
-          // or because of an actual fault
-          bool mispredicated = false;
-          true_guard.has_triggered_faultaware(mispredicated);
-          if (!mispredicated)
-            execution_context->raise_poison_exception();
-          // No need to release the reservations because they were
-          // poisoned out from being executed
-        }
-        else
-        {
-          variant->dispatch_inline(launch_processor, execution_context);
-          // Release any reservations that we took on behalf of this task
-          if (!to_release.empty())
-          {
-            for (std::vector<Reservation>::const_iterator it = 
-                  to_release.begin(); it != to_release.end(); it++)
-              Runtime::release_reservation(*it);
-          }
-        }
+        for (std::vector<Reservation>::const_iterator it = 
+              to_release.begin(); it != to_release.end(); it++)
+          Runtime::release_reservation(*it, task_launch_event);
       }
-      else
+      // If this task was predicated then we need to protect everything that
+      // comes after this from the predication poison
+      if (true_guard.exists())
       {
-        task_launch_event = variant->dispatch_task(launch_processor, this,
-                            execution_context, start_condition,
-                            task_priority, profiling_requests);
-        // Release any reservations that we took on behalf of this task
-        // Note this happens before protection of the event for predication
-        // because the acquires were also subject to poisoning so we either
-        // want all the releases to be done or poisoned the same as the acquires
-        if (!to_release.empty())
+        task_launch_event = Runtime::ignorefaults(task_launch_event);
+        // Also merge in the original preconditions so that is reflected 
+        // downstream in the event chain still for things like postconditions
+        // Make sure to prune out the true guard that we added here
+        wait_on_events.erase(ApEvent(true_guard));
+        if (!wait_on_events.empty())
         {
-          for (std::vector<Reservation>::const_iterator it = 
-                to_release.begin(); it != to_release.end(); it++)
-            Runtime::release_reservation(*it, task_launch_event);
-        }
-        // If this task was predicated then we need to protect everything that
-        // comes after this from the predication poison
-        if (true_guard.exists())
-        {
-          task_launch_event = Runtime::ignorefaults(task_launch_event);
-          // Also merge in the original preconditions so that is reflected 
-          // downstream in the event chain still for things like postconditions
-          // Make sure to prune out the true guard that we added here
-          wait_on_events.erase(ApEvent(true_guard));
-          if (!wait_on_events.empty())
-          {
-            wait_on_events.insert(task_launch_event);
-            task_launch_event = Runtime::merge_events(NULL, wait_on_events);
-          }
+          wait_on_events.insert(task_launch_event);
+          task_launch_event = Runtime::merge_events(NULL, wait_on_events);
         }
       }
       if (chain_task_termination.exists())

@@ -2148,6 +2148,7 @@ namespace Legion {
     class MustEpochMappingBroadcast;
     class MustEpochMappingExchange;
     class PredicateCollective;
+    class UnorderedExchange;
     class ShardRendezvous;
     class ProjectionTreeExchange;
 

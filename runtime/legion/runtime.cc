@@ -6101,7 +6101,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent OutputRegionImpl::finalize(void)
+    void OutputRegionImpl::finalize(void)
     //--------------------------------------------------------------------------
     {
       Domain domain;
@@ -6201,7 +6201,6 @@ namespace Legion {
       for (std::vector<PhysicalInstance>::const_iterator it =
             escaped_instances.begin(); it != escaped_instances.end(); it++)
         it->destroy();
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -14692,24 +14691,6 @@ namespace Legion {
            Runtime::merge_events(NULL, precondition, ready_event), priority));
       return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests,
                                   precondition, priority));
-    }
-
-    //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Processor current, TaskContext *ctx)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::FunctionPointerImplementation *fp_impl = 
-        realm_descriptor.find_impl<Realm::FunctionPointerImplementation>();
-#ifdef DEBUG_LEGION
-      assert(fp_impl != NULL);
-      assert(implicit_context != NULL);
-#endif
-      // Save the implicit context here on the stack so we can restore it
-      TaskContext *previous_context = implicit_context;
-      RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
-      (*inline_ptr)(&ctx, sizeof(ctx), user_data, user_data_size, current);
-      // Restore the implicit context back to the previous context
-      implicit_context = previous_context;
     }
 
     //--------------------------------------------------------------------------
@@ -30941,7 +30922,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finish_implicit_task(TaskContext *ctx)
+    void Runtime::finish_implicit_task(TaskContext *ctx, ApEvent effects)
     //--------------------------------------------------------------------------
     {
       if (!ctx->implicit_task)
@@ -30952,7 +30933,7 @@ namespace Legion {
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
           NULL/*callback functor*/, NULL/*resource*/,  NULL/*freefunc*/,
-          NULL/*metadataptr*/, 0/*metadatasize*/);
+          NULL/*metadataptr*/, 0/*metadatasize*/, effects);
       implicit_context = NULL;
     }
 

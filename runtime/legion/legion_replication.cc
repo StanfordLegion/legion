@@ -15417,15 +15417,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool UnorderedExchange::exchange_unordered_ops(
-                                    const std::list<Operation*> &unordered_ops,
-                                          std::vector<Operation*> &ready_ops)
+    void UnorderedExchange::start_unordered_exchange(
+                                   const std::vector<Operation*> &unordered_ops)
     //--------------------------------------------------------------------------
     {
       // Sort our operations
       if (!unordered_ops.empty())
       {
-        for (std::list<Operation*>::const_iterator it = 
+        for (std::vector<Operation*>::const_iterator it = 
               unordered_ops.begin(); it != unordered_ops.end(); it++)
         {
           switch ((*it)->get_operation_kind())
@@ -15477,33 +15476,32 @@ namespace Legion {
         initialize_counts(partition_detachments, partition_detach_counts);
       }
       // Perform the exchange
-      perform_collective_sync();
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void UnorderedExchange::find_ready_operations(
+                                             std::vector<Operation*> &ready_ops)
+    //--------------------------------------------------------------------------
+    {
       // Now look and see which operations have keys for all shards 
       // Only need to do this if we have ops, if we didn't have ops then
       // it's impossible for anyone else to have them all too
-      if (!unordered_ops.empty())
-      {
-        const size_t total_shards = manager->total_shards;
-        find_ready_ops(total_shards, index_space_counts,
-                       index_space_deletions, ready_ops);
-        find_ready_ops(total_shards, index_partition_counts,
-                       index_partition_deletions, ready_ops);
-        find_ready_ops(total_shards, field_space_counts,
-                       field_space_deletions, ready_ops);
-        find_ready_ops(total_shards, field_counts,
-                       field_deletions, ready_ops);
-        find_ready_ops(total_shards, logical_region_counts,
-                       logical_region_deletions, ready_ops);
-        find_ready_ops(total_shards, region_detach_counts,
-                       region_detachments, ready_ops);
-        find_ready_ops(total_shards, partition_detach_counts,
-                       partition_detachments, ready_ops);
-      }
-      // Return true if anybody anywhere had a non-zero count
-      return (!index_space_counts.empty() || !index_partition_counts.empty() ||
-          !field_space_counts.empty() || !field_counts.empty() || 
-          !logical_region_counts.empty() || !region_detach_counts.empty() ||
-          !partition_detach_counts.empty());
+      const size_t total_shards = manager->total_shards;
+      find_ready_ops(total_shards, index_space_counts,
+                     index_space_deletions, ready_ops);
+      find_ready_ops(total_shards, index_partition_counts,
+                     index_partition_deletions, ready_ops);
+      find_ready_ops(total_shards, field_space_counts,
+                     field_space_deletions, ready_ops);
+      find_ready_ops(total_shards, field_counts,
+                     field_deletions, ready_ops);
+      find_ready_ops(total_shards, logical_region_counts,
+                     logical_region_deletions, ready_ops);
+      find_ready_ops(total_shards, region_detach_counts,
+                     region_detachments, ready_ops);
+      find_ready_ops(total_shards, partition_detach_counts,
+                     partition_detachments, ready_ops);
     }
 
     /////////////////////////////////////////////////////////////
