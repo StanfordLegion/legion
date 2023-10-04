@@ -9336,8 +9336,8 @@ namespace Legion {
           }
           dependence_queue.push_back(*it);
         }
-        outstanding_children_count.fetch_add(unordered_ops.size());
-        unordered_ops.clear();
+        outstanding_children_count.fetch_add(ready_operations.size());
+        ready_operations.clear();
       }
     }
 
