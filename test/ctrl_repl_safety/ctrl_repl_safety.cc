@@ -159,8 +159,12 @@ struct Test
 
 int main(int argc, char **argv)
 {
+  ssize_t ret = 0;
   int result_pipe[2];
-  pipe(result_pipe);
+  ret = pipe(result_pipe);
+  if (ret != 0) {
+    return -1;
+  }
 
   Test::Params params = Test::parse(argv);
   Test::Result result{0};
@@ -176,13 +180,19 @@ int main(int argc, char **argv)
 
     // Seems we haven't crashed, write result to the pipe
     result.is_complete = true;
-    write(result_pipe[1], &result, sizeof result);
+    ret = write(result_pipe[1], &result, sizeof result);
+    if (ret != sizeof result) {
+      exit(-1);
+    }
     exit(Runtime::wait_for_shutdown());
   }
 
   close(result_pipe[1]);
   // if the child crashes, it won't actually write to the pipe
-  read(result_pipe[0], &result, sizeof result);
+  ret = read(result_pipe[0], &result, sizeof result);
+  if (ret != 0 && ret != sizeof result) {
+    return -1;
+  }
 
   int status = 0;
   pid_t finished = waitpid(child, &status, 0);
