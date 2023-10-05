@@ -285,8 +285,7 @@ namespace Realm {
     static bool needs_transpose(size_t in_lstride, size_t in_pstride, size_t out_lstride,
                                 size_t out_pstride)
     {
-      return !((in_lstride < in_pstride && out_lstride < out_pstride) ||
-               (in_lstride > in_pstride && out_lstride > out_pstride));
+      return in_lstride > in_pstride || out_lstride > out_pstride;
     }
 
     // Calculates the maximum alignment native type alignment the GPU supports that will
