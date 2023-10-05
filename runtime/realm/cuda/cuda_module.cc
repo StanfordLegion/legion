@@ -5138,6 +5138,59 @@ namespace Realm {
       ThreadLocal::context_sync_required = (is_required ? 1 : 0);
     }
 
+    static void CUDA_CB event_trigger_callback(void *userData) {
+      UserEvent realm_event;
+      realm_event.id = reinterpret_cast<Realm::Event::id_t>(userData);
+      realm_event.trigger();
+    }
+
+    Event CudaModule::make_realm_event(CUevent_st *cuda_event)
+    {
+      CUresult res = CUDA_DRIVER_FNPTR(cuEventQuery)(cuda_event);
+      if(res == CUDA_SUCCESS) {
+        // This CUDA event is already completed, no need to create a new event.
+        return Event::NO_EVENT;
+      } else if(res != CUDA_ERROR_NOT_READY) {
+        CHECK_CU(res);
+      }
+      UserEvent realm_event = UserEvent::create_user_event();
+      bool free_stream = false;
+      CUstream cuda_stream = 0;
+      if(ThreadLocal::current_gpu_stream != nullptr) {
+        cuda_stream = ThreadLocal::current_gpu_stream->get_stream();
+      } else {
+        // Create a temporary stream to push the signaling onto.  This will ensure there's
+        // no direct dependency on the signaling other than the event
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamCreate)(&cuda_stream, CU_STREAM_NON_BLOCKING));
+        free_stream = true;
+      }
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(cuda_stream, cuda_event,
+                                                    CU_EVENT_WAIT_DEFAULT));
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchHostFunc)(
+          cuda_stream, event_trigger_callback, reinterpret_cast<void *>(realm_event.id)));
+      if(free_stream) {
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamDestroy)(cuda_stream));
+      }
+      
+      return realm_event;
+    }
+
+    Event CudaModule::make_realm_event(CUstream_st *cuda_stream)
+    {
+      CUresult res = CUDA_DRIVER_FNPTR(cuStreamQuery)(cuda_stream);
+      if (res == CUDA_SUCCESS) {
+        // This CUDA stream is already completed, no need to create a new event.
+        return Event::NO_EVENT;
+      }
+      else if (res != CUDA_ERROR_NOT_READY) {
+        CHECK_CU(res);
+      }
+      UserEvent realm_event = UserEvent::create_user_event();
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchHostFunc)(
+          cuda_stream, event_trigger_callback,
+          reinterpret_cast<void *>(realm_event.id)));
+      return realm_event;
+    }
 
 #ifdef REALM_USE_CUDART_HIJACK
     ////////////////////////////////////////////////////////////////////////
