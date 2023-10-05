@@ -225,6 +225,11 @@ impl fmt::Display for Timestamp {
     }
 }
 
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+)]
+pub struct TimestampDelta(pub i64 /* ns */);
+
 #[derive(Debug, Copy, Clone)]
 pub struct TimePoint<Entry, Secondary>
 where
@@ -2283,6 +2288,7 @@ pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub num_nodes: u32,
+    pub zero_time: TimestampDelta,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
     pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
@@ -3249,6 +3255,9 @@ fn process_record(
         }
         Record::MachineDesc { num_nodes, .. } => {
             state.num_nodes = *num_nodes;
+        }
+        Record::ZeroTime { zero_time } => {
+            state.zero_time = TimestampDelta(*zero_time);
         }
         Record::ProcDesc { proc_id, kind } => {
             let kind = match ProcKind::try_from(*kind) {

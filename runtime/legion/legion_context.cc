@@ -18367,15 +18367,6 @@ namespace Legion {
                                                    bool from_application)
     //--------------------------------------------------------------------------
     {
-      for (int i = 0; runtime->safe_control_replication && from_application &&
-        (i < 2) && ((current_trace == NULL) || !current_trace->is_fixed()); i++)
-      {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
-        hasher.hash(REPLICATE_DESTROY_FIELD_ALLOCATOR, __func__);
-        hasher.hash(node->handle, "handle");
-        if (hasher.verify(__func__))
-          break;
-      }
       if (from_application)
       {
         AutoRuntimeCall call(this);
