@@ -1582,6 +1582,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
           log_runtime.warning(
               "Unable to send shared memory information to node %u, skipping",
               (unsigned)*it);
+          continue;
         }
         // TODO: modify ipc_mailbox_recv to peek and resize the data buffer the same as
         // the peer handles
@@ -1592,6 +1593,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
           log_runtime.warning(
               "Unable to recv shared memory information from node %u, skipping",
               (unsigned)*it);
+          continue;
         }
         assert(peer_handles.size() * sizeof(peer_mem_ids[0]) == data_sz &&
                "Mismatch in received handles and ids");
