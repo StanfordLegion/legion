@@ -117,7 +117,7 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
 }
 
 #define MEMCPY_TEMPLATE_INST(type, dim, offt, name)                            \
-  extern "C" __global__ __launch_bounds__(256, 8) void                         \
+  extern "C" __global__ __launch_bounds__(256, 4) void                         \
       memcpy_affine_batch##name(Realm::Cuda::AffineCopyInfo<dim, offt> info) { \
     memcpy_affine_batch<type, dim, offt>(info.subrects, info.num_rects);       \
   }
@@ -137,7 +137,7 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
       Realm::Cuda::MemcpyTransposeInfo<offt> info) {}
 
 #define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                  \
-  extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name( \
+  extern "C" __global__ __launch_bounds__(256, 4) void memcpy_indirect##name( \
       Realm::Cuda::MemcpyUnstructuredInfo<dim> info) {}
 
 #define INST_TEMPLATES(type, sz, dim, off)                                     \

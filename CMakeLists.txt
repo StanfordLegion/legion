@@ -405,9 +405,10 @@ if("${Legion_NETWORKS}" MATCHES .*ucx.*)
 endif()
 
 if (MPI_FOUND)
-  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_C_LIB_NAMES})
+  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_mpi_LIBRARY})
   # Check if MPI has comm split type available
   check_function_exists(MPI_Comm_split_type REALM_MPI_HAS_COMM_SPLIT_TYPE)
+  list(POP_BACK CMAKE_REQUIRED_LIBRARIES)
 endif()
 
 #------------------------------------------------------------------------------#
