@@ -10367,13 +10367,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_post_execution(FutureInstance *inst, 
-                                    void *metadata, size_t metasize, bool local)
+    void ShardManager::handle_post_execution(FutureInstance *inst,
+        ApEvent effects, void *metadata, size_t metasize, bool local)
     //--------------------------------------------------------------------------
     {
       bool notify = false;
       {
         AutoLock m_lock(manager_lock);
+        if (effects.exists())
+          execution_effects.push_back(effects);
         if (local)
         {
           local_execution_complete++;
@@ -10413,6 +10415,8 @@ namespace Legion {
       {
         FutureInstance *result = local_future_result;
         local_future_result = NULL;
+        if (!execution_effects.empty())
+          effects = Runtime::merge_events(NULL, execution_effects);
         if (original_task == NULL)
         {
           Serializer rez;
@@ -10424,14 +10428,16 @@ namespace Legion {
           rez.serialize(metasize);
           if (metasize > 0)
             rez.serialize(metadata, metasize);
+          rez.serialize(effects);
           runtime->send_replicate_post_execution(owner_space, rez);
           if (result != NULL)
             delete result;
         }
         else
         {
-          original_task->handle_post_execution(result, metadata, metasize,
-              NULL/*functor*/, Processor::NO_PROC, false/*own functor*/);
+          original_task->handle_post_execution(result, effects, metadata, 
+              metasize, NULL/*functor*/, Processor::NO_PROC, 
+              false/*own functor*/);
           // we no longer own this, it got passed through
           metadata = NULL;
         }
@@ -11369,7 +11375,10 @@ namespace Legion {
         memcpy(metadata, derez.get_current_pointer(), metasize);
         derez.advance_pointer(metasize);
       }
-      manager->handle_post_execution(instance,metadata,metasize,false/*local*/);
+      ApEvent effects;
+      derez.deserialize(effects);
+      manager->handle_post_execution(instance, effects, metadata, 
+                                     metasize, false/*local*/);
     }
 
     //--------------------------------------------------------------------------

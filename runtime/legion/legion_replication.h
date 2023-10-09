@@ -2922,8 +2922,8 @@ namespace Legion {
       void barrier_shard_local(size_t context_index, size_t exchange_index);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
-      void handle_post_execution(FutureInstance *instance, void *metadata,
-                                 size_t metasize, bool local);
+      void handle_post_execution(FutureInstance *instance, ApEvent effects,
+                                 void *metadata, size_t metasize, bool local);
       RtEvent trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:
@@ -3040,6 +3040,7 @@ namespace Legion {
       unsigned    semantic_attach_counter;
       FutureInstance *local_future_result;
       std::set<RtEvent> mapping_preconditions;
+      std::vector<ApEvent> execution_effects;
     protected:
       RtBarrier shard_task_barrier;
       RtBarrier callback_barrier;
