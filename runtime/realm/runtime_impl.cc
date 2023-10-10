@@ -356,30 +356,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // struct ReductionOpUntyped
-  //
-
-  /*static*/ ReductionOpUntyped *ReductionOpUntyped::clone_reduction_op(const ReductionOpUntyped *redop)
-  {
-    void *ptr = malloc(redop->sizeof_this);
-    assert(ptr);
-    memcpy(ptr, redop, redop->sizeof_this);
-    ReductionOpUntyped *cloned = static_cast<ReductionOpUntyped *>(ptr);
-    // fix up identity and userdata fields, if non-null
-    if(redop->identity)
-      cloned->identity = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(redop->identity) -
-                                                  reinterpret_cast<uintptr_t>(redop) +
-                                                  reinterpret_cast<uintptr_t>(cloned));
-    if(redop->userdata)
-      cloned->userdata = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(redop->userdata) -
-                                                  reinterpret_cast<uintptr_t>(redop) +
-                                                  reinterpret_cast<uintptr_t>(cloned));
-    return cloned;
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class Runtime
   //
 
@@ -566,12 +542,12 @@ namespace Realm {
     {
       assert(impl != 0);
 
-      ReductionOpUntyped *cloned = ReductionOpUntyped::clone_reduction_op(redop);
+      ReductionOpUntyped *cloned = redop->clone();
       bool conflict = ((RuntimeImpl *)impl)->reduce_op_table.put(redop_id, cloned);
       if(conflict) {
 	log_runtime.error() << "duplicate registration of reduction op " << redop_id;
-	free(cloned);
-	return false;
+        delete cloned;
+        return false;
       }
 
       return true;
@@ -1142,7 +1118,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       delete core_reservations;
       delete core_map;
 
-      delete_container_contents_free(reduce_op_table.map);
+      delete_container_contents(reduce_op_table.map);
       delete_container_contents(custom_serdez_table.map);
     }
 

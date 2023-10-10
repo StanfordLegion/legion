@@ -122,6 +122,12 @@ namespace Realm {
 #endif
       {}
 
+      virtual ~ReductionOpUntyped() = default;
+      ReductionOpUntyped(const ReductionOpUntyped &) = default;
+      ReductionOpUntyped &operator=(const ReductionOpUntyped &) = default;
+      ReductionOpUntyped(ReductionOpUntyped &&) noexcept = default;
+      ReductionOpUntyped &operator=(ReductionOpUntyped &&) noexcept = default;
+
       template <class REDOP>
       static ReductionOpUntyped *create_reduction_op(void)
       {
@@ -129,7 +135,7 @@ namespace Realm {
         return redop;
       }
 
-      static ReductionOpUntyped *clone_reduction_op(const ReductionOpUntyped *redop);
+      virtual ReductionOpUntyped *clone() const = 0;
     };
 
     namespace ReductionKernels {
@@ -251,6 +257,8 @@ namespace Realm {
         MaybeAddHipReductions<REDOP, HasHasHipReductions<REDOP>::value>::if_member_exists(this);
 #endif
       }
+
+      ReductionOpUntyped *clone() const override { return new ReductionOp{*this}; }
 
     protected:
     };
