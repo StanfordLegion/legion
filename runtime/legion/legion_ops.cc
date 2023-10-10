@@ -20525,10 +20525,15 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+      // Pretend like the privileges for the region requirement are read-write
+      // for cases where uses actually want to map it
+      requirement.privilege = LEGION_READ_WRITE;
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
         mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT, 
         false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
         false/*virtual mapped*/, launcher.collective, runtime)); 
+      // Restore privileges back to write-discard
+      requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, restricted);
@@ -21868,10 +21873,15 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+      // Pretend like the privileges for the region requirement are read-write
+      // for cases where uses actually want to map it
+      requirement.privilege = LEGION_READ_WRITE;
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
             mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT,
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
             false/*virtual mapped*/, false/*collective*/, runtime)); 
+      // Restore privileges back to write-discard
+      requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_index_point(owner->get_unique_op_id(), 

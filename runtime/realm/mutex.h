@@ -286,12 +286,7 @@ namespace Realm {
     //  but if we don't define it here, we run afoul of
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
-    union {
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef REALM_KERNEL_MUTEX_IMPL
-      REALM_KERNEL_MUTEX_IMPL;
-#endif
-    };
+    alignas(8) uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
   };
 
 
@@ -380,12 +375,7 @@ namespace Realm {
     //  but if we don't define it here, we run afoul of
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
-    union {
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef REALM_KERNEL_CONDVAR_IMPL
-      REALM_KERNEL_CONDVAR_IMPL;
-#endif
-    };
+    alignas(8) uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
   };
 
   template <typename LT = Mutex>
@@ -461,17 +451,12 @@ namespace Realm {
     //  but if we don't define it here, we run afoul of
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
-    union {
 #ifdef REALM_ON_MACOS
       // apparently pthread_rwlock_t's are LARGE on macOS
-      uint64_t placeholder[32]; // 256 bytes, at least 8 byte aligned
+      alignas(8) uint64_t placeholder[32]; // 256 bytes, at least 8 byte aligned
 #else
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
+      alignas(8) uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
 #endif
-#ifdef REALM_RWLOCK_IMPL
-      REALM_RWLOCK_IMPL;
-#endif
-    };
   };
 };
 
