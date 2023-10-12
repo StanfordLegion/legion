@@ -2207,11 +2207,11 @@ namespace Legion {
       if (inline_task)
         parent_ctx->decrement_inlined();
       if (release_callback)
-        parent_ctx->add_to_post_task_queue(this, last_registration, instance,
-              NULL/*no functor here*/, owned, metadataptr, metadatasize);
+        parent_ctx->add_to_post_task_queue(this, last_registration, effects,
+          instance, NULL/*no functor here*/, owned, metadataptr, metadatasize);
       else
-        parent_ctx->add_to_post_task_queue(this, last_registration, instance,
-                     callback_functor, owned, metadataptr, metadatasize); 
+        parent_ctx->add_to_post_task_queue(this, last_registration, effects,
+            instance, callback_functor, owned, metadataptr, metadatasize); 
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -2338,12 +2338,12 @@ namespace Legion {
         // Make a copy of the metadata
         void *metacopy = malloc(metasize);
         memcpy(metacopy, metadata, metasize);
-        post_end_task(instance, metacopy, metasize,
+        post_end_task(instance, ApEvent::NO_AP_EVENT, metacopy, metasize,
                       NULL/*functor*/, false/*owner*/);
       }
       else
-        post_end_task(instance, NULL/*metadata*/, 0/*metasize*/,
-                      NULL/*functor*/, false/*owner*/);
+        post_end_task(instance, ApEvent::NO_AP_EVENT, NULL/*metadata*/,
+                      0/*metasize*/, NULL/*functor*/, false/*owner*/);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -9032,6 +9032,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                                              ApEvent effects,
                                               FutureInstance *instance,
                                               FutureFunctor *callback_functor,
                                               bool own_callback_functor,
@@ -9057,8 +9058,9 @@ namespace Legion {
           // Add a reference to the context the first time we defer this
           add_base_resource_ref(META_TASK_REF);
         }
-        post_task_queue.push_back(PostTaskArgs(ctx,task_index,wait_on,instance,
-          metadatacopy, metadatasize, callback_functor, own_callback_functor));
+        post_task_queue.push_back(PostTaskArgs(ctx, task_index, wait_on, 
+              effects, instance, metadatacopy, metadatasize, callback_functor,
+              own_callback_functor));
         // If we've already got a completion queue then use it
         if (post_task_comp_queue.exists())
           post_task_comp_queue.add_event(wait_on);
@@ -9212,8 +9214,8 @@ namespace Legion {
         std::sort(to_perform.begin(), to_perform.end());
         for (std::vector<PostTaskArgs>::const_iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
-          it->context->post_end_task(it->instance, it->metadata, it->metasize,
-                                     it->functor, it->own_functor);
+          it->context->post_end_task(it->instance, it->effects, it->metadata,
+                                     it->metasize, it->functor,it->own_functor);
       }
       // If we didn't launch a next op, then we can remove the reference
       return (next_ctx == NULL);
@@ -12336,7 +12338,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::post_end_task(FutureInstance *instance,
+    void InnerContext::post_end_task(FutureInstance *instance, ApEvent effects,
                                      void *metadata, size_t metasize,
                                      FutureFunctor *callback_functor,
                                      bool own_callback_functor)
@@ -12345,7 +12347,7 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_post_execution(instance, metadata, metasize, 
+      owner_task->handle_post_execution(instance, effects, metadata, metasize, 
           callback_functor, executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
@@ -20403,7 +20405,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::post_end_task(FutureInstance *instance,
+    void ReplicateContext::post_end_task(FutureInstance *instance, 
+                                         ApEvent effects,
                                          void *metadata, size_t metasize,
                                          FutureFunctor *callback_functor,
                                          bool own_callback_functor)
@@ -20438,7 +20441,7 @@ namespace Legion {
       // Grab this now before the context might be deleted
       const ShardID local_shard = owner_shard->shard_id;
       // Do the base call
-      InnerContext::post_end_task(instance, metadata, metasize,
+      InnerContext::post_end_task(instance, effects, metadata, metasize,
                                   callback_functor, own_callback_functor);
       // Then delete all the pending collectives that we had
       while (!release_index_spaces.empty())
@@ -26045,7 +26048,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::post_end_task(FutureInstance *instance,
+    void LeafContext::post_end_task(FutureInstance *instance, ApEvent effects,
                                     void *metadata, size_t metasize,
                                     FutureFunctor *callback_functor,
                                     bool own_callback_functor)
@@ -26054,7 +26057,7 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_post_execution(instance, metadata, metasize,
+      owner_task->handle_post_execution(instance, effects, metadata, metasize,
           callback_functor, executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;

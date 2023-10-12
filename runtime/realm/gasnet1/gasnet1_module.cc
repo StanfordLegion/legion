@@ -605,6 +605,15 @@ namespace Realm {
     Network::max_node_id = gasnet_nodes() - 1;
     Network::all_peers.add_range(0, gasnet_nodes() - 1);
     Network::all_peers.remove(gasnet_mynode());
+    std::vector<gasnet_nodeinfo_t> node_info_table(gasnet_nodes());
+    gasnet_getNodeInfo(node_info_table.data(), node_info_table.size());
+    gex_Rank_t my_supernode = node_info_table[0].supernode;
+    for(gasnet_nodeinfo_t &node_info : node_info_table) {
+      if((Realm::NodeID(node_info.host) != Network::my_node_id) &&
+         (node_info.supernode == my_supernode)) {
+        Network::shared_peers.add(node_info.host);
+      }
+    }
     // TODO: do an all gather on the hostname to discover the shared peers.
     Network::shared_peers = Network::all_peers;
 #ifdef DEBUG_REALM_STARTUP
