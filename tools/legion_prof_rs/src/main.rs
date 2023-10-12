@@ -273,14 +273,15 @@ fn main() -> io::Result<()> {
 
     let mut have_alllogs = true;
     // if number of files
-    if state.num_nodes > cli.filenames.len().try_into().unwrap() {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", state.num_nodes, cli.filenames.len());
+    let num_nodes: usize = state.num_nodes.try_into().unwrap();
+    if num_nodes > cli.filenames.len() {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", num_nodes, cli.filenames.len());
         have_alllogs = false;
     }
 
     // check if subnodes is enabled and filter input is true
-    if state.visible_nodes.len() < state.num_nodes.try_into().unwrap() && filter_input {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", state.num_nodes, state.visible_nodes.len());
+    if state.visible_nodes.len() < num_nodes && filter_input {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", num_nodes, state.visible_nodes.len());
         have_alllogs = false;
     }
 
