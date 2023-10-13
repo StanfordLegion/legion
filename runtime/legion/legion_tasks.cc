@@ -6420,11 +6420,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_post_execution(FutureInstance *instance,
+                                       ApEvent effects,
                                        void *metadata, size_t metasize,
                                        FutureFunctor *functor,
                                        Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
+      if (effects.exists())
+        record_completion_effect(effects);
       if (functor != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -7426,6 +7429,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::handle_post_execution(FutureInstance *instance,
+                                  ApEvent effects,
                                   void *metadata, size_t metasize,
                                   FutureFunctor *functor, 
                                   Processor future_proc, bool own_functor)
@@ -7433,6 +7437,8 @@ namespace Legion {
     {
       if ((instance != NULL) && (instance->size > 0))
         check_future_return_bounds(instance);
+      if (effects.exists())
+        record_completion_effect(effects);
       if (!is_remote())
       {
         ApEvent effects_done;
@@ -8055,14 +8061,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_post_execution(FutureInstance *instance,
-        void *metadata, size_t metasize, FutureFunctor *functor,
-        Processor future_proc, bool own_functor)
+        ApEvent effects, void *metadata, size_t metasize,
+        FutureFunctor *functor, Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(functor == NULL);
 #endif
-      shard_manager->handle_post_execution(instance, metadata, 
+      shard_manager->handle_post_execution(instance, effects, metadata, 
                                            metasize, true/*local*/);
       complete_execution();
     }
@@ -12290,9 +12296,6 @@ namespace Legion {
       rez.serialize(applied_condition);
       // Serialize the privilege state
       pack_resources_return(rez, context_index); 
-#ifdef DEBUG_LEGION
-      assert(point_completions.empty() || (redop > 0));
-#endif
       if (!point_completions.empty())
       {
         const ApEvent completion_effects =

@@ -47,6 +47,9 @@
 #include "realm/activemsg.h"
 #include "realm/repl_heap.h"
 
+#include "realm/shm.h"
+#include <unordered_map>
+
 namespace Realm {
 
   class ProcessorGroupImpl;
@@ -419,6 +422,8 @@ namespace Realm {
       int shutdown_result_code;
       bool shutdown_initiated;  // is it time to start shutting down
       atomic<bool> shutdown_in_progress; // are we actively shutting down?
+      std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
+      std::unordered_map<realm_id_t, SharedMemoryInfo> local_shared_memory_mappings;
 
       CoreMap *core_map;
       CoreReservationSet *core_reservations;
@@ -477,6 +482,13 @@ namespace Realm {
       friend class Runtime;
 
       Module *get_module_untyped(const char *name) const;
+
+      /// @brief Auxilary function for handling the sharing mechanism of all registered
+      /// memories across the machine
+      /// @note requires a coordination of Network::barriers, so may be fatal if this call
+      /// fails
+      /// @return True if successful, false otherwise
+      bool share_memories(void);
 
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
       NetworkSegment reg_ib_mem_segment;

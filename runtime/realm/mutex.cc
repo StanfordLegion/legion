@@ -17,67 +17,27 @@
 
 #include "realm/realm_config.h"
 
-// include gasnet header files before mutex.h to make sure we have
-//  definitions for gasnet_hsl_t and gasnett_cond_t
-#ifdef REALM_USE_GASNET1
-
-// so OpenMPI borrowed gasnet's platform-detection code and didn't change
-//  the define names - work around it by undef'ing anything set via mpi.h
-//  before we include gasnet.h
-#undef __PLATFORM_COMPILER_GNU_VERSION_STR
-
-#ifndef GASNET_PAR
-#define GASNET_PAR
-#endif
-#include <gasnet.h>
-
-#ifndef GASNETT_THREAD_SAFE
-#define GASNETT_THREAD_SAFE
-#endif
-#include <gasnet_tools.h>
-
-// eliminate GASNet warnings for unused static functions
-REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
-REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
-
-// can't use gasnet_hsl_t in debug mode
-// actually, don't use gasnet_hsl_t at all right now...
-//#ifndef GASNET_DEBUG
-#if 0
-#define USE_GASNET_HSL_T
-#endif
-#endif
-
-#ifdef USE_GASNET_HSL_T
-
-#define REALM_KERNEL_MUTEX_IMPL   gasnet_hsl_t mutex
-#define REALM_KERNEL_CONDVAR_IMPL gasnett_cond_t condvar
-// gasnet doesn't provide an rwlock?
-#define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
-
-#else
-
 #ifdef REALM_ON_WINDOWS
 #include <windows.h>
 #include <synchapi.h>
 #include <processthreadsapi.h>
 
-#define REALM_KERNEL_MUTEX_IMPL   CRITICAL_SECTION mutex
-#define REALM_KERNEL_CONDVAR_IMPL CONDITION_VARIABLE condvar
-struct RWLockImpl {
+typedef CRITICAL_SECTION NativeMutex;
+typedef CONDITION_VARIABLE NativeConditionVariable;
+
+typedef struct RWLockImpl {
   SRWLOCK rwlock;
   bool exclusive;
-};
-#define REALM_RWLOCK_IMPL  RWLockImpl rwlock
+} NativeRWLock;
 #else
 // use pthread mutex/condvar
 #include <pthread.h>
 #include <errno.h>
 
-#define REALM_KERNEL_MUTEX_IMPL   pthread_mutex_t mutex
-#define REALM_KERNEL_CONDVAR_IMPL pthread_cond_t  condvar
-#define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
-#endif
+typedef pthread_mutex_t NativeMutex;
+typedef pthread_cond_t NativeConditionVariable;
+typedef pthread_rwlock_t NativeRWLock;
+
 #endif
 
 #include "realm/mutex.h"
@@ -861,70 +821,54 @@ namespace Realm {
 
   KernelMutex::KernelMutex(void)
   {
-    assert(sizeof(mutex) <= sizeof(placeholder));
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_init(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
+    assert(sizeof(NativeMutex) <= sizeof(placeholder));
 #ifdef REALM_ON_WINDOWS
-    InitializeCriticalSection(&mutex);
+    InitializeCriticalSection(mutex);
 #else
-    pthread_mutex_init(&mutex, 0);
-#endif
+    pthread_mutex_init(mutex, 0);
 #endif
   }
 
   KernelMutex::~KernelMutex(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_destroy(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    DeleteCriticalSection(&mutex);
+    DeleteCriticalSection(mutex);
 #else
-    pthread_mutex_destroy(&mutex);
-#endif
+    pthread_mutex_destroy(mutex);
 #endif
   }
 
   void KernelMutex::lock(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_lock(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    EnterCriticalSection(&mutex);
+    EnterCriticalSection(mutex);
 #else
-    pthread_mutex_lock(&mutex);
-#endif
+    pthread_mutex_lock(mutex);
 #endif
   }
 
   void KernelMutex::unlock(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnet_hsl_unlock(&mutex);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    LeaveCriticalSection(&mutex);
+    LeaveCriticalSection(mutex);
 #else
-    pthread_mutex_unlock(&mutex);
-#endif
+    pthread_mutex_unlock(mutex);
 #endif
   }
 
   bool KernelMutex::trylock(void)
   {
-#ifdef USE_GASNET_HSL_T
-    int ret = gasnet_hsl_trylock(&mutex);
-    return (ret == 0);
-#else
+    NativeMutex *mutex = reinterpret_cast<NativeMutex*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = TryEnterCriticalSection(&mutex);
+    BOOL ret = TryEnterCriticalSection(mutex);
     return (ret != 0);
 #else
-    int ret = pthread_mutex_trylock(&mutex);
+    int ret = pthread_mutex_trylock(mutex);
     return (ret == 0);
-#endif
 #endif
   }
 
@@ -1093,68 +1037,55 @@ namespace Realm {
   KernelCondVar::KernelCondVar(KernelMutex &_mutex)
     : mutex(_mutex)
   {
-    assert(sizeof(condvar) <= sizeof(placeholder));
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_init(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
+    assert(sizeof(NativeConditionVariable) <= sizeof(placeholder));
 #ifdef REALM_ON_WINDOWS
-    InitializeConditionVariable(&condvar);
+    InitializeConditionVariable(condvar);
 #else
-    pthread_cond_init(&condvar, 0);
-#endif
+    pthread_cond_init(condvar, 0);
 #endif
   }
 
   KernelCondVar::~KernelCondVar(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_destroy(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
     // no destructor on windows?
+    (void)condvar;
 #else
-    pthread_cond_destroy(&condvar);
-#endif
+    pthread_cond_destroy(condvar);
 #endif
   }
 
   // these require that you hold the lock when you call
   void KernelCondVar::signal(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_signal(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    WakeConditionVariable(&condvar);
+    WakeConditionVariable(condvar);
 #else
-    pthread_cond_signal(&condvar);
-#endif
+    pthread_cond_signal(condvar);
 #endif
   }
 
   void KernelCondVar::broadcast(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_broadcast(&condvar);
-#else
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    WakeAllConditionVariable(&condvar);
+    WakeAllConditionVariable(condvar);
 #else
-    pthread_cond_broadcast(&condvar);
-#endif
+    pthread_cond_broadcast(condvar);
 #endif
   }
 
   void KernelCondVar::wait(void)
   {
-#ifdef USE_GASNET_HSL_T
-    gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
-#else
+    NativeMutex *native_mutex = reinterpret_cast<NativeMutex*>(&mutex.placeholder);
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    SleepConditionVariableCS(&condvar, &mutex.mutex, INFINITE);
+    SleepConditionVariableCS(condvar, native_mutex, INFINITE);
 #else
-    pthread_cond_wait(&condvar, &mutex.mutex);
-#endif
+    pthread_cond_wait(condvar, native_mutex);
 #endif
   }
 
@@ -1162,22 +1093,20 @@ namespace Realm {
   //  false if the timeout expires first
   bool KernelCondVar::timedwait(long long max_nsec)
   {
-#ifdef USE_GASNET_HSL_T
-    assert(0 && "gasnett_cond_t doesn't have timedwait!");
-#else
+    NativeMutex *native_mutex = reinterpret_cast<NativeMutex*>(&mutex.placeholder);
+    NativeConditionVariable *condvar = reinterpret_cast<NativeConditionVariable*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = SleepConditionVariableCS(&condvar, &mutex.mutex, max_nsec / 1000000LL);
+    BOOL ret = SleepConditionVariableCS(condvar, native_mutex, max_nsec / 1000000LL);
     return (ret != 0);
 #else
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += (ts.tv_nsec + max_nsec) / 1000000000LL;
     ts.tv_nsec = (ts.tv_nsec + max_nsec) % 1000000000LL;
-    int ret = pthread_cond_timedwait(&condvar, &mutex.mutex, &ts);
+    int ret = pthread_cond_timedwait(condvar, native_mutex, &ts);
     if(ret == ETIMEDOUT) return false;
     // TODO: check other error codes?
     return true;
-#endif
 #endif
   }
 
@@ -1191,81 +1120,89 @@ namespace Realm {
     : writer(*this)
     , reader(*this)
   {
-    assert(sizeof(rwlock) <= sizeof(placeholder));
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
+    assert(sizeof(NativeRWLock) <= sizeof(placeholder));
 #ifdef REALM_ON_WINDOWS
-    InitializeSRWLock(&rwlock.rwlock);
+    InitializeSRWLock(&rwlock->rwlock);
 #else
-    pthread_rwlock_init(&rwlock, 0);
+    pthread_rwlock_init(rwlock, 0);
 #endif
   }
 
   RWLock::~RWLock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
     // no destructor on windows?
+    (void)rwlock;
 #else
-    pthread_rwlock_destroy(&rwlock);
+    pthread_rwlock_destroy(rwlock);
 #endif
   }
 
   void RWLock::wrlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    AcquireSRWLockExclusive(&rwlock.rwlock);
-    rwlock.exclusive = true;
+    AcquireSRWLockExclusive(&rwlock->rwlock);
+    rwlock->exclusive = true;
 #else
-    pthread_rwlock_wrlock(&rwlock);
+    pthread_rwlock_wrlock(rwlock);
 #endif
   }
 
   void RWLock::rdlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    AcquireSRWLockShared(&rwlock.rwlock);
-    rwlock.exclusive = false;
+    AcquireSRWLockShared(&rwlock->rwlock);
+    rwlock->exclusive = false;
 #else
-    pthread_rwlock_rdlock(&rwlock);
+    pthread_rwlock_rdlock(rwlock);
 #endif
   }
 
   void RWLock::unlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    if(rwlock.exclusive)
-      ReleaseSRWLockExclusive(&rwlock.rwlock);
+    if(rwlock->exclusive)
+      ReleaseSRWLockExclusive(&rwlock->rwlock);
     else
-      ReleaseSRWLockShared(&rwlock.rwlock);
+      ReleaseSRWLockShared(&rwlock->rwlock);
 #else
-    pthread_rwlock_unlock(&rwlock);
+    pthread_rwlock_unlock(rwlock);
 #endif
   }
 
   bool RWLock::trywrlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = TryAcquireSRWLockExclusive(&rwlock.rwlock);
+    BOOL ret = TryAcquireSRWLockExclusive(&rwlock->rwlock);
     if(ret != 0) {
-      rwlock.exclusive = true;
+      rwlock->exclusive = true;
       return true;
     } else
       return false;
 #else
-    int ret = pthread_rwlock_trywrlock(&rwlock);
+    int ret = pthread_rwlock_trywrlock(rwlock);
     return (ret == 0);
 #endif
   }
 
   bool RWLock::tryrdlock(void)
   {
+    NativeRWLock *rwlock = reinterpret_cast<NativeRWLock*>(&placeholder);
 #ifdef REALM_ON_WINDOWS
-    BOOL ret = TryAcquireSRWLockShared(&rwlock.rwlock);
+    BOOL ret = TryAcquireSRWLockShared(&rwlock->rwlock);
     if(ret != 0) {
-      rwlock.exclusive = false;
+      rwlock->exclusive = false;
       return true;
     } else
       return false;
 #else
-    int ret = pthread_rwlock_trywrlock(&rwlock);
+    int ret = pthread_rwlock_trywrlock(rwlock);
     return (ret == 0);
 #endif
   }

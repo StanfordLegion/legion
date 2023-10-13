@@ -482,6 +482,7 @@ namespace Legion {
                     const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -794,6 +795,7 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -914,6 +916,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -1033,6 +1036,7 @@ namespace Legion {
               const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,

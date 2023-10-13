@@ -556,7 +556,7 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize, 
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance,
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
@@ -965,9 +965,9 @@ namespace Legion {
       };
       struct PostTaskArgs {
       public:
-        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w,
+        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w, ApEvent e,
             FutureInstance *i, void *m, size_t s, FutureFunctor *f, bool o)
-          : context(ctx), index(x), wait_on(w), instance(i), 
+          : context(ctx), index(x), effects(e), wait_on(w), instance(i), 
             metadata(m), metasize(s), functor(f), own_functor(o) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
@@ -975,6 +975,7 @@ namespace Legion {
       public:
         TaskContext *context;
         size_t index;
+        ApEvent effects;
         RtEvent wait_on;
         FutureInstance *instance;
         void *metadata;
@@ -1566,6 +1567,7 @@ namespace Legion {
                                            bool outermost = true);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                                  ApEvent effects,
                                   FutureInstance *instance,
                                   FutureFunctor *callback_functor,
                                   bool own_callback_functor,
@@ -1723,7 +1725,7 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance,
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
@@ -2270,7 +2272,6 @@ namespace Legion {
         REPLICATE_DESTROY_LOGICAL_REGION,
         REPLICATE_ADVISE_ANALYSIS_SUBTREE,
         REPLICATE_CREATE_FIELD_ALLOCATOR,
-        REPLICATE_DESTROY_FIELD_ALLOCATOR,
         REPLICATE_EXECUTE_TASK,
         REPLICATE_EXECUTE_INDEX_SPACE,
         REPLICATE_REDUCE_FUTURE_MAP,
@@ -2845,7 +2846,7 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance,
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
@@ -3851,7 +3852,7 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance,
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);

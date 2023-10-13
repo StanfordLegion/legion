@@ -167,6 +167,8 @@ namespace Realm {
     }
     info.handle = fd;
     return true;
+#else
+    return false;
 #endif
   }
 
@@ -177,6 +179,7 @@ namespace Realm {
     info.name.clear();
     info.owner = false;
     info.base = nullptr;
+    info.handle = handle;
 #if defined(REALM_ON_WINDOWS)
     info.base = MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size);
 #elif defined(REALM_ON_LINUX)
@@ -192,6 +195,43 @@ namespace Realm {
     , handle(Realm::INVALID_OS_HANDLE)
     , owner(false)
   {}
+  SharedMemoryInfo::SharedMemoryInfo(SharedMemoryInfo&& other)
+    : name(std::move(other.name))
+    , base(nullptr)
+    , size(0)
+    , handle(Realm::INVALID_OS_HANDLE)
+    , owner(false)
+  {
+    // Swap the currently empty newly constructed shared memory info with that of the
+    // other, leaving other empty and the newly constructed SharedMemoryInfo as the
+    // owner of the resource
+    std::swap(base, other.base);
+    std::swap(size, other.size);
+    std::swap(handle, other.handle);
+    std::swap(owner, other.owner);
+  }
+
+  SharedMemoryInfo& SharedMemoryInfo::operator=(SharedMemoryInfo&& other) {
+    if (this != &other) {
+      // Release whatever's currently in this shared memory info
+      unlink();
+
+      // Copy over the shared memory information
+      name = other.name;
+      base = other.base;
+      size = other.size;
+      handle = other.handle;
+      owner = other.owner;
+
+      // And clear out the other's shared memory infomation
+      other.name.clear();
+      other.base = nullptr;
+      other.size = 0;
+      other.handle = Realm::INVALID_OS_HANDLE;
+      other.owner = false;
+    }
+    return *this;
+  }
 
   SharedMemoryInfo::~SharedMemoryInfo(void)
   {
@@ -211,19 +251,17 @@ namespace Realm {
 
   void SharedMemoryInfo::unlink(void)
   {
-    if(owner) {
-      if(handle != Realm::INVALID_OS_HANDLE) {
-        close_handle(handle);
-        handle = Realm::INVALID_OS_HANDLE;
-      }
-      if(!name.empty()) {
+    if(handle != Realm::INVALID_OS_HANDLE) {
+      close_handle(handle);
+      handle = Realm::INVALID_OS_HANDLE;
+    }
+    if(owner && !name.empty()) {
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
-        log_shm.spew() << "Unlinking shm " << name;
-        std::string path = '/' + name;
-        shm_unlink(path.c_str());
+      log_shm.spew() << "Unlinking shm " << name;
+      std::string path = '/' + name;
+      shm_unlink(path.c_str());
 #endif
-        name.clear();
-      }
+      name.clear();
     }
   }
 

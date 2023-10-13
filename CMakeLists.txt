@@ -405,9 +405,10 @@ if("${Legion_NETWORKS}" MATCHES .*ucx.*)
 endif()
 
 if (MPI_FOUND)
-  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_C_LIB_NAMES})
+  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_mpi_LIBRARY})
   # Check if MPI has comm split type available
   check_function_exists(MPI_Comm_split_type REALM_MPI_HAS_COMM_SPLIT_TYPE)
+  list(POP_BACK CMAKE_REQUIRED_LIBRARIES)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -741,6 +742,17 @@ set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
 # hiding internal symbols is much more complicated in Windows
 if(NOT WIN32)
   option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
+endif()
+
+# Only enable shm on linux and if GASNET1 is not available.
+# OSX is not well tested yet, so disable by default for the time being
+# GASNET1 does not allow communication before network attach, which is needed
+# in order to coordinate a job identifier required to set up named system
+# resources
+if (UNIX AND NOT APPLE AND NOT REALM_USE_GASNET1)
+  option(REALM_USE_SHM "Enable shared memory usage" ON)  
+else()
+  option(REALM_USE_SHM "Enable shared memory usage" OFF)
 endif()
 
 if (UNIX)

@@ -26,8 +26,7 @@
 
 #if !defined(REALM_TIMERS_USE_RDTSC) && \
     (defined(__i386__) || defined(__x86_64__) || \
-    defined(__aarch64__) || defined(__arm__) || \
-    (defined(__GLIBC__) && (defined(__PPC__) || defined(__PPC64__))))
+    defined(__aarch64__) || defined(__arm__))
 #define REALM_TIMERS_USE_RDTSC 1
 #endif
 
