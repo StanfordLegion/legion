@@ -3515,7 +3515,7 @@ namespace Legion {
       // If we're already releasing a guard then there is no point in sending it 
       if (releasing_guards)
       {
-        rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+        rez.serialize(RtUserEvent::NO_RT_USER_EVENT());
         return;
       }
 #ifdef DEBUG_LEGION
@@ -4341,7 +4341,7 @@ namespace Legion {
       if (!events.empty())
         return Runtime::merge_events(&info, events);
       else
-        return ApEvent::NO_AP_EVENT;
+        return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -4638,7 +4638,7 @@ namespace Legion {
                                                   src_pre, preconditions);
           if (preconditions.empty())
             // NO precondition so enter it with a no event
-            update_groups[ApEvent::NO_AP_EVENT].insert(it->first, 
+            update_groups[ApEvent::NO_AP_EVENT()].insert(it->first, 
                                                        it->first->src_mask);
           else if (preconditions.size() == 1)
           {
@@ -4647,7 +4647,7 @@ namespace Legion {
             update_groups[first->first].insert(it->first, first->second);
             const FieldMask remainder = it->first->src_mask - first->second;
             if (!!remainder)
-              update_groups[ApEvent::NO_AP_EVENT].insert(it->first, remainder);
+              update_groups[ApEvent::NO_AP_EVENT()].insert(it->first, remainder);
           }
           else
           {
@@ -4799,7 +4799,7 @@ namespace Legion {
                           src_mask, trace_info, has_dst_preconditions);
             }
             else
-              issue_fills(uit->first, fills, ApEvent::NO_AP_EVENT, 
+              issue_fills(uit->first, fills, ApEvent::NO_AP_EVENT(), 
                           src_mask, trace_info, has_dst_preconditions);
           }
           if (!copies.empty())
@@ -4875,14 +4875,14 @@ namespace Legion {
                            src_mask, trace_info, has_dst_preconditions);
             }
             else
-              issue_copies(uit->first, copies, ApEvent::NO_AP_EVENT, 
+              issue_copies(uit->first, copies, ApEvent::NO_AP_EVENT(), 
                            src_mask, trace_info, has_dst_preconditions);
 
           }
         }
       }
 #endif
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -5277,7 +5277,7 @@ namespace Legion {
         // a deferral of an the traversal since we haven't even
         // started the traversal yet
         defer_traversal(precondition, set, mask, deferral_events,applied_events,
-                   cached_set, RtUserEvent::NO_RT_USER_EVENT, already_deferred);
+                   cached_set, RtUserEvent::NO_RT_USER_EVENT(), already_deferred);
       }
       else
       {
@@ -5337,7 +5337,7 @@ namespace Legion {
     {
       // only called by derived classes
       assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -5348,7 +5348,7 @@ namespace Legion {
     {
       // only called by derived classes
       assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -5359,7 +5359,7 @@ namespace Legion {
     {
       // only called by derived classes
       assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -5694,7 +5694,7 @@ namespace Legion {
       std::set<RtEvent> deferral_events, applied_events;
       dargs->analysis->traverse(dargs->set, *(dargs->mask), 
           deferral_events, applied_events, dargs->cached_set, 
-          RtEvent::NO_RT_EVENT, dargs->already_deferred);
+          RtEvent::NO_RT_EVENT(), dargs->already_deferred);
       if (!deferral_events.empty())
         Runtime::trigger_event(dargs->done_event,
             Runtime::merge_events(deferral_events));
@@ -5730,7 +5730,7 @@ namespace Legion {
       std::set<RtEvent> applied_events;
       // Get this before doing anything
       const bool on_heap = dargs->analysis->on_heap;
-      const RtEvent done = dargs->analysis->perform_remote(RtEvent::NO_RT_EVENT,
+      const RtEvent done = dargs->analysis->perform_remote(RtEvent::NO_RT_EVENT(),
                                       applied_events, true/*already deferred*/);
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
@@ -5762,7 +5762,7 @@ namespace Legion {
       std::set<RtEvent> applied_events;
       // Get this before doing anything
       const bool on_heap = dargs->analysis->on_heap;
-      const RtEvent done =dargs->analysis->perform_updates(RtEvent::NO_RT_EVENT,
+      const RtEvent done =dargs->analysis->perform_updates(RtEvent::NO_RT_EVENT(),
                                       applied_events, true/*already deferred*/); 
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
@@ -5795,7 +5795,7 @@ namespace Legion {
       std::set<RtEvent> applied_events;
       const bool on_heap = dargs->analysis->on_heap;
       const ApEvent effects = dargs->analysis->perform_output(
-          RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
+          RtEvent::NO_RT_EVENT(), applied_events, true/*already deferred*/);
       // Get this before doing anything
       Runtime::trigger_event(dargs->trace_info, dargs->effects_event, effects);
       if (!applied_events.empty())
@@ -5886,7 +5886,7 @@ namespace Legion {
       }
       // Easy out if we don't have remote sets
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       std::set<RtEvent> ready_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
                      FieldMaskSet<EquivalenceSet> >::const_iterator 
@@ -5969,7 +5969,7 @@ namespace Legion {
           target_analysis->process_local_instances(*remote_instances,
                                                    restricted);
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -6024,7 +6024,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
       {
         const RtEvent remote_ready = 
@@ -6131,7 +6131,7 @@ namespace Legion {
       }
       // Easy out if we don't have remote sets
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       std::set<RtEvent> ready_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
                      FieldMaskSet<EquivalenceSet> >::const_iterator 
@@ -6220,7 +6220,7 @@ namespace Legion {
           target_analysis->process_local_instances(*remote_instances, 
                                                    restricted);
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -6290,7 +6290,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
       {
         const RtEvent remote_ready = 
@@ -6430,7 +6430,7 @@ namespace Legion {
       }
       // Easy out if we don't have any remote sets
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
 #ifdef DEBUG_LEGION
       assert(!target_instances.empty());
       assert(target_instances.size() == target_views.size());
@@ -6550,7 +6550,7 @@ namespace Legion {
       if (!guard_events.empty())
         return Runtime::merge_events(guard_events);
       else
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -6683,7 +6683,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       std::set<RtEvent> update_events;
       // If we have remote messages to send do that now
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -6800,7 +6800,7 @@ namespace Legion {
       } 
       // Easy out if there is nothing to do
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       std::set<RtEvent> remote_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
                      FieldMaskSet<EquivalenceSet> >::const_iterator 
@@ -6882,7 +6882,7 @@ namespace Legion {
           target_analysis->process_local_instances(*remote_instances, 
                                                    restricted);
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -6936,7 +6936,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
       {
         const RtEvent remote_ready = 
@@ -7044,7 +7044,7 @@ namespace Legion {
       }
       // Easy out if there is nothing to do
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       std::set<RtEvent> remote_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
                      FieldMaskSet<EquivalenceSet> >::const_iterator 
@@ -7146,7 +7146,7 @@ namespace Legion {
         if (!guard_events.empty())
           return Runtime::merge_events(guard_events);
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7203,7 +7203,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
       {
         const RtEvent remote_ready = 
@@ -7377,7 +7377,7 @@ namespace Legion {
         return args.done_event;
       }
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
 #ifdef DEBUG_LEGION
       assert(target_instances.size() == target_views.size());
       assert(src_indexes.size() == dst_indexes.size());
@@ -7440,7 +7440,7 @@ namespace Legion {
       }
       // Filter all the remote expressions from the local ones here
       filter_remote_expressions(local_exprs);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7560,7 +7560,7 @@ namespace Legion {
           return across_aggregator->guard_postcondition;
 #endif
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7590,7 +7590,7 @@ namespace Legion {
       if (!copy_events.empty())
         return Runtime::merge_events(&trace_info, copy_events);
       else
-        return ApEvent::NO_AP_EVENT;
+        return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7704,7 +7704,7 @@ namespace Legion {
                                  deferral_events, applied_events);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       // Start with the source mask here in case we need to filter which
       // is all done on the source fields
       analysis->local_exprs.insert(dst_expr, src_mask);
@@ -7877,7 +7877,7 @@ namespace Legion {
       }
       // If there are no sets we're done
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       WrapperReferenceMutator mutator(applied_events);
       for (LegionMap<std::pair<AddressSpaceID,bool>,
                      FieldMaskSet<EquivalenceSet> >::const_iterator 
@@ -7890,7 +7890,7 @@ namespace Legion {
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
           Runtime::create_ap_user_event(&trace_info) : 
-          ApUserEvent::NO_AP_USER_EVENT;
+          ApUserEvent::NO_AP_USER_EVENT();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -7930,7 +7930,7 @@ namespace Legion {
         if (track_effects)
           effects_events.insert(effects);
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7963,7 +7963,7 @@ namespace Legion {
           return output_aggregator->guard_postcondition;
 #endif
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7993,7 +7993,7 @@ namespace Legion {
       if (!effects_events.empty())
         return Runtime::merge_events(&trace_info, effects_events);
       else
-        return ApEvent::NO_AP_EVENT;
+        return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -8072,7 +8072,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
@@ -8180,7 +8180,7 @@ namespace Legion {
       if (!stale_sets.empty())
         update_stale_equivalence_sets(applied_events);
       if (remote_sets.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       WrapperReferenceMutator mutator(applied_events);
       for (LegionMap<std::pair<AddressSpaceID,bool>,
                      FieldMaskSet<EquivalenceSet> >::const_iterator 
@@ -8226,7 +8226,7 @@ namespace Legion {
         runtime->send_equivalence_set_remote_filters(target, rez);
         applied_events.insert(applied);
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -8300,7 +8300,7 @@ namespace Legion {
         analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
                            applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())     
         analysis->perform_remote(traversal_done, applied_events);
@@ -8514,7 +8514,7 @@ namespace Legion {
       assert(waiting_event.exists());
 #endif
       Runtime::trigger_event(waiting_event);
-      waiting_event = RtUserEvent::NO_RT_USER_EVENT;
+      waiting_event = RtUserEvent::NO_RT_USER_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -10029,7 +10029,7 @@ namespace Legion {
       if (late_references != NULL)
       {
         // Launch a task to remove the references once the migration is done
-        RemoteRefTaskArgs args(this->did, RtUserEvent::NO_RT_USER_EVENT,
+        RemoteRefTaskArgs args(this->did, RtUserEvent::NO_RT_USER_EVENT(),
                                false/*add*/, late_references);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY, 
                                          done_migration); 
@@ -10277,7 +10277,7 @@ namespace Legion {
         // We can trigger this transition event now that we have a valid
         // copy of the subsets (we are the logical owner)
         Runtime::trigger_event(transition_event);
-        transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        transition_event = RtUserEvent::NO_RT_USER_EVENT();
       }
       eq_state = MAPPING_STATE;
       LocalReferenceMutator mutator;
@@ -10784,7 +10784,7 @@ namespace Legion {
           // See if we have an input aggregator that we can use now
           // for any fills that need to be done to initialize instances
           std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
-            analysis.input_aggregators.find(RtEvent::NO_RT_EVENT);
+            analysis.input_aggregators.find(RtEvent::NO_RT_EVENT());
           if (finder != analysis.input_aggregators.end())
             fill_aggregator = finder->second;
           FieldMask guard_fill_mask;
@@ -10859,8 +10859,8 @@ namespace Legion {
               {
                 fill_aggregator = new CopyFillAggregator(runtime->forest,
                     analysis.op, analysis.index, analysis.index,
-                    RtEvent::NO_RT_EVENT, false/*track events*/);
-                analysis.input_aggregators[RtEvent::NO_RT_EVENT] = 
+                    RtEvent::NO_RT_EVENT(), false/*track events*/);
+                analysis.input_aggregators[RtEvent::NO_RT_EVENT()] = 
                   fill_aggregator;
               }
               // Record the fill operation on the aggregator
@@ -10911,7 +10911,7 @@ namespace Legion {
             const FieldMask reduce_mask = user_mask & restricted_fields;
             if (!!reduce_mask)
               apply_reductions(reduce_mask, analysis.output_aggregator,
-                  RtEvent::NO_RT_EVENT, analysis.op, 
+                  RtEvent::NO_RT_EVENT(), analysis.op, 
                   analysis.index, true/*track events*/); 
             // No need to record that we applied the reductions, we'll
             // discover that when we collapse the single/multi-reduce state
@@ -11041,14 +11041,14 @@ namespace Legion {
           CopyFillAggregator *input_aggregator = NULL;
           // See if we have an input aggregator that we can use now
           std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
-            analysis.input_aggregators.find(RtEvent::NO_RT_EVENT);
+            analysis.input_aggregators.find(RtEvent::NO_RT_EVENT());
           if (finder != analysis.input_aggregators.end())
           {
             input_aggregator = finder->second;
             if (input_aggregator != NULL)
               input_aggregator->clear_update_fields();
           }
-          update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, 
+          update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT(), 
                               analysis.op, analysis.index,
                               analysis.usage, remainder_mask, 
                               analysis.target_instances, 
@@ -11059,7 +11059,7 @@ namespace Legion {
               ((finder == analysis.input_aggregators.end()) ||
                input_aggregator->has_update_fields()))
           {
-            analysis.input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+            analysis.input_aggregators[RtEvent::NO_RT_EVENT()] = input_aggregator;
 #ifdef DEBUG_LEGION
             assert(input_aggregator->get_update_fields() * refining_fields);
 #endif
@@ -11082,14 +11082,14 @@ namespace Legion {
         CopyFillAggregator *input_aggregator = NULL;
         // See if we have an input aggregator that we can use now
         std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
-          analysis.input_aggregators.find(RtEvent::NO_RT_EVENT);
+          analysis.input_aggregators.find(RtEvent::NO_RT_EVENT());
         if (finder != analysis.input_aggregators.end())
         {
           input_aggregator = finder->second;
           if (input_aggregator != NULL)
             input_aggregator->clear_update_fields();
         }
-        update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, 
+        update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT(), 
                             analysis.op, analysis.index, analysis.usage,
                             user_mask, analysis.target_instances, 
                             analysis.target_views, applied_events,
@@ -11109,7 +11109,7 @@ namespace Legion {
             ((finder == analysis.input_aggregators.end()) ||
              input_aggregator->has_update_fields()))
         {
-          analysis.input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+          analysis.input_aggregators[RtEvent::NO_RT_EVENT()] = input_aggregator;
 #ifdef DEBUG_LEGION
           assert(input_aggregator->get_update_fields() * refining_fields);
 #endif
@@ -11611,7 +11611,7 @@ namespace Legion {
         analysis.release_aggregator->clear_update_fields();
       // Issue the updates
       issue_update_copies_and_fills(analysis.release_aggregator, 
-                                    RtEvent::NO_RT_EVENT,
+                                    RtEvent::NO_RT_EVENT(),
                                     analysis.op, analysis.index, 
                                     false/*track*/, release_mask,
                                     local_instances, local_views, set_expr);
@@ -11624,7 +11624,7 @@ namespace Legion {
       const FieldMask reduce_mask = release_mask & reduction_fields;
       if (!!reduce_mask)
         apply_reductions(reduce_mask, analysis.release_aggregator, 
-                         RtEvent::NO_RT_EVENT, analysis.op, 
+                         RtEvent::NO_RT_EVENT(), analysis.op, 
                          analysis.index, false/*track*/);
       // Add the fields back to the restricted ones
       restricted_fields |= release_mask;
@@ -11858,7 +11858,7 @@ namespace Legion {
       {
         // Fields align and we're not doing a reduction so we can just 
         // do a normal update copy analysis to figure out what to do
-        issue_update_copies_and_fills(across_aggregator, RtEvent::NO_RT_EVENT,
+        issue_update_copies_and_fills(across_aggregator, RtEvent::NO_RT_EVENT(),
                                       analysis.op, analysis.src_index, 
                                       true/*track effects*/, src_mask, 
                                       analysis.target_instances,
@@ -12574,7 +12574,7 @@ namespace Legion {
         {
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                      RtEvent::NO_RT_EVENT, true/*track*/);
+                                      RtEvent::NO_RT_EVENT(), true/*track*/);
           aggregator->record_updates(dst_view, srcs, restricted_mask, set_expr);
         }
       }
@@ -12597,7 +12597,7 @@ namespace Legion {
           InstanceView *dst_view = it->first->as_instance_view();
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                      RtEvent::NO_RT_EVENT, true/*track*/);
+                                      RtEvent::NO_RT_EVENT(), true/*track*/);
           aggregator->record_updates(dst_view, srcs, overlap, set_expr);
         }
       }
@@ -12626,7 +12626,7 @@ namespace Legion {
           {
             if (aggregator == NULL)
               aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                        RtEvent::NO_RT_EVENT, true/*track*/);
+                                        RtEvent::NO_RT_EVENT(), true/*track*/);
             aggregator->record_updates(dst_view, srcs, dst_overlap, set_expr);
           }
         }
@@ -12655,7 +12655,7 @@ namespace Legion {
         InstanceView *dst_view = it->first->as_instance_view();
         if (aggregator == NULL)
           aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                    RtEvent::NO_RT_EVENT, true/*track*/);
+                                    RtEvent::NO_RT_EVENT(), true/*track*/);
         aggregator->record_updates(dst_view, srcs, overlap, set_expr);
       }
     }
@@ -12771,7 +12771,7 @@ namespace Legion {
           if (transition_event.exists())
           {
             Runtime::trigger_event(transition_event);
-            transition_event = RtUserEvent::NO_RT_USER_EVENT;
+            transition_event = RtUserEvent::NO_RT_USER_EVENT();
           }
         }
 #ifdef DEBUG_LEGION
@@ -13014,7 +13014,7 @@ namespace Legion {
           // Go back to the mapping state and trigger our done event
           eq_state = MAPPING_STATE;
           to_trigger = waiting_event;
-          waiting_event = RtUserEvent::NO_RT_USER_EVENT;
+          waiting_event = RtUserEvent::NO_RT_USER_EVENT();
         }
         else // there are more refinements to do so we go around again
         {
@@ -13494,7 +13494,7 @@ namespace Legion {
         eq_state = VALID_STATE;
         // Trigger the transition state to wake up any waiters
         Runtime::trigger_event(transition_event);
-        transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        transition_event = RtUserEvent::NO_RT_USER_EVENT();
       }
     }
 
@@ -13847,7 +13847,7 @@ namespace Legion {
       derez.deserialize(source);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->process_subset_request(source, RtUserEvent::NO_RT_USER_EVENT);
+      set->process_subset_request(source, RtUserEvent::NO_RT_USER_EVENT());
     }
 
     //--------------------------------------------------------------------------
@@ -13923,7 +13923,7 @@ namespace Legion {
           // We need to defer this until things are ready
           DeferRayTraceArgs args(set, target, expr, 
                                  handle, origin, done_event,
-                                 RtUserEvent::NO_RT_USER_EVENT,
+                                 RtUserEvent::NO_RT_USER_EVENT(),
                                  ray_mask, &pending); 
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 
@@ -14127,7 +14127,7 @@ namespace Legion {
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
           if (!remaining_mask)
-            return RtEvent::NO_RT_EVENT;
+            return RtEvent::NO_RT_EVENT();
         }
       }
       // Retake the lock in exclusive mode and make sure we don't lose the race
@@ -14171,7 +14171,7 @@ namespace Legion {
           // If we got all our fields here and we're not waiting 
           // on any other computations then we're done
           if (!remaining_mask && wait_on.empty())
-            return RtEvent::NO_RT_EVENT;
+            return RtEvent::NO_RT_EVENT();
         }
         // If we still have remaining fields then we need to
         // do this computation ourselves
@@ -14372,7 +14372,7 @@ namespace Legion {
           it.clear();
         }
         if (!update_mask)
-          return RtEvent::NO_RT_EVENT;
+          return RtEvent::NO_RT_EVENT();
         compute_event = Runtime::create_rt_user_event();
         equivalence_sets_ready[compute_event] = update_mask; 
       }
@@ -14406,7 +14406,7 @@ namespace Legion {
       }
       // If we make it here we can do the finalize call now
       finalize_equivalence_sets(compute_event);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -14568,7 +14568,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(bool comp)
-      : ready_event(ApEvent::NO_AP_EVENT), manager(NULL), local(true)
+      : ready_event(ApEvent::NO_AP_EVENT()), manager(NULL), local(true)
     //--------------------------------------------------------------------------
     {
     }

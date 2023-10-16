@@ -447,7 +447,7 @@ namespace Legion {
       inline RtEvent get_collect_event(void) const 
         {
           if ((memo == NULL) || !recording)
-            return RtEvent::NO_RT_EVENT;
+            return RtEvent::NO_RT_EVENT();
           else
             return rec->get_collect_event();
         }
@@ -958,7 +958,7 @@ namespace Legion {
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
       InstanceRef(InstanceManager *manager, const FieldMask &valid_fields,
-                  ApEvent ready_event = ApEvent::NO_AP_EVENT);
+                  ApEvent ready_event = ApEvent::NO_AP_EVENT());
       ~InstanceRef(void);
     public:
       InstanceRef& operator=(const InstanceRef &rhs);
@@ -1272,11 +1272,11 @@ namespace Legion {
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned idx, RtEvent guard_event, bool track_events,
-                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT());
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned src_idx, unsigned dst_idx, 
                          RtEvent guard_event, bool track_events,
-                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT());
       CopyFillAggregator(const CopyFillAggregator &rhs);
       virtual ~CopyFillAggregator(void);
     public:
@@ -1481,12 +1481,12 @@ namespace Legion {
       void traverse(EquivalenceSet *set, const FieldMask &mask, 
                     std::set<RtEvent> &deferral_events,
                     std::set<RtEvent> &applied_events, const bool cached_set,
-                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                    RtEvent precondition = RtEvent::NO_RT_EVENT(),
                     const bool already_deferred = false);
       void defer_traversal(RtEvent precondition, EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &deferral_events,
               std::set<RtEvent> &applied_events, const bool cached_set,
-              RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT,
+              RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT(),
               const bool already_deferred = true);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
@@ -1905,8 +1905,8 @@ namespace Legion {
                         const VersionInfo &info, LogicalView *view,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                        const RtEvent guard_event = RtEvent::NO_RT_EVENT(),
+                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT(),
                         const bool track_effects = false,
                         const bool add_restriction = false);
       // Also local but with a full set of views
@@ -1916,8 +1916,8 @@ namespace Legion {
                         const std::set<LogicalView*> &views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                        const RtEvent guard_event = RtEvent::NO_RT_EVENT(),
+                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT(),
                         const bool track_effects = false,
                         const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
@@ -2289,7 +2289,7 @@ namespace Legion {
                                       AddressSpaceID source,
                                       RtUserEvent ready,
                                       RtUserEvent deferral_event = 
-                                        RtUserEvent::NO_RT_USER_EVENT); 
+                                        RtUserEvent::NO_RT_USER_EVENT()); 
       void record_subset(EquivalenceSet *set, const FieldMask &mask);
     public:
       // Analysis methods

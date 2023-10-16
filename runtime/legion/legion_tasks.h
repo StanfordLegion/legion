@@ -367,7 +367,7 @@ namespace Legion {
                                     std::vector<ApEvent> *effects = NULL);
       void defer_launch_task(RtEvent precondition);
       void enqueue_ready_task(bool use_target_processor,
-                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
+                              RtEvent wait_on = RtEvent::NO_RT_EVENT());
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -605,7 +605,7 @@ namespace Legion {
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
                                  Processor future_proc) = 0;
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT()) = 0;
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
@@ -847,7 +847,7 @@ namespace Legion {
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
                                  Processor future_proc);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT());
       virtual void handle_misspeculation(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -949,7 +949,7 @@ namespace Legion {
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
                                  Processor future_proc);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT());
       virtual void handle_misspeculation(void);
     public:
       // ProjectionPoint methods
@@ -1242,7 +1242,7 @@ namespace Legion {
           std::map<PhysicalManager*,unsigned> &child_acquired);
       void record_point_complete(RtEvent child_complete);
       void record_point_committed(RtEvent commit_precondition =
-                                  RtEvent::NO_RT_EVENT);
+                                  RtEvent::NO_RT_EVENT());
     protected:
       void trigger_slice_mapped(void);
       void trigger_slice_complete(void);

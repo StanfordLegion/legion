@@ -143,7 +143,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!runtime->resilient_mode)
-        commit_event = RtUserEvent::NO_RT_USER_EVENT;
+        commit_event = RtUserEvent::NO_RT_USER_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -188,7 +188,7 @@ namespace Legion {
       completion_event = Runtime::create_ap_user_event(NULL);
       if (runtime->resilient_mode)
         commit_event = Runtime::create_rt_user_event(); 
-      execution_fence_event = ApEvent::NO_AP_EVENT;
+      execution_fence_event = ApEvent::NO_AP_EVENT();
       trace = NULL;
       tracing = false;
       trace_local_id = (unsigned)-1;
@@ -427,7 +427,7 @@ namespace Legion {
         else
           it++;
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -521,7 +521,7 @@ namespace Legion {
         assert(generation <= gen);
 #endif
         if (generation < gen)
-          return RtEvent::NO_RT_EVENT;
+          return RtEvent::NO_RT_EVENT();
         // Check to see if we've already started the analysis
         if (prepipelined)
         {
@@ -529,7 +529,7 @@ namespace Legion {
           if (from_logical_analysis)
             return prepipelined_event;
           else
-            return RtEvent::NO_RT_EVENT;
+            return RtEvent::NO_RT_EVENT();
         }
         else
         {
@@ -555,9 +555,9 @@ namespace Legion {
         assert(prepipelined_event.exists());
 #endif
         Runtime::trigger_event(prepipelined_event);
-        prepipelined_event = RtUserEvent::NO_RT_USER_EVENT;
+        prepipelined_event = RtUserEvent::NO_RT_USER_EVENT();
       }
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -782,7 +782,7 @@ namespace Legion {
       if (!grants.empty())
         assert(false); // Figure out how to deduplicate grant acquires
       if (wait_barriers.empty())
-        return ApEvent::NO_AP_EVENT;
+        return ApEvent::NO_AP_EVENT();
       if (wait_barriers.size() == 1)
         return Runtime::get_previous_phase(wait_barriers[0].phase_barrier);
       std::set<ApEvent> wait_events;
@@ -1579,7 +1579,7 @@ namespace Legion {
             req.privilege_fields.begin(); it != 
             req.privilege_fields.end(); it++)
         LegionSpy::log_mapping_decision(unique_op_id, index, *it,
-                                        ApEvent::NO_AP_EVENT/*inst event*/);
+                                        ApEvent::NO_AP_EVENT()/*inst event*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1814,7 +1814,7 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -2185,10 +2185,10 @@ namespace Legion {
     {
       activate_operation();
       predicate_resolved = false;
-      collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
+      collect_predicate = RtUserEvent::NO_RT_USER_EVENT();
       predicate_references = 0;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
+      true_guard = PredEvent::NO_PRED_EVENT();
+      false_guard = PredEvent::NO_PRED_EVENT();
       can_result_future_complete = false;
     }
 
@@ -2485,7 +2485,7 @@ namespace Legion {
       predicate = NULL;
       speculate_mapping_only = false;
       received_trigger_resolution = false;
-      predicate_waiter = RtUserEvent::NO_RT_USER_EVENT;
+      predicate_waiter = RtUserEvent::NO_RT_USER_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -2574,7 +2574,7 @@ namespace Legion {
     bool SpeculativeOp::get_predicate_value(Processor proc)
     //--------------------------------------------------------------------------
     {
-      RtEvent wait_event = RtEvent::NO_RT_EVENT;
+      RtEvent wait_event = RtEvent::NO_RT_EVENT();
       // this is actually set on all paths, but the compiler can't see it
       bool result = false; 
       {
@@ -3034,7 +3034,7 @@ namespace Legion {
       mapper = NULL;
       layout_constraint_id = 0;
       ready_event = Runtime::create_ap_user_event(NULL);
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
@@ -3231,7 +3231,7 @@ namespace Legion {
         dump_physical_state(&requirement, 0);
       } 
 #endif
-      ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
+      ApEvent map_complete_event = ApEvent::NO_AP_EVENT();
       if (mapped_instances.size() > 1)
       {
         std::set<ApEvent> mapped_events;
@@ -4836,10 +4836,10 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
-      predication_guard = PredEvent::NO_PRED_EVENT;
+      predication_guard = PredEvent::NO_PRED_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -5374,7 +5374,7 @@ namespace Legion {
         const bool dst_indirect = (idx < dst_indirect_requirements.size());
         const ApUserEvent local_precondition = (src_indirect || dst_indirect) ?
           Runtime::create_ap_user_event(&trace_info) : 
-          ApUserEvent::NO_AP_USER_EVENT;
+          ApUserEvent::NO_AP_USER_EVENT();
         ApEvent collective_precondition, collective_postcondition;
         // Track applied conditions special for copy-across
         std::set<RtEvent> perform_ready_events;
@@ -5870,7 +5870,7 @@ namespace Legion {
       collective_pre = local_pre;
       collective_post = local_post;
       records.emplace_back(IndirectRecord(runtime->forest, req, insts, key));
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -7213,7 +7213,7 @@ namespace Legion {
         (*it)->launch();
       }
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                       completion_event);
 #endif
       // Record that we are mapped when all our points are mapped
@@ -8414,7 +8414,7 @@ namespace Legion {
       // Still need this to record that this operation is done for LegionSpy
       if (fence_kind != EXECUTION_FENCE)
         LegionSpy::log_operation_events(unique_op_id, 
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+            ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT());
       complete_operation();
     }
 #endif
@@ -8511,7 +8511,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      previous_completion = ApEvent::NO_AP_EVENT;
+      previous_completion = ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -8825,8 +8825,8 @@ namespace Legion {
       }
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       if (!complete_preconditions.empty())
         complete_operation(Runtime::merge_events(complete_preconditions));
@@ -9318,8 +9318,8 @@ namespace Legion {
       }
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       if (!preconditions.empty())
         complete_operation(Runtime::merge_events(preconditions));
@@ -9780,7 +9780,7 @@ namespace Legion {
     {
       // Still need this to record that this operation is done for LegionSpy
       LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+          ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT());
       complete_operation();
     }
 #endif
@@ -9848,7 +9848,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
@@ -9933,7 +9933,7 @@ namespace Legion {
         runtime->forest->physical_perform_updates_and_registration(
                                               requirement, version_info,
                                               this, 0/*idx*/,
-                                              ApEvent::NO_AP_EVENT,
+                                              ApEvent::NO_AP_EVENT(),
                                               close_event,
                                               target_instances, 
                                               trace_info,
@@ -10302,7 +10302,7 @@ namespace Legion {
     {
       // Still need this to record that this operation is done for LegionSpy
       LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+          ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT());
       complete_operation();
     }
 #endif
@@ -10486,7 +10486,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
     }
@@ -11394,7 +11394,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
     }
@@ -12305,7 +12305,7 @@ namespace Legion {
     {
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id,
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+          ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT());
 #endif
       complete_operation();
     }
@@ -12433,8 +12433,8 @@ namespace Legion {
       bool value = future.impl->get_boolean_value(valid);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       if (valid)
         set_resolved_value(get_generation(), value);
@@ -12562,8 +12562,8 @@ namespace Legion {
       complete_mapping();
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       if (pred_op != NULL)
       {
@@ -12739,8 +12739,8 @@ namespace Legion {
         (*it)->remove_predicate_reference();
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       if (need_resolve)
         set_resolved_value(local_gen, !false_short);
@@ -12920,8 +12920,8 @@ namespace Legion {
         (*it)->remove_predicate_reference();
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       if (need_resolve)
         set_resolved_value(local_gen, true_short);
@@ -13361,7 +13361,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         // Still need this for Legion Spy
         LegionSpy::log_operation_events(unique_op_id,
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+            ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT());
 #endif
         complete_operation(completion_done);
       }
@@ -13624,7 +13624,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         // Still need this for Legion Spy
         LegionSpy::log_operation_events(unique_op_id, 
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+            ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT());
 #endif
         complete_operation(completion_done);
       }
@@ -14337,7 +14337,7 @@ namespace Legion {
     {
       // Give these slightly higher priority since they are likely
       // needed by later operations
-      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+      enqueue_ready_operation(RtEvent::NO_RT_EVENT(), 
                               LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
@@ -14362,8 +14362,8 @@ namespace Legion {
       const ApEvent ready_event = thunk->perform(this, runtime->forest);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       complete_operation(Runtime::protect_event(ready_event));
     }
@@ -15139,7 +15139,7 @@ namespace Legion {
           (*it)->launch();
         }
 #ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                         completion_event);
 #endif
         // We are mapped when all our points are mapped
@@ -15159,7 +15159,7 @@ namespace Legion {
           enqueue_ready_operation(Runtime::merge_events(preconditions),
                                   LG_THROUGHPUT_DEFERRED_PRIORITY);
         else
-          enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+          enqueue_ready_operation(RtEvent::NO_RT_EVENT(), 
                                   LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
     }
@@ -15183,7 +15183,7 @@ namespace Legion {
       runtime->forest->physical_perform_updates_and_registration(
                                               requirement, version_info,
                                               this, 0/*idx*/,
-                                              ApEvent::NO_AP_EVENT,
+                                              ApEvent::NO_AP_EVENT(),
                                               completion_event,
                                               mapped_instances,
                                               trace_info,
@@ -15723,10 +15723,10 @@ namespace Legion {
       commit_request = false;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
-      intermediate_index_event = ApUserEvent::NO_AP_USER_EVENT;
+      intermediate_index_event = ApUserEvent::NO_AP_USER_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -16529,8 +16529,8 @@ namespace Legion {
       value = NULL;
       value_size = 0;
       fill_view = NULL;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
+      true_guard = PredEvent::NO_PRED_EVENT();
+      false_guard = PredEvent::NO_PRED_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -17409,7 +17409,7 @@ namespace Legion {
         (*it)->launch();
       }
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                       completion_event);
 #endif
       // Record that we are mapped when all our points are mapped
@@ -18116,7 +18116,7 @@ namespace Legion {
       }
       else
         region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-              mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
+              mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT(), 
               false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
               false/*virtual mapped*/, runtime)); 
       // Restore privileges back to write-discard
@@ -18141,8 +18141,8 @@ namespace Legion {
       activate_operation();
       file_name = NULL;
       footprint = 0;
-      attached_event = ApUserEvent::NO_AP_USER_EVENT;
-      termination_event = ApEvent::NO_AP_EVENT;
+      attached_event = ApUserEvent::NO_AP_USER_EVENT();
+      termination_event = ApEvent::NO_AP_EVENT();
       restricted = true;
     }
 
@@ -18305,7 +18305,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Nothing to do here for individual attach ops
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -18353,7 +18353,7 @@ namespace Legion {
         complete_mapping();
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                         completion_event);
 #endif
       if (!request_early_complete(attach_event))
@@ -19002,7 +19002,7 @@ namespace Legion {
         (*it)->trigger_ready();
       }
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                       completion_event);
 #endif
       // Record that we are mapped when all our points are mapped
@@ -19032,7 +19032,7 @@ namespace Legion {
       {
         // No co-regions in this case
         coregions.erase(finder);
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       }
 #ifdef DEBUG_LEGION
       assert(!attached_event.exists());
@@ -19063,7 +19063,7 @@ namespace Legion {
         attached_event = event_finder->second;
       }
       // Will only have non-trival events here with control replication
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -19519,7 +19519,7 @@ namespace Legion {
           assert(false); // should never get here
       }
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
+            mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT(), 
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
             false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
@@ -19537,7 +19537,7 @@ namespace Legion {
     {
       owner->find_coregions(this, requirement.region, 
                   external_instances, attached_event); 
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -19778,8 +19778,8 @@ namespace Legion {
           runtime->forest->physical_perform_updates_and_registration(
                                                   requirement, version_info,
                                                   this, 0/*idx*/, 
-                                                  ApEvent::NO_AP_EVENT, 
-                                                  ApEvent::NO_AP_EVENT,
+                                                  ApEvent::NO_AP_EVENT(), 
+                                                  ApEvent::NO_AP_EVENT(),
                                                   references, trace_info,
                                                   map_applied_conditions,
 #ifdef DEBUG_LEGION
@@ -20107,7 +20107,7 @@ namespace Legion {
         (*it)->trigger_ready();
       }
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                       completion_event);
 #endif
       // Record that we are mapped when all our points are mapped
@@ -20521,8 +20521,8 @@ namespace Legion {
       }
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       // Complete the future
       complete_execution();
@@ -20706,7 +20706,7 @@ namespace Legion {
         LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
                         tunable_index, output.value, output.size);
 #ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
                                         completion_event); 
 #endif
       }
@@ -20862,8 +20862,8 @@ namespace Legion {
       result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+                                      ApEvent::NO_AP_EVENT());
 #endif
       // Mark that we are done executing which will complete the future
       // as soon as this operation is complete

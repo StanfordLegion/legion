@@ -398,21 +398,21 @@ namespace Legion {
       // indicate mapping, execution, resolution, completion, and commit
       //
       // Add this to the list of ready operations
-      void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT,
+      void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT(),
                             LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY);
       // Indicate that we are done mapping this operation
-      void complete_mapping(RtEvent wait_on = RtEvent::NO_RT_EVENT); 
+      void complete_mapping(RtEvent wait_on = RtEvent::NO_RT_EVENT()); 
       // Indicate when this operation has finished executing
-      void complete_execution(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void complete_execution(RtEvent wait_on = RtEvent::NO_RT_EVENT());
       // Indicate when we have resolved the speculation for
       // this operation
-      void resolve_speculation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void resolve_speculation(RtEvent wait_on = RtEvent::NO_RT_EVENT());
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
-      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT());
       // Indicate that we are committing this operation
       void commit_operation(bool do_deactivate,
-                            RtEvent wait_on = RtEvent::NO_RT_EVENT);
+                            RtEvent wait_on = RtEvent::NO_RT_EVENT());
       // Indicate that this operation is hardened against failure
       void harden_operation(void);
       // Quash this task and do what is necessary to the
@@ -956,7 +956,7 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
       virtual PhysicalTemplate* get_template(void) const;
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const
-        { assert(false); return ApEvent::NO_AP_EVENT; }
+        { assert(false); return ApEvent::NO_AP_EVENT(); }
       virtual void set_effects_postcondition(ApEvent postcondition)
         { assert(false); }
       virtual void complete_replay(ApEvent complete_event)

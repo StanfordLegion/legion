@@ -607,7 +607,7 @@ namespace Legion {
       void perform_delete(RtEvent deferred_event, bool left); 
       void force_delete(bool left);
       void detach_external(RtUserEvent to_trigger, bool left, 
-                  RtEvent full_detach = RtEvent::NO_RT_EVENT);
+                  RtEvent full_detach = RtEvent::NO_RT_EVENT());
       bool finalize_message(void);
     protected:
       void collective_deletion(RtEvent deferred_event);
@@ -727,7 +727,7 @@ namespace Legion {
                         CollectiveManager *collective, DomainPoint *point,
                         LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL,
-                        RtEvent precondition = RtEvent::NO_RT_EVENT);
+                        RtEvent precondition = RtEvent::NO_RT_EVENT());
       CollectiveManager* create_collective_instance(RegionTreeForest *forest,
                         Memory::Kind mem_kind, IndexSpaceNode *point_space,
                         LayoutConstraintKind *unsat_kind, unsigned *unsat_index,

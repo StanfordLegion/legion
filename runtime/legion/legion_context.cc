@@ -2185,7 +2185,7 @@ namespace Legion {
 #ifdef DEBUG
       assert(inst.first == instance);
 #endif
-      manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
+      manager->free_legion_instance(RtEvent::NO_RT_EVENT(), inst.second);
     }
 #endif
 
@@ -2198,7 +2198,7 @@ namespace Legion {
       // Otherwise check to see if we have a value
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
         runtime->get_available_distributed_id(), 
-        runtime->address_space, ApEvent::NO_AP_EVENT);
+        runtime->address_space, ApEvent::NO_AP_EVENT());
       if (launcher.predicate_false_result.get_size() > 0)
         result->set_result(launcher.predicate_false_result.get_ptr(),
                            launcher.predicate_false_result.get_size(),
@@ -2215,7 +2215,7 @@ namespace Legion {
     {
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           runtime->get_available_distributed_id(),
-          runtime->address_space, RtEvent::NO_RT_EVENT);
+          runtime->address_space, RtEvent::NO_RT_EVENT());
       if (launcher.predicate_false_future.impl != NULL)
       {
         ApEvent ready_event = 
@@ -2283,7 +2283,7 @@ namespace Legion {
       // Otherwise check to see if we have a value
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), 
-        runtime->address_space, ApEvent::NO_AP_EVENT);
+        runtime->address_space, ApEvent::NO_AP_EVENT());
       if (launcher.predicate_false_result.get_size() > 0)
         result->set_result(launcher.predicate_false_result.get_ptr(),
                            launcher.predicate_false_result.get_size(),
@@ -3319,7 +3319,7 @@ namespace Legion {
       // Do not check the current execution fence as it may have come after us
       if (!previous_events.empty())
         return Runtime::merge_events(NULL, previous_events);
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -3370,7 +3370,7 @@ namespace Legion {
           root = finder->second;
       }
       else
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       if (root == NULL)
       {
         RegionNode *root_node = runtime->forest->get_tree(tree_id);
@@ -5783,8 +5783,8 @@ namespace Legion {
       if (!virtual_mapped)
         unmap_event = Runtime::create_ap_user_event(NULL);
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req,
-          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
-          mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
+          RtEvent::NO_RT_EVENT(), ApEvent::NO_AP_EVENT(),
+          mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT(), mapped, this,
           mid, tag, false/*leaf region*/, virtual_mapped, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
       if (!virtual_mapped)
@@ -5883,7 +5883,7 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT());
         result->set_result(reduction_op->identity,
                            reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -5918,7 +5918,7 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT());
         result->set_result(reduction_op->identity,
                            reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -5956,7 +5956,7 @@ namespace Legion {
           get_task_name(), get_unique_id())
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, did,
-                  runtime->address_space, RtEvent::NO_RT_EVENT);
+                  runtime->address_space, RtEvent::NO_RT_EVENT());
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -5968,7 +5968,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
-            ApEvent::NO_AP_EVENT);
+            ApEvent::NO_AP_EVENT());
         future->set_result(it->second.get_ptr(), it->second.get_size(), false);
         impl->set_future(it->first, future, &mutator);
       }
@@ -6013,7 +6013,7 @@ namespace Legion {
       creation_op->initialize_map(this, provenance, futures);
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
-          RtEvent::NO_RT_EVENT, runtime, did, runtime->address_space);
+          RtEvent::NO_RT_EVENT(), runtime, did, runtime->address_space);
       add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
@@ -6087,7 +6087,7 @@ namespace Legion {
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
-        return ApEvent::NO_AP_EVENT;
+        return ApEvent::NO_AP_EVENT();
       if (current_trace != NULL)
       {
         const RegionRequirement &req = region.impl->get_requirement();
@@ -6794,7 +6794,7 @@ namespace Legion {
           issue_task = true;
           outstanding_dependence = true;
           precondition = dependence_precondition;
-          dependence_precondition = RtEvent::NO_RT_EVENT;
+          dependence_precondition = RtEvent::NO_RT_EVENT();
           op = dependence_queue.front();
         }
       }
@@ -7035,14 +7035,14 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT());
         const bool value = true;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT());
         const bool value = false;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
@@ -7311,7 +7311,7 @@ namespace Legion {
           issue_task = true;
           outstanding_dependence = true;
           precondition = dependence_precondition;
-          dependence_precondition = RtEvent::NO_RT_EVENT;
+          dependence_precondition = RtEvent::NO_RT_EVENT();
         }
         dependence_queue.push_back(op);
         // If we have any unordered ops and we're not in the middle of
@@ -8134,7 +8134,7 @@ namespace Legion {
           owner_task->trigger_children_complete(
             Runtime::merge_events(NULL, child_completion_events));
         else
-          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT());
       }
     }
 
@@ -8662,12 +8662,12 @@ namespace Legion {
             // trace needs to see this dependence
             Memoizable *memo = op->get_memoizable();
             if ((memo == NULL) || !memo->is_recording())
-              current_execution_fence_event = ApEvent::NO_AP_EVENT;
+              current_execution_fence_event = ApEvent::NO_AP_EVENT();
           }
         }
         return current_execution_fence_event;
       }
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
 #endif
     }
 
@@ -8852,13 +8852,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (current_mapping_fence == NULL)
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       RtEvent result = current_mapping_fence->get_mapped_event();
       // Check the generation
       if (current_mapping_fence->get_generation() == mapping_fence_gen)
         return result;
       else
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -9315,7 +9315,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Runtime::phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
+      Runtime::phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT(),buffer,size);
     }
 
     //--------------------------------------------------------------------------
@@ -9796,7 +9796,7 @@ namespace Legion {
           pending_top_views.find(manager);
         if (pending_finder == pending_top_views.end())
           // mark that we are making it
-          pending_top_views[manager] = RtUserEvent::NO_RT_USER_EVENT;
+          pending_top_views[manager] = RtUserEvent::NO_RT_USER_EVENT();
         else
         {
           // See if we are the first one to follow
@@ -10348,7 +10348,7 @@ namespace Legion {
           owner_task->trigger_children_complete(
               Runtime::merge_events(NULL, child_completion_events));
         else
-          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT());
       }
       if (need_commit)
         owner_task->trigger_children_committed();
@@ -10842,7 +10842,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
       : InnerContext(rt, NULL, -1, false/*full inner*/, dummy_requirements, 
-                     dummy_indexes, dummy_mapped, ctx_id, ApEvent::NO_AP_EVENT)
+                     dummy_indexes, dummy_mapped, ctx_id, ApEvent::NO_AP_EVENT())
     //--------------------------------------------------------------------------
     {
     }
@@ -10850,7 +10850,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
       : InnerContext(NULL, NULL, -1, false, dummy_requirements, dummy_indexes, 
-                     dummy_mapped, 0, ApEvent::NO_AP_EVENT)
+                     dummy_mapped, 0, ApEvent::NO_AP_EVENT())
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10895,7 +10895,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -11039,7 +11039,7 @@ namespace Legion {
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
       : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
           local_parent_req_indexes, local_virtual_mapped, 
-          context_uid, ApEvent::NO_AP_EVENT, true/*remote*/),
+          context_uid, ApEvent::NO_AP_EVENT(), true/*remote*/),
         parent_ctx(NULL), provenance(NULL), top_level_context(false), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
@@ -11049,7 +11049,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
       : InnerContext(NULL, NULL, 0, false, rhs.regions,local_parent_req_indexes,
-          local_virtual_mapped, 0, ApEvent::NO_AP_EVENT, true), 
+          local_virtual_mapped, 0, ApEvent::NO_AP_EVENT(), true), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
@@ -12307,7 +12307,7 @@ namespace Legion {
         allocator->ready_event.wait();
       // Free the indexes first and immediately
       std::vector<FieldID> to_free(1,fid);
-      runtime->forest->free_field_indexes(space, to_free, RtEvent::NO_RT_EVENT);
+      runtime->forest->free_field_indexes(space, to_free, RtEvent::NO_RT_EVENT());
       // We can free this field immediately
       std::set<RtEvent> preconditions;
       runtime->forest->free_field(space, fid, preconditions);
@@ -12359,7 +12359,7 @@ namespace Legion {
         allocator->ready_event.wait();
       // Free the indexes first and immediately
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
-      runtime->forest->free_field_indexes(space,field_vec,RtEvent::NO_RT_EVENT);
+      runtime->forest->free_field_indexes(space,field_vec,RtEvent::NO_RT_EVENT());
       // We can free these fields immediately
       std::set<RtEvent> preconditions;
       runtime->forest->free_fields(space, field_vec, preconditions);
@@ -12511,8 +12511,8 @@ namespace Legion {
       assert(!unmap_event.exists());
 #endif
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
-          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
-          ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
+          RtEvent::NO_RT_EVENT(), ApEvent::NO_AP_EVENT(), 
+          ApUserEvent::NO_AP_USER_EVENT(), mapped, this, mid, tag, 
           true/*leaf region*/, virtual_mapped, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
       if (mapped)
@@ -12682,7 +12682,7 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,
         "Illegal remap operation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -12954,14 +12954,14 @@ namespace Legion {
     {
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT());
         const bool value = true;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT());
         const bool value = false;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
@@ -13290,7 +13290,7 @@ namespace Legion {
         }
       } 
       if (need_complete)
-        owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+        owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT());
       if (need_commit)
         owner_task->trigger_children_committed();
     }

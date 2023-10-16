@@ -427,22 +427,22 @@ namespace Legion {
       // Return events indicate when message is on the virtual channel
       RtEvent send_remote_valid_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,
-                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT(),
                                     unsigned count = 1);
       RtEvent send_remote_valid_decrement(AddressSpaceID target,
                                     ReferenceMutator *mutator = NULL,
-                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT(),
                                     unsigned count = 1);
       RtEvent send_remote_gc_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,
-                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT(),
                                     unsigned count = 1);
       RtEvent send_remote_gc_decrement(AddressSpaceID target,
                                     ReferenceMutator *mutator = NULL,
-                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT(),
                                     unsigned count = 1);
       void send_remote_resource_decrement(AddressSpaceID target,
-                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT(),
                                     unsigned count = 1);
 #ifdef USE_REMOTE_REFERENCES
     public:

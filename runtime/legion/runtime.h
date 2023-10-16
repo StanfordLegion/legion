@@ -1177,7 +1177,7 @@ namespace Legion {
       template<MessageKind M>
       inline void send_message(Serializer &rez, bool flush, 
                         bool response = false, bool shutdown = false,
-                        RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
+                        RtEvent flush_precondition = RtEvent::NO_RT_EVENT());
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
@@ -1354,7 +1354,7 @@ namespace Legion {
                                          bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                         const void *value, size_t size, bool is_mutable,
-                        RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+                        RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT());
       void send_semantic_request(AddressSpaceID target, SemanticTag tag, 
                              bool can_fail, bool wait_until, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID target, 
@@ -2789,12 +2789,12 @@ namespace Legion {
       template<typename T>
       inline RtEvent issue_runtime_meta_task(const LgTaskArgs<T> &args,
                                              LgPriority lg_priority,
-                                   RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT(),
                                    Processor proc = Processor::NO_PROC);
       template<typename T>
       inline RtEvent issue_application_processor_task(const LgTaskArgs<T> &args,
                                    LgPriority lg_priority, const Processor proc,
-                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT());
     public:
       DistributedID get_available_distributed_id(void); 
       AddressSpaceID determine_owner(DistributedID did) const;
@@ -3535,12 +3535,12 @@ namespace Legion {
     public:
       static inline ApUserEvent create_ap_user_event(const TraceInfo *info);
       static inline void trigger_event(const TraceInfo *info, 
-          ApUserEvent to_trigger, ApEvent precondition = ApEvent::NO_AP_EVENT);
+          ApUserEvent to_trigger, ApEvent precondition = ApEvent::NO_AP_EVENT());
       static inline void poison_event(ApUserEvent to_poison);
     public:
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
-                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT());
       static inline void poison_event(RtUserEvent to_poison);
     public:
       static inline PredEvent create_pred_event(void);
@@ -3553,7 +3553,7 @@ namespace Legion {
                                           const std::set<ApEvent> &events);
     public:
       static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
-                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
+                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT(),
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
       static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
@@ -3562,11 +3562,11 @@ namespace Legion {
                                             size_t result_size);
     public:
       static inline ApEvent acquire_ap_reservation(Reservation r,bool exclusive,
-                                   ApEvent precondition = ApEvent::NO_AP_EVENT);
+                                   ApEvent precondition = ApEvent::NO_AP_EVENT());
       static inline RtEvent acquire_rt_reservation(Reservation r,bool exclusive,
-                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT());
       static inline void release_reservation(Reservation r,
-                                   LgEvent precondition = LgEvent::NO_LG_EVENT);
+                                   LgEvent precondition = LgEvent::NO_LG_EVENT());
     };
 
     // This is a small helper class for converting realm index spaces when
@@ -3808,7 +3808,7 @@ namespace Legion {
           return result;
         }
         else
-          return ApEvent::NO_AP_EVENT;
+          return ApEvent::NO_AP_EVENT();
       }
       if (events.size() == 1)
       {
@@ -3866,7 +3866,7 @@ namespace Legion {
           return result;
         }
         else
-          return ApEvent::NO_AP_EVENT;
+          return ApEvent::NO_AP_EVENT();
       }
       if (events.size() == 1)
       {
@@ -3942,7 +3942,7 @@ namespace Legion {
     {
 #ifndef LEGION_DISABLE_EVENT_PRUNING
       if (events.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       if (events.size() == 1)
         return *(events.begin());
 #endif
@@ -3962,7 +3962,7 @@ namespace Legion {
     {
 #ifndef LEGION_DISABLE_EVENT_PRUNING
       if (events.empty())
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       if (events.size() == 1)
         return events.front();
 #endif
@@ -4118,7 +4118,7 @@ namespace Legion {
       if (to_protect.exists())
         return RtEvent(Realm::Event::ignorefaults(to_protect));
       else
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------

@@ -1221,7 +1221,7 @@ namespace Legion {
           RezCheck z2(rez);
           rez.serialize(result);
           rez.serialize(target);
-          rez.serialize(RtEvent::NO_RT_EVENT);
+          rez.serialize(RtEvent::NO_RT_EVENT());
           rez.serialize(done);
         }
         runtime->send_gc_response(source, rez);
@@ -1542,14 +1542,14 @@ namespace Legion {
         AutoLock i_lock(inst_lock);
         // If this thing is already deleted then there is nothing to do
         if (gc_state == COLLECTED_GC_STATE)
-          return RtEvent::NO_RT_EVENT;
+          return RtEvent::NO_RT_EVENT();
         std::map<std::pair<MapperID,Processor>,GCPriority>::iterator finder =
           mapper_gc_priorities.find(key);
         if (finder == mapper_gc_priorities.end())
         {
           mapper_gc_priorities[key] = priority;
           if (min_gc_priority <= priority)
-            return RtEvent::NO_RT_EVENT;
+            return RtEvent::NO_RT_EVENT();
         }
         else
         {
@@ -1559,7 +1559,7 @@ namespace Legion {
             // We weren't one of the minimum priorities before
             finder->second = priority;
             if (min_gc_priority <= priority)
-              return RtEvent::NO_RT_EVENT;
+              return RtEvent::NO_RT_EVENT();
             // Otherwise fall through and update the min priority
           }
           else
@@ -1570,7 +1570,7 @@ namespace Legion {
 #endif
             // If things don't change then there is nothing to do
             if (finder->second == priority)
-              return RtEvent::NO_RT_EVENT;
+              return RtEvent::NO_RT_EVENT();
             finder->second = priority;
             if (min_gc_priority < priority)
             {
@@ -1582,7 +1582,7 @@ namespace Legion {
               {
                 // If the new minimum priority is still the same we're done
                 if (it->second == min_gc_priority)
-                  return RtEvent::NO_RT_EVENT;
+                  return RtEvent::NO_RT_EVENT();
                 if (it->second < priority)
                   priority = it->second;
               }
@@ -1780,7 +1780,7 @@ namespace Legion {
         if (!info.collect_event.has_triggered())
           return;
         else
-          info.collect_event = RtEvent::NO_RT_EVENT;
+          info.collect_event = RtEvent::NO_RT_EVENT();
       }
       // Only do the pruning for every so many adds
       if (info.events_added >= runtime->gc_epoch_size)
@@ -2500,14 +2500,14 @@ namespace Legion {
                                               space_node, tree_id, layout, 
                                               redop, false/*reg now*/, 
                                               inst_footprint, 
-                                              ApEvent::NO_AP_EVENT, unique,
+                                              ApEvent::NO_AP_EVENT(), unique,
                                               external_instance, op);
       else
         man = new IndividualManager(runtime->forest, did, owner_space, memory, 
                               inst, inst_domain, piece_list, piece_list_size,
                               space_node, tree_id, layout, redop, 
                               false/*reg now*/, inst_footprint,
-                              ApEvent::NO_AP_EVENT, unique, 
+                              ApEvent::NO_AP_EVENT(), unique, 
                               external_instance, op);
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
@@ -2585,7 +2585,7 @@ namespace Legion {
         }
       }
       // We issued the deletion to Realm so all our effects are done
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -2606,7 +2606,7 @@ namespace Legion {
         instance.destroy();
 #ifdef LEGION_MALLOC_INSTANCES
       if (!is_external_instance())
-        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
+        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT());
 #endif
 #endif
     }
@@ -2632,7 +2632,7 @@ namespace Legion {
       else
       {
         memory_manager->set_garbage_collection_priority(this, priority);
-        return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT();
       }
     }
 
@@ -2731,7 +2731,7 @@ namespace Legion {
     {
       // TODO: implement this
       assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -2803,7 +2803,7 @@ namespace Legion {
     {
       // TODO: implement this
       assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -2820,7 +2820,7 @@ namespace Legion {
     {
       // TODO: implement this
       assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -2829,7 +2829,7 @@ namespace Legion {
     {
       // TODO: implement this
       assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -3285,7 +3285,7 @@ namespace Legion {
     {
       // TODO: implement this
       assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -3303,7 +3303,7 @@ namespace Legion {
     {
       // TODO: implement this
       assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
@@ -3665,14 +3665,14 @@ namespace Legion {
     ApEvent VirtualManager::get_use_event(void) const
     //--------------------------------------------------------------------------
     {
-      return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT();
     }
 
     //--------------------------------------------------------------------------
     LgEvent VirtualManager::get_unique_event(void) const
     //--------------------------------------------------------------------------
     {
-      return LgEvent::NO_LG_EVENT;
+      return LgEvent::NO_LG_EVENT();
     }
 
     //--------------------------------------------------------------------------

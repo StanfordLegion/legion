@@ -652,7 +652,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
-      : phase_barrier(Internal::ApBarrier::NO_AP_BARRIER)
+      : phase_barrier(Internal::ApBarrier::NO_AP_BARRIER())
     //--------------------------------------------------------------------------
     {
     }
@@ -747,7 +747,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::phase_barrier_arrive(*this, count, 
-                                  Internal::ApEvent::NO_AP_EVENT, value, size);
+                                  Internal::ApEvent::NO_AP_EVENT(), value, size);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7034,7 +7034,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Future result = runtime->help_create_future(Internal::implicit_context,
-                                              Internal::ApEvent::NO_AP_EVENT);
+                                              Internal::ApEvent::NO_AP_EVENT());
       // Set the future result
       result.impl->set_result(value, value_size, owned);
       return result;
