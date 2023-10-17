@@ -33,7 +33,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MappingCallInfo::MappingCallInfo(MapperManager *man, MappingCallKind k,
                                      Operation *op /*= NULL*/)
-      : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT()), 
+      : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), 
         start_time(0), collective_count(0), reentrant_disabled(false),
@@ -3632,7 +3632,7 @@ namespace Legion {
       if (info->supports_collectives && !runtime->unsafe_mapper)
         info->operation->report_total_collective_instance_calls(
                               info->kind, info->collective_count);
-      info->resume = RtUserEvent::NO_RT_USER_EVENT();
+      info->resume = RtUserEvent::NO_RT_USER_EVENT;
       info->operation = NULL;
       info->acquired_instances = NULL;
       info->start_time = 0;
@@ -4047,7 +4047,7 @@ namespace Legion {
         executing_call = NULL;
       }
       // No one to wake up
-      return RtUserEvent::NO_RT_USER_EVENT();
+      return RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4084,7 +4084,7 @@ namespace Legion {
       else
       {
         executing_call = NULL;
-        return RtUserEvent::NO_RT_USER_EVENT();
+        return RtUserEvent::NO_RT_USER_EVENT;
       }
     }
 

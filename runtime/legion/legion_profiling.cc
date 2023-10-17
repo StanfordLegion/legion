@@ -720,7 +720,7 @@ namespace Legion {
           {
             indirect.src = 0;
             indirect.src_fid = 0;
-            indirect.src_inst_uid = LgEvent::NO_LG_EVENT();
+            indirect.src_inst_uid = LgEvent::NO_LG_EVENT;
           }
           if (it->dst_indirection_inst.exists())
           {
@@ -733,7 +733,7 @@ namespace Legion {
           {
             indirect.dst = 0;
             indirect.dst_fid = 0;
-            indirect.dst_inst_uid = LgEvent::NO_LG_EVENT();
+            indirect.dst_inst_uid = LgEvent::NO_LG_EVENT;
           }
           for (unsigned idx1 = 0; idx1 < it->src_insts.size(); idx1++)
           {
@@ -1781,7 +1781,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : runtime(NULL), done_event(RtUserEvent::NO_RT_USER_EVENT()),
+      : runtime(NULL), done_event(RtUserEvent::NO_RT_USER_EVENT),
         output_footprint_threshold(0), output_target_latency(0), 
         target_proc(rhs.target_proc)
     //--------------------------------------------------------------------------

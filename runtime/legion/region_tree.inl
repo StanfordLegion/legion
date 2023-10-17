@@ -1123,7 +1123,7 @@ namespace Legion {
               !tight_index_space_ready.has_triggered())
             tight_index_space_ready.wait();
           space = tight_index_space;
-          return ApEvent::NO_AP_EVENT();
+          return ApEvent::NO_AP_EVENT;
         }
         else
         {
@@ -1135,7 +1135,7 @@ namespace Legion {
       {
         // Already tight so we can just return that
         space = tight_index_space;
-        return ApEvent::NO_AP_EVENT();
+        return ApEvent::NO_AP_EVENT;
       }
     }
 
@@ -1752,8 +1752,8 @@ namespace Legion {
         lhs->add_tree_expression_reference(this->did);
         this->realm_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->tight_index_space = Realm::IndexSpace<DIM,T>::make_empty();
-        this->realm_index_space_ready = ApEvent::NO_AP_EVENT();
-        this->tight_index_space_ready = RtEvent::NO_RT_EVENT();
+        this->realm_index_space_ready = ApEvent::NO_AP_EVENT;
+        this->tight_index_space_ready = RtEvent::NO_RT_EVENT;
       }
       else
       {
@@ -2195,7 +2195,7 @@ namespace Legion {
       // At this point we have a tight index space
       // That means it's already ready
       result = realm_index_space;
-      return ApEvent::NO_AP_EVENT();
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3683,7 +3683,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      return ApEvent::NO_AP_EVENT();
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3863,7 +3863,7 @@ namespace Legion {
         }
       }
       if (result_events.empty())
-        return ApEvent::NO_AP_EVENT();
+        return ApEvent::NO_AP_EVENT;
       return Runtime::merge_events(NULL, result_events);
     }
 
@@ -5340,17 +5340,17 @@ namespace Legion {
           LegionSpy::log_indirect_field(last_copy, src_fields[idx].field_id,
                                         (idx < src_unique_events.size()) ? 
                                           src_unique_events[idx] :
-                                          LgEvent::NO_LG_EVENT(),
+                                          LgEvent::NO_LG_EVENT,
                                         src_fields[idx].indirect_index,
                                         dst_fields[idx].field_id,
                                         (idx < dst_unique_events.size()) ? 
                                           dst_unique_events[idx] : 
-                                          LgEvent::NO_LG_EVENT(),
+                                          LgEvent::NO_LG_EVENT,
                                         dst_fields[idx].indirect_index,
                                         dst_fields[idx].redop_id);
         return last_copy;
 #else
-        return ApEvent::NO_AP_EVENT();
+        return ApEvent::NO_AP_EVENT;
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -5467,12 +5467,12 @@ namespace Legion {
           LegionSpy::log_indirect_field(last_copy, src_fields[idx].field_id,
                                         (idx < src_unique_events.size()) ?
                                           src_unique_events[idx] :
-                                          LgEvent::NO_LG_EVENT(),
+                                          LgEvent::NO_LG_EVENT,
                                         src_fields[idx].indirect_index,
                                         dst_fields[idx].field_id,
                                         (idx < dst_unique_events.size()) ?
                                           dst_unique_events[idx] :
-                                          LgEvent::NO_LG_EVENT(),
+                                          LgEvent::NO_LG_EVENT,
                                         dst_fields[idx].indirect_index,
                                         dst_fields[idx].redop_id);
       }
@@ -5531,7 +5531,7 @@ namespace Legion {
           postconditions.push_back(post);
       }
       if (postconditions.empty())
-        return ApEvent::NO_AP_EVENT();
+        return ApEvent::NO_AP_EVENT;
       return Runtime::merge_events(NULL, postconditions);
     }
 #endif // defined(DEFINE_NT_TEMPLATES)

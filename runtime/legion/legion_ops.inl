@@ -102,7 +102,7 @@ namespace Legion {
           if (manager == NULL)
           {
             Runtime::trigger_event(NULL, instance_ready);
-            instance_ready = ApUserEvent::NO_AP_USER_EVENT();
+            instance_ready = ApUserEvent::NO_AP_USER_EVENT;
           }
           AutoLock o_lock(this->op_lock);
           typename std::map<CollectiveKey,CollectiveInstance>::iterator finder =
@@ -116,7 +116,7 @@ namespace Legion {
 #endif
           finder->second.manager = manager;
           Runtime::trigger_event(finder->second.ready_event);
-          finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+          finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
           finder->second.instance_event = instance_ready;
           finder->second.remaining = total_points;
           if ((manager == NULL) && (--finder->second.remaining == 0) &&
@@ -163,12 +163,12 @@ namespace Legion {
           if (finder->second.ready_event.exists())
           {
             Runtime::trigger_event(finder->second.ready_event);
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
           }
           if (finder->second.instance_event.exists())
           {
             Runtime::trigger_event(NULL, finder->second.instance_event);
-            finder->second.instance_event = ApUserEvent::NO_AP_USER_EVENT();
+            finder->second.instance_event = ApUserEvent::NO_AP_USER_EVENT;
           }
           if ((--finder->second.remaining == 0) && 
               (finder->second.pending == 0))
@@ -210,13 +210,13 @@ namespace Legion {
           if (finder->second.ready_event.exists())
           {
             Runtime::trigger_event(finder->second.ready_event);
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
           }
 #ifdef DEBUG_LEGION
           assert(finder->second.instance_event.exists());
 #endif
           Runtime::trigger_event(NULL, finder->second.instance_event);
-          finder->second.instance_event = ApUserEvent::NO_AP_USER_EVENT();
+          finder->second.instance_event = ApUserEvent::NO_AP_USER_EVENT;
           if ((--finder->second.remaining == 0) && 
               (finder->second.pending == 0))
             collective_instances.erase(finder);
@@ -275,12 +275,12 @@ namespace Legion {
         if (it->second.ready_event.exists())
         {
           Runtime::trigger_event(it->second.ready_event);
-          it->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+          it->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
         }
         if (it->second.instance_event.exists())
         {
           Runtime::trigger_event(NULL, it->second.instance_event);
-          it->second.instance_event = ApUserEvent::NO_AP_USER_EVENT();
+          it->second.instance_event = ApUserEvent::NO_AP_USER_EVENT;
         }
       }
     }

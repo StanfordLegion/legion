@@ -124,12 +124,12 @@ namespace Legion {
     IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
                                         const Domain *domain, DistributedID did,
                                         Provenance *provenance,
-                                        ApEvent ready /*=ApEvent::NO_AP_EVENT()*/,
+                                        ApEvent ready /*=ApEvent::NO_AP_EVENT*/,
                                         std::set<RtEvent> *applied /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       return create_node(handle, domain, true/*domain*/, NULL/*parent*/,
-                         0/*color*/, did, RtEvent::NO_RT_EVENT(),
+                         0/*color*/, did, RtEvent::NO_RT_EVENT,
                          provenance, ready, 0/*expr id*/, applied);
     }
 
@@ -262,7 +262,7 @@ namespace Legion {
         disjointness_event = Runtime::create_rt_user_event();
         node = create_node(pid, parent_node, color_node, partition_color,
                 disjointness_event, complete, did, provenance, partition_ready,
-                partial_pending, RtEvent::NO_RT_EVENT(), applied);
+                partial_pending, RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
               complete, partition_color, runtime->address_space, 
@@ -281,7 +281,7 @@ namespace Legion {
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         node = create_node(pid, parent_node, color_node, partition_color, 
                     disjoint, complete, did, provenance, partition_ready,
-                    partial_pending, RtEvent::NO_RT_EVENT(), applied);
+                    partial_pending, RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
@@ -451,7 +451,7 @@ namespace Legion {
                                      source->color_space->handle, 
                                      part_color, kind, did,
                                      provenance, domain_ready,
-                                     ApUserEvent::NO_AP_USER_EVENT(), 
+                                     ApUserEvent::NO_AP_USER_EVENT, 
                                      &safe_events);
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
@@ -476,7 +476,7 @@ namespace Legion {
                                      source->color_space->handle, 
                                      part_color, kind, did,
                                      provenance, domain_ready, 
-                                     ApUserEvent::NO_AP_USER_EVENT(), 
+                                     ApUserEvent::NO_AP_USER_EVENT, 
                                      &safe_events);
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
@@ -504,7 +504,7 @@ namespace Legion {
                                      source->color_space->handle, 
                                      part_color, kind, did,
                                      provenance, domain_ready, 
-                                     ApUserEvent::NO_AP_USER_EVENT(),
+                                     ApUserEvent::NO_AP_USER_EVENT,
                                      &safe_events);
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
@@ -1040,7 +1040,7 @@ namespace Legion {
       Provenance *provenance = NULL;
       if (prov != NULL)
         provenance = new Provenance(prov);
-      return create_node(handle, did, RtEvent::NO_RT_EVENT(), provenance,applied);
+      return create_node(handle, did, RtEvent::NO_RT_EVENT, provenance,applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1236,7 +1236,7 @@ namespace Legion {
       Provenance *prov = NULL;
       if (provenance != NULL)
         prov = new Provenance(provenance); 
-      create_node(handle, NULL/*parent*/,RtEvent::NO_RT_EVENT(),did,prov,applied);
+      create_node(handle, NULL/*parent*/,RtEvent::NO_RT_EVENT,did,prov,applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1831,7 +1831,7 @@ namespace Legion {
         analysis.traverse(it->first, it->second, deferral_events,
                           map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent ready;
       if (traversal_done.exists() || analysis.has_remote_sets())
         ready = analysis.perform_remote(traversal_done, map_applied_events);
@@ -1873,7 +1873,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       InnerContext *context = op->find_physical_context(index, req);
 #ifdef DEBUG_LEGION
       RegionTreeContext ctx = context->get_context();
@@ -1919,7 +1919,7 @@ namespace Legion {
         analysis->traverse(it->first, it->second, deferral_events,
                            map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
@@ -1940,7 +1940,7 @@ namespace Legion {
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
       if (analysis == NULL)
-        return ApEvent::NO_AP_EVENT();
+        return ApEvent::NO_AP_EVENT;
       // We can skip this if the term event is a 
       // no-event (happens with post-mapping and copies)
       if (analysis->term_event.exists())
@@ -2009,7 +2009,7 @@ namespace Legion {
       ApEvent result;
       if (analysis->has_output_updates())
         result = 
-          analysis->perform_output(RtEvent::NO_RT_EVENT(), map_applied_events);
+          analysis->perform_output(RtEvent::NO_RT_EVENT, map_applied_events);
       // Remove the reference that we added in the updates step
       if (analysis->remove_reference())
         delete analysis;
@@ -2130,7 +2130,7 @@ namespace Legion {
         analysis.traverse(it->first, it->second, deferral_events,
                           map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis.has_remote_sets())
         remote_ready = 
@@ -2161,7 +2161,7 @@ namespace Legion {
       }
       if (!acquired_events.empty())
         return Runtime::merge_events(&trace_info, acquired_events);
-      return ApEvent::NO_AP_EVENT();
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2196,7 +2196,7 @@ namespace Legion {
         analysis.traverse(it->first, it->second, deferral_events,
                           map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis.has_remote_sets())
         remote_ready = 
@@ -2234,7 +2234,7 @@ namespace Legion {
       }
       if (!released_events.empty())
         return Runtime::merge_events(&trace_info, released_events);
-      return ApEvent::NO_AP_EVENT();
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2266,7 +2266,7 @@ namespace Legion {
           src_node->row_source, dst_node->row_source, &mutator);
       // Quick out if there is nothing to copy to
       if (copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT();
+        return ApEvent::NO_AP_EVENT;
       // Perform the copies/reductions across
       InnerContext *context = op->find_physical_context(dst_index, dst_req);
       std::vector<InstanceView*> target_views;
@@ -2314,12 +2314,12 @@ namespace Legion {
         if (!copy_preconditions.empty())
           precondition = Runtime::merge_events(&trace_info, copy_preconditions);
         ApEvent result = across->execute(op, guard, precondition,
-            ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT(), trace_info);
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, trace_info);
         if (trace_info.recording)
         {
           // Record this with the trace
           trace_info.record_issue_across(result, precondition, precondition,
-                        ApEvent::NO_AP_EVENT(), ApEvent::NO_AP_EVENT(), across);
+                        ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
           FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
             tracing_srcs.insert(source_views[idx],
@@ -2383,7 +2383,7 @@ namespace Legion {
                                        deferral_events, map_applied_events);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       // Start with the source mask here in case we need to filter which
       // is all done on the source fields
       analysis->local_exprs.insert(copy_expr, src_mask);
@@ -2501,12 +2501,12 @@ namespace Legion {
           Runtime::merge_events(&trace_info, copy_preconditions);
       // Launch the copy
       ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
-          src_indirect_ready, ApEvent::NO_AP_EVENT(), trace_info);
+          src_indirect_ready, ApEvent::NO_AP_EVENT, trace_info);
       if (trace_info.recording)
       {
         // Record this with the trace
         trace_info.record_issue_across(copy_post, local_precondition,
-           copy_precondition, src_indirect_ready, ApEvent::NO_AP_EVENT(), across);
+           copy_precondition, src_indirect_ready, ApEvent::NO_AP_EVENT, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, idx_views, dst_views;
         // Get the src_views
@@ -2642,12 +2642,12 @@ namespace Legion {
           Runtime::merge_events(&trace_info, copy_preconditions);
       // Launch the copy
       ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
-          ApEvent::NO_AP_EVENT(), dst_indirect_ready, trace_info);
+          ApEvent::NO_AP_EVENT, dst_indirect_ready, trace_info);
       if (trace_info.recording)
       {
         // Record this with the trace
         trace_info.record_issue_across(copy_post, local_precondition,
-           copy_precondition, ApEvent::NO_AP_EVENT(), dst_indirect_ready, across);
+           copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, dst_views, idx_views;
         // src_views
@@ -2880,7 +2880,7 @@ namespace Legion {
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), version_info, fill_view, trace_info, precondition, 
-          RtEvent::NO_RT_EVENT()/*reg guard*/, true_guard, true/*track effects*/);
+          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -2888,7 +2888,7 @@ namespace Legion {
         analysis->traverse(it->first, it->second, deferral_events,
                            map_applied_events, true/*original mask*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
@@ -2964,7 +2964,7 @@ namespace Legion {
       }
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
           index, RegionUsage(req), version_info, registration_views, trace_info,
-          ApEvent::NO_AP_EVENT(),  guard_event, PredEvent::NO_PRED_EVENT(), 
+          ApEvent::NO_AP_EVENT,  guard_event, PredEvent::NO_PRED_EVENT, 
           false/*track effects*/, restricted);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -2975,14 +2975,14 @@ namespace Legion {
         analysis->traverse(it->first, it->second, deferral_events,
                            map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
       if (!ready_events.empty())
         return Runtime::merge_events(&trace_info, ready_events);
-      return ApEvent::NO_AP_EVENT();
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3025,7 +3025,7 @@ namespace Legion {
         analysis->traverse(it->first, it->second, deferral_events,
                            map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())     
         analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
@@ -3044,7 +3044,7 @@ namespace Legion {
         version_info.get_equivalence_sets();
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          usage, version_info, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT());
+          usage, version_info, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3052,7 +3052,7 @@ namespace Legion {
         analysis->traverse(it->first, it->second, deferral_events,
                            map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
@@ -3079,7 +3079,7 @@ namespace Legion {
         analysis.traverse(it->first, it->second, deferral_events,
                           map_applied_events, true/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent ready;
       if (traversal_done.exists() || analysis.has_remote_sets())
         ready = analysis.perform_remote(traversal_done, map_applied_events);
@@ -3112,7 +3112,7 @@ namespace Legion {
         static_assert(sizeof(log_views) == sizeof(inst_views), "Fuck c++");
         memcpy(&log_views, &inst_views, sizeof(log_views));
         OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-           usage, version_info, *log_views, trace_info, ApEvent::NO_AP_EVENT());
+           usage, version_info, *log_views, trace_info, ApEvent::NO_AP_EVENT);
         analysis->add_reference();
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3127,7 +3127,7 @@ namespace Legion {
                                    map_applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
-          RtEvent::NO_RT_EVENT() : Runtime::merge_events(deferral_events);
+          RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
         if (traversal_done.exists() || analysis->has_remote_sets())
           analysis->perform_remote(traversal_done, map_applied_events);
         if (analysis->remove_reference())
@@ -3824,13 +3824,13 @@ namespace Legion {
       {
         row_ready.wait();
         row_src = get_node(r.index_space);
-        row_ready = RtEvent::NO_RT_EVENT();
+        row_ready = RtEvent::NO_RT_EVENT;
       }
       if (col_src == NULL)
       {
         col_ready.wait();
         col_src = get_node(r.field_space);
-        col_ready = RtEvent::NO_RT_EVENT();
+        col_ready = RtEvent::NO_RT_EVENT;
       }
       
       RtUserEvent local_initialized;
@@ -3934,13 +3934,13 @@ namespace Legion {
       {
         row_ready.wait();
         row_src = get_node(p.index_partition);
-        row_ready = RtEvent::NO_RT_EVENT();
+        row_ready = RtEvent::NO_RT_EVENT;
       }
       if (col_src == NULL)
       {
         col_ready.wait();
         col_src = get_node(p.field_space);
-        col_ready = RtEvent::NO_RT_EVENT();
+        col_ready = RtEvent::NO_RT_EVENT;
       }
       RtEvent initialized = parent->tree_initialized;
       RtUserEvent local_initialized;
@@ -4035,7 +4035,7 @@ namespace Legion {
         if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
-        result->initialized = RtEvent::NO_RT_EVENT();
+        result->initialized = RtEvent::NO_RT_EVENT;
         return result;
       }
       // Couldn't find it, so send a request to the owner node
@@ -4085,7 +4085,7 @@ namespace Legion {
             {
               if (finder->second->initialized.has_triggered())
               {
-                finder->second->initialized = RtEvent::NO_RT_EVENT();
+                finder->second->initialized = RtEvent::NO_RT_EVENT;
                 return finder->second;
               }
               else
@@ -4097,7 +4097,7 @@ namespace Legion {
           else if (can_fail)
             return NULL;
           else
-            wait_on = RtEvent::NO_RT_EVENT();
+            wait_on = RtEvent::NO_RT_EVENT;
         }
         if (!wait_on.exists())
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
@@ -4147,7 +4147,7 @@ namespace Legion {
         if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
-        result->initialized = RtEvent::NO_RT_EVENT();
+        result->initialized = RtEvent::NO_RT_EVENT;
         return result;
       }
       // Couldn't find it, so send a request to the owner node
@@ -4198,7 +4198,7 @@ namespace Legion {
             {
               if (finder->second->initialized.has_triggered())
               {
-                finder->second->initialized = RtEvent::NO_RT_EVENT();
+                finder->second->initialized = RtEvent::NO_RT_EVENT;
                 return finder->second;
               }
               else
@@ -4210,7 +4210,7 @@ namespace Legion {
           else if (can_fail)
             return NULL;
           else
-            wait_on = RtEvent::NO_RT_EVENT();
+            wait_on = RtEvent::NO_RT_EVENT;
         }
         if (!wait_on.exists())
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
@@ -4258,7 +4258,7 @@ namespace Legion {
         if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
-        result->initialized = RtEvent::NO_RT_EVENT();
+        result->initialized = RtEvent::NO_RT_EVENT;
         return result;
       }
       // Couldn't find it, so send a request to the owner node
@@ -4304,7 +4304,7 @@ namespace Legion {
             {
               if (finder->second->initialized.has_triggered())
               {
-                finder->second->initialized = RtEvent::NO_RT_EVENT();
+                finder->second->initialized = RtEvent::NO_RT_EVENT;
                 return finder->second;
               }
               else
@@ -4314,7 +4314,7 @@ namespace Legion {
               return finder->second;
           }
           else
-            wait_on = RtEvent::NO_RT_EVENT();
+            wait_on = RtEvent::NO_RT_EVENT;
         }
         if (!wait_on.exists())
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
@@ -4365,7 +4365,7 @@ namespace Legion {
         if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
-        result->initialized = RtEvent::NO_RT_EVENT();
+        result->initialized = RtEvent::NO_RT_EVENT;
         return result;
       }
       // If we don't have the top-level region, we need to request it before
@@ -4435,7 +4435,7 @@ namespace Legion {
               if (!wait_on.has_triggered())
                 wait_on.wait();
               AutoLock l_lock(lookup_lock);
-              result->initialized = RtEvent::NO_RT_EVENT();
+              result->initialized = RtEvent::NO_RT_EVENT;
             }
             return result;
           }
@@ -4454,7 +4454,7 @@ namespace Legion {
         // are guaranteed that the top level node exists
         PartitionNode *parent = get_node(parent_handle, false/*need check*/);
         // Now make our node and then return it
-        result = create_node(handle, parent, RtEvent::NO_RT_EVENT(), 0/*did*/);
+        result = create_node(handle, parent, RtEvent::NO_RT_EVENT, 0/*did*/);
       }
       else
       {
@@ -4465,7 +4465,7 @@ namespace Legion {
         assert(index_node->depth == 0);
 #endif
         // Even though this is a root node, we'll discover it's already made
-        result = create_node(handle, NULL, RtEvent::NO_RT_EVENT(), 0/*did*/);
+        result = create_node(handle, NULL, RtEvent::NO_RT_EVENT, 0/*did*/);
       }
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -4476,7 +4476,7 @@ namespace Legion {
       if (!wait_on.has_triggered())
         wait_on.wait();
       AutoLock l_lock(lookup_lock);
-      result->initialized = RtEvent::NO_RT_EVENT();
+      result->initialized = RtEvent::NO_RT_EVENT;
       return result;
     }
 
@@ -4511,7 +4511,7 @@ namespace Legion {
         if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
-        result->initialized = RtEvent::NO_RT_EVENT();
+        result->initialized = RtEvent::NO_RT_EVENT;
         return result;
       }
       // Otherwise it hasn't been made yet so make it
@@ -4535,7 +4535,7 @@ namespace Legion {
       if (!wait_on.has_triggered())
         wait_on.wait();
       AutoLock l_lock(lookup_lock);
-      result->initialized = RtEvent::NO_RT_EVENT();
+      result->initialized = RtEvent::NO_RT_EVENT;
       return result;
     }
 
@@ -4564,7 +4564,7 @@ namespace Legion {
       {
         wait_on.wait();
         AutoLock l_lock(lookup_lock);
-        result->initialized = RtEvent::NO_RT_EVENT();
+        result->initialized = RtEvent::NO_RT_EVENT;
         return result;
       }
       // Couldn't find it, so send a request to the owner node
@@ -4619,7 +4619,7 @@ namespace Legion {
         std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
         if (finder != index_nodes.end())
-          return RtEvent::NO_RT_EVENT();
+          return RtEvent::NO_RT_EVENT;
       }
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
@@ -4631,7 +4631,7 @@ namespace Legion {
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
         index_nodes.find(space);
       if (finder != index_nodes.end())
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       // Still doesn't exists, see if we sent a request already
       std::map<IndexSpace,RtEvent>::const_iterator wait_finder = 
         index_space_requests.find(space);
@@ -7235,7 +7235,7 @@ namespace Legion {
     {
       if (!is_owner())
         send_remote_valid_decrement(owner_space, mutator,
-           RtEvent::NO_RT_EVENT(), remote_owner_valid_references.exchange(0) + 1);
+           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
       // If we have a canonical reference that is not ourselves then 
       // we need to remove the nested reference that we are holding on it too
       IndexSpaceExpression *canon = canonical.load();
@@ -7874,7 +7874,7 @@ namespace Legion {
                           finder->second.size);
               finder->second.buffer = local;
               finder->second.size = size;
-              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
           }
@@ -7883,7 +7883,7 @@ namespace Legion {
             finder->second.buffer = local;
             finder->second.size = size;
             // Trigger will happen by the caller
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
         }
@@ -8046,9 +8046,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(const IndexSpaceNode &rhs)
-      : IndexTreeNode(NULL, 0, 0, 0, 0, RtEvent::NO_RT_EVENT(), NULL),
+      : IndexTreeNode(NULL, 0, 0, 0, 0, RtEvent::NO_RT_EVENT, NULL),
         IndexSpaceExpression(node_lock), handle(IndexSpace::NO_SPACE), 
-        parent(NULL), index_space_ready(ApEvent::NO_AP_EVENT())
+        parent(NULL), index_space_ready(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8123,7 +8123,7 @@ namespace Legion {
       }
       else
         send_remote_valid_decrement(owner_space, mutator,
-           RtEvent::NO_RT_EVENT(), remote_owner_valid_references.exchange(0) + 1);
+           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
       // If we have a canonical reference that is not ourselves then 
       // we need to remove the nested reference that we are holding on it too
       IndexSpaceExpression *canon = canonical.load();
@@ -9777,7 +9777,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(const IndexPartNode &rhs)
-      : IndexTreeNode(NULL,0,0,0,0,RtEvent::NO_RT_EVENT(),NULL), 
+      : IndexTreeNode(NULL,0,0,0,0,RtEvent::NO_RT_EVENT,NULL), 
         handle(IndexPartition::NO_PART), parent(NULL), color_space(NULL),
         total_children(0), max_linearized_color(0)
     //--------------------------------------------------------------------------
@@ -11071,7 +11071,7 @@ namespace Legion {
         if (((--send_count) == 0) && send_done.exists())
         {
           Runtime::trigger_event(send_done);
-          send_done = RtUserEvent::NO_RT_USER_EVENT();
+          send_done = RtUserEvent::NO_RT_USER_EVENT;
         }
         return false;
       }
@@ -11104,7 +11104,7 @@ namespace Legion {
       if (((--send_count) == 0) && send_done.exists())
       {
         Runtime::trigger_event(send_done);
-        send_done = RtUserEvent::NO_RT_USER_EVENT();
+        send_done = RtUserEvent::NO_RT_USER_EVENT;
       }
       // Check to see if we have computed the disjointness result
       // If not we'll record that we need to do it and then when it 
@@ -11735,7 +11735,7 @@ namespace Legion {
                           finder->second.size);
               finder->second.buffer = local;
               finder->second.size = size;
-              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
           }
@@ -11744,7 +11744,7 @@ namespace Legion {
             finder->second.buffer = local;
             finder->second.size = size;
             // Trigger will happen by caller
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
         }
@@ -11825,7 +11825,7 @@ namespace Legion {
                           finder->second.size);
               finder->second.buffer = local;
               finder->second.size = size;
-              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
           }
@@ -11834,7 +11834,7 @@ namespace Legion {
             finder->second.buffer = local;
             finder->second.size = size;
             // Trigger will happen by caller
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
         }
@@ -12529,7 +12529,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!is_owner());
 #endif
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       }
       else
       {
@@ -12572,7 +12572,7 @@ namespace Legion {
             return done_event;
           }
         }
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       }
     }
 
@@ -12662,7 +12662,7 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
-          rez.serialize(ApEvent::NO_AP_EVENT());
+          rez.serialize(ApEvent::NO_AP_EVENT);
           if (provenance != NULL)
           {
             const size_t length = strlen(provenance);
@@ -12780,7 +12780,7 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
-          rez.serialize(ApEvent::NO_AP_EVENT());
+          rez.serialize(ApEvent::NO_AP_EVENT);
           if (provenance != NULL)
           {
             const size_t length = strlen(provenance);
@@ -12828,7 +12828,7 @@ namespace Legion {
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
       else
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -12895,7 +12895,7 @@ namespace Legion {
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
       else
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -12924,7 +12924,7 @@ namespace Legion {
         assert(finder->second.size_ready.exists());
 #endif
         finder->second.field_size = field_size;
-        finder->second.size_ready = ApEvent::NO_AP_EVENT();
+        finder->second.size_ready = ApEvent::NO_AP_EVENT;
       }
       // Now figure out where the updates need to go 
       if (is_owner())
@@ -15511,7 +15511,7 @@ namespace Legion {
                           finder->second.size);
               finder->second.buffer = local;
               finder->second.size = size;
-              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
           }
@@ -15520,7 +15520,7 @@ namespace Legion {
             finder->second.buffer = local;
             finder->second.size = size;
             // Trigger will happen by caller
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
         }
@@ -18226,7 +18226,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionNode::RegionNode(const RegionNode &rhs)
-      : RegionTreeNode(NULL, NULL, RtEvent::NO_RT_EVENT(), RtEvent::NO_RT_EVENT()),
+      : RegionTreeNode(NULL, NULL, RtEvent::NO_RT_EVENT, RtEvent::NO_RT_EVENT),
         handle(LogicalRegion::NO_REGION), parent(NULL), row_source(NULL)
     //--------------------------------------------------------------------------
     {
@@ -19535,7 +19535,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PartitionNode::PartitionNode(const PartitionNode &rhs)
-      : RegionTreeNode(NULL, NULL, RtEvent::NO_RT_EVENT(), RtEvent::NO_RT_EVENT()),
+      : RegionTreeNode(NULL, NULL, RtEvent::NO_RT_EVENT, RtEvent::NO_RT_EVENT),
         handle(LogicalPartition::NO_PART), parent(NULL), row_source(NULL)
     //--------------------------------------------------------------------------
     {
@@ -19659,7 +19659,7 @@ namespace Legion {
       LogicalRegion reg_handle(handle.tree_id, index_node->handle,
                                handle.field_space);
       return context->create_node(reg_handle, this, 
-                                  RtEvent::NO_RT_EVENT(), 0/*did*/);
+                                  RtEvent::NO_RT_EVENT, 0/*did*/);
     }
 
     //--------------------------------------------------------------------------

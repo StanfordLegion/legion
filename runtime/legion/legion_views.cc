@@ -383,7 +383,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT();
+      RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
       bool reading;
@@ -519,7 +519,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT();
+      RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
       EventFieldExprs preconditions;
@@ -566,7 +566,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT();
+      RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
       bool reading;
@@ -626,7 +626,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT();
+      RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
       FieldMask request_mask;
@@ -651,7 +651,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT();
+      RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
       RtUserEvent done_event;
@@ -675,7 +675,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT();
+      RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
       FieldMask removal_mask;
@@ -1664,7 +1664,7 @@ namespace Legion {
             current_epoch_users[user_event];
 #ifndef ENABLE_VIEW_REPLICATION
           if (current_users.empty())
-            to_collect[user_event] = RtEvent::NO_RT_EVENT();
+            to_collect[user_event] = RtEvent::NO_RT_EVENT;
 #endif
           size_t num_users;
           derez.deserialize(num_users);
@@ -1701,7 +1701,7 @@ namespace Legion {
             previous_epoch_users[user_event];
 #ifndef ENABLE_VIEW_REPLICATION
           if (previous_users.empty())
-            to_collect[user_event] = RtEvent::NO_RT_EVENT();
+            to_collect[user_event] = RtEvent::NO_RT_EVENT;
 #endif
           size_t num_users;
           derez.deserialize(num_users);
@@ -2580,7 +2580,7 @@ namespace Legion {
       // If it's the root this is easy
       if (user_expr == current_users->view_expr)
       {
-        current_users->add_current_user(user, term_event, RtEvent::NO_RT_EVENT(),
+        current_users->add_current_user(user, term_event, RtEvent::NO_RT_EVENT,
                                         user_mask, false);
         return;
       }
@@ -2612,7 +2612,7 @@ namespace Legion {
         }
       }
       // Now that the view is valid we can add the user to it
-      finder->second->add_current_user(user, term_event, RtEvent::NO_RT_EVENT(),
+      finder->second->add_current_user(user, term_event, RtEvent::NO_RT_EVENT,
                                        user_mask, false);
       // No need to launch a collection task as the destructor will handle it 
     }
@@ -2777,7 +2777,7 @@ namespace Legion {
                 rez.serialize(index);
                 rez.serialize(term_event);
                 rez.serialize(collect_event);
-                rez.serialize(ApUserEvent::NO_AP_USER_EVENT());
+                rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
                 rez.serialize(applied_event);
                 trace_info.pack_trace_info<true/*pack operation*/>(rez, 
                                             applied_events, it->first);
@@ -2816,7 +2816,7 @@ namespace Legion {
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
         else
-          return ApEvent::NO_AP_EVENT();
+          return ApEvent::NO_AP_EVENT;
       }
     }
 
@@ -2987,7 +2987,7 @@ namespace Legion {
         if (!preconditions.empty())
           aggregator.record_preconditions(this, reading, preconditions);
         // We're done with the analysis
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       }
     }
 
@@ -3481,7 +3481,7 @@ namespace Legion {
         {
           // Wake up the clean waiter
           Runtime::trigger_event(clean_waiting);
-          clean_waiting = RtUserEvent::NO_RT_USER_EVENT();
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       if (!update_cache)
@@ -3619,7 +3619,7 @@ namespace Legion {
             {
               // Wake up the clean waiter
               Runtime::trigger_event(clean_waiting);
-              clean_waiting = RtUserEvent::NO_RT_USER_EVENT();
+              clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
             }
           }
         }
@@ -3650,7 +3650,7 @@ namespace Legion {
         {
           // Wake up the clean waiter
           Runtime::trigger_event(clean_waiting);
-          clean_waiting = RtUserEvent::NO_RT_USER_EVENT();
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
         }
       } 
     }
@@ -4065,8 +4065,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
       : DeferredView(NULL, 0, 0, false),
-        true_guard(PredEvent::NO_PRED_EVENT()), 
-        false_guard(PredEvent::NO_PRED_EVENT()), owner_context(NULL)
+        true_guard(PredEvent::NO_PRED_EVENT), 
+        false_guard(PredEvent::NO_PRED_EVENT), owner_context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4498,7 +4498,7 @@ namespace Legion {
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
         else
-          return ApEvent::NO_AP_EVENT();
+          return ApEvent::NO_AP_EVENT;
       }
     }
 
@@ -4562,7 +4562,7 @@ namespace Legion {
         if (!preconditions.empty())
           aggregator.record_preconditions(this, reading, preconditions);
         // We're done with the analysis
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       }
     }
 

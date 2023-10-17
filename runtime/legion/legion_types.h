@@ -2106,7 +2106,7 @@ namespace Legion {
     // Legion derived event types
     class LgEvent : public Realm::Event {
     public:
-      static const LgEvent &NO_LG_EVENT();
+      static const LgEvent NO_LG_EVENT;
     public:
       LgEvent(void) noexcept { id = 0; }
       LgEvent(const LgEvent &rhs) = default;
@@ -2124,7 +2124,7 @@ namespace Legion {
 
     class PredEvent : public LgEvent {
     public:
-      static const PredEvent &NO_PRED_EVENT();
+      static const PredEvent NO_PRED_EVENT;
     public:
       PredEvent(void) noexcept : LgEvent() { } 
       PredEvent(const PredEvent &rhs) = default;
@@ -2137,7 +2137,7 @@ namespace Legion {
 
     class ApEvent : public LgEvent {
     public:
-      static const ApEvent &NO_AP_EVENT();
+      static const ApEvent NO_AP_EVENT;
     public:
       ApEvent(void) noexcept : LgEvent() { }
       ApEvent(const ApEvent &rhs) = default;
@@ -2159,7 +2159,7 @@ namespace Legion {
 
     class ApUserEvent : public ApEvent {
     public:
-      static const ApUserEvent &NO_AP_USER_EVENT();
+      static const ApUserEvent NO_AP_USER_EVENT;
     public:
       ApUserEvent(void) noexcept : ApEvent() { }
       ApUserEvent(const ApUserEvent &rhs) = default;
@@ -2172,7 +2172,7 @@ namespace Legion {
 
     class ApBarrier : public ApEvent {
     public:
-      static const ApBarrier &NO_AP_BARRIER();
+      static const ApBarrier NO_AP_BARRIER;
     public:
       ApBarrier(void) noexcept : ApEvent(), timestamp(0) { }
       ApBarrier(const ApBarrier &rhs) = default; 
@@ -2189,7 +2189,7 @@ namespace Legion {
 
     class RtEvent : public LgEvent {
     public:
-      static const RtEvent &NO_RT_EVENT();
+      static const RtEvent NO_RT_EVENT;
     public:
       RtEvent(void) noexcept : LgEvent() { }
       RtEvent(const RtEvent &rhs) = default;
@@ -2201,7 +2201,7 @@ namespace Legion {
 
     class RtUserEvent : public RtEvent {
     public:
-      static const RtUserEvent &NO_RT_USER_EVENT();
+      static const RtUserEvent NO_RT_USER_EVENT;
     public:
       RtUserEvent(void) noexcept : RtEvent() { }
       RtUserEvent(const RtUserEvent &rhs) = default;
@@ -2214,7 +2214,7 @@ namespace Legion {
 
     class RtBarrier : public RtEvent {
     public:
-      static const RtBarrier &NO_RT_BARRIER();
+      static const RtBarrier NO_RT_BARRIER;
     public:
       RtBarrier(void) noexcept : RtEvent(), timestamp(0) { }
       RtBarrier(const RtBarrier &rhs) = default;

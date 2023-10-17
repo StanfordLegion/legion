@@ -812,7 +812,7 @@ namespace Legion {
       if (!preconditions.empty())
         return Runtime::merge_events(preconditions);
       else
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1115,8 +1115,8 @@ namespace Legion {
       options_selected = false;
       map_origin = false;
       request_valid_instances = false;
-      true_guard = PredEvent::NO_PRED_EVENT();
-      false_guard = PredEvent::NO_PRED_EVENT();
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
       local_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
@@ -1796,7 +1796,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::enqueue_ready_task(bool use_target_processor,
-                                    RtEvent wait_on /*=RtEvent::NO_RT_EVENT()*/)
+                                    RtEvent wait_on /*=RtEvent::NO_RT_EVENT*/)
     //--------------------------------------------------------------------------
     {
       if (use_target_processor)
@@ -2940,8 +2940,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_SINGLE_CALL);
       activate_task();
-      task_effects_complete = ApEvent::NO_AP_EVENT();
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
+      task_effects_complete = ApEvent::NO_AP_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
@@ -3047,9 +3047,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           rez.serialize<bool>(virtual_mapped[idx]);
         rez.serialize(deferred_complete_mapping);
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         rez.serialize(single_task_termination);
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT();
+        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
         rez.serialize<size_t>(physical_instances.size());
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           physical_instances[idx].pack_references(rez);
@@ -3081,7 +3081,7 @@ namespace Legion {
         {
           rez.serialize(deferred_complete_mapping);
           // Clear it once we've packed it up
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
         if (memo_state == MEMO_RECORD)
         {
@@ -3272,10 +3272,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_replaying())
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       // If we're remote and origin mapped, then we are already done
       if (is_remote() && is_origin_mapped())
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
 #ifdef DEBUG_LEGION
       assert(version_infos.empty() || (version_infos.size() == regions.size()));
 #endif
@@ -3295,7 +3295,7 @@ namespace Legion {
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3880,7 +3880,7 @@ namespace Legion {
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), false/*is inner*/, regions, parent_req_indexes,
-          virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT(),
+          virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT,
           false/*remote*/, false/*inline*/, true/*implicit*/);
       execution_context = inner_ctx;
       execution_context->add_reference();
@@ -4178,8 +4178,8 @@ namespace Legion {
             performed_regions.reserve(regions.size());
             std::set<RtEvent> registration_postconditions;
             std::vector<UpdateAnalysis*> analyses(regions.size(), NULL);
-            std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT());
-            std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT());
+            std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
+            std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
             for (unsigned idx = 0; idx < regions.size(); idx++)
             {
               if (early_mapped_regions.find(idx) != early_mapped_regions.end())
@@ -4391,7 +4391,7 @@ namespace Legion {
           delete remote_trace_recorder;
         remote_trace_recorder = NULL;
       }
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4560,7 +4560,7 @@ namespace Legion {
         runtime->forest->physical_perform_updates_and_registration(
                           regions[idx], local_version_info, this, idx,
                           completion_event/*wait for task to be done*/,
-                          ApEvent::NO_AP_EVENT()/*done immediately*/, 
+                          ApEvent::NO_AP_EVENT/*done immediately*/, 
                           result, PhysicalTraceInfo(trace_info, idx), 
                           map_applied_conditions,
 #ifdef DEBUG_LEGION
@@ -4831,7 +4831,7 @@ namespace Legion {
         chain_precondition = single_task_termination;
       }
       else // We're going to trigger this right now with no precondition
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT();
+        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
       ApEvent task_launch_event;
       if (inline_task)
       {
@@ -5143,7 +5143,7 @@ namespace Legion {
       {
         Runtime::trigger_event(NULL, 
             single_task_termination, all_children_complete); 
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT();
+        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
       }
       else if (all_children_complete.exists())
       {
@@ -6124,7 +6124,7 @@ namespace Legion {
       complete_mapping();
       complete_execution(execution_condition);
       resolve_speculation();
-      trigger_children_complete(ApEvent::NO_AP_EVENT());
+      trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
     }
 
@@ -6178,7 +6178,7 @@ namespace Legion {
 #endif
           Runtime::trigger_event(deferred_complete_mapping, applied_condition);
           applied_condition = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       else if (!is_remote())
@@ -6203,7 +6203,7 @@ namespace Legion {
         applied_condition = release_nonempty_acquired_instances(
                           applied_condition, acquired_instances);
       complete_mapping(applied_condition);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6402,7 +6402,7 @@ namespace Legion {
           map_applied_conditions.insert(mapped_precondition);
         // Little race condition here so pull it on the stack first
         RtUserEvent to_trigger = deferred_complete_mapping;
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         if (!map_applied_conditions.empty())
           Runtime::trigger_event(to_trigger, 
               Runtime::merge_events(map_applied_conditions)); 
@@ -6524,7 +6524,7 @@ namespace Legion {
         if (deferred_complete_mapping.exists())
         {
           orig_task->deferred_complete_mapping = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
@@ -7008,7 +7008,7 @@ namespace Legion {
 #endif
           Runtime::trigger_event(deferred_complete_mapping, applied_condition);
           applied_condition = deferred_complete_mapping;
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       else
@@ -7022,7 +7022,7 @@ namespace Legion {
       slice_owner->record_point_mapped(applied_condition, task_effects_complete,
                                        acquired_instances);
       complete_mapping(applied_condition);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -7099,7 +7099,7 @@ namespace Legion {
           slice_owner->record_point_complete(
               Runtime::merge_events(preconditions));
         else
-          slice_owner->record_point_complete(RtEvent::NO_RT_EVENT());
+          slice_owner->record_point_complete(RtEvent::NO_RT_EVENT);
         if (runtime->legion_spy_enabled)
           execution_context->log_created_requirements();
         // Invalidate any context that we had so that the child
@@ -7118,7 +7118,7 @@ namespace Legion {
           slice_owner->record_point_complete(
               Runtime::merge_events(preconditions));
         else
-          slice_owner->record_point_complete(RtEvent::NO_RT_EVENT());
+          slice_owner->record_point_complete(RtEvent::NO_RT_EVENT);
 
         complete_operation();
       }
@@ -7176,7 +7176,7 @@ namespace Legion {
       assert(is_origin_mapped());
 #endif
       slice_owner->record_point_mapped(deferred_complete_mapping,
-                         ApEvent::NO_AP_EVENT(), acquired_instances);
+                         ApEvent::NO_AP_EVENT, acquired_instances);
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
       return false;
@@ -7202,7 +7202,7 @@ namespace Legion {
           map_applied_conditions.insert(mapped_precondition);
         // Little race condition here so pull it on the stack first
         RtUserEvent to_trigger = deferred_complete_mapping;
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT();
+        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         if (!map_applied_conditions.empty())
           Runtime::trigger_event(to_trigger, 
               Runtime::merge_events(map_applied_conditions)); 
@@ -7343,7 +7343,7 @@ namespace Legion {
       // Check to see if we're replaying this locally or remotely
       if (target_space != runtime->address_space)
       {
-        slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT(),
+        slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
                     task_effects_complete, acquired_instances);
         // Record this slice as an origin-mapped slice so that it
         // will be deactivated accordingly
@@ -7364,7 +7364,7 @@ namespace Legion {
       {
         // This is the local case
         if (!is_remote())
-          slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT(),
+          slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
                       task_effects_complete, acquired_instances);
         for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
              it != physical_instances.end(); ++it)
@@ -7531,7 +7531,7 @@ namespace Legion {
       complete_points = 0;
       committed_points = 0;
       need_intra_task_alias_analysis = true;
-      profiling_reported = RtUserEvent::NO_RT_USER_EVENT();
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
@@ -8445,7 +8445,7 @@ namespace Legion {
         (*it)->trigger_mapping();
         it = slices.erase(it);
       }
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8523,7 +8523,7 @@ namespace Legion {
         must_epoch->notify_subop_complete(this, precondition);
       } 
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT(),
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       completion_event);
 #endif
       if (!complete_preconditions.empty())
@@ -9503,7 +9503,7 @@ namespace Legion {
       remote_owner_uid = 0;
       remote_unique_id = get_unique_id();
       origin_mapped = false;
-      origin_mapped_complete = RtUserEvent::NO_RT_USER_EVENT();
+      origin_mapped_complete = RtUserEvent::NO_RT_USER_EVENT;
       // Slice tasks always already have their options selected
       options_selected = true;
     }
@@ -9644,7 +9644,7 @@ namespace Legion {
         // enable all the point tasks to be mapping in parallel with
         // each other in case they need to synchronize to create 
         // collective instances
-        mapped_events.insert((*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT(),
+        mapped_events.insert((*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
                                     epoch_owner, args, 0/*invocation count*/));
       }
       return Runtime::merge_events(mapped_events);
@@ -9693,7 +9693,7 @@ namespace Legion {
         // each other in case they need to synchronize to create 
         // collective instances
         const RtEvent map_event = point->defer_perform_mapping(
-            RtEvent::NO_RT_EVENT(), NULL/*must epoch*/, 
+            RtEvent::NO_RT_EVENT, NULL/*must epoch*/, 
             NULL/*defer args*/, 0/*invocation count*/);
         if (map_event.exists() && !map_event.has_triggered())
           point->defer_launch_task(map_event);

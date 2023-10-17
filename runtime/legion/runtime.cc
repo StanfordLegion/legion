@@ -80,50 +80,14 @@ namespace Legion {
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
     thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 
-    namespace
-    {
-
-    template <typename T>
-    const T &static_var_helper()
-    {
-      static const T var{};
-      return var;
-    }
-
-    }
-
-    const LgEvent &LgEvent::NO_LG_EVENT()
-    {
-      return static_var_helper<LgEvent>();
-    }
-    const ApEvent &ApEvent::NO_AP_EVENT()
-    {
-      return static_var_helper<ApEvent>();
-    }
-    const ApUserEvent &ApUserEvent::NO_AP_USER_EVENT()
-    {
-      return static_var_helper<ApUserEvent>();
-    }
-    const ApBarrier &ApBarrier::NO_AP_BARRIER()
-    {
-      return static_var_helper<ApBarrier>();
-    }
-    const RtEvent &RtEvent::NO_RT_EVENT()
-    {
-      return static_var_helper<RtEvent>();
-    }
-    const RtUserEvent &RtUserEvent::NO_RT_USER_EVENT()
-    {
-      return static_var_helper<RtUserEvent>();
-    }
-    const RtBarrier &RtBarrier::NO_RT_BARRIER()
-    {
-      return static_var_helper<RtBarrier>();
-    }
-    const PredEvent &PredEvent::NO_PRED_EVENT()
-    {
-      return static_var_helper<PredEvent>();
-    }
+    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
+    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
+    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
+    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
+    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
+    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
+    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
+    const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
 
     //--------------------------------------------------------------------------
     void LgEvent::begin_context_wait(Context ctx) const
@@ -331,7 +295,7 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, did,
-            runtime->address_space, RtEvent::NO_RT_EVENT()));
+            runtime->address_space, RtEvent::NO_RT_EVENT));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -779,7 +743,7 @@ namespace Legion {
           Runtime::trigger_event(NULL, subscription_event, future_complete);
         else
           Runtime::trigger_event(NULL, subscription_event);
-        subscription_event = ApUserEvent::NO_AP_USER_EVENT();
+        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
         if (remove_base_resource_ref(RUNTIME_REF))
           assert(false); // should always hold a reference from caller
       }
@@ -866,7 +830,7 @@ namespace Legion {
       ApEvent complete;
       derez.deserialize(complete);
       Runtime::trigger_event(NULL, subscription_event, complete);
-      subscription_event = ApUserEvent::NO_AP_USER_EVENT();
+      subscription_event = ApUserEvent::NO_AP_USER_EVENT;
       if (is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -1331,7 +1295,7 @@ namespace Legion {
                                          Runtime::protect_event(ready));
       }
       else // If we've already triggered, then we can do the arrival now
-        Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT(),
+        Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
                                       result, result_size);
     }
 
@@ -1523,12 +1487,12 @@ namespace Legion {
           return finder->second;
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
-        Future result =
-          runtime->help_create_future(context, ApEvent::NO_AP_EVENT(), op);
+        Future result = 
+          runtime->help_create_future(context, ApEvent::NO_AP_EVENT, op);
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
-                                   ApEvent::NO_AP_EVENT(), point);
+                                   ApEvent::NO_AP_EVENT, point);
         return result;
       }
     }
@@ -2053,7 +2017,7 @@ namespace Legion {
       // trigger the termination event conditional upon the ready event
       Runtime::trigger_event(NULL, termination_event, ready_event);
 #ifdef DEBUG_LEGION
-      termination_event = ApUserEvent::NO_AP_USER_EVENT();
+      termination_event = ApUserEvent::NO_AP_USER_EVENT;
 #endif
       // reset mapped and valid
       mapped = false;
@@ -3036,7 +3000,7 @@ namespace Legion {
       AutoLock g_lock(grant_lock);
       if (!acquired)
       {
-        grant_event = ApEvent::NO_AP_EVENT();
+        grant_event = ApEvent::NO_AP_EVENT;
         for (std::vector<ReservationRequest>::const_iterator it = 
               requests.begin(); it != requests.end(); it++)
         {
@@ -3749,7 +3713,7 @@ namespace Legion {
       if (state.deferral_event == deferred_event)
       {
         // Now we can clear it
-        state.deferral_event = RtEvent::NO_RT_EVENT();
+        state.deferral_event = RtEvent::NO_RT_EVENT;
         // And if we still have tasks, reactivate the mapper
         if (!state.ready_queue.empty())
           increment_active_mappers();
@@ -3894,7 +3858,7 @@ namespace Legion {
           if (queue_copy_ready.exists() && !queue_copy_ready.has_triggered())
           {
             queue_copy_ready.wait();
-            queue_copy_ready = RtEvent::NO_RT_EVENT();
+            queue_copy_ready = RtEvent::NO_RT_EVENT;
           }
           AutoLock q_lock(queue_lock);
           MapperState &map_state = mapper_states[*steal_it];
@@ -3979,7 +3943,7 @@ namespace Legion {
           else if (rqueue.empty())
           {
             if (map_state.deferral_event.exists())
-              map_state.deferral_event = RtEvent::NO_RT_EVENT();
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
             else
               decrement_active_mappers();
           }
@@ -4005,7 +3969,7 @@ namespace Legion {
           if (map_state.queue_waiter.exists())
           {
             Runtime::trigger_event(map_state.queue_waiter);
-            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT();
+            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
           }
         }
         if (!local_stolen.empty())
@@ -4083,7 +4047,7 @@ namespace Legion {
       if (map_state.ready_queue.empty() || map_state.deferral_event.exists())
       {
         // Clear our deferral event since we are changing state
-        map_state.deferral_event = RtEvent::NO_RT_EVENT();
+        map_state.deferral_event = RtEvent::NO_RT_EVENT;
         increment_active_mappers();
       }
       map_state.ready_queue.push_back(task);
@@ -4122,7 +4086,7 @@ namespace Legion {
           if (queue_copy_ready.exists() && !queue_copy_ready.has_triggered())
           {
             queue_copy_ready.wait();
-            queue_copy_ready = RtEvent::NO_RT_EVENT();
+            queue_copy_ready = RtEvent::NO_RT_EVENT;
           }
           AutoLock q_lock(queue_lock);
           MapperState &map_state = mapper_states[map_id];
@@ -4191,7 +4155,7 @@ namespace Legion {
               if (map_state.queue_waiter.exists())
               {
                 Runtime::trigger_event(map_state.queue_waiter);
-                map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT();
+                map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
               }
               // Launch a task to remove the deferred mapper 
               // event when it triggers
@@ -4275,7 +4239,7 @@ namespace Legion {
           else if (rqueue.empty())
           {
             if (map_state.deferral_event.exists())
-              map_state.deferral_event = RtEvent::NO_RT_EVENT();
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
             else
               decrement_active_mappers();
           }
@@ -4311,7 +4275,7 @@ namespace Legion {
           if (map_state.queue_waiter.exists())
           {
             Runtime::trigger_event(map_state.queue_waiter);
-            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT();
+            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
           }
         }
         // Now we can trigger our tasks that the mapper selected
@@ -5884,8 +5848,8 @@ namespace Legion {
         assert((CREATE_INSTANCE_CONSTRAINTS <= kind) &&
                (kind <= FIND_ONLY_LAYOUT));
 #endif
-        RtEvent manager_ready = RtEvent::NO_RT_EVENT();
-        PhysicalManager *manager =
+        RtEvent manager_ready = RtEvent::NO_RT_EVENT;
+        PhysicalManager *manager = 
           runtime->find_or_request_instance_manager(did, manager_ready);
         // If the manager isn't ready yet, then we need to wait for it
         if (manager_ready.exists())
@@ -5918,8 +5882,8 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            RtEvent manager_ready = RtEvent::NO_RT_EVENT();
-            PhysicalManager *manager =
+            RtEvent manager_ready = RtEvent::NO_RT_EVENT;
+            PhysicalManager *manager = 
               runtime->find_or_request_instance_manager(did, manager_ready);
             // If the manager isn't ready yet, then we need to wait for it
             if (manager_ready.exists())
@@ -6274,8 +6238,8 @@ namespace Legion {
       const RtUserEvent our_event = Runtime::create_rt_user_event();
       AutoLock m_lock(manager_lock);
       // Wait for the previous allocation if there is one
-      const RtEvent wait_on = pending_allocation_attempts.empty() ?
-        RtEvent::NO_RT_EVENT() : pending_allocation_attempts.back();
+      const RtEvent wait_on = pending_allocation_attempts.empty() ? 
+        RtEvent::NO_RT_EVENT : pending_allocation_attempts.back();
       pending_allocation_attempts.push_back(our_event);
       return wait_on;
     }
@@ -6639,7 +6603,7 @@ namespace Legion {
 #endif
         insts[manager] = LEGION_GC_NEVER_PRIORITY;
       }
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -7030,7 +6994,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const FreeInstanceArgs *fargs = (const FreeInstanceArgs*)args;
-      fargs->manager->free_legion_instance(RtEvent::NO_RT_EVENT(), fargs->ptr,
+      fargs->manager->free_legion_instance(RtEvent::NO_RT_EVENT, fargs->ptr, 
                                                       false/*needs defer*/);
     }
 #endif
@@ -7086,7 +7050,7 @@ namespace Legion {
       sending_index += sizeof(header);
       packaged_messages = 0;
       sending_index += sizeof(packaged_messages);
-      last_message_event = RtEvent::NO_RT_EVENT();
+      last_message_event = RtEvent::NO_RT_EVENT;
       partial_message_id = 0;
       partial_assembly = NULL;
       partial = false;
@@ -9365,7 +9329,7 @@ namespace Legion {
                           finder->second.buffer, finder->second.size);
               finder->second.buffer = local;
               finder->second.size = size;
-              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+              finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
           }
@@ -9374,7 +9338,7 @@ namespace Legion {
             finder->second.buffer = local;
             finder->second.size = size;
             to_trigger = finder->second.ready_event;
-            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT();
+            finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
         }
@@ -17497,7 +17461,7 @@ namespace Legion {
           }
         }
         else // We were already handled so nothing to do
-          done_event = RtUserEvent::NO_RT_USER_EVENT();
+          done_event = RtUserEvent::NO_RT_USER_EVENT;
       }
       if (!deduplicate || done_event.exists())
       {
@@ -19804,7 +19768,7 @@ namespace Legion {
         // If we've already got it, then we are done
         if (finder != dist_collectables.end())
         {
-          ready = RtEvent::NO_RT_EVENT();
+          ready = RtEvent::NO_RT_EVENT;
           return finder->second;
         }
         // If it is already pending, we can just return the ready event
@@ -19864,7 +19828,7 @@ namespace Legion {
 #endif
       InnerContext *context = find_context(context_uid);
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
-                                          owner_space, ApEvent::NO_AP_EVENT());
+                                          owner_space, ApEvent::NO_AP_EVENT);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -24486,8 +24450,8 @@ namespace Legion {
             TaskImpl::SemanticRequestArgs *req_args = 
               (TaskImpl::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
-                          req_args->tag, req_args->source,
-                          false, false, RtUserEvent::NO_RT_USER_EVENT());
+                          req_args->tag, req_args->source, 
+                          false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
@@ -24495,8 +24459,8 @@ namespace Legion {
             IndexSpaceNode::SemanticRequestArgs *req_args = 
               (IndexSpaceNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
-                          req_args->tag, req_args->source,
-                          false, false, RtUserEvent::NO_RT_USER_EVENT());
+                          req_args->tag, req_args->source, 
+                          false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID:
@@ -24504,8 +24468,8 @@ namespace Legion {
             IndexPartNode::SemanticRequestArgs *req_args = 
               (IndexPartNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
-                          req_args->tag, req_args->source,
-                          false, false, RtUserEvent::NO_RT_USER_EVENT());
+                          req_args->tag, req_args->source, 
+                          false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
@@ -24513,8 +24477,8 @@ namespace Legion {
             FieldSpaceNode::SemanticRequestArgs *req_args = 
               (FieldSpaceNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
-                          req_args->tag, req_args->source,
-                          false, false, RtUserEvent::NO_RT_USER_EVENT());
+                          req_args->tag, req_args->source, 
+                          false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID:
@@ -24522,8 +24486,8 @@ namespace Legion {
             FieldSpaceNode::SemanticFieldRequestArgs *req_args = 
               (FieldSpaceNode::SemanticFieldRequestArgs*)args;
             req_args->proxy_this->process_semantic_field_request(
-                  req_args->fid, req_args->tag, req_args->source,
-                  false, false, RtUserEvent::NO_RT_USER_EVENT());
+                  req_args->fid, req_args->tag, req_args->source, 
+                  false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_DEFER_FIELD_INFOS_TASK_ID:
@@ -24536,8 +24500,8 @@ namespace Legion {
             RegionNode::SemanticRequestArgs *req_args = 
               (RegionNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
-                          req_args->tag, req_args->source,
-                          false, false, RtUserEvent::NO_RT_USER_EVENT());
+                          req_args->tag, req_args->source, 
+                          false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID:
@@ -24545,8 +24509,8 @@ namespace Legion {
             PartitionNode::SemanticRequestArgs *req_args = 
               (PartitionNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
-                          req_args->tag, req_args->source,
-                          false, false, RtUserEvent::NO_RT_USER_EVENT());
+                          req_args->tag, req_args->source, 
+                          false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
         case LG_INDEX_SPACE_DEFER_CHILD_TASK_ID:

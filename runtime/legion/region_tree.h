@@ -177,22 +177,22 @@ namespace Legion {
       IndexSpaceNode* create_index_space(IndexSpace handle, 
                               const Domain *domain, DistributedID did, 
                               Provenance *provenance,
-                              ApEvent ready = ApEvent::NO_AP_EVENT(),
+                              ApEvent ready = ApEvent::NO_AP_EVENT,
                               std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_union_space(IndexSpace handle, DistributedID did,
                               const char *provenance,
                               const std::vector<IndexSpace> &sources,
-                              RtEvent initialized = RtEvent::NO_RT_EVENT(),
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_intersection_space(IndexSpace handle, 
                               DistributedID did, const char *provenance,
                               const std::vector<IndexSpace> &sources,
-                              RtEvent initialized = RtEvent::NO_RT_EVENT(),
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_difference_space(IndexSpace handle,
                               DistributedID did, const char *provenance,
                               IndexSpace left, IndexSpace right,
-                              RtEvent initialized = RtEvent::NO_RT_EVENT(),
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
       RtEvent create_pending_partition(TaskContext *ctx,
                                        IndexPartition pid,
@@ -203,7 +203,7 @@ namespace Legion {
                                        DistributedID did,
                                        Provenance *provenance,
                                        ApEvent partition_ready,
-            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT(),
+            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT,
                                        std::set<RtEvent> *applied = NULL);
       void create_pending_cross_product(TaskContext *ctx,
                                         IndexPartition handle1,
@@ -676,7 +676,7 @@ namespace Legion {
                                   bool is_domain, IndexPartNode *par, 
                                   LegionColor color, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
-                                  ApEvent is_ready = ApEvent::NO_AP_EVENT(),
+                                  ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
                                   std::set<RtEvent> *applied = NULL,
                                   bool add_root_reference = false,
@@ -3324,7 +3324,7 @@ namespace Legion {
            const void *result, size_t size, bool is_mutable, RtUserEvent ready);
       void send_semantic_field_info(AddressSpaceID target, FieldID fid,
             SemanticTag tag, const void *result, size_t size, bool is_mutable,
-            RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT());
+            RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                              bool can_fail, bool wait_until, RtUserEvent ready);
       void process_semantic_field_request(FieldID fid, SemanticTag tag, 
@@ -3339,7 +3339,7 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       RtEvent create_allocator(AddressSpaceID source,
-          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT());
+          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
       RtEvent destroy_allocator(AddressSpaceID source);
     public:
       void initialize_fields(const std::vector<size_t> &sizes,
@@ -3500,7 +3500,7 @@ namespace Legion {
     protected:
       RtEvent request_field_infos_copy(std::map<FieldID,FieldInfo> *copy,
           AddressSpaceID source, 
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT()) const;
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) const;
       void record_read_only_infos(const std::map<FieldID,FieldInfo> &infos);
       void process_allocator_response(Deserializer &derez);
       void process_allocator_invalidation(RtUserEvent done);

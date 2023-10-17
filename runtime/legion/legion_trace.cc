@@ -1899,8 +1899,8 @@ namespace Legion {
           !(runtime->no_trace_optimization || runtime->no_fence_elision)),
         previous_replay(NULL), current_template(NULL),
         nonreplayable_count(0), new_template_count(0), 
-        previous_template_completion(ApEvent::NO_AP_EVENT()),
-        execution_fence_event(ApEvent::NO_AP_EVENT()),
+        previous_template_completion(ApEvent::NO_AP_EVENT),
+        execution_fence_event(ApEvent::NO_AP_EVENT),
         intermediate_execution_fence(false)
     //--------------------------------------------------------------------------
     {
@@ -1922,7 +1922,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> deleted_events;
-      ApEvent pending_deletion = ApEvent::NO_AP_EVENT();
+      ApEvent pending_deletion = ApEvent::NO_AP_EVENT;
       for (std::vector<PhysicalTemplate*>::iterator it =
            templates.begin(); it != templates.end(); ++it)
         if (!(*it)->defer_template_deletion(pending_deletion, deleted_events))
@@ -1944,7 +1944,7 @@ namespace Legion {
       assert(tpl->is_recording());
 #endif
       tpl->finalize(op, has_blocking_call);
-      ApEvent pending_deletion = ApEvent::NO_AP_EVENT();
+      ApEvent pending_deletion = ApEvent::NO_AP_EVENT;
       if (!tpl->is_replayable())
       {
         if (!tpl->defer_template_deletion(pending_deletion, applied_events))
@@ -2500,7 +2500,7 @@ namespace Legion {
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
       : trace(NULL), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
-        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT()),
+        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT),
         pre(NULL), post(NULL), pre_reductions(NULL), post_reductions(NULL),
         consumed_reductions(NULL)
     //--------------------------------------------------------------------------
@@ -2783,7 +2783,7 @@ namespace Legion {
         propagate_merges(gen);
         if (do_transitive_reduction)
         {
-          TransitiveReductionState state(RtUserEvent::NO_RT_USER_EVENT());
+          TransitiveReductionState state(RtUserEvent::NO_RT_USER_EVENT);
           transitive_reduction(&state, false/*deferred*/);
         }
         propagate_copies(&gen);
@@ -5164,7 +5164,7 @@ namespace Legion {
       }
       if (recurrent)
       {
-        fence_completion = ApEvent::NO_AP_EVENT();
+        fence_completion = ApEvent::NO_AP_EVENT;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = events[it->first];
@@ -5195,7 +5195,7 @@ namespace Legion {
           runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
             replay_targets[idx % replay_targets.size()]) :
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-            RtEvent::NO_RT_EVENT(), replay_targets[idx % replay_targets.size()]);
+            RtEvent::NO_RT_EVENT, replay_targets[idx % replay_targets.size()]);
         replayed_events.insert(done);
       }
     }
@@ -5731,7 +5731,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT(),
+                                     precondition, PredEvent::NO_PRED_EVENT,
                                      src_unique, dst_unique,
                                      priority, true/*replay*/);
     }
@@ -5818,7 +5818,7 @@ namespace Legion {
       ApEvent src_indirect_pre = events[src_indirect_precondition];
       ApEvent dst_indirect_pre = events[dst_indirect_precondition];
       const PhysicalTraceInfo trace_info(op, -1U, false);
-      events[lhs] = executor->execute(op, PredEvent::NO_PRED_EVENT(),
+      events[lhs] = executor->execute(op, PredEvent::NO_PRED_EVENT,
                                       copy_pre, src_indirect_pre,
                                       dst_indirect_pre, trace_info,
                                       true/*replay*/, recurrent_replay);
@@ -5902,7 +5902,7 @@ namespace Legion {
                                      trace_info.op->get_unique_op_id(),
                                      handle, tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT(),
+                                     precondition, PredEvent::NO_PRED_EVENT,
                                      unique_event, priority, true/*replay*/);
     }
 

@@ -70,7 +70,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (mutation_effects.empty())
-        return RtEvent::NO_RT_EVENT();
+        return RtEvent::NO_RT_EVENT;
       RtEvent result = Runtime::merge_events(mutation_effects);
       // Can clear this since the user caller takes responsibility for waiting
       mutation_effects.clear();
@@ -236,7 +236,7 @@ namespace Legion {
           if (gc_references.fetch_add(cnt) > 0)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
           }
 #ifdef DEBUG_LEGION
@@ -319,7 +319,7 @@ namespace Legion {
           else
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
           }
           if (reentrant)
@@ -391,7 +391,7 @@ namespace Legion {
           if (valid_references.fetch_add(cnt) > 0)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
           }
 #ifdef DEBUG_LEGION
@@ -474,7 +474,7 @@ namespace Legion {
           else
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
           }
           if (reentrant)
@@ -512,7 +512,7 @@ namespace Legion {
         assert(in_stable_state());
         result = (current_state == VALID_STATE);
         if (!reentrant)
-          reentrant_event = RtEvent::NO_RT_EVENT();
+          reentrant_event = RtEvent::NO_RT_EVENT;
         break;
       } while (true);
       return result;
@@ -559,7 +559,7 @@ namespace Legion {
         if (current_state != VALID_STATE)
         {
           if (!reentrant)
-            reentrant_event = RtEvent::NO_RT_EVENT();
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
         }
 #ifdef LEGION_GC
@@ -580,7 +580,7 @@ namespace Legion {
         valid_references.fetch_add(cnt);
 #endif
         if (!reentrant)
-          reentrant_event = RtEvent::NO_RT_EVENT();
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -626,7 +626,7 @@ namespace Legion {
         if (current_state != VALID_STATE)
         {
           if (!reentrant)
-            reentrant_event = RtEvent::NO_RT_EVENT();
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
         }
 #ifdef LEGION_GC
@@ -648,7 +648,7 @@ namespace Legion {
         valid_references.fetch_add(cnt);
 #endif
         if (!reentrant)
-          reentrant_event = RtEvent::NO_RT_EVENT();
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -695,7 +695,7 @@ namespace Legion {
             (current_state != VALID_STATE))
         {
           if (!reentrant)
-            reentrant_event = RtEvent::NO_RT_EVENT();
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
         }
 #ifdef LEGION_GC
@@ -716,7 +716,7 @@ namespace Legion {
           has_gc_references = true;
 #endif
         if (!reentrant)
-          reentrant_event = RtEvent::NO_RT_EVENT();
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -763,7 +763,7 @@ namespace Legion {
             (current_state != VALID_STATE))
         {
           if (!reentrant)
-            reentrant_event = RtEvent::NO_RT_EVENT();
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
         }
 #ifdef LEGION_GC
@@ -785,7 +785,7 @@ namespace Legion {
           has_gc_references = true;
 #endif
         if (!reentrant)
-          reentrant_event = RtEvent::NO_RT_EVENT();
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -1073,7 +1073,7 @@ namespace Legion {
           if (gc_references > cnt)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
           }
 #ifdef DEBUG_LEGION
@@ -1152,7 +1152,7 @@ namespace Legion {
           if (gc_references > cnt)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
           }
 #ifdef DEBUG_LEGION
@@ -1234,7 +1234,7 @@ namespace Legion {
           if (gc_references > 0)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
           }
           has_gc_references = false;
@@ -1315,7 +1315,7 @@ namespace Legion {
           if (gc_references > 0)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
           }
           has_gc_references = false;
@@ -1391,7 +1391,7 @@ namespace Legion {
           if (valid_references > cnt)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
           }
 #ifdef DEBUG_LEGION
@@ -1469,7 +1469,7 @@ namespace Legion {
           if (valid_references > cnt)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
           }
 #ifdef DEBUG_LEGION
@@ -1552,7 +1552,7 @@ namespace Legion {
           if (valid_references > 0)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
           }
           has_valid_references = false;
@@ -1633,7 +1633,7 @@ namespace Legion {
           if (valid_references > 0)
           {
             if (!reentrant)
-              reentrant_event = RtEvent::NO_RT_EVENT();
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
           }
           has_valid_references = false;
@@ -1947,7 +1947,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1983,7 +1983,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2019,7 +2019,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2055,7 +2055,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
-      return RtEvent::NO_RT_EVENT();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2067,7 +2067,7 @@ namespace Legion {
       if (precondition.exists() && !precondition.has_triggered())
       {
         DeferRemoteReferenceUpdateArgs args(this, target,
-            RtUserEvent::NO_RT_USER_EVENT(), signed_count, RESOURCE_REF_KIND);
+            RtUserEvent::NO_RT_USER_EVENT, signed_count, RESOURCE_REF_KIND);
         runtime->issue_runtime_meta_task(args,
             LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
@@ -2454,7 +2454,7 @@ namespace Legion {
         if (finish_event == reentrant_event)
         {
           reentrant = true;
-          return RtEvent::NO_RT_EVENT();
+          return RtEvent::NO_RT_EVENT;
         }
         else
           return transition_event;
@@ -2478,7 +2478,7 @@ namespace Legion {
         if (finish_event == reentrant_event)
         {
           reentrant = true;
-          return RtEvent::NO_RT_EVENT();
+          return RtEvent::NO_RT_EVENT;
         }
         else
           transition_event = Runtime::create_rt_user_event();
@@ -2718,11 +2718,11 @@ namespace Legion {
         assert(in_stable_state());
 #endif
         do_deletion = can_delete();
-        reentrant_event = RtEvent::NO_RT_EVENT();
+        reentrant_event = RtEvent::NO_RT_EVENT;
         if (transition_event.exists())
         {
           Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT();
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       else

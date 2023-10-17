@@ -112,7 +112,7 @@ namespace Legion {
     class MapperEvent {
     public:
       MapperEvent(void)
-        : impl(Internal::RtUserEvent::NO_RT_USER_EVENT()) { }
+        : impl(Internal::RtUserEvent::NO_RT_USER_EVENT) { }
       FRIEND_ALL_RUNTIME_CLASSES
     public:
       inline bool exists(void) const { return impl.exists(); }
