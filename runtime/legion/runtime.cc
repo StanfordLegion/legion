@@ -3113,7 +3113,7 @@ namespace Legion {
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
-        ApEvent src_ready = source->get_ready(false/*check ready*/);
+        ApEvent src_ready = source->get_ready(true/*check ready*/);
         if (precondition.exists())
           result = ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, src_ready, precondition)));
