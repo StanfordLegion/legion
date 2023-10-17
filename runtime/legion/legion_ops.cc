@@ -7364,7 +7364,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool commit_now = false;
-      RtEvent commit_pre;
       {
         AutoLock o_lock(op_lock);
         points_committed++;
@@ -15555,7 +15554,6 @@ namespace Legion {
       assert(is_index_space);
 #endif
       bool commit_now = false;
-      RtEvent commit_pre;
       {
         AutoLock o_lock(op_lock);
         points_committed++;
