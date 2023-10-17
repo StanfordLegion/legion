@@ -80,6 +80,7 @@ namespace Legion {
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
     thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 
+#if __cplusplus < 201703L // C++17
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
     const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
@@ -88,6 +89,7 @@ namespace Legion {
     const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
     const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
     const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
+#endif
 
     //--------------------------------------------------------------------------
     void LgEvent::begin_context_wait(Context ctx) const

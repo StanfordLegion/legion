@@ -36,10 +36,12 @@ namespace Realm {
   // class Event
   //
 
-  /*static*/ const Event Event::NO_EVENT = { 0 };
+#if __cplusplus < 201703L // C++17
+  /*static*/ const Event Event::NO_EVENT = Event();
   // Take this you POS c++ type system
   /* static */ const UserEvent UserEvent::NO_USER_EVENT = 
     *(static_cast<UserEvent*>(const_cast<Event*>(&Event::NO_EVENT)));
+#endif
 
   bool Event::has_triggered(void) const
   {
@@ -441,6 +443,7 @@ namespace Realm {
   // class Barrier
   //
 
+#if __cplusplus < 201703L // C++17
   namespace {
     Barrier make_no_barrier(void)
     {
@@ -452,7 +455,7 @@ namespace Realm {
   };
 
   /*static*/ const Barrier Barrier::NO_BARRIER = make_no_barrier();
-
+#endif
   /*static*/ const ::realm_event_gen_t Barrier::MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
 
   /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals,
