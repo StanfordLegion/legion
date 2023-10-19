@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Stanford University
+# Copyright 2023 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,31 +15,18 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+project(RealmTest_perf_realm_memcpy)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file_mini)
-add_subdirectory(legion_stl)
-add_subdirectory(rendering)
-add_subdirectory(realm)
-add_subdirectory(gather_perf)
-add_subdirectory(performance/realm/event_latency)
-add_subdirectory(performance/realm/task_throughput)
-add_subdirectory(performance/realm/event_ubench)
-add_subdirectory(performance/realm/task_ubench)
-add_subdirectory(performance/realm/memcpy)
-add_subdirectory(legion_redop_test)
+set(CPU_SOURCES memcpy.cc)
+add_executable(memcpy ${CPU_SOURCES})
 
-if(Legion_USE_HDF5)
-  add_subdirectory(hdf_attach_subregion_parallel)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_bindings)
-endif()
-
-if(Legion_NETWORKS)
-  add_subdirectory(bug954)
+target_link_libraries(memcpy Legion::Realm)
+target_compile_options(memcpy PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME memcpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:memcpy> ${Legion_TEST_ARGS})
 endif()

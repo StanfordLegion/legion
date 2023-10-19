@@ -11300,6 +11300,10 @@ namespace Legion {
       // usage of instances are now split across multiple log files
       if (config.num_profiling_nodes > 0)
         initialize_legion_prof(config);
+
+      if (config.legion_spy_enabled)
+        log_local_machine();
+
 #ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count.store(0);
       // Instantiate all the kinds of allocations
@@ -11938,18 +11942,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::log_machine(void) const
+    void Runtime::log_local_machine(void) const
     //--------------------------------------------------------------------------
     {
       std::set<Processor::Kind> proc_kinds;
-      Machine::ProcessorQuery all_procs(machine);
+      Machine::ProcessorQuery local_procs(machine);
+      local_procs.local_address_space();
 #define COUNTER(X,Y) +1
       constexpr size_t num_procs = REALM_PROCESSOR_KINDS(COUNTER);
       static_assert(num_procs == 9, "Add new processor kinds"); 
 #undef COUNTER
       // Log processors
-      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
-            it != all_procs.end(); it++)
+      for (Machine::ProcessorQuery::iterator it = local_procs.begin();
+            it != local_procs.end(); it++)
       {
         Processor::Kind kind = it->kind();
         if (proc_kinds.find(kind) == proc_kinds.end())
@@ -12010,13 +12015,14 @@ namespace Legion {
       }
       // Log memories
       std::set<Memory::Kind> mem_kinds;
-      Machine::MemoryQuery all_mems(machine);
+      Machine::MemoryQuery local_mems(machine);
+      local_mems.local_address_space();
 #define COUNTER(X,Y) +1
       constexpr size_t num_mems = REALM_MEMORY_KINDS(COUNTER);
       static_assert(num_mems == 15, "Add new memory kinds"); 
 #undef COUNTER
-      for (Machine::MemoryQuery::iterator it = all_mems.begin();
-            it != all_mems.end(); it++)
+      for (Machine::MemoryQuery::iterator it = local_mems.begin();
+            it != local_mems.end(); it++)
       {
         Memory::Kind kind = it->kind();
         if (mem_kinds.find(kind) == mem_kinds.end())
@@ -12100,9 +12106,10 @@ namespace Legion {
         LegionSpy::log_memory(it->id, it->capacity(), it->kind());
       }
       // Log Proc-Mem Affinity
-      Machine::ProcessorQuery all_procs2(machine);
-      for (Machine::ProcessorQuery::iterator pit = all_procs2.begin();
-            pit != all_procs2.end(); pit++)
+      Machine::ProcessorQuery local_procs2(machine);
+      local_procs2.local_address_space();
+      for (Machine::ProcessorQuery::iterator pit = local_procs2.begin();
+            pit != local_procs2.end(); pit++)
       {
         std::vector<ProcessorMemoryAffinity> affinities;
         machine.get_proc_mem_affinity(affinities, *pit);
@@ -12114,9 +12121,10 @@ namespace Legion {
         }
       }
       // Log Mem-Mem Affinity
-      Machine::MemoryQuery all_mems2(machine);
-      for (Machine::MemoryQuery::iterator mit = all_mems2.begin();
-            mit != all_mems2.begin(); mit++)
+      Machine::MemoryQuery local_mems2(machine);
+      local_mems2.local_address_space();
+      for (Machine::MemoryQuery::iterator mit = local_mems2.begin();
+            mit != local_mems2.begin(); mit++)
       {
         std::vector<MemoryMemoryAffinity> affinities;
         machine.get_mem_mem_affinity(affinities, *mit);
@@ -22299,11 +22307,10 @@ namespace Legion {
         const RtEvent initialized = Runtime::merge_events(nop_events);
         initialized.wait();
       }
+
       // Launch the top-level task if we have a main set
       if (the_runtime->address_space == 0)
       {
-        if (config.legion_spy_enabled)
-          the_runtime->log_machine();
         if (legion_main_set)
         {
           TaskLauncher launcher(Runtime::legion_main_id,

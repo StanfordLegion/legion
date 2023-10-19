@@ -91,6 +91,11 @@ namespace Legion {
          << "num_nodes:unsigned:" << sizeof(unsigned)
          << "}" << std::endl;
 
+      ss << "ZeroTime {"
+         << "id:" << ZERO_TIME_ID  << delim
+         << "zero_time:long long:" << sizeof(long long)
+         << "}" << std::endl;
+
       ss << "MemDesc {" 
          << "id:" << MEM_DESC_ID                               << delim
          << "mem_id:MemID:"                << sizeof(MemID)    << delim
@@ -329,7 +334,6 @@ namespace Legion {
          << "ready:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "start:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"        << sizeof(timestamp_t)        << delim
-         << "request_type:unsigned:"   << sizeof(unsigned)           << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)
 #ifdef LEGION_PROF_PROVENANCE
          << delim
@@ -508,6 +512,18 @@ namespace Legion {
 		sizeof(machine_desc.node_id));
       lp_fwrite(f, (char*)&(machine_desc.num_nodes),
 		sizeof(machine_desc.num_nodes));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                      const LegionProfDesc::ZeroTime
+				      &zero_time)
+    //--------------------------------------------------------------------------
+    {
+      int ID = ZERO_TIME_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(zero_time.zero_time),
+		sizeof(zero_time.zero_time));
     }
 
     //--------------------------------------------------------------------------
@@ -922,7 +938,6 @@ namespace Legion {
       lp_fwrite(f, (char*)&(copy_info.ready),  sizeof(copy_info.ready));
       lp_fwrite(f, (char*)&(copy_info.start),  sizeof(copy_info.start));
       lp_fwrite(f, (char*)&(copy_info.stop),   sizeof(copy_info.stop));
-      lp_fwrite(f, (char*)&(copy_info.request_type), sizeof(copy_info.request_type));
       lp_fwrite(f, (char*)&(copy_info.fevent),sizeof(copy_info.fevent.id));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(copy_info.provenance),sizeof(copy_info.provenance));
@@ -1595,6 +1610,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
+                                      const LegionProfDesc::ZeroTime
+				      &zero_time)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Zero Time %lld", zero_time.zero_time);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
                                   const LegionProfInstance::TaskKind &task_kind)
     //--------------------------------------------------------------------------
     {
@@ -1739,16 +1763,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu %u " IDFMT " " 
+      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu " IDFMT " " 
                      IDFMT, copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.request_type, copy_info.fevent.id,
-                     copy_info.provenance.id);
+                     copy_info.fevent.id, copy_info.provenance.id);
 #else
-      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu %u " IDFMT,
+      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu " IDFMT,
                      copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.request_type, copy_info.fevent.id);
+                     copy_info.fevent.id);
 #endif
       for (std::vector<LegionProfInstance::CopyInstInfo>::const_iterator it =
            copy_info.inst_infos.begin(); it != copy_info.inst_infos.end(); it++)

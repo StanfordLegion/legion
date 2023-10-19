@@ -436,6 +436,9 @@ namespace Realm {
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
+      private:
+      // For mapped remote memory, this is non-null
+      void *base;
     };
 
 
@@ -478,6 +481,11 @@ namespace Realm {
       static void handle_message(NodeID sender, const MemStorageReleaseResponse &msg,
 				 const void *data, size_t datalen);
     };
+
+    /// @brief Returns the full path for use in SharedMemoryInfo::create and SharedMemoryInfo::open given the realm id
+    /// @param id identifier of the realm object to get the name of
+    /// @return shared memory name of the requested object
+    std::string get_shm_name(realm_id_t id);
 
 }; // namespace Realm
 

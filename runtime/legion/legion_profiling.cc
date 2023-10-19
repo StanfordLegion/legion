@@ -31,8 +31,7 @@ namespace Legion {
 
     // Keep a thread-local profiler instance so we can always
     // be thread safe no matter what Realm decides to do 
-    __thread LegionProfInstance *thread_local_profiling_instance = NULL;
-
+    thread_local LegionProfInstance *thread_local_profiling_instance = NULL;
 
     //--------------------------------------------------------------------------
     template<size_t ENTRIES>
@@ -1734,6 +1733,11 @@ namespace Legion {
         rt->total_address_spaces);
 
       serializer->serialize(machine_desc);
+
+      LegionProfDesc::ZeroTime zero_time;
+      zero_time.zero_time = Legion::Runtime::get_zero_time();
+
+      serializer->serialize(zero_time);
 
       for (unsigned idx = 0; idx < num_meta_tasks; idx++)
       {

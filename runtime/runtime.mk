@@ -440,6 +440,15 @@ ifeq ($(strip $(USE_DLMOPEN)),1)
   REALM_CC_FLAGS += -DREALM_USE_DLMOPEN
 endif
 
+# The full capabilities of shared memory require configure-time checks that would be difficult to replicate in the makefile.
+# The following features would need to be tested for in the toolchain and enabled:
+# - posix_fallocate64 (for proper error handling when allocating shared memory)
+# - memfd_create (for anonymous memory sharing)
+USE_SHM ?= 0
+ifeq ($(strip $(USE_SHM)),1)
+  REALM_CC_FLAGS += -DREALM_USE_SHM
+endif
+
 USE_SPY ?= 0
 ifeq ($(strip $(USE_SPY)),1)
   LEGION_CC_FLAGS += -DLEGION_SPY
@@ -963,38 +972,39 @@ MAPPER_SRC	?=
 
 # Set the source files
 REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
-		   $(LG_RT_DIR)/realm/bgwork.cc \
-	           $(LG_RT_DIR)/realm/transfer/transfer.cc \
-	           $(LG_RT_DIR)/realm/transfer/channel.cc \
-	           $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
-	           $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
-	           $(LG_RT_DIR)/realm/transfer/ib_memory.cc \
-	           $(LG_RT_DIR)/realm/mutex.cc \
-	           $(LG_RT_DIR)/realm/module.cc \
-		   $(LG_RT_DIR)/realm/module_config.cc \
-	           $(LG_RT_DIR)/realm/threads.cc \
-	           $(LG_RT_DIR)/realm/faults.cc \
-		   $(LG_RT_DIR)/realm/operation.cc \
-	           $(LG_RT_DIR)/realm/tasks.cc \
-	           $(LG_RT_DIR)/realm/metadata.cc \
-	           $(LG_RT_DIR)/realm/repl_heap.cc \
-	           $(LG_RT_DIR)/realm/deppart/partitions.cc \
-	           $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
-	           $(LG_RT_DIR)/realm/deppart/image.cc \
-	           $(LG_RT_DIR)/realm/deppart/preimage.cc \
-	           $(LG_RT_DIR)/realm/deppart/byfield.cc \
-	           $(LG_RT_DIR)/realm/deppart/setops.cc \
-		   $(LG_RT_DIR)/realm/event_impl.cc \
-		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
-		   $(LG_RT_DIR)/realm/proc_impl.cc \
-		   $(LG_RT_DIR)/realm/mem_impl.cc \
-		   $(LG_RT_DIR)/realm/idx_impl.cc \
-		   $(LG_RT_DIR)/realm/inst_impl.cc \
-		   $(LG_RT_DIR)/realm/inst_layout.cc \
-		   $(LG_RT_DIR)/realm/machine_impl.cc \
-		   $(LG_RT_DIR)/realm/sampling_impl.cc \
-		   $(LG_RT_DIR)/realm/subgraph_impl.cc \
-                   $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc
+    $(LG_RT_DIR)/realm/bgwork.cc \
+    $(LG_RT_DIR)/realm/transfer/transfer.cc \
+    $(LG_RT_DIR)/realm/transfer/channel.cc \
+    $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
+    $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
+    $(LG_RT_DIR)/realm/transfer/ib_memory.cc \
+    $(LG_RT_DIR)/realm/mutex.cc \
+    $(LG_RT_DIR)/realm/module.cc \
+    $(LG_RT_DIR)/realm/module_config.cc \
+    $(LG_RT_DIR)/realm/threads.cc \
+    $(LG_RT_DIR)/realm/faults.cc \
+    $(LG_RT_DIR)/realm/operation.cc \
+    $(LG_RT_DIR)/realm/tasks.cc \
+    $(LG_RT_DIR)/realm/metadata.cc \
+    $(LG_RT_DIR)/realm/repl_heap.cc \
+    $(LG_RT_DIR)/realm/deppart/partitions.cc \
+    $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
+    $(LG_RT_DIR)/realm/deppart/image.cc \
+    $(LG_RT_DIR)/realm/deppart/preimage.cc \
+    $(LG_RT_DIR)/realm/deppart/byfield.cc \
+    $(LG_RT_DIR)/realm/deppart/setops.cc \
+    $(LG_RT_DIR)/realm/event_impl.cc \
+    $(LG_RT_DIR)/realm/rsrv_impl.cc \
+    $(LG_RT_DIR)/realm/proc_impl.cc \
+    $(LG_RT_DIR)/realm/mem_impl.cc \
+    $(LG_RT_DIR)/realm/idx_impl.cc \
+    $(LG_RT_DIR)/realm/inst_impl.cc \
+    $(LG_RT_DIR)/realm/inst_layout.cc \
+    $(LG_RT_DIR)/realm/machine_impl.cc \
+    $(LG_RT_DIR)/realm/sampling_impl.cc \
+    $(LG_RT_DIR)/realm/subgraph_impl.cc \
+    $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc \
+    $(LG_RT_DIR)/realm/shm.cc
 # REALM_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 REALM_INST_SRC  += $(LG_RT_DIR)/realm/deppart/image_tmpl.cc \
 	           $(LG_RT_DIR)/realm/deppart/preimage_tmpl.cc \

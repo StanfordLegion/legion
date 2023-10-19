@@ -18,7 +18,7 @@ use legion_prof::backend::archiver;
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
 use legion_prof::backend::viewer;
-use legion_prof::backend::{analyze, trace_viewer, visualize};
+use legion_prof::backend::{analyze, dump, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
 use legion_prof::spy;
 use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
@@ -54,6 +54,9 @@ struct Cli {
 
     #[arg(long, hide = true, help = "emit JSON for Google Trace Viewer")]
     trace: bool,
+
+    #[arg(long, help = "dump parsed log files in a JSON format")]
+    dump: bool,
 
     #[arg(long, help = "start time in microseconds to trim the profile")]
     start_trim: Option<u64>,
@@ -148,7 +151,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "archiver"))]
     if cli.archive {
         panic!(
-            "Legion Prof was not build with the \"archiver\" feature. \
+            "Legion Prof was not built with the \"archiver\" feature. \
                 Rebuild with --features=archiver to enable."
         );
     }
@@ -156,7 +159,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "client"))]
     if cli.attach {
         panic!(
-            "Legion Prof was not build with the \"client\" feature. \
+            "Legion Prof was not built with the \"client\" feature. \
                 Rebuild with --features=client to enable."
         );
     }
@@ -164,7 +167,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "server"))]
     if cli.serve {
         panic!(
-            "Legion Prof was not build with the \"server\" feature. \
+            "Legion Prof was not built with the \"server\" feature. \
                 Rebuild with --features=server to enable."
         );
     }
@@ -172,7 +175,7 @@ fn main() -> io::Result<()> {
     #[cfg(not(feature = "viewer"))]
     if cli.view {
         panic!(
-            "Legion Prof was not build with the \"viewer\" feature. \
+            "Legion Prof was not built with the \"viewer\" feature. \
                 Rebuild with --features=viewer to enable."
         );
     }
@@ -230,6 +233,20 @@ fn main() -> io::Result<()> {
             )
         })
         .collect();
+    if cli.dump {
+        for record in records? {
+            match record {
+                Records::Prof(r) => {
+                    dump::dump_record(&r)?;
+                }
+                Records::Spy(r) => {
+                    dump::dump_spy_record(&r)?;
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let mut state = State::default();
     state.visible_nodes = node_list;
     let mut spy_state = SpyState::default();
@@ -256,14 +273,15 @@ fn main() -> io::Result<()> {
 
     let mut have_alllogs = true;
     // if number of files
-    if state.num_nodes > cli.filenames.len().try_into().unwrap() {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", state.num_nodes, cli.filenames.len());
+    let num_nodes: usize = state.num_nodes.try_into().unwrap();
+    if num_nodes > cli.filenames.len() {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", num_nodes, cli.filenames.len());
         have_alllogs = false;
     }
 
     // check if subnodes is enabled and filter input is true
-    if state.visible_nodes.len() < state.num_nodes.try_into().unwrap() && filter_input {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", state.num_nodes, state.visible_nodes.len());
+    if state.visible_nodes.len() < num_nodes && filter_input {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", num_nodes, state.visible_nodes.len());
         have_alllogs = false;
     }
 

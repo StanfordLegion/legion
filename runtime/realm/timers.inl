@@ -22,7 +22,9 @@
 
 #include <climits>
 
-#if REALM_TIMERS_USE_RDTSC
+// When compiling with nvcc, some of the rdtsc intrinsics don't translate properly when
+// compiling device code, so don't use RDTSC for device code
+#if REALM_TIMERS_USE_RDTSC && !defined(__CUDA_ARCH__)
 #if defined(REALM_ON_WINDOWS)
 #include <intrin.h>
 #pragma intrinsic(__rdtsc)
@@ -113,7 +115,7 @@ namespace Realm {
     return native_to_nanoseconds.convert_reverse_delta(d_nanoseconds);
   }
 
-#if REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC && !defined(__CUDA_ARCH__)
   inline /*static*/ uint64_t Clock::raw_cpu_tsc(void)
   {
 #if defined(__i386__) || defined(__x86_64__)

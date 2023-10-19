@@ -9,6 +9,8 @@ use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
 
+use serde::Serialize;
+
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
@@ -198,7 +200,9 @@ macro_rules! conditional_assert {
     )
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+)]
 pub struct Timestamp(pub u64 /* ns */);
 
 impl Timestamp {
@@ -220,6 +224,11 @@ impl fmt::Display for Timestamp {
         write!(f, "{}.{:0>3}", microseconds, remainder)
     }
 }
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+)]
+pub struct TimestampDelta(pub i64 /* ns */);
 
 #[derive(Debug, Copy, Clone)]
 pub struct TimePoint<Entry, Secondary>
@@ -423,10 +432,10 @@ impl ContainerEntry for ProcEntry {
 
 pub type ProcPoint = TimePoint<ProfUID, u64>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct ProcID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct NodeID(pub u64);
 
 impl ProcID {
@@ -674,7 +683,7 @@ pub type MemEntry = Inst;
 
 pub type MemPoint = TimePoint<InstUID, u64>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
 
 impl MemID {
@@ -1161,7 +1170,7 @@ pub struct ISpaceSize {
     pub is_sparse: bool,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct ISpaceID(pub u64);
 
 #[derive(Debug)]
@@ -1232,7 +1241,7 @@ impl ISpace {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct IPartID(pub u64);
 
 #[derive(Debug)]
@@ -1276,7 +1285,7 @@ impl IPart {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FSpaceID(pub u64);
 
 #[derive(Debug)]
@@ -1302,7 +1311,7 @@ impl FSpace {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FieldID(pub u32);
 
 #[derive(Debug)]
@@ -1324,7 +1333,7 @@ impl Field {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TreeID(pub u32);
 
 #[derive(Debug)]
@@ -1414,10 +1423,10 @@ impl Align {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Dim(pub u32);
 
 #[derive(Debug)]
@@ -1606,7 +1615,7 @@ impl Color {
     pub const GRAY: Color = Color(0x808080);
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -1630,7 +1639,7 @@ impl MapperCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -1654,7 +1663,7 @@ impl RuntimeCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
@@ -1677,7 +1686,7 @@ impl TaskKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct VariantID(pub u32);
 
 #[derive(Debug)]
@@ -1835,7 +1844,7 @@ impl Waiters {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct OpID(pub u64);
 
 impl From<spy::serialize::UniqueID> for OpID {
@@ -1936,10 +1945,10 @@ impl Operation {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct EventID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct InstUID(pub u64);
 
 impl From<spy::serialize::EventID> for EventID {
@@ -2010,20 +2019,12 @@ pub struct Copy {
     chan_id: Option<ChanID>,
     pub op_id: OpID,
     pub size: u64,
-    _request_type: u32,
     pub copy_kind: Option<CopyKind>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
 impl Copy {
-    fn new(
-        base: Base,
-        time_range: TimeRange,
-        op_id: OpID,
-        size: u64,
-        request_type: u32,
-        fevent: EventID,
-    ) -> Self {
+    fn new(base: Base, time_range: TimeRange, op_id: OpID, size: u64, fevent: EventID) -> Self {
         Copy {
             base,
             fevent,
@@ -2031,7 +2032,6 @@ impl Copy {
             chan_id: None,
             op_id,
             size,
-            _request_type: request_type,
             copy_kind: None,
             copy_inst_infos: Vec::new(),
         }
@@ -2279,6 +2279,7 @@ pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub num_nodes: u32,
+    pub zero_time: TimestampDelta,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
     pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
@@ -2479,22 +2480,14 @@ impl State {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        request_type: u32,
         fevent: EventID,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         assert_eq!(copies.contains_key(&fevent), false);
-        copies.entry(fevent).or_insert_with(|| {
-            Copy::new(
-                Base::new(alloc),
-                time_range,
-                op_id,
-                size,
-                request_type,
-                fevent,
-            )
-        })
+        copies
+            .entry(fevent)
+            .or_insert_with(|| Copy::new(Base::new(alloc), time_range, op_id, size, fevent))
     }
 
     fn create_fill<'a>(
@@ -3246,6 +3239,9 @@ fn process_record(
         Record::MachineDesc { num_nodes, .. } => {
             state.num_nodes = *num_nodes;
         }
+        Record::ZeroTime { zero_time } => {
+            state.zero_time = TimestampDelta(*zero_time);
+        }
         Record::ProcDesc { proc_id, kind } => {
             let kind = match ProcKind::try_from(*kind) {
                 Ok(x) => x,
@@ -3562,12 +3558,11 @@ fn process_record(
             ready,
             start,
             stop,
-            request_type,
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_op(*op_id);
-            state.create_copy(time_range, *op_id, *size, *request_type, *fevent, copies);
+            state.create_copy(time_range, *op_id, *size, *fevent, copies);
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {

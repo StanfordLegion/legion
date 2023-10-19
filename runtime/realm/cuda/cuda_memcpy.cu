@@ -71,12 +71,26 @@ static __device__ inline void memcpy_kernel_transpose(
   const Offset_t tile_size = info.tile_size;
   const Offset_t tidx = threadIdx.x % tile_size;
   const Offset_t tidy = (threadIdx.x / tile_size) % tile_size;
-  const Offset_t grid_dimx = ((info.width + tile_size - 1) / tile_size);
-  const Offset_t grid_dimy = ((info.height + tile_size - 1) / tile_size);
-  const Offset_t chunks = info.field_size / sizeof(T);
+  const Offset_t grid_dimx = ((info.extents[2] + tile_size - 1) / tile_size);
+  const Offset_t grid_dimy = ((info.extents[1] + tile_size - 1) / tile_size);
+  const Offset_t contig_bytes = info.extents[0];
+  const Offset_t chunks = contig_bytes / sizeof(T);
 
-  for (Offset_t block = blockIdx.x; block < grid_dimx * grid_dimy;
-       block += gridDim.x) {
+  const Offset_t src_stride_x =
+      ((info.src_strides[0] > info.src_strides[1]) ? info.src_strides[1]
+                                                   : info.src_strides[0]) /
+      contig_bytes;
+  const Offset_t src_stride_y =
+      ((info.src_strides[0] > info.src_strides[1]) ? info.src_strides[0]
+                                                   : info.src_strides[1]) /
+      contig_bytes;
+
+  const Offset_t dst_stride_y =
+      ((info.dst_strides[0] > info.dst_strides[1]) ? info.dst_strides[0]
+                                                   : info.dst_strides[1]) /
+      contig_bytes;
+
+  for(Offset_t block = blockIdx.x; block < grid_dimx * grid_dimy; block += gridDim.x) {
     Offset_t block_idx = block % grid_dimx;
     Offset_t block_idy = block / grid_dimx;
 
@@ -85,17 +99,17 @@ static __device__ inline void memcpy_kernel_transpose(
 
     __syncthreads();
 
-    for (Offset_t block_offset = 0; block_offset < chunks * tile_size;
-         block_offset += tile_size) {
-      if (x_base + block_offset < info.width * chunks && y_base < info.height) {
+    for(Offset_t block_offset = 0; block_offset < chunks * tile_size;
+        block_offset += tile_size) {
+      if(x_base + block_offset < info.extents[2] * chunks && y_base < info.extents[1]) {
         Offset_t in_tile_idx = tidx + (tile_size + 1) * tidy * chunks;
 
         // The purpose of this calculation is to handle XYZ -> ZYX case
-        // where field_size > sizeof(T)
+        // where contig_bytes > sizeof(T)
         Offset_t x_base_idx =
-            ((x_base / chunks) * (info.src_stride_x * chunks) + x_base % chunks);
+            ((x_base / chunks) * (src_stride_x * chunks) + x_base % chunks);
         tile[in_tile_idx + block_offset] =
-            in_base[x_base_idx + y_base * info.src_stride * chunks + block_offset];
+            in_base[x_base_idx + y_base * src_stride_y * chunks + block_offset];
       }
     }
 
@@ -104,14 +118,13 @@ static __device__ inline void memcpy_kernel_transpose(
     x_base = block_idy * tile_size * chunks + tidx;
     y_base = block_idx * tile_size + tidy;
 
-    for (Offset_t block_offset = 0; block_offset < chunks * tile_size;
-         block_offset += tile_size) {
-      if (x_base + block_offset < info.height * chunks && y_base < info.width) {
+    for(Offset_t block_offset = 0; block_offset < chunks * tile_size;
+        block_offset += tile_size) {
+      if(x_base + block_offset < info.extents[1] * chunks && y_base < info.extents[2]) {
         Offset_t out_tile_idx =
-            (tidy + (tile_size + 1) * ((tidx + block_offset) / chunks)) *
-                chunks +
+            (tidy + (tile_size + 1) * ((tidx + block_offset) / chunks)) * chunks +
             (tidx + block_offset) % chunks;
-        out_base[x_base + info.dst_stride * y_base * chunks + block_offset] =
+        out_base[x_base + dst_stride_y * y_base * chunks + block_offset] =
             tile[out_tile_idx];
       }
     }
@@ -172,7 +185,7 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
 }
 
 #define MEMCPY_TEMPLATE_INST(type, dim, offt, name)                            \
-  extern "C" __global__ __launch_bounds__(256, 8) void                         \
+  extern "C" __global__ __launch_bounds__(256, 4) void                         \
       memcpy_affine_batch##name(Realm::Cuda::AffineCopyInfo<dim, offt> info) { \
     memcpy_affine_batch<type, dim, offt>(info.subrects, info.num_rects);       \
   }
@@ -196,7 +209,7 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
   }
 
 #define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                  \
-  extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name( \
+  extern "C" __global__ __launch_bounds__(256, 4) void memcpy_indirect##name( \
       Realm::Cuda::MemcpyUnstructuredInfo<dim> info) {}
 
 #define INST_TEMPLATES(type, sz, dim, off)                                     \

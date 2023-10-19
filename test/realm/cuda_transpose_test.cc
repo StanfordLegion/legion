@@ -90,7 +90,7 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
 }
 
 namespace TestConfig {
-  size_t field_size = 32;
+  size_t field_size = 8;
   size_t block_cols = 4;
   size_t block_rows = 4;
   bool verbose = false;
@@ -99,11 +99,11 @@ namespace TestConfig {
   size_t narrow_dim = 0;        // should one dimension be a fixed (narrow) size?
   unsigned dim_mask = 3;        // i.e. all the dimensions
   bool all_mems = true;
-  size_t pad_width = 0;
+  size_t pad_width = 32;
   size_t max_perms = 10;
   unsigned random_seed = 12345; // used to sample permutations if needed
   bool wait_after = false;      // wait after each copy?
-  bool do_unit_test = true;
+  bool do_unit_test = false;
 };                              // namespace TestConfig
 
 template <int N, typename T, typename DT>
@@ -216,8 +216,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
                    size_t narrow_size, Processor prof_proc,
                    const std::set<std::string> &src_perms,
                    const std::set<std::string> &dst_perms,
-                   Rect<N, T> bounds = Rect<N, T>::make_empty(),
-                   Rect<N, T> bounds_pad = Rect<N, T>::make_empty(),
+                   std::vector<Rect<N, T>> domain = {},
+                   std::vector<Rect<N, T>> src_bounds = {},
+                   std::vector<Rect<N, T>> dst_bounds = {},
                    int pad = 0) {
   std::vector<LayoutPermutation<N>> perms;
   LayoutPermutation<N> scratch;
@@ -236,41 +237,54 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     perms.resize(TestConfig::max_perms);
   }
 
-  if (bounds.empty()) {
+  if (domain.empty()) {
+    domain.resize(1);
     for (int i = 0; i < N; i++) {
-      bounds.lo[i] = 0;
+      domain.back().lo[i] = 0;
       if ((N > 1) && (narrow_size > 0)) {
         if (i == 0)
-          bounds.hi[i] = narrow_size - 1;
+          domain.back().hi[i] = narrow_size - 1;
         else {
-          bounds.hi[i] = (1 << (log2_size / std::max(1, N - 1))) - 1;
-          // max is for compilers that don't see this code is unreachable for
-          // N==1
+          domain.back().hi[i] = (1 << (log2_size / std::max(1, N - 1))) - 1;
         }
       } else
-        bounds.hi[i] = (1 << (log2_size / N)) - 1;
+        domain.back().hi[i] = (1 << (log2_size / N)) - 1;
     }
   }
+  IndexSpace<N> is(domain);
 
-  log_app.info() << "bounds=" << bounds;
-  IndexSpace<N> is(bounds);
-
-  if (bounds_pad.empty()) {
+  if (src_bounds.empty()) {
+    src_bounds.resize(1);
     for (int i = 0; i < N; i++) {
-      bounds_pad.lo[i] = 0;
-      bounds_pad.hi[i] = bounds.hi[i] + (((narrow_size > 0) &&
-                                          (narrow_size < TestConfig::pad_width))
-                                             ? narrow_size
-                                             : TestConfig::pad_width);
+      src_bounds.back().lo[i] = 0;
+      src_bounds.back().hi[i] =
+          domain.back().hi[i] +
+          (((narrow_size > 0) && (narrow_size < TestConfig::pad_width))
+               ? narrow_size
+               : TestConfig::pad_width);
     }
   }
 
-  log_app.info() << "bounds_pad=" << bounds_pad;
-  IndexSpace<N> is_pad(bounds_pad);
+  IndexSpace<N> src_is(src_bounds);
+
+  if (dst_bounds.empty()) {
+    dst_bounds.resize(1);
+    for (int i = 0; i < N; i++) {
+      dst_bounds.back().lo[i] = 0;
+      dst_bounds.back().hi[i] =
+          dst_bounds.back().hi[i] +
+          (((narrow_size > 0) && (narrow_size < TestConfig::pad_width))
+               ? narrow_size
+               : TestConfig::pad_width);
+    }
+  }
+
+  IndexSpace<N> dst_is(dst_bounds);
 
   std::map<FieldID, size_t> field_sizes;
   field_sizes[0] = sizeof(FT);
-  InstanceLayoutConstraints ilc(field_sizes, 1);
+
+  InstanceLayoutConstraints ilc(field_sizes, /*block_size=*/0);
 
   std::vector<FT> test_data;
   std::vector<TransposeExperiment<N> *> experiments;
@@ -285,7 +299,8 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     RegionInstance src_inst;
     {
       InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
-          is_pad, ilc, perms[i].dim_order);
+          src_is, ilc, perms[i].dim_order);
+
       wait_for = RegionInstance::create_instance(src_inst, src_mem, ilg,
                                                  ProfilingRequestSet(), wait_for);
 
@@ -294,8 +309,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
         test_data.push_back(index+N);
         return index += N;
       };
-      init_index_space<N, T, FT>(src_inst, src_inst, is, /*field_id=*/0,
-                                 src_lambda, /*use_proxy_inst=*/false);
+
+      init_index_space<N, T, FT>(src_inst, src_inst, is, 0,
+                                 src_lambda, false);
     }
 
     for (unsigned j = 0; j < perms.size(); j++) {
@@ -307,7 +323,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       {
         InstanceLayoutGeneric *ilg =
             InstanceLayoutGeneric::choose_instance_layout<N, T>(
-                is_pad, ilc, perms[j].dim_order);
+                dst_is, dst_bounds, ilc, perms[j].dim_order);
         wait_for = RegionInstance::create_instance(
             dst_inst, dst_mem, ilg, ProfilingRequestSet(), wait_for);
       }
@@ -342,9 +358,12 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       wait_for = is.copy(srcs, dsts, prs, wait_for);
       wait_for.wait();
 
-      dump_and_verify<N, T, FT>(src_inst, /*field_id=*/0, is,
+      dump_and_verify<N, T, FT>(src_inst, 0, is,
                                 is.bounds.hi[i] + 1, test_data,
-                                TestConfig::verbose, TestConfig::verify);
+                                TestConfig::verbose, 0);
+
+      log_app.print() << "Verify " << perms[i].name << " " << perms[j].name;
+
       dump_and_verify<N, T, FT>(dst_inst, /*field_id=*/0, is,
                                 is.bounds.hi[i] + 1, test_data,
                                 TestConfig::verbose, TestConfig::verify);
@@ -365,8 +384,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     double bw = 1.0 * is.volume() * field_sizes[0] / (*it)->nanoseconds;
 
     log_app.print() << "Test passed, src=" << (*it)->src_perm->name
-                    << " dst=" << (*it)->dst_perm->name << " bounds=" << bounds
-                    << " bounds_pad=" << bounds_pad
+                    << " dst=" << (*it)->dst_perm->name
                     << " field_size=" << sizeof(FT)
                     << " time=" << (1e-9 * (*it)->nanoseconds) << " bw=" << bw;
     delete *it;
@@ -378,38 +396,42 @@ void do_single_dim_field_size(Memory src_mem, Memory dst_mem, int log2_size,
                               size_t narrow_size, Processor prof_proc,
                               const std::set<std::string> &src_perms,
                               const std::set<std::string> &dst_perms,
-                              Rect<N, T> bounds = Rect<N, T>::make_empty(),
-                              Rect<N, T> bounds_pad = Rect<N, T>::make_empty(),
+                              std::vector<Rect<N, T>> domain = {},
+                              std::vector<Rect<N, T>> src_bounds = {},
+                              std::vector<Rect<N, T>> dst_bounds = {},
                               size_t field_size = 8, int pad = 0) {
-  if (TestConfig::field_size == 8) {
+  if (field_size == 4) {
+    do_single_dim<N, T, int>(src_mem, dst_mem, log2_size,
+                             TestConfig::narrow_dim, prof_proc, src_perms,
+                             dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if (field_size == 8) {
     do_single_dim<N, T, double>(src_mem, dst_mem, log2_size,
-                                TestConfig::narrow_dim, prof_proc, src_perms, dst_perms,
-                                bounds, bounds_pad, pad);
-  } else if (TestConfig::field_size == 16) {
+                                TestConfig::narrow_dim, prof_proc, src_perms,
+                                dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if (field_size == 16) {
     typedef Data<double, 2> FieldStruct16;
-    do_single_dim<N, T, FieldStruct16>(src_mem, dst_mem, log2_size,
-                                       TestConfig::narrow_dim, prof_proc, src_perms,
-                                       dst_perms, bounds, bounds_pad, pad);
-  } else if (TestConfig::field_size == 24) {
+    do_single_dim<N, T, FieldStruct16>(
+        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
+        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if (field_size == 24) {
     typedef Data<double, 3> FieldStruct24;
-    do_single_dim<N, T, FieldStruct24>(src_mem, dst_mem, log2_size,
-                                       TestConfig::narrow_dim, prof_proc, src_perms,
-                                       dst_perms, bounds, bounds_pad, pad);
+    do_single_dim<N, T, FieldStruct24>(
+        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
+        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
   }
-  if (TestConfig::field_size == 32) {
+  if (field_size == 32) {
     typedef Data<double, 4> FieldStruct32;
-    do_single_dim<N, T, FieldStruct32>(src_mem, dst_mem, log2_size,
-                                       TestConfig::narrow_dim, prof_proc, src_perms,
-                                       dst_perms, bounds, bounds_pad, pad);
+    do_single_dim<N, T, FieldStruct32>(
+        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
+        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
   }
-  if (TestConfig::field_size == 40) {
+  if (field_size == 40) {
     typedef Data<char, 40> FieldStruct40;
-    do_single_dim<N, T, FieldStruct40>(src_mem, dst_mem, log2_size,
-                                       TestConfig::narrow_dim, prof_proc, src_perms,
-                                       dst_perms, bounds, bounds_pad, pad);
+    do_single_dim<N, T, FieldStruct40>(
+        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
+        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
   }
 }
-
 
 std::set<Processor::Kind> supported_proc_kinds;
 
@@ -447,40 +469,63 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
       if (TestConfig::dim_mask == 1) {
         // TODO(apryakhin@): Add support/tests for dim=1
         assert(0);
-        // do_single_dim<1, FT>(*src_it, *dst_it, log2_buffer_size, 0, p);
+        do_single_dim_field_size<1, int>(*src_it, *dst_it, log2_buffer_size, 0,
+                                         p, {}, {});
       } else if (TestConfig::dim_mask == 2) {
         do_single_dim_field_size<2, int>(*src_it, *dst_it, log2_buffer_size,
                                          TestConfig::narrow_dim, p, {"XY"},
                                          {"YX"});
       } else if (TestConfig::dim_mask == 3) {
         if (!TestConfig::do_unit_test) {
-          do_single_dim_field_size<3, int>(*src_it, *dst_it, log2_buffer_size,
-                                           TestConfig::narrow_dim, p, {"XYZ"},
-                                           {"YXZ"});
+          // TODO(apryakhin@): This is an HTR hard-coded use case.
+          // Consider finding a more generica alternative.
+          std::vector<Rect<3>> domain;
+          domain.push_back(Rect<3>(Point<3>(0, 9, 9), Point<3>(0, 16, 16)));
+          domain.push_back(Rect<3>(Point<3>(8, 9, 9), Point<3>(8, 16, 16)));
+
+          std::vector<Rect<3>> src_bounds = {
+              Rect<3>(Point<3>(0, 9, 9), Point<3>(8, 17, 17))};
+
+          std::vector<Rect<3>> dst_bounds;
+          dst_bounds.push_back(Rect<3>(Point<3>(0, 9, 6), Point<3>(8, 17, 8)));
+          dst_bounds.push_back(Rect<3>(Point<3>(0, 6, 9), Point<3>(8, 8, 17)));
+          dst_bounds.push_back(Rect<3>(Point<3>(0, 9, 9), Point<3>(0, 16, 16)));
+          dst_bounds.push_back(Rect<3>(Point<3>(8, 9, 9), Point<3>(8, 16, 16)));
+          dst_bounds.push_back(Rect<3>(Point<3>(9, 9, 9), Point<3>(11, 17, 17)));
+          dst_bounds.push_back(Rect<3>(Point<3>(0, 17, 9), Point<3>(8, 17, 16)));
+          dst_bounds.push_back(Rect<3>(Point<3>(0, 9, 17), Point<3>(8, 17, 17)));
+
+          do_single_dim_field_size<3, int>(
+              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {},
+              {}, domain, src_bounds, dst_bounds, TestConfig::field_size);
+
+          /*do_single_dim_field_size<3, int>(
+              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"YXZ"},
+              {"XYZ"}, domain, src_bounds, dst_bounds, TestConfig::field_size);*/
+
+
+          //do_single_dim_field_size<3, int>(
+            //  *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"ZYX"},
+              //{"XZY"}, domain, src_bounds, dst_bounds, TestConfig::field_size);
+
         } else {
           const size_t block_cols = TestConfig::block_cols;
           const size_t block_rows = TestConfig::block_rows;
-          for (size_t xscale = 1; xscale < 4; xscale *= 2) {
-            for (size_t yscale = 1; yscale < 4; yscale *= 2) {
-              {
-                size_t zscale = 1;
-                for (int pad_x = -1; pad_x <= 1; pad_x++) {
-                  for (int pad_y = -1; pad_y <= 1; pad_y++) {
-                    do_single_dim_field_size<3>(
-                        *src_it, *dst_it, log2_buffer_size,
-                        TestConfig::narrow_dim, p, {}, {},
-                        Rect<3>(Point<3>(0, 0, 0),
-                                Point<3>((xscale * block_cols) + pad_x,
-                                         (yscale * block_rows) + pad_y,
-                                         zscale * block_rows)),
-                        Rect<3>(Point<3>(0, 0, 0),
-                                Point<3>((xscale * block_cols) + pad_x,
-                                         (yscale * block_rows) + pad_y,
-                                         zscale * block_rows)),
-                        TestConfig::field_size);
-                  }
-                }
-              }
+          for (int pad_x = -1; pad_x <= 1; pad_x++) {
+            for (int pad_y = -1; pad_y <= 1; pad_y++) {
+              do_single_dim_field_size<3, int>(
+                  *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p,
+                  {}, {},
+                  {Rect<3>(Point<3>(0, 0, 0),
+                           Point<3>((2 * block_cols) + pad_x,
+                                    (2 * block_rows) + pad_y, 2 * block_rows))},
+                  {Rect<3>(Point<3>(0, 0, 0),
+                           Point<3>((2 * block_cols) + pad_x,
+                                    (2 * block_rows) + pad_y, 2 * block_rows))},
+                  {Rect<3>(Point<3>(0, 0, 0),
+                           Point<3>((2 * block_cols) + pad_x,
+                                    (2 * block_rows) + pad_y, 2 * block_rows))},
+                  TestConfig::field_size);
             }
           }
         }
