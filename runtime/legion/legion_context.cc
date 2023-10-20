@@ -207,7 +207,11 @@ namespace Legion {
     {
       // No need to do a match here, there is just one shard
       const size_t future_size = sizeof(num_elements);
-      memcpy(output, input, num_elements*future_size);
+      // We only need this if-statement to guard against nullptr cases
+      // to make undefined behavior checkers happy since the C++ standard
+      // is woefully underspecified as usual.
+      if (num_elements > 0)
+        memcpy(output, input, num_elements*future_size);
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       result.impl->set_local(&num_elements, future_size);
