@@ -5182,7 +5182,7 @@ namespace Legion {
         case LEGION_WRITE_ONLY:
         case LEGION_WRITE_DISCARD:
           {
-            if (!(LEGION_WRITE_DISCARD & req.privilege))
+            if (!(LEGION_WRITE_ONLY & req.privilege))
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating write-discard field accessor "
                             "without write privileges on field %d in task %s",
