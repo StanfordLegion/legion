@@ -10615,6 +10615,10 @@ namespace Legion {
     {
       if (!precondition.exists() || precondition.has_triggered())
       {
+#ifdef LEGION_SPY_EQUIVALENCE_SETS
+        LegionSpy::log_equivalence_set_use(set->did, 
+            op->get_unique_op_id(), index);
+#endif
         if (set->set_expr == analysis_expr)
           set->analyze(*this, analysis_expr, true/*covers*/, mask,
                        deferral_events, applied_events, already_deferred);
@@ -15307,6 +15311,11 @@ namespace Legion {
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
+#endif
+#ifdef LEGION_SPY_EQUIVALENCE_SETS
+      if (is_logical_owner())
+        LegionSpy::log_equivalence_set(did, expr->expr_id, tree_id, 
+                                       implicit_provenance);
 #endif
     }
 

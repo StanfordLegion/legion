@@ -1695,6 +1695,22 @@ namespace Legion {
       {
         log_spy.print("Replay Operation %llu", op_unique_id);
       } 
+
+      // Logging for equivalence set creation
+      static inline void log_equivalence_set(DistributedID did,
+                                             IndexSpaceExprID expr_id,
+                                             RegionTreeID tid,
+                                             UniqueID creator_uid)
+      {
+        log_spy.print("Equivalence Set %llx %lld %d %llu",
+            did, expr_id, tid, creator_uid);
+      }
+
+      static inline void log_equivalence_set_use(DistributedID did,
+                                                 UniqueID uid, unsigned index)
+      {
+        log_spy.print("Equivalence Use %llx %llu %d", did, uid, index);
+      }
 #endif
     }; // namespace LegionSpy
 

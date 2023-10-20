@@ -6156,7 +6156,7 @@ class Operation(object):
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance',
-                 'collective_rendezvous']
+                 'collective_rendezvous', 'equivalence_set_uses']
                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -6234,6 +6234,8 @@ class Operation(object):
         self.provenance = None
         # Any collective rendezvous that we need to perform
         self.collective_rendezvous = None
+        # Any uses of equivalence sets
+        self.equivalence_set_uses = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -6628,6 +6630,14 @@ class Operation(object):
             self.collective_rendezvous = set()
         # Ignore the analysis index for now
         self.collective_rendezvous.add(req_index)
+
+    def record_equivalence_set_use(self, index, eq):
+        if self.equivalence_set_uses is None:
+            self.equivalence_set_uses = list()
+        while len(self.equivalence_set_uses) <= index:
+            self.equivalence_set_uses.append(list())
+        if eq not in self.equivalence_set_uses[index]:
+            self.equivalence_set_uses[index].append(eq)
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -11684,6 +11694,30 @@ class GraphPrinter(object):
         return '<table border="0" cellborder="1" cellpadding="3" cellspacing="0" bgcolor="%s">' % color + \
               "".join([self.wrap_with_trtd(line) for line in lines]) + '</table>'
 
+# Unlike the other equivalence set class that we use for actual verification, this
+# class helps track which equivalence sets were used by the runtime and their shapes
+class RuntimeEquivalenceSet(object):
+    __slots__ = ['did', 'expr', 'tree_id', 'creator', 'users']
+    def __init__(self, did):
+        self.did = did
+        self.expr = None
+        self.tree_id = None
+        self.creator = None
+        self.users = None
+
+    def initialize(self, expr, tid, creator):
+        assert self.expr == None and self.tree_id == None and self.creator == None
+        self.expr = expr
+        self.tree_id = tid
+        self.creator = creator
+
+    def record_user(self, op, index):
+        if self.users is None:
+            self.users = list()
+        key = (op,index)
+        if key not in self.users:
+            self.users.append(key)
+
 
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_spy\}: "
 prefix_pat               = re.compile(prefix)
@@ -11986,6 +12020,11 @@ barrier_wait_pat        = re.compile(
     prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 replay_op_pat           = re.compile(
     prefix+"Replay Operation (?P<uid>[0-9]+)")
+# Equivalence set patterns
+equivalence_set_pat     = re.compile(
+    prefix+"Equivalence Set (?P<did>[0-9a-f]+) (?P<expr>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+)")
+equivalence_use_pat     = re.compile(
+    prefix+"Equivalence Use (?P<did>[0-9a-f]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 
 def parse_legion_spy_line(line, state):
     # Quick test to see if the line is even worth considering
@@ -12949,6 +12988,22 @@ def parse_legion_spy_line(line, state):
             e2.add_incoming(e1)
             e1.add_outgoing(e2)
         return True
+    m = equivalence_set_pat.match(line)
+    if m is not None:
+        eq = state.get_equivalence_set(int(m.group('did'),16))
+        expr = state.get_index_expr(int(m.group('expr')))
+        tid = int(m.group('tid'))
+        op = state.get_operation(int(m.group('uid')))
+        eq.initialize(expr, tid, op)
+        return True
+    m = equivalence_use_pat.match(line)
+    if m is not None:
+        eq = state.get_equivalence_set(int(m.group('did'),16))
+        op = state.get_operation(int(m.group('uid')))
+        index = int(m.group('index'))
+        eq.record_user(op, index)
+        op.record_equivalence_set_use(index, eq)
+        return True
     return False
 
 class State(object):
@@ -12962,7 +13017,7 @@ class State(object):
                  'slice_slice', 'point_slice', 'point_point', 'futures', 'next_generation', 
                  'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
                  'assert_on_error', 'assert_on_warning', 'bad_graph_on_error', 
-                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants']
+                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants', 'eq_sets']
     def __init__(self, temp_dir, verbose, details, assert_on_error, 
                  assert_on_warning, bad_graph_on_error, eq_graph_on_error):
         self.temp_dir = temp_dir
@@ -13007,6 +13062,8 @@ class State(object):
         self.depparts = dict()
         self.no_event = Event(self, EventHandle(0))
         self.indirections = dict()
+        # Equivalence set things
+        self.eq_sets = dict()
         # For parsing only
         self.slice_index = dict()
         self.slice_slice = dict()
@@ -14127,6 +14184,13 @@ class State(object):
             return self.projection_functions[pid]
         result = ProjectionFunction(self, pid)
         self.projection_functions[pid] = result
+        return result
+
+    def get_equivalence_set(self, did):
+        if did in self.eq_sets:
+            return self.eq_sets[did]
+        result = RuntimeEquivalenceSet(did)
+        self.eq_sets[did] = result
         return result
 
     def get_instance(self, eid):
