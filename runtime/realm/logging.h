@@ -169,7 +169,7 @@ namespace Realm {
     bool is_active(void) const;
 
     void deactivate(void);
-    
+
     std::ostream& get_stream(void);
     
   protected:
