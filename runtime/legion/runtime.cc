@@ -17803,9 +17803,6 @@ namespace Legion {
       // global invocations of this registration callback
       if (!deduplicate || (implicit_context == NULL))
       {
-#ifdef DEBUG_LEGION
-        assert(implicit_runtime == NULL);
-#endif
         // This means we're in an external thread asking for us to
         // perform a global registration so just send out messages
         // to all the nodes asking them to do the registration
