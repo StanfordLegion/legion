@@ -2200,10 +2200,10 @@ namespace Legion {
         assert(freefunc == NULL);
 #endif
         // escape this task local instance
-        escape_task_local_instance(deferred_result_instance);
+        LgEvent unique = escape_task_local_instance(deferred_result_instance);
         instance = new FutureInstance(res, res_size, effects, runtime,
             true/*eager*/, false/*external*/, true/*own alloc*/,
-            effects, deferred_result_instance);
+            unique, deferred_result_instance);
       }
       else if (resource != NULL)
       {
@@ -2379,7 +2379,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    LgEvent TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalInstance,LgEvent>::iterator finder =
@@ -2387,8 +2387,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
+      const LgEvent result = finder->second;
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
+      return result;
     }
 
     //--------------------------------------------------------------------------
