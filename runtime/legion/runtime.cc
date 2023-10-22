@@ -11208,7 +11208,8 @@ namespace Legion {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_constraint_id((unique == 0) ? runtime_stride : unique),
+        unique_constraint_id(LEGION_MAX_APPLICATION_LAYOUT_ID + 
+                        ((unique == 0) ? runtime_stride : unique)),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
@@ -11817,14 +11818,15 @@ namespace Legion {
       if (!pending_constraints.empty())
       {
         // Update the next available constraint
-        LayoutConstraintID largest = 0;
+        unsigned already_used = 0;
         // Now do the registrations
         std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
-          largest = it->first;
+          if (LEGION_MAX_APPLICATION_LAYOUT_ID < it->first)
+            already_used++;
           // Figure out the distributed ID that we expect and then
           // check against what we expect on the owner node. This
           // is slightly brittle, but we'll always catch it when
@@ -11862,13 +11864,9 @@ namespace Legion {
           }
           register_layout(it->second, it->first, expected_did);
         }
-        // Round largest up to the next biggest multiple of the total spaces
-        // so that the new unique constraint id still maps to this node
-        size_t remainder = largest % total_address_spaces;
-        if (remainder != 0)
-          largest += (total_address_spaces - remainder);
         // Update all the next unique constraint IDs
-        unique_constraint_id += largest;
+        if (already_used > 0)
+          unique_constraint_id += already_used;
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
@@ -22026,25 +22024,30 @@ namespace Legion {
       if (layout_id == LEGION_AUTO_GENERATE_ID)
       {
         // Find the first available layout ID
-        layout_id = 1;
-        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
-              const_iterator it = pending_constraints.begin(); 
-              it != pending_constraints.end(); it++)
+        if (!pending_constraints.empty())
         {
-          if (layout_id != it->first)
-          {
-            // We've found a free one, so we can use it
-            break;
-          }
+          std::map<LayoutConstraintID,
+            LayoutConstraintRegistrar>::const_reverse_iterator finder = 
+              pending_constraints.crbegin();
+          if (finder->first <= LEGION_MAX_APPLICATION_LAYOUT_ID)
+            layout_id = LEGION_MAX_APPLICATION_LAYOUT_ID + 1;
           else
-            layout_id++;
+            layout_id = finder->first + 1;
         }
+        else
+          layout_id = LEGION_MAX_APPLICATION_LAYOUT_ID + 1;
       }
       else
       {
         if (layout_id == 0)
           REPORT_LEGION_ERROR(ERROR_RESERVED_CONSTRAINT_ID, 
-                        "Illegal use of reserved constraint ID 0");
+                        "Illegal use of reserved constraint ID 0")
+        else if (LEGION_MAX_APPLICATION_LAYOUT_ID < layout_id)
+          REPORT_LEGION_ERROR(ERROR_RESERVED_CONSTRAINT_ID,
+              "Illegal application-provided layout constraint ID %ld "
+              "which exceeds the LEGION_MAX_APPLICATION_LAYOUT_ID of %d "
+              "configured in legion_config.h.", layout_id,
+              LEGION_MAX_APPLICATION_LAYOUT_ID)
         // Check to make sure it is not already used
         std::map<LayoutConstraintID,LayoutConstraintRegistrar>::const_iterator
           finder = pending_constraints.find(layout_id);
