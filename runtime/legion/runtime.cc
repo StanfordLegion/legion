@@ -11866,7 +11866,15 @@ namespace Legion {
         }
         // Update all the next unique constraint IDs
         if (already_used > 0)
-          unique_constraint_id += already_used;
+        {
+          // Round this up to the nearest number of nodes
+          unsigned remainder = already_used % total_address_spaces;
+          if (remainder == 0)
+            unique_constraint_id += already_used;
+          else
+            unique_constraint_id += 
+              (already_used + total_address_spaces - remainder);
+        }
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
