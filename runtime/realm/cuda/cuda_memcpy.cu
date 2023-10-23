@@ -76,19 +76,24 @@ static __device__ inline void memcpy_kernel_transpose(
   const Offset_t contig_bytes = info.extents[0];
   const Offset_t chunks = contig_bytes / sizeof(T);
 
-  const Offset_t src_stride_x =
-      ((info.src_strides[0] > info.src_strides[1]) ? info.src_strides[1]
-                                                   : info.src_strides[0]) /
-      contig_bytes;
-  const Offset_t src_stride_y =
-      ((info.src_strides[0] > info.src_strides[1]) ? info.src_strides[0]
-                                                   : info.src_strides[1]) /
-      contig_bytes;
+  const Offset_t src_stride_x = info.src_strides[1] / contig_bytes;
+ //     ((info.src_strides[0] > info.src_strides[1]) ? info.src_strides[1]
+   //                                                : info.src_strides[0]) /
+     // contig_bytes;
+  const Offset_t src_stride_y = info.src_strides[0] / contig_bytes;
+      //((info.src_strides[0] > info.src_strides[1]) ? info.src_strides[0]
+        //                                           : info.src_strides[1]) /
+      //contig_bytes;
 
-  const Offset_t dst_stride_y =
-      ((info.dst_strides[0] > info.dst_strides[1]) ? info.dst_strides[0]
-                                                   : info.dst_strides[1]) /
-      contig_bytes;
+  const Offset_t dst_stride_y = info.dst_strides[1] / contig_bytes;//1;
+      //((info.dst_strides[0] > info.dst_strides[1]) ? info.dst_strides[1]
+        //                                           : info.dst_strides[0]) /
+      //contig_bytes;
+
+  const Offset_t dst_stride_x = info.dst_strides[0] / contig_bytes; //8;
+      //((info.dst_strides[0] > info.dst_strides[1]) ? info.dst_strides[0]
+        //                                           : info.dst_strides[1]) /
+      //contig_bytes;
 
   for(Offset_t block = blockIdx.x; block < grid_dimx * grid_dimy; block += gridDim.x) {
     Offset_t block_idx = block % grid_dimx;
@@ -124,7 +129,11 @@ static __device__ inline void memcpy_kernel_transpose(
         Offset_t out_tile_idx =
             (tidy + (tile_size + 1) * ((tidx + block_offset) / chunks)) * chunks +
             (tidx + block_offset) % chunks;
-        out_base[x_base + dst_stride_y * y_base * chunks + block_offset] =
+
+        Offset_t x_base_idx =
+            ((x_base / chunks) * (dst_stride_x * chunks) + x_base % chunks);
+
+        out_base[x_base_idx + dst_stride_y * y_base * chunks + block_offset] =
             tile[out_tile_idx];
       }
     }

@@ -358,7 +358,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       wait_for = is.copy(srcs, dsts, prs, wait_for);
       wait_for.wait();
 
-      dump_and_verify<N, T, FT>(src_inst, 0, is,
+      dump_and_verify<N, T, FT>(src_inst, 0, src_is,
                                 is.bounds.hi[i] + 1, test_data,
                                 TestConfig::verbose, 0);
 
@@ -473,8 +473,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
                                          p, {}, {});
       } else if (TestConfig::dim_mask == 2) {
         do_single_dim_field_size<2, int>(*src_it, *dst_it, log2_buffer_size,
-                                         TestConfig::narrow_dim, p, {"XY"},
-                                         {"YX"});
+                                         TestConfig::narrow_dim, p, {"XY"}, {"YX"});
       } else if (TestConfig::dim_mask == 3) {
         if (!TestConfig::do_unit_test) {
           // TODO(apryakhin@): This is an HTR hard-coded use case.
@@ -496,8 +495,12 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
           dst_bounds.push_back(Rect<3>(Point<3>(0, 9, 17), Point<3>(8, 17, 17)));
 
           do_single_dim_field_size<3, int>(
-              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {},
-              {}, domain, src_bounds, dst_bounds, TestConfig::field_size);
+              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {}, {},
+              domain, src_bounds, dst_bounds, TestConfig::field_size);
+
+          /*do_single_dim_field_size<3, int>(
+              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"XYZ"}, {"XZY"},
+              domain, src_bounds, dst_bounds, TestConfig::field_size);*/
 
           /*do_single_dim_field_size<3, int>(
               *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"YXZ"},

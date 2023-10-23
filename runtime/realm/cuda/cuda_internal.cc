@@ -690,10 +690,7 @@ namespace Realm {
         }
 
         if(in_gpu && in_gpu->can_access_peer(out_gpu) && transpose_copy.extents[0] != 0 &&
-            // TODO(apryakhin@): this precondition needs resolution
-           ((transpose_copy.src_strides[0] > transpose_copy.src_strides[1]) !=
-            (transpose_copy.dst_strides[0] > transpose_copy.dst_strides[1]))) {
-          // contig_bytes <= CUDA_MAX_FIELD_BYTES
+           transpose_copy.extents[0] <= CUDA_MAX_FIELD_BYTES) {
           stream->get_gpu()->launch_transpose_kernel(transpose_copy, min_align,
                                                     stream);
           bytes_to_fence += transpose_copy.extents[0] * transpose_copy.extents[1] *
@@ -764,6 +761,7 @@ namespace Realm {
 
           cuda_copy.srcPitch = copy_info.src.strides[0];
           cuda_copy.srcHeight = copy_info.src.strides[1];
+
           cuda_copy.dstPitch = copy_info.dst.strides[0];
           cuda_copy.dstHeight = copy_info.dst.strides[1];
 
