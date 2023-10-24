@@ -204,7 +204,11 @@ namespace Legion {
     {
       // No need to do a match here, there is just one shard
       const size_t future_size = sizeof(num_elements);
-      memcpy(output, input, num_elements*future_size);
+      // We only need this if-statement to guard against nullptr cases
+      // to make undefined behavior checkers happy since the C++ standard
+      // is woefully underspecified as usual.
+      if (num_elements > 0)
+        memcpy(output, input, num_elements*future_size);
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       result.impl->set_local(&num_elements, future_size);
@@ -2120,10 +2124,10 @@ namespace Legion {
         assert(freefunc == NULL);
 #endif
         // escape this task local instance
-        escape_task_local_instance(deferred_result_instance);
+        LgEvent unique = escape_task_local_instance(deferred_result_instance);
         instance = new FutureInstance(res, res_size, effects, runtime,
             true/*eager*/, false/*external*/, true/*own alloc*/,
-            effects, deferred_result_instance);
+            unique, deferred_result_instance);
       }
       else if (resource != NULL)
       {
@@ -2299,7 +2303,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    LgEvent TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalInstance,LgEvent>::iterator finder =
@@ -2307,8 +2311,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
+      const LgEvent result = finder->second;
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8720,7 +8726,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->trigger_ready();
+      }
       return (next == NULL);
     }
 
@@ -8749,7 +8758,10 @@ namespace Legion {
       }
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->enqueue_ready_task(false/*use target*/);
+      }
       return (next == NULL);
     }
 
@@ -8778,8 +8790,11 @@ namespace Legion {
       }
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         if ((*it)->distribute_task())
           (*it)->launch_task();
+      }
       return (next == NULL);
     }
 
@@ -8808,7 +8823,10 @@ namespace Legion {
       }
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->launch_task();
+      }
       return (next == NULL);
     }
 
@@ -8837,7 +8855,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->trigger_resolution();
+      }
       return (next == NULL);
     }
 
@@ -8868,7 +8889,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->trigger_execution();
+      }
       return (next == NULL);
     }
 
@@ -8899,7 +8923,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->complete_execution();
+      }
       return (next == NULL);
     }
 
@@ -8931,7 +8958,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->trigger_complete();
+      }
       return (next == NULL);
     }
 
@@ -8962,7 +8992,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->complete_operation(RtEvent::NO_RT_EVENT, false/*first invoke*/);
+      }
       return (next == NULL);
     }
 
@@ -8992,7 +9025,10 @@ namespace Legion {
       }
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = (*it)->get_unique_op_id();
         (*it)->trigger_commit();
+      }
       return (next == NULL);
     }
 
@@ -9026,7 +9062,10 @@ namespace Legion {
       }
       for (std::vector<std::pair<Operation*,bool> >::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
+      {
+        implicit_provenance = it->first->get_unique_op_id();
         it->first->commit_operation(it->second);
+      }
       return (next.first == NULL);
     }
 
@@ -9214,8 +9253,11 @@ namespace Legion {
         std::sort(to_perform.begin(), to_perform.end());
         for (std::vector<PostTaskArgs>::const_iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
+        {
+          implicit_provenance = it->context->get_unique_id();
           it->context->post_end_task(it->instance, it->effects, it->metadata,
                                      it->metasize, it->functor,it->own_functor);
+        }
       }
       // If we didn't launch a next op, then we can remove the reference
       return (next_ctx == NULL);
