@@ -358,7 +358,7 @@ namespace Legion {
         TaskPriority                           parent_priority; // = current
       };
       //------------------------------------------------------------------------
-      virtual void select_task_options(const MapperContext    ctx,
+      virtual void select_task_options(MapperContext          ctx,
                                        const Task&            task,
                                              TaskOptions&     output) = 0;
       //------------------------------------------------------------------------
@@ -399,7 +399,7 @@ namespace Legion {
         RealmPriority                                      copy_fill_priority;
       };
       //------------------------------------------------------------------------
-      virtual void premap_task(const MapperContext      ctx,
+      virtual void premap_task(MapperContext            ctx,
                                const Task&              task, 
                                const PremapTaskInput&   input,
                                PremapTaskOutput&        output) = 0; 
@@ -457,7 +457,7 @@ namespace Legion {
         bool                                   verify_correctness; // = false
       };
       //------------------------------------------------------------------------
-      virtual void slice_task(const MapperContext      ctx,
+      virtual void slice_task(MapperContext            ctx,
                               const Task&              task, 
                               const SliceTaskInput&    input,
                                     SliceTaskOutput&   output) = 0;
@@ -543,7 +543,7 @@ namespace Legion {
         bool                                            postmap_task; // = false
       };
       //------------------------------------------------------------------------
-      virtual void map_task(const MapperContext      ctx,
+      virtual void map_task(MapperContext            ctx,
                             const Task&              task,
                             const MapTaskInput&      input,
                                   MapTaskOutput&     output) = 0;
@@ -567,7 +567,7 @@ namespace Legion {
         VariantID                                       chosen_variant;
       };
       //------------------------------------------------------------------------
-      virtual void select_task_variant(const MapperContext          ctx,
+      virtual void select_task_variant(MapperContext                ctx,
                                        const Task&                  task,
                                        const SelectVariantInput&    input,
                                              SelectVariantOutput&   output) = 0;
@@ -600,7 +600,7 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances;
       };
       //------------------------------------------------------------------------
-      virtual void postmap_task(const MapperContext      ctx,
+      virtual void postmap_task(MapperContext            ctx,
                                 const Task&              task,
                                 const PostMapInput&      input,
                                       PostMapOutput&     output) = 0;
@@ -629,7 +629,7 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void select_task_sources(const MapperContext        ctx,
+      virtual void select_task_sources(MapperContext              ctx,
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output) = 0;
@@ -666,7 +666,7 @@ namespace Legion {
         bool                                    speculate_mapping_only;
       };
       //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext      ctx,
+      virtual void speculate(MapperContext            ctx,
                              const Task&              task,
                                    SpeculativeOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -695,7 +695,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext      ctx,
+      virtual void report_profiling(MapperContext            ctx,
                                     const Task&              task,
                                     const TaskProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
@@ -733,7 +733,7 @@ namespace Legion {
         bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
-      virtual void map_inline(const MapperContext        ctx,
+      virtual void map_inline(MapperContext              ctx,
                               const InlineMapping&       inline_op,
                               const MapInlineInput&      input,
                                     MapInlineOutput&     output) = 0;
@@ -760,7 +760,7 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void select_inline_sources(const MapperContext        ctx,
+      virtual void select_inline_sources(MapperContext              ctx,
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output) = 0;
@@ -797,7 +797,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext         ctx,
+      virtual void report_profiling(MapperContext               ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input)  = 0;
       //------------------------------------------------------------------------
@@ -863,7 +863,7 @@ namespace Legion {
         bool                                          compute_preimages;
       };
       //------------------------------------------------------------------------
-      virtual void map_copy(const MapperContext      ctx,
+      virtual void map_copy(MapperContext            ctx,
                             const Copy&              copy,
                             const MapCopyInput&      input,
                                   MapCopyOutput&     output) = 0;
@@ -898,7 +898,7 @@ namespace Legion {
         std::deque<PhysicalInstance>                  chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void select_copy_sources(const MapperContext          ctx,
+      virtual void select_copy_sources(MapperContext                ctx,
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output) = 0;
@@ -927,7 +927,7 @@ namespace Legion {
        * 'speculative_value' field.
        */
       //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext      ctx,
+      virtual void speculate(MapperContext            ctx,
                              const Copy&              copy,
                                    SpeculativeOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -957,7 +957,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext      ctx,
+      virtual void report_profiling(MapperContext            ctx,
                                     const Copy&              copy,
                                     const CopyProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
@@ -992,7 +992,7 @@ namespace Legion {
         std::deque<PhysicalInstance>                chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void select_close_sources(const MapperContext        ctx,
+      virtual void select_close_sources(MapperContext              ctx,
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output) = 0;
@@ -1031,7 +1031,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext       ctx,
+      virtual void report_profiling(MapperContext             ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
@@ -1054,7 +1054,7 @@ namespace Legion {
         RealmPriority                               copy_fill_priority;
       };
       //------------------------------------------------------------------------
-      virtual void map_acquire(const MapperContext         ctx,
+      virtual void map_acquire(MapperContext               ctx,
                                const Acquire&              acquire,
                                const MapAcquireInput&      input,
                                      MapAcquireOutput&     output) = 0;
@@ -1070,7 +1070,7 @@ namespace Legion {
        * it can predict the value with the 'speculative_value'.
        */
       //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext         ctx,
+      virtual void speculate(MapperContext               ctx,
                              const Acquire&              acquire,
                                    SpeculativeOutput&    output) = 0;
       //------------------------------------------------------------------------
@@ -1095,7 +1095,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext         ctx,
+      virtual void report_profiling(MapperContext               ctx,
                                     const Acquire&              acquire,
                                     const AcquireProfilingInfo& input) = 0;
       //------------------------------------------------------------------------
@@ -1121,7 +1121,7 @@ namespace Legion {
         RealmPriority                               copy_fill_priority;
       };
       //------------------------------------------------------------------------
-      virtual void map_release(const MapperContext         ctx,
+      virtual void map_release(MapperContext               ctx,
                                const Release&              release,
                                const MapReleaseInput&      input,
                                      MapReleaseOutput&     output) = 0;
@@ -1146,7 +1146,7 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void select_release_sources(const MapperContext       ctx,
+      virtual void select_release_sources(MapperContext             ctx,
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output) = 0;
@@ -1173,7 +1173,7 @@ namespace Legion {
        * will take.
        */
       //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext         ctx,
+      virtual void speculate(MapperContext               ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output) = 0;
       //------------------------------------------------------------------------
@@ -1198,7 +1198,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext         ctx,
+      virtual void report_profiling(MapperContext               ctx,
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
@@ -1232,7 +1232,7 @@ namespace Legion {
         LogicalPartition                        chosen_partition;
       };
       //------------------------------------------------------------------------
-      virtual void select_partition_projection(const MapperContext  ctx,
+      virtual void select_partition_projection(MapperContext        ctx,
                           const Partition&                          partition,
                           const SelectPartitionProjectionInput&     input,
                                 SelectPartitionProjectionOutput&    output) = 0;
@@ -1273,7 +1273,7 @@ namespace Legion {
         bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
-      virtual void map_partition(const MapperContext        ctx,
+      virtual void map_partition(MapperContext              ctx,
                                  const Partition&           partition,
                                  const MapPartitionInput&   input,
                                        MapPartitionOutput&  output) = 0;
@@ -1300,8 +1300,7 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void select_partition_sources(
-                                    const MapperContext             ctx,
+      virtual void select_partition_sources(MapperContext           ctx,
                                     const Partition&                partition,
                                     const SelectPartitionSrcInput&  input,
                                           SelectPartitionSrcOutput& output) = 0;
@@ -1338,7 +1337,7 @@ namespace Legion {
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext              ctx,
+      virtual void report_profiling(MapperContext                    ctx,
                                     const Partition&                 partition,
                                     const PartitionProfilingInfo&    input) = 0;
       //------------------------------------------------------------------------
@@ -1397,7 +1396,7 @@ namespace Legion {
         bool                                    mutable_priority; // = false
       };
       //------------------------------------------------------------------------
-      virtual void configure_context(const MapperContext         ctx,
+      virtual void configure_context(MapperContext               ctx,
                                      const Task&                 task,
                                            ContextConfigOutput&  output) = 0;
       //------------------------------------------------------------------------
@@ -1431,7 +1430,7 @@ namespace Legion {
         bool                                    take_ownership; // = true 
       };
       //------------------------------------------------------------------------
-      virtual void select_tunable_value(const MapperContext         ctx,
+      virtual void select_tunable_value(MapperContext               ctx,
                                         const Task&                 task,
                                         const SelectTunableInput&   input,
                                               SelectTunableOutput&  output) = 0;
@@ -1473,7 +1472,7 @@ namespace Legion {
         std::vector<int>                            weights;
       };
       //------------------------------------------------------------------------
-      virtual void map_must_epoch(const MapperContext           ctx,
+      virtual void map_must_epoch(MapperContext                 ctx,
                                   const MapMustEpochInput&      input,
                                         MapMustEpochOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -1489,7 +1488,7 @@ namespace Legion {
           
       };
       //------------------------------------------------------------------------
-      virtual void map_dataflow_graph(const MapperContext           ctx,
+      virtual void map_dataflow_graph(MapperContext                 ctx,
                                       const MapDataflowGraphInput&  input,
                                             MapDataflowGraphOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -1511,7 +1510,7 @@ namespace Legion {
         bool memoize;
       };
       //------------------------------------------------------------------------
-      virtual void memoize_operation(const MapperContext  ctx,
+      virtual void memoize_operation(MapperContext        ctx,
                                      const Mappable&      mappable,
                                      const MemoizeInput&  input,
                                            MemoizeOutput& output) = 0;
@@ -1550,7 +1549,7 @@ namespace Legion {
         MapperEvent                             deferral_event;
       };
       //------------------------------------------------------------------------
-      virtual void select_tasks_to_map(const MapperContext          ctx,
+      virtual void select_tasks_to_map(MapperContext                ctx,
                                        const SelectMappingInput&    input,
                                              SelectMappingOutput&   output) = 0;
       //------------------------------------------------------------------------
@@ -1579,7 +1578,7 @@ namespace Legion {
         std::set<Processor>                     targets;
       };
       //------------------------------------------------------------------------
-      virtual void select_steal_targets(const MapperContext         ctx,
+      virtual void select_steal_targets(MapperContext               ctx,
                                         const SelectStealingInput&  input,
                                               SelectStealingOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -1607,7 +1606,7 @@ namespace Legion {
         std::set<const Task*>                   stolen_tasks;
       };
       //------------------------------------------------------------------------
-      virtual void permit_steal_request(const MapperContext         ctx,
+      virtual void permit_steal_request(MapperContext               ctx,
                                         const StealRequestInput&    input,
                                               StealRequestOutput&   output) = 0;
       //------------------------------------------------------------------------
@@ -1633,7 +1632,7 @@ namespace Legion {
         bool                                    broadcast;
       };
       //------------------------------------------------------------------------
-      virtual void handle_message(const MapperContext           ctx,
+      virtual void handle_message(MapperContext                 ctx,
                                   const MapperMessage&          message) = 0;
       //------------------------------------------------------------------------
 
@@ -1654,7 +1653,7 @@ namespace Legion {
         size_t                                  result_size;
       };
       //------------------------------------------------------------------------
-      virtual void handle_task_result(const MapperContext           ctx,
+      virtual void handle_task_result(MapperContext           ctx,
                                       const MapperTaskResult&       result) = 0;
       //------------------------------------------------------------------------
     public:
