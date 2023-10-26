@@ -708,7 +708,8 @@ namespace Realm {
                             << d2_copy_info.srcPitch
                             << " dstpitch=" << d2_copy_info.dstPitch
                             << " WidthInBytes=" << d2_copy_info.WidthInBytes
-                            << " Height=" << d2_copy_info.Height;
+                            << " Height=" << d2_copy_info.Height
+                            << " out_is_ipc=" << out_is_ipc;
 
           size_t planes = transpose_copy.extents[2];
           size_t act_planes = 0;
@@ -741,10 +742,14 @@ namespace Realm {
             copy_infos.subrects[i].extents[0]     /= min_align;
             copy_infos.subrects[i].volume /= min_align;
           }
-          // TODO: add some heuristics here, like if some rectangles are very large, do a cuMemcpy
-          // instead, possibly utilizing the copy engines or better optimized kernels
-          log_gpudma.info() << "\tLaunching kernel for " << copy_infos.num_rects << " rects " << copy_info_total << " bytes";
-          stream->get_gpu()->launch_batch_affine_kernel(&copy_infos, 3, min_align, copy_info_total / min_align, stream);
+          // TODO: add some heuristics here, like if some rectangles are very large, do a
+          // cuMemcpy instead, possibly utilizing the copy engines or better optimized
+          // kernels
+          log_gpudma.info() << "\tLaunching kernel for rects=" << copy_infos.num_rects
+                            << " bytes=" << copy_info_total
+                            << " out_is_ipc=" << out_is_ipc;
+          stream->get_gpu()->launch_batch_affine_kernel(
+              &copy_infos, 3, min_align, copy_info_total / min_align, stream);
           bytes_to_fence += copy_info_total;
         } else if (copy_infos.num_rects == 1) {
           // Then the affine copies to/from the device
@@ -766,10 +771,15 @@ namespace Realm {
           cuda_copy.dstDevice = copy_info.dst.addr;
           cuda_copy.srcDevice = copy_info.src.addr;
 
-          log_gpudma.info() << "\tLaunching 3D CE for "
+          log_gpudma.info() << "\tLaunching 3D CE bytes="
                             << copy_info.extents[0] * copy_info.extents[1] *
                                    copy_info.extents[2]
-                            << "bytes";
+                            << " srcPitch=" << cuda_copy.srcPitch
+                            << " srcHeight=" << cuda_copy.srcHeight
+                            << " dstPitch=" << cuda_copy.dstPitch
+                            << " dstHeight=" << cuda_copy.dstHeight
+                            << " out_is_ipc=" << out_is_ipc;
+
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
 
           bytes_to_fence += copy_info.extents[0] * copy_info.extents[1] * copy_info.extents[2];
