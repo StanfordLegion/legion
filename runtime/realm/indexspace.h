@@ -597,7 +597,7 @@ namespace Realm {
      * \return Event representing the partitioning operation.
      * */
     Event create_equal_subspace(size_t count, size_t granularity,
-                                unsigned index, IndexSpace<N,T>& subspace,
+                                unsigned index, IndexSpace<N,T> &subspace,
                                 const ProfilingRequestSet &reqs,
                                 Event wait_on = Event::NO_EVENT) const;
 
