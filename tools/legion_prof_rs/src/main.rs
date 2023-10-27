@@ -254,12 +254,12 @@ fn main() -> io::Result<()> {
     let paths: Vec<_> = cli
         .filenames
         .iter()
-        .map(|x| x.to_string_lossy().to_string())
+        .map(|x| PathBuf::from(x))
         .collect();
 
     let mut unique_paths = BTreeSet::<String>::new();
     for p in paths {
-        if let Some(base) = PathBuf::from(p).parent() {
+        if let Some(base) = p.parent() {
             unique_paths.insert(base.to_string_lossy().to_string());
         }
     }
