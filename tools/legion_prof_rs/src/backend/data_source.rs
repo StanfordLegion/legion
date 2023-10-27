@@ -253,9 +253,7 @@ impl StateDataSource {
             for kind in &mem_kinds {
                 let group = MemGroup(*node, *kind);
 
-                let Some(mems) = mem_groups.get(&group) else {
-                    continue;
-                };
+                let Some(mems) = mem_groups.get(&group) else { continue; };
 
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
