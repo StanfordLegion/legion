@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io;
+use std::path::PathBuf;
 
 use clap::Parser;
 
@@ -248,6 +250,22 @@ fn main() -> io::Result<()> {
     }
 
     let mut state = State::default();
+
+    let paths: Vec<_> = cli
+        .filenames
+        .iter()
+        .map(|x| PathBuf::from(x))
+        .collect();
+
+    let mut unique_paths = BTreeSet::<String>::new();
+    for p in paths {
+        if let Some(base) = p.parent() {
+            unique_paths.insert(base.to_string_lossy().to_string());
+        }
+    }
+
+    state.source_locator.extend(unique_paths.into_iter());
+
     state.visible_nodes = node_list;
     let mut spy_state = SpyState::default();
     if filter_input {
