@@ -251,11 +251,7 @@ fn main() -> io::Result<()> {
 
     let mut state = State::default();
 
-    let paths: Vec<_> = cli
-        .filenames
-        .iter()
-        .map(|x| PathBuf::from(x))
-        .collect();
+    let paths: Vec<_> = cli.filenames.iter().map(PathBuf::from).collect();
 
     let mut unique_paths = BTreeSet::<String>::new();
     for p in paths {
