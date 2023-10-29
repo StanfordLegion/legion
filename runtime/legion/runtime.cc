@@ -7968,8 +7968,8 @@ namespace Legion {
       assert(ready_concurrent_tasks > 0);
 #endif
       // See if we can prove that there is a task that is safe to start
-      uint64_t min_next = -1;
-      uint64_t min_pending = -1;
+      uint64_t min_next = (uint64_t)-1;
+      uint64_t min_pending = (uint64_t)-1;
       SingleTask *next = NULL;
       TaskTreeCoordinates next_coords;
       for (std::map<SingleTask*,ConcurrentState>::const_iterator it =

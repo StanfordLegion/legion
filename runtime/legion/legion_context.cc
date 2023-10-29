@@ -2159,10 +2159,6 @@ namespace Legion {
                   const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
-      // If this was a concurrent task then tell the runtime we're done
-      // running it so the next one can be started
-      if (owner_task->is_concurrent())
-        runtime->end_concurrent_task(executing_processor);
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
       if (!output_regions.empty())
@@ -2170,6 +2166,10 @@ namespace Legion {
       const bool internal_task = Processor::get_executing_processor().exists();
       if (internal_task)
       {
+        // If this was a concurrent task then tell the runtime we're done
+        // running it so the next one can be started
+        if (owner_task->is_concurrent())
+          runtime->end_concurrent_task(executing_processor);
 #ifdef DEBUG_LEGION
         assert(!effects.exists());
 #endif
