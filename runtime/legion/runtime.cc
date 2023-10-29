@@ -7342,7 +7342,9 @@ namespace Legion {
         stealing_disabled(no_steal), replay_execution(replay), 
         next_local_index(0), task_scheduler_enabled(false), 
         outstanding_task_scheduler(false),
-        total_active_contexts(0), total_active_mappers(0)
+        total_active_contexts(0), total_active_mappers(0),
+        concurrent_lamport_clock(0), ready_concurrent_tasks(0),
+        outstanding_concurrent_task(false)
     //--------------------------------------------------------------------------
     {
       context_states.resize(LEGION_DEFAULT_CONTEXTS);
@@ -7360,30 +7362,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
-      : runtime(NULL), local_proc(Processor::NO_PROC),
-        proc_kind(Processor::LOC_PROC), stealing_disabled(false), 
-        replay_execution(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ProcessorManager::~ProcessorManager(void)
     //--------------------------------------------------------------------------
     {
       mapper_states.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    ProcessorManager& ProcessorManager::operator=(const ProcessorManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -7906,14 +7888,179 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ProcessorManager::find_concurrent_fence_event(ApEvent next)
+    void ProcessorManager::order_concurrent_task_launch(SingleTask *task,
+                                        ApEvent precondition, ApUserEvent ready)
     //--------------------------------------------------------------------------
     {
-      // This might look racy but it's not because there is synchronization
-      // provided by the runtime in the form of the concurrent_reservation
-      const ApEvent result = previous_concurrent_execution;
-      previous_concurrent_execution = next;
-      return result;
+      uint64_t lamport_clock = 0;
+      {
+        AutoLock c_lock(concurrent_lock);
+#ifdef DEBUG_LEGION
+        assert(concurrent_tasks.find(task) == concurrent_tasks.end());
+#endif
+        lamport_clock = concurrent_lamport_clock++;
+        concurrent_tasks.insert(std::make_pair(task,
+              ConcurrentState(lamport_clock, precondition, ready)));
+      }
+      // Check to see if the precondition event was poisoned
+      bool poisoned = false;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      bool triggered =
+#endif
+#endif
+        precondition.has_triggered_faultaware(poisoned);
+#ifdef DEBUG_LEGION
+      assert(triggered);
+#endif
+      // Tell the task to compute the max all-reduce of lamport clocks
+      task->concurrent_allreduce(this, lamport_clock, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::finalize_concurrent_task_order(SingleTask *task,
+                                          uint64_t lamport_clock, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(concurrent_lock);
+      std::map<SingleTask*,ConcurrentState>::iterator finder = 
+        concurrent_tasks.find(task);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_tasks.end());
+      assert(!finder->second.max);
+      assert(finder->second.lamport_clock <= lamport_clock);
+#endif
+      if (poisoned)
+      {
+        Runtime::poison_event(finder->second.ready);
+        concurrent_tasks.erase(finder);
+      }
+      else
+      {
+        finder->second.lamport_clock = lamport_clock;
+        finder->second.max = true;
+        ready_concurrent_tasks++;
+        if (!outstanding_concurrent_task)
+          start_next_concurrent_task();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::end_concurrent_task(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(concurrent_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_concurrent_task);
+#endif
+      outstanding_concurrent_task = false;
+      if (ready_concurrent_tasks > 0)
+        start_next_concurrent_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::start_next_concurrent_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!concurrent_tasks.empty());
+      assert(!outstanding_concurrent_task);
+      assert(ready_concurrent_tasks > 0);
+#endif
+      // See if we can prove that there is a task that is safe to start
+      uint64_t min_next = -1;
+      uint64_t min_pending = -1;
+      SingleTask *next = NULL;
+      TaskTreeCoordinates next_coords;
+      for (std::map<SingleTask*,ConcurrentState>::const_iterator it =
+            concurrent_tasks.begin(); it != concurrent_tasks.end(); it++)
+      {
+        if (it->second.max)
+        {
+          if (next != NULL)
+          {
+            // Compare the lamport clocks
+            if (it->second.lamport_clock < min_next)
+            {
+              next = it->first;
+              min_next = it->second.lamport_clock;
+            }
+            else if (min_next == it->second.lamport_clock)
+            {
+              // Very bad case, same min of max all-reduce of clocks
+              // Resolve this conflict based on task tree coordinates
+              TaskTreeCoordinates it_coords;
+              if (next_coords.empty())
+                next->compute_task_tree_coordinates(next_coords);
+              it->first->compute_task_tree_coordinates(it_coords);
+              const size_t lower_bound =
+                std::min(next_coords.size(), it_coords.size());
+              bool equal = true;
+              for (unsigned idx = 0; idx < lower_bound; idx++)
+              {
+                const ContextCoordinate &c1 = next_coords[idx];
+                const ContextCoordinate &c2 = it_coords[idx];
+                if (c1.context_index == c2.context_index)
+                {
+                  if (c2.index_point < c1.index_point)
+                  {
+                    next = it->first;
+                    next_coords.swap(it_coords);
+                  }
+                  else if (c1.index_point == c2.index_point)
+                    continue;
+                }
+                else if (c2.context_index < c1.context_index)
+                {
+                  next = it->first;
+                  next_coords.swap(it_coords);
+                }
+                equal = false;
+                break;
+              }
+              if (equal)
+              {
+#ifdef DEBUG_LEGION
+                assert(next_coords.size() != it_coords.size());
+#endif
+                if (it_coords.size() < next_coords.size())
+                {
+                  next = it->first;
+                  next_coords.swap(it_coords);
+                }
+              }
+            }
+          }
+          else
+          {
+            next = it->first;
+            min_next = it->second.lamport_clock;
+          }
+        }
+        else if (it->second.lamport_clock < min_pending)
+          min_pending = it->second.lamport_clock;
+      }
+      // If all the pending tasks with lamport clocks are
+      // larger than our max lamport clock of the next task
+      // to launch then we know they won't ever come before it
+      // so we can issue our next task now, otherwise we'll need
+      // to wait until those pending lamport clocks are done
+      if (min_next < min_pending)
+      {
+        std::map<SingleTask*,ConcurrentState>::iterator finder =
+          concurrent_tasks.find(next);
+#ifdef DEBUG_LEGION
+        assert(finder != concurrent_tasks.end());
+#endif
+        // Trigger the ready event with the precondition to keep
+        // tools like Legion Spy happy even though we know that
+        // the precondition event has already triggered
+        Runtime::trigger_event(NULL, finder->second.ready, 
+            finder->second.precondition);
+        concurrent_tasks.erase(finder);
+        ready_concurrent_tasks--;
+        outstanding_concurrent_task = true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12280,6 +12427,17 @@ namespace Legion {
               runtime->handle_slice_verify_concurrent_execution(derez);
               break;
             }
+          case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
+            {
+              runtime->handle_slice_concurrent_allreduce_request(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SLICE_CONCURRENT_ALLREDUCE_RESPONSE:
+            {
+              runtime->handle_slice_concurrent_allreduce_response(derez);
+              break;
+            }
           case SLICE_FIND_INTRA_DEP:
             {
               runtime->handle_slice_find_intra_dependence(derez);
@@ -12294,16 +12452,6 @@ namespace Legion {
             {
               runtime->handle_slice_remote_collective_rendezvous(derez,
                                                   remote_address_space);
-              break;
-            }
-          case SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL:
-            {
-              runtime->handle_slice_remote_pre_launch_collective_kernel(derez);
-              break;
-            }
-          case SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL:
-            {
-              runtime->handle_slice_remote_post_launch_collective_kernel(derez);
               break;
             }
           case DISTRIBUTED_REMOTE_REGISTRATION:
@@ -12749,11 +12897,6 @@ namespace Legion {
           case SEND_REPL_FIND_COLLECTIVE_VIEW:
             {
               runtime->handle_control_replicate_find_collective_view(derez);
-              break;
-            }
-          case SEND_REPL_COLLECTIVE_KERNEL_LAUNCH:
-            {
-              runtime->handle_control_replicate_collective_kernel_launch(derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -13310,27 +13453,6 @@ namespace Legion {
           case SEND_REMOTE_DISTRIBUTED_ID_RESPONSE:
             {
               runtime->handle_remote_distributed_id_response(derez);
-              break;
-            }
-          case SEND_CONCURRENT_RESERVATION_CREATION:
-            {
-              runtime->handle_concurrent_reservation_creation(derez,
-                                                remote_address_space);
-              break;
-            }
-          case SEND_CONCURRENT_EXECUTION_ANALYSIS:
-            {
-              runtime->handle_concurrent_execution_analysis(derez);
-              break;
-            }
-          case SEND_PRE_LAUNCH_COLLECTIVE_KERNEL:
-            {
-              runtime->handle_pre_launch_collective_kernel(derez);
-              break;
-            }
-          case SEND_POST_LAUNCH_COLLECTIVE_KERNEL:
-            {
-              runtime->handle_post_launch_collective_kernel(derez);
               break;
             }
           case SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE:
@@ -16717,7 +16839,6 @@ namespace Legion {
         prepared_for_shutdown(false), total_outstanding_tasks(0), 
         outstanding_top_level_tasks(initialize_outstanding_top_level_tasks(
               address_space, total_address_spaces, legion_collective_radix)),
-        concurrent_reservation(Reservation::NO_RESERVATION),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
@@ -16733,6 +16854,8 @@ namespace Legion {
         unique_constraint_id(LEGION_MAX_APPLICATION_LAYOUT_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
+        unique_top_level_task_id((unique == 0) ? runtime_stride : unique),
+        unique_implicit_top_level_task_id(0),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
 #endif
@@ -17115,12 +17238,6 @@ namespace Legion {
         delete it->second;
       }
       memory_managers.clear();
-      if (address_space == 0)
-      {
-        Reservation r = concurrent_reservation.load();
-        if (r.exists())
-          r.destroy_reservation();
-      }
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
 	delete tree_state_logger;
@@ -17923,7 +18040,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *map_context = new TopLevelContext(this);
+      TopLevelContext *map_context = 
+        new TopLevelContext(this, get_unique_top_level_task_id(),0/*implicit*/);
       map_context->add_base_gc_ref(RUNTIME_REF);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
@@ -21923,6 +22041,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_concurrent_allreduce_request(Processor target,
+                                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_CONCURRENT_ALLREDUCE_REQUEST, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_concurrent_allreduce_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
+          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_slice_find_intra_space_dependence(Processor target,
                                                          Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21946,26 +22083,6 @@ namespace Legion {
     {
       find_messenger(target)->send_message(SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
                                                             rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_slice_pre_launch_collective_kernel(Processor target,
-                                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-          SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL,
-          rez, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_slice_post_launch_collective_kernel(Processor target,
-                                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-          SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL,
-          rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -22703,15 +22820,6 @@ namespace Legion {
     {
       find_messenger(target)->send_message(SEND_REPL_FIND_COLLECTIVE_VIEW,
                                                           rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_collective_kernel_launch(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_REPL_COLLECTIVE_KERNEL_LAUNCH,
-                                        rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24342,6 +24450,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_concurrent_allreduce_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_concurrent_allreduce_request(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_concurrent_allreduce_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_concurrent_allreduce_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_slice_find_intra_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -24361,22 +24485,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SliceTask::handle_collective_rendezvous(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_slice_remote_pre_launch_collective_kernel(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      SliceTask::handle_pre_launch_collective_kernel(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_slice_remote_post_launch_collective_kernel(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      SliceTask::handle_post_launch_collective_kernel(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24965,14 +25073,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_find_collective_view(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_collective_kernel_launch(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_collective_kernel_launch(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -26453,238 +26553,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent Runtime::acquire_concurrent_reservation(RtEvent release_event,
-                                                    RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!release_event.has_triggered());
-#endif
-      const Reservation r = find_or_create_concurrent_reservation(); 
-      Runtime::release_reservation(r, release_event);
-      return Runtime::acquire_rt_reservation(r, true/*exclusive*/,precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    Reservation Runtime::find_or_create_concurrent_reservation(void)
-    //--------------------------------------------------------------------------
-    {
-      Reservation r = concurrent_reservation.load();
-      if (r.exists())
-        return r;
-      if (address_space > 0)
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        rez.serialize<bool>(true/*request*/);
-        rez.serialize(&concurrent_reservation);
-        rez.serialize(done);
-        find_messenger(0/*target*/)->send_message(
-          SEND_CONCURRENT_RESERVATION_CREATION, rez, true/*flush*/);
-        done.wait();
-        r = concurrent_reservation.load();
-      }
-      else
-      {
-        Reservation fresh = Reservation::create_reservation();
-        if (!concurrent_reservation.compare_exchange_strong(r, fresh))
-          fresh.destroy_reservation();
-        else
-          r = concurrent_reservation.load();
-      }
-#ifdef DEBUG_LEGION
-      assert(r.exists());
-#endif
-      return r;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_concurrent_reservation_creation(Deserializer &derez,
-                                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      bool request;
-      derez.deserialize(request);
-      std::atomic<Reservation>* target;
-      derez.deserialize(target);
-      RtUserEvent done;
-      derez.deserialize(done);
-      if (request)
-      {
-        const Reservation r = find_or_create_concurrent_reservation();
-        Serializer rez;
-        rez.serialize<bool>(false/*request*/);
-        rez.serialize(target);
-        rez.serialize(done);
-        rez.serialize(r);
-        find_messenger(source)->send_message(
-          SEND_CONCURRENT_RESERVATION_CREATION, rez, true/*flush*/, 
-                                                true/*response*/);
-      }
-      else
-      {
-        Reservation r;
-        derez.deserialize(r);
-        target->store(r);
-        Runtime::trigger_event(done);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent Runtime::find_concurrent_fence_event(Processor target, ApEvent next,
-                                        ApEvent &previous, RtEvent precondition)
+    void Runtime::order_concurrent_task_launch(Processor proc, SingleTask *task,
+                                        ApEvent precondition, ApUserEvent ready)
     //--------------------------------------------------------------------------
     {
       std::map<Processor,ProcessorManager*>::const_iterator finder =
-        proc_managers.find(target);
-      if (finder == proc_managers.end())
-      {
-        // Send this to a remote node
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        const ApUserEvent result = Runtime::create_ap_user_event(NULL);
-        Serializer rez;
-        rez.serialize(target);
-        rez.serialize(next);
-        rez.serialize(result);
-        rez.serialize(precondition);
-        rez.serialize(done);
-        find_messenger(target)->send_message(
-          SEND_CONCURRENT_EXECUTION_ANALYSIS, rez, true/*flush*/);
-        previous = result;
-        return done;
-      }
-      else
-      {
-        if (precondition.exists() && !precondition.has_triggered())
-        {
-          const ApUserEvent result = Runtime::create_ap_user_event(NULL);
-          previous = result;
-          DeferConcurrentAnalysisArgs args(finder->second, next, result);
-          return issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, precondition);
-        }
-        else
-        {
-          previous = finder->second->find_concurrent_fence_event(next);
-          return RtEvent::NO_RT_EVENT;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_concurrent_execution_analysis(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      Processor target;
-      derez.deserialize(target);
-      ApEvent next;
-      derez.deserialize(next);
-      ApUserEvent result;
-      derez.deserialize(result);
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      RtUserEvent done;
-      derez.deserialize(done);
-
-      std::map<Processor,ProcessorManager*>::const_iterator finder =
-        proc_managers.find(target);
+        proc_managers.find(proc);
 #ifdef DEBUG_LEGION
       assert(finder != proc_managers.end());
 #endif
-      if (precondition.exists() && !precondition.has_triggered())
-      {
-        DeferConcurrentAnalysisArgs args(finder->second, next, result);
-        Runtime::trigger_event(done, issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, precondition));
-      }
-      else
-      {
-        Runtime::trigger_event(NULL, result,
-            finder->second->find_concurrent_fence_event(next));
-        Runtime::trigger_event(done);
-      }
+      finder->second->order_concurrent_task_launch(task, precondition, ready);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::handle_concurrent_analysis(const void *args)
+    void Runtime::end_concurrent_task(Processor proc)
     //--------------------------------------------------------------------------
     {
-      const DeferConcurrentAnalysisArgs *dargs = 
-        (const DeferConcurrentAnalysisArgs*)args;
-      Runtime::trigger_event(NULL, dargs->result,
-          dargs->manager->find_concurrent_fence_event(dargs->next));
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::pre_launch_collective_kernel(RtUserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-      bool trigger_now = false;
-      if (address_space > 0)
-      {
-        // Send a message to node 0 to add the launch to the queue
-        Serializer rez;
-        rez.serialize(to_trigger);
-        find_messenger(0)->send_message(SEND_PRE_LAUNCH_COLLECTIVE_KERNEL,
-            rez, true/*flush*/, true/*response*/);
-      }
-      else
-      {
-        AutoLock q_lock(collective_kernel_lock);
-        if (collective_kernel_queue.empty())
-          trigger_now = true;
-        collective_kernel_queue.push_back(to_trigger);
-      }
-      if (trigger_now)
-        Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::post_launch_collective_kernel(void)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent trigger_next;
-      if (address_space > 0)
-      {
-        // Send a message to node 0 to pop the queue
-        Serializer rez;
-        find_messenger(0)->send_message(SEND_POST_LAUNCH_COLLECTIVE_KERNEL,
-            rez, true/*flush*/, true/*response*/);
-      }
-      else
-      {
-        AutoLock q_lock(collective_kernel_lock);
+      std::map<Processor,ProcessorManager*>::const_iterator finder =
+        proc_managers.find(proc);
 #ifdef DEBUG_LEGION
-        assert(!collective_kernel_queue.empty());
+      assert(finder != proc_managers.end());
 #endif
-        collective_kernel_queue.pop_front();
-        if (!collective_kernel_queue.empty())
-          trigger_next = collective_kernel_queue.front();
-      }
-      if (trigger_next.exists())
-        Runtime::trigger_event(trigger_next);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_pre_launch_collective_kernel(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0);
-#endif
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      pre_launch_collective_kernel(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_post_launch_collective_kernel(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0);
-#endif
-      post_launch_collective_kernel();
+      finder->second->end_concurrent_task();
     }
 
     //--------------------------------------------------------------------------
@@ -29148,6 +29038,30 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    uint64_t Runtime::get_unique_top_level_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      uint64_t result = unique_top_level_task_id.fetch_add(runtime_stride);
+#ifdef DEBUG_LEGION
+      assert(result < unique_top_level_task_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t Runtime::get_unique_implicit_top_level_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // These count the same across all the nodes and don't need to be 
+      // atomic since it's up to the caller to guard againt concurrency here
+      uint64_t result = unique_implicit_top_level_task_id++;
+#ifdef DEBUG_LEGION
+      assert(result < unique_implicit_top_level_task_id);
+#endif
+      return result;
+    }
+
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     unsigned Runtime::get_unique_indirections_id(void)
@@ -30572,7 +30486,8 @@ namespace Legion {
       assert(target.exists());
 #endif
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = new TopLevelContext(this);
+      TopLevelContext *top_context = 
+        new TopLevelContext(this, get_unique_top_level_task_id(),0/*implicit*/);
       // Save the current context if there is one and restore it later
       TaskContext *previous_implicit = implicit_context;
       // Save the context in the implicit context
@@ -30623,7 +30538,8 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = new TopLevelContext(this);
+      TopLevelContext *top_context = new TopLevelContext(this, 0/*id*/,
+          get_unique_implicit_top_level_task_id());
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
       // Set the executing processor
@@ -32471,6 +32387,11 @@ namespace Legion {
             SingleTask::handle_deferred_task_complete(args);
             break;
           }
+        case LG_ORDER_CONCURRENT_LAUNCH_TASK_ID:
+          {
+            SingleTask::order_concurrent_task_launch(args);
+            break;
+          }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
           {
             MaterializedView::handle_defer_materialized_view(args, runtime);
@@ -32658,11 +32579,6 @@ namespace Legion {
         case LG_DEFER_TRACE_UPDATE_TASK_ID:
           {
             ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
-            break;
-          }
-        case LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID:
-          {
-            handle_concurrent_analysis(args);
             break;
           }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:

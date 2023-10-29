@@ -1333,10 +1333,10 @@ namespace Legion {
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
                        Runtime *rt, unsigned default_mappers,  
                        bool no_steal, bool replay);
-      ProcessorManager(const ProcessorManager &rhs);
+      ProcessorManager(const ProcessorManager &rhs) = delete;
       ~ProcessorManager(void);
     public:
-      ProcessorManager& operator=(const ProcessorManager &rhs);
+      ProcessorManager& operator=(const ProcessorManager &rhs) = delete;
     public:
       void prepare_for_shutdown(void);
     public:
@@ -1365,7 +1365,21 @@ namespace Legion {
       void find_visible_memories(std::set<Memory> &visible) const;
       Memory find_best_visible_memory(Memory::Kind kind) const;
     public:
-      ApEvent find_concurrent_fence_event(ApEvent next);
+      // This method will perform the computation needed to order concurrent
+      // index space task launches and trigger the ready event with the 
+      // precondition event once it is safe to do so
+      void order_concurrent_task_launch(SingleTask *task, ApEvent precondition,
+                                        ApUserEvent ready);
+      // Once the concurrent index space task launch has performed its max 
+      // all-reduce of the lamport clocks across all the points then it needs
+      // to report the resulting clock back to the processor
+      void finalize_concurrent_task_order(SingleTask *task, 
+          uint64_t lamport, bool poisoned);
+      // Report when we are done executing a concurrent index space task and
+      // therefore it is safe to beging the next one on this processor
+      void end_concurrent_task(void);
+    protected:
+      void start_next_concurrent_task(void);
     protected:
       void perform_mapping_operations(void);
       void issue_advertisements(MapperID mid);
@@ -1425,9 +1439,25 @@ namespace Legion {
       // The set of visible memories from this processor
       std::map<Memory,size_t/*bandwidth affinity*/> visible_memories;
     protected:
-      // Keep track of the termination event for the previous 
-      // concurrently executed task on this processor
-      ApEvent previous_concurrent_execution;
+      // Data structures to help with the management of concurrent index
+      // space task launches. We track a lamport clock for helping to
+      // order all concurrent index space task launches that overlap on
+      // the same kind of processors.
+      mutable LocalLock concurrent_lock;
+      struct ConcurrentState {
+      public:
+        ConcurrentState(uint64_t clock, ApEvent pre, ApUserEvent r)
+          : lamport_clock(clock), precondition(pre), ready(r), max(false) { }
+      public:
+        uint64_t lamport_clock;
+        ApEvent precondition;
+        ApUserEvent ready;
+        bool max; // whether the lamport clock is the max all-reduce or not
+      };
+      std::map<SingleTask*,ConcurrentState> concurrent_tasks;
+      uint64_t concurrent_lamport_clock;
+      uint32_t ready_concurrent_tasks;
+      bool outstanding_concurrent_task;
     }; 
 
     /**
@@ -2632,20 +2662,6 @@ namespace Legion {
         const ApEvent event;
         TopLevelContext *const ctx;
       }; 
-      struct DeferConcurrentAnalysisArgs :
-        public LgTaskArgs<DeferConcurrentAnalysisArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID;
-      public:
-        DeferConcurrentAnalysisArgs(ProcessorManager *man, ApEvent n,
-                                    ApUserEvent r)
-          : LgTaskArgs<DeferConcurrentAnalysisArgs>(implicit_provenance),
-            manager(man), next(n), result(r) { }
-      public:
-        ProcessorManager *const manager;
-        const ApEvent next;
-        const ApUserEvent result;
-      };
     public:
       struct ProcessorGroupInfo {
       public:
@@ -3198,15 +3214,15 @@ namespace Legion {
       void send_slice_remote_commit(Processor target, Serializer &rez);
       void send_slice_verify_concurrent_execution(Processor target,
                                                   Serializer &rez);
+      void send_slice_concurrent_allreduce_request(Processor target,
+                                                   Serializer &rez);
+      void send_slice_concurrent_allreduce_response(AddressSpaceID target,
+                                                    Serializer &rez);
       void send_slice_find_intra_space_dependence(Processor target, 
                                                   Serializer &rez);
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
-      void send_slice_pre_launch_collective_kernel(Processor target,
-                                                   Serializer &rez);
-      void send_slice_post_launch_collective_kernel(Processor target,
-                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_request(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
@@ -3349,8 +3365,6 @@ namespace Legion {
                                                     Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
                                                        Serializer &rez);
-      void send_control_replicate_collective_kernel_launch(
-                                AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -3597,14 +3611,13 @@ namespace Legion {
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_slice_verify_concurrent_execution(Deserializer &derez);
+      void handle_slice_concurrent_allreduce_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_slice_concurrent_allreduce_response(Deserializer &derez);
       void handle_slice_find_intra_dependence(Deserializer &derez);
       void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
-      void handle_slice_remote_pre_launch_collective_kernel(
-                                                     Deserializer &derez);
-      void handle_slice_remote_post_launch_collective_kernel(
-                                                     Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_downgrade_request(Deserializer &derez,
@@ -3841,8 +3854,6 @@ namespace Legion {
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
-      void handle_control_replicate_collective_kernel_launch(
-                                                        Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -3875,11 +3886,6 @@ namespace Legion {
                                                  AddressSpaceID source);
       void handle_create_future_instance_response(Deserializer &derez);
       void handle_free_future_instance(Deserializer &derez);
-      void handle_concurrent_reservation_creation(Deserializer &derez,
-                                                  AddressSpaceID source);
-      void handle_concurrent_execution_analysis(Deserializer &derez);
-      void handle_pre_launch_collective_kernel(Deserializer &derez);
-      void handle_post_launch_collective_kernel(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -3960,16 +3966,9 @@ namespace Legion {
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       // Support for concurrent index task execution 
-      RtEvent acquire_concurrent_reservation(RtEvent release_event,
-                        RtEvent precondition = RtEvent::NO_RT_EVENT);
-      Reservation find_or_create_concurrent_reservation(void);
-      RtEvent find_concurrent_fence_event(Processor target, ApEvent next,
-                                ApEvent &previous, RtEvent precondition);
-      static void handle_concurrent_analysis(const void *args);
-    public:
-      // Support for concurrent kernel launches
-      void pre_launch_collective_kernel(RtUserEvent to_trigger);
-      void post_launch_collective_kernel(void);
+      void order_concurrent_task_launch(Processor proc, SingleTask *task,
+          ApEvent precondition, ApUserEvent ready);
+      void end_concurrent_task(Processor proc);
     public:
       DistributedID get_available_distributed_id(void); 
       DistributedID get_remote_distributed_id(AddressSpaceID from);
@@ -4236,6 +4235,8 @@ namespace Legion {
       CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
       IndexSpaceExprID   get_unique_index_space_expr_id(void);
+      uint64_t           get_unique_top_level_task_id(void);
+      uint64_t           get_unique_implicit_top_level_task_id(void);
 #ifdef LEGION_SPY
       unsigned           get_unique_indirections_id(void);
 #endif
@@ -4304,15 +4305,6 @@ namespace Legion {
     public:
       std::vector<std::atomic<int> > outstanding_counts;
 #endif
-      // To support concurrent index task launches we need to have a
-      // global reservation that any node can ask for in order to know
-      // that it is safe to perform collective analysis. This reservation
-      // is made on demand on node 0 and gradually spread to other nodes
-      std::atomic<Reservation> concurrent_reservation;
-    protected:
-      // Support for collective kernel launches
-      mutable LocalLock collective_kernel_lock;
-      std::deque<RtUserEvent> collective_kernel_queue;
     public:
       // Internal runtime state 
       // The local processor managed by this runtime
@@ -4375,6 +4367,8 @@ namespace Legion {
       std::atomic<unsigned long long> unique_code_descriptor_id;
       std::atomic<unsigned long long> unique_constraint_id;
       std::atomic<unsigned long long> unique_is_expr_id;
+      std::atomic<uint64_t> unique_top_level_task_id;
+      uint64_t unique_implicit_top_level_task_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
 #endif
@@ -5880,15 +5874,15 @@ namespace Legion {
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_VERIFY_CONCURRENT_EXECUTION:
           break;
+        case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
+          break;
+        case SLICE_CONCURRENT_ALLREDUCE_RESPONSE:
+          break;
         case SLICE_FIND_INTRA_DEP:
           break;
         case SLICE_RECORD_INTRA_DEP:
           break;
         case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
-          break;
-        case SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL:
-          break;
-        case SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL:
           break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           break;
@@ -6075,8 +6069,6 @@ namespace Legion {
         case SEND_REPL_IMPLICIT_RESPONSE:
           return TASK_VIRTUAL_CHANNEL;
         case SEND_REPL_FIND_COLLECTIVE_VIEW:
-          break;
-        case SEND_REPL_COLLECTIVE_KERNEL_LAUNCH:
           break;
         case SEND_MAPPER_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;
@@ -6286,14 +6278,6 @@ namespace Legion {
           break;
         case SEND_REMOTE_DISTRIBUTED_ID_RESPONSE:
           break;
-        case SEND_CONCURRENT_RESERVATION_CREATION:
-          break;
-        case SEND_CONCURRENT_EXECUTION_ANALYSIS:
-          break;
-        case SEND_PRE_LAUNCH_COLLECTIVE_KERNEL:
-          break;
-        case SEND_POST_LAUNCH_COLLECTIVE_KERNEL:
-          break;
         case SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE:
         case SEND_CONTROL_REPLICATION_FUTURE_BROADCAST:
         case SEND_CONTROL_REPLICATION_FUTURE_REDUCTION:
@@ -6331,6 +6315,7 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
         case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
+        case SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE:
         case SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE:
         case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
         case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:

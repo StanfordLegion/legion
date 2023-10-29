@@ -394,6 +394,7 @@ namespace Legion {
       LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
+      LG_ORDER_CONCURRENT_LAUNCH_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
@@ -443,7 +444,6 @@ namespace Legion {
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
-      LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
@@ -512,6 +512,7 @@ namespace Legion {
         "Deferred Task Launch",                                   \
         "Handle Mapping Misspeculation",                          \
         "Defer Trigger Task Complete",                            \
+        "Order Concurrent Launch",                                \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
         "Defer Phi View Registration",                            \
@@ -561,7 +562,6 @@ namespace Legion {
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \
-        "Defer Concurrent Analysis",                              \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
         "Defer Record Complete Replay",                           \
@@ -812,11 +812,11 @@ namespace Legion {
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
       SLICE_VERIFY_CONCURRENT_EXECUTION,
+      SLICE_CONCURRENT_ALLREDUCE_REQUEST,
+      SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
-      SLICE_REMOTE_PRE_LAUNCH_COLLECTIVE_KERNEL,
-      SLICE_REMOTE_POST_LAUNCH_COLLECTIVE_KERNEL,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_DOWNGRADE_REQUEST,
       DISTRIBUTED_DOWNGRADE_RESPONSE,
@@ -900,7 +900,6 @@ namespace Legion {
       SEND_REPL_IMPLICIT_REQUEST,
       SEND_REPL_IMPLICIT_RESPONSE,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
-      SEND_REPL_COLLECTIVE_KERNEL_LAUNCH,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -1004,10 +1003,6 @@ namespace Legion {
       SEND_FREE_FUTURE_INSTANCE,
       SEND_REMOTE_DISTRIBUTED_ID_REQUEST,
       SEND_REMOTE_DISTRIBUTED_ID_RESPONSE,
-      SEND_CONCURRENT_RESERVATION_CREATION,
-      SEND_CONCURRENT_EXECUTION_ANALYSIS,
-      SEND_PRE_LAUNCH_COLLECTIVE_KERNEL,
-      SEND_POST_LAUNCH_COLLECTIVE_KERNEL,
       SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE,
       SEND_CONTROL_REPLICATION_FUTURE_BROADCAST,
       SEND_CONTROL_REPLICATION_FUTURE_REDUCTION,
@@ -1045,6 +1040,7 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW,
       SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION,
+      SEND_CONTROL_REPLICATION_CONCURRENT_ALLREDUCE,
       SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE,
       SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
@@ -1121,11 +1117,11 @@ namespace Legion {
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
         "Slice Verify Concurrent Execution",                          \
+        "Slice Concurrent Allreduce Request",                         \
+        "Slice Concurrent Allreduce Response",                        \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
-        "Slice Remote Pre Launch Collective Kernel",                  \
-        "Slice Remote Post Launch Collective Kernel",                 \
         "Distributed Remote Registration",                            \
         "Distributed Downgrade Request",                              \
         "Distributed Downgrade Response",                             \
@@ -1209,7 +1205,6 @@ namespace Legion {
         "Send Replicate Implicit Request",                            \
         "Send Replicate Implicit Response",                           \
         "Send Replicate Find or Create Collective View",              \
-        "Send Replicate Collective Kernel Launch",                    \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1313,10 +1308,6 @@ namespace Legion {
         "Send Free Future Instance",                                  \
         "Send Remote Distributed ID Request",                         \
         "Send Remote Distributed ID Response",                        \
-        "Send Concurrent Reservation Creation",                       \
-        "Send Concurrent Execution Analysis",                         \
-        "Send Pre Launch Collective Kernel",                          \
-        "Send Post Launch Collective Kernel",                         \
         "Control Replication Collective Future All-Reduce",           \
         "Control Replication Collective Future Broadcast",            \
         "Control Replication Collective Future Reduction",            \
@@ -1354,6 +1345,7 @@ namespace Legion {
         "Control Replication Collective Create Fill View",            \
         "Control Replication Collective View Rendezvous",             \
         "Control Replication Collective Concurrent Execution Validation",\
+        "Control Replication Collective Concurrent Allreduce",        \
         "Control Replication Collective Elide Close Exchange",        \
         "Control Replication Collective Predicate Exchange",          \
         "Control Replication Collective Cross Product Exchange",      \
@@ -1765,10 +1757,10 @@ namespace Legion {
       COLLECTIVE_LOC_73 = 73,
       COLLECTIVE_LOC_74 = 74,
       COLLECTIVE_LOC_75 = 75,
-      //COLLECTIVE_LOC_76 = 76,
+      COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
-      //COLLECTIVE_LOC_79 = 79,
+      COLLECTIVE_LOC_79 = 79,
       COLLECTIVE_LOC_80 = 80,
       COLLECTIVE_LOC_81 = 81,
       COLLECTIVE_LOC_82 = 82,

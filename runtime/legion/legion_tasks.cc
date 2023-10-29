@@ -4623,6 +4623,21 @@ namespace Legion {
         wait_on_events.insert(ApEvent(true_guard));
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
+      // If we're performing a concurrent index space task launch then we
+      // need to perform an extra step here to ensure a global ordering 
+      // between concurrent index space task launches on the same processor
+      if (is_concurrent())
+      {
+#ifdef DEBUG_LEGION
+        assert(target_processors.size() == 1);
+#endif
+        const OrderConcurrentLaunchArgs args(this, 
+            target_processors.front(), start_condition); 
+        // Give this very high priority as it is likely on the critical path
+        runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+            Runtime::protect_event(start_condition));
+        start_condition = args.ready;
+      }
       // Need a copy of any locks to release on the stack since the 
       // atomic_locks cannot be touched after we launch the task
       std::vector<Reservation> to_release;
@@ -5061,23 +5076,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::perform_concurrent_analysis(Processor target,
-                                                 RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!concurrent_fence_event.exists());
-#endif
-      if (!single_task_termination.exists())
-        single_task_termination = Runtime::create_ap_user_event(NULL);
-      // Find the concurrent fence event
-      const RtEvent postcondition = runtime->find_concurrent_fence_event(target,
-          single_task_termination, concurrent_fence_event, precondition);
-      if (postcondition.exists())
-        map_applied_conditions.insert(postcondition);
-    }
-
-    //--------------------------------------------------------------------------
     void SingleTask::trigger_children_complete(ApEvent all_children_complete)
     //--------------------------------------------------------------------------
     {
@@ -5109,6 +5107,16 @@ namespace Legion {
       const DeferTriggerTaskCompleteArgs *targs =
         (const DeferTriggerTaskCompleteArgs*)args;
       targs->task->trigger_task_complete();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::order_concurrent_task_launch(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const OrderConcurrentLaunchArgs *oargs = 
+        (const OrderConcurrentLaunchArgs*)args;
+      oargs->task->runtime->order_concurrent_task_launch(oargs->processor,
+          oargs->task, oargs->start, oargs->ready);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5148,15 +5156,14 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
-      concurrent_precondition = RtEvent::NO_RT_EVENT;
       concurrent_verified = RtUserEvent::NO_RT_USER_EVENT;
-      collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
-      pre_launch_collective_kernel_arrivals = 0;
-      post_launch_collective_kernel_arrivals = 0;
+      collective_kernel_barrier = RtBarrier::NO_RT_BARRIER;
       children_complete_invoked = false;
       children_commit_invoked = false;
       predicate_false_result = NULL;
       predicate_false_size = 0;
+      concurrent_lamport_clock = 0;
+      concurrent_poisoned = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5411,7 +5418,6 @@ namespace Legion {
       if (!rhs->point_futures.empty())
         this->point_futures = rhs->point_futures;
       this->output_region_options = rhs->output_region_options;
-      this->concurrent_precondition = rhs->concurrent_precondition;
       if (!elide_future_return)
       {
         this->predicate_false_future = rhs->predicate_false_future;
@@ -6554,6 +6560,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::concurrent_allreduce(ProcessorManager *manager, 
+                                          uint64_t lamport_clock, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      manager->finalize_concurrent_task_order(this, lamport_clock, poisoned);  
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::pre_launch_collective_kernel(void)
     //--------------------------------------------------------------------------
     {
@@ -6964,6 +6978,7 @@ namespace Legion {
       SingleTask::activate();
       orig_task = this;
       slice_owner = NULL;
+      collective_kernel_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -7007,14 +7022,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SingleTask::trigger_replay();
-      if (concurrent_task)
-      {
-#ifdef DEBUG_LEGION
-        assert(target_processors.size() == 1);
-#endif
-        perform_concurrent_analysis(target_processors.back(),
-                  slice_owner->get_concurrent_precondition());
-      }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -7210,8 +7217,6 @@ namespace Legion {
           if (checked.exists())
             map_applied_conditions.insert(checked);
         }
-        perform_concurrent_analysis(target_proc,
-            slice_owner->get_concurrent_precondition());
       }
       RtEvent applied_condition;
       // If we succeeded in mapping and we're a leaf so we are done mapping
@@ -7508,6 +7513,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::concurrent_allreduce(ProcessorManager *manager,
+                                         uint64_t lamport_clock, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->concurrent_allreduce(this, manager, lamport_clock, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::pre_launch_collective_kernel(void)
     //--------------------------------------------------------------------------
     {
@@ -7518,8 +7531,18 @@ namespace Legion {
             "not part of a concurrent index space task. Collective kernel "
             "launches are only permitted in concurrent index space tasks.",
             get_task_name(), get_unique_id())
-      const RtEvent wait_on = slice_owner->pre_launch_collective_kernel();
-      wait_on.wait();
+      if (!collective_kernel_barrier.exists())
+        collective_kernel_barrier = 
+          slice_owner->get_collective_kernel_barrier();
+      Runtime::phase_barrier_arrive(collective_kernel_barrier, 1/*count*/);
+      collective_kernel_barrier.wait();
+      Runtime::advance_barrier(collective_kernel_barrier);
+#ifdef DEBUG_LEGION
+      // If you ever fail this assertion then we exhausted the number
+      // of generations in a barrier. Hopefully CUDA will fix its bug
+      // before we ever need to deal with this
+      assert(collective_kernel_barrier.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7533,7 +7556,18 @@ namespace Legion {
             "not part of a concurrent index space task. Collective kernel "
             "launches are only permitted in concurrent index space tasks.",
             get_task_name(), get_unique_id())
-      slice_owner->post_launch_collective_kernel();
+#ifdef DEBUG_LEGION
+      assert(collective_kernel_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_kernel_barrier, 1/*count*/);
+      collective_kernel_barrier.wait();
+      Runtime::advance_barrier(collective_kernel_barrier);
+#ifdef DEBUG_LEGION
+      // If you ever fail this assertion then we exhausted the number
+      // of generations in a barrier. Hopefully CUDA will fix its bug
+      // before we ever need to deal with this
+      assert(collective_kernel_barrier.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8090,6 +8124,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::concurrent_allreduce(ProcessorManager *manager,
+                                         uint64_t lamport_clock, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardTask::pre_launch_collective_kernel(void)
     //--------------------------------------------------------------------------
     {
@@ -8493,6 +8536,7 @@ namespace Legion {
       mapped_points = 0;
       complete_points = 0;
       committed_points = 0;
+      concurrent_points = 0;
       need_intra_task_alias_analysis = true;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
@@ -8551,6 +8595,9 @@ namespace Legion {
       all_output_sizes.clear();
       interfering_requirements.clear();
       point_requirements.clear();
+      concurrent_slices.clear();
+      if (collective_kernel_barrier.exists())
+        collective_kernel_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION
       assert(pending_intra_space_dependences.empty());
 #endif
@@ -9334,9 +9381,6 @@ namespace Legion {
         // Enumerate the futures in the future map
         if ((redop == 0) && !elide_future_return)
           enumerate_futures(index_domain);
-        // Prepare any setup for performing the concurrent analysis
-        if (concurrent_task)
-          initialize_concurrent_analysis(false/*replay*/);
         Operation::trigger_ready();
       }
     }
@@ -9364,20 +9408,6 @@ namespace Legion {
         Future f = future_map.impl->get_future(itr.p, true/*internal only*/);
         handles[itr.p] = f.impl->did;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::initialize_concurrent_analysis(bool replay)
-    //--------------------------------------------------------------------------
-    {
-      // Ask the runtime to acquire the concurrent reservation
-      if (replay)
-        concurrent_precondition = 
-         parent_ctx->total_hack_function_for_inorder_concurrent_replay_analysis(
-                                                                  mapped_event);
-      else
-        concurrent_precondition = 
-          runtime->acquire_concurrent_reservation(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -9429,6 +9459,51 @@ namespace Legion {
         Runtime::trigger_event(concurrent_verified);
       }
       return concurrent_verified;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::concurrent_allreduce(SliceTask *slice,
+        AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
+        bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      {
+        AutoLock o_lock(op_lock);
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        if (poisoned)
+          concurrent_poisoned = true;
+        concurrent_slices.push_back(std::make_pair(slice, slice_space));
+        concurrent_points += points;
+        done = (concurrent_points == total_points);
+      }
+      if (done)
+      {
+        collective_kernel_barrier =
+          RtBarrier(Realm::Barrier::create_barrier(total_points));
+        for (std::vector<std::pair<SliceTask*,AddressSpaceID> >::const_iterator
+              it = concurrent_slices.begin(); 
+              it != concurrent_slices.end(); it++)
+        {
+          if (it->second != runtime->address_space)
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(it->first);
+              rez.serialize(collective_kernel_barrier);
+              rez.serialize(concurrent_lamport_clock);
+              rez.serialize(concurrent_poisoned);
+            }
+            runtime->send_slice_concurrent_allreduce_response(it->second, rez);
+          }
+          else
+            it->first->finish_concurrent_allreduce(
+                concurrent_lamport_clock, concurrent_poisoned, 
+                collective_kernel_barrier);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10368,50 +10443,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexTask::pre_launch_collective_kernel(size_t points)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_send;
-      {
-        AutoLock o_lock(op_lock);
-        if (!collective_kernel_precondition.exists())
-          collective_kernel_precondition = Runtime::create_rt_user_event();
-        pre_launch_collective_kernel_arrivals += points;
-#ifdef DEBUG_LEGION
-        assert(pre_launch_collective_kernel_arrivals <= total_points);
-#endif
-        if (pre_launch_collective_kernel_arrivals < total_points)
-          return collective_kernel_precondition;
-        to_send = collective_kernel_precondition;
-        // Reset for the next iteration
-        collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
-        pre_launch_collective_kernel_arrivals = 0;
-      }
-      // Send the message off to the global queue
-      runtime->pre_launch_collective_kernel(to_send);
-      return to_send;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::post_launch_collective_kernel(size_t points)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock o_lock(op_lock);
-        post_launch_collective_kernel_arrivals += points;
-#ifdef DEBUG_LEGION
-        assert(post_launch_collective_kernel_arrivals <= total_points);
-#endif
-        if (post_launch_collective_kernel_arrivals < total_points)
-          return;
-        // Reset for the next iteration
-        post_launch_collective_kernel_arrivals = 0;
-      }
-      // Send the message off to the global queue
-      runtime->post_launch_collective_kernel();
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::return_slice_commit(unsigned points, 
                                         RtEvent commit_precondition)
     //--------------------------------------------------------------------------
@@ -10599,9 +10630,6 @@ namespace Legion {
         runtime->forest->find_domain(internal_space, internal_domain);
         enumerate_futures(internal_domain);
       }
-      // Prepare any setup for performing the concurrent analysis
-      if (concurrent_task)
-        initialize_concurrent_analysis(true/*replay*/);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
@@ -10699,13 +10727,7 @@ namespace Legion {
       {
         const RegionRequirement &req = regions[idx];
         if (!IS_WRITE(req))
-        {
-          // Special case here for concurrent index task launches where
-          // atomic coherence can get us into trouble
-          if (concurrent_task && IS_ATOMIC(req))
-            local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
           continue;
-        }
         // If the projection functions are invertible then we don't have to 
         // worry about interference because the runtime knows how to hook
         // up those kinds of dependences
@@ -11027,6 +11049,7 @@ namespace Legion {
       created_index_partitions.clear();
       unique_intra_space_deps.clear();
       all_output_sizes.clear();
+      concurrent_points.clear();
       if (freeop)
         runtime->free_slice_task(this);
     }
@@ -11290,7 +11313,6 @@ namespace Legion {
           FutureMapImpl *impl = point_futures[idx].impl;
           impl->pack_future_map(rez, target);
         }
-        rez.serialize(concurrent_precondition);
       }
       if (is_origin_mapped() && !is_remote())
       {
@@ -11384,7 +11406,6 @@ namespace Legion {
             point_futures[idx] = FutureMapImpl::unpack_future_map(runtime, 
                                                         derez, parent_ctx);
         }
-        derez.deserialize(concurrent_precondition);
       }
       else // Set the first mapping to false since we know things are mapped
         first_mapping = false;
@@ -12033,67 +12054,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent SliceTask::pre_launch_collective_kernel(void)
+    void SliceTask::concurrent_allreduce(PointTask *task,
+               ProcessorManager *manager, uint64_t lamport_clock, bool poisoned)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent to_send;
-      if (is_remote())
+      bool done = false;
       {
         AutoLock o_lock(op_lock);
-        if (!collective_kernel_precondition.exists())
-          collective_kernel_precondition = Runtime::create_rt_user_event();
-#ifdef DEBUG_LEGION
-        assert(pre_launch_collective_kernel_arrivals < points.size());
-#endif
-        if ((++pre_launch_collective_kernel_arrivals) < points.size())
-          return collective_kernel_precondition;
-        to_send = collective_kernel_precondition;
-        // Reset for the next iteration
-        collective_kernel_precondition = RtUserEvent::NO_RT_USER_EVENT;
-        pre_launch_collective_kernel_arrivals = 0;
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        if (poisoned)
+          concurrent_poisoned = true;
+        concurrent_points.push_back(std::make_pair(task, manager));
+        done = (concurrent_points.size() == points.size());
       }
-      else
-        return index_owner->pre_launch_collective_kernel(1/*count*/);
-      // Send it off to the owner
-      Serializer rez;
+      if (done)
       {
-        RezCheck z(rez);
-        rez.serialize(index_owner);
-        rez.serialize<size_t>(points.size());
-        rez.serialize(to_send);
+        if (is_remote())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(index_owner);
+            rez.serialize(this);
+            rez.serialize(points.size());
+            rez.serialize(concurrent_lamport_clock);
+            rez.serialize(concurrent_poisoned);
+          }
+          runtime->send_slice_concurrent_allreduce_request(orig_proc, rez);
+        }
+        else
+          index_owner->concurrent_allreduce(this,runtime->address_space,
+              points.size(), concurrent_lamport_clock, concurrent_poisoned);
       }
-      runtime->send_slice_pre_launch_collective_kernel(orig_proc, rez);
-      return to_send;
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::post_launch_collective_kernel(void)
+    void SliceTask::finish_concurrent_allreduce(uint64_t lamport_clock,
+                                 bool poisoned, RtBarrier collective_kernel_bar)
     //--------------------------------------------------------------------------
     {
-      if (is_remote())
-      {
-        AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-        assert(post_launch_collective_kernel_arrivals < points.size());
+      assert(!collective_kernel_barrier.exists());
 #endif
-        if ((++post_launch_collective_kernel_arrivals) < points.size())
-          return;
-        // Reset for the next iteration
-        post_launch_collective_kernel_arrivals = 0;
-      }
-      else
-      {
-        index_owner->post_launch_collective_kernel(1/*count*/);
-        return;
-      }
-      // Send it to the owner
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(index_owner);
-        rez.serialize<size_t>(points.size());
-      }
-      runtime->send_slice_post_launch_collective_kernel(orig_proc, rez);
+      collective_kernel_barrier = collective_kernel_bar;
+      // No need for the lock, no races here
+      for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
+            it = concurrent_points.begin(); it != concurrent_points.end(); it++) 
+        it->second->finalize_concurrent_task_order(it->first,
+            lamport_clock, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -12121,32 +12130,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void SliceTask::handle_pre_launch_collective_kernel(
-                                                            Deserializer &derez)
+    /*static*/ void SliceTask::handle_concurrent_allreduce_request(
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       IndexTask *owner;
       derez.deserialize(owner);
-      size_t points;
-      derez.deserialize(points);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      Runtime::trigger_event(to_trigger, 
-          owner->pre_launch_collective_kernel(points)); 
+      SliceTask *slice;
+      derez.deserialize(slice);
+      size_t total_points;
+      derez.deserialize(total_points);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      bool poisoned;
+      derez.deserialize<bool>(poisoned);
+      owner->concurrent_allreduce(slice, source, total_points,
+                                  lamport_clock, poisoned);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void SliceTask::handle_post_launch_collective_kernel(
+    /*static*/ void SliceTask::handle_concurrent_allreduce_response(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      IndexTask *owner;
-      derez.deserialize(owner);
-      size_t points;
-      derez.deserialize(points);
-      owner->post_launch_collective_kernel(points);
+      SliceTask *slice;
+      derez.deserialize(slice);
+      RtBarrier barrier;
+      derez.deserialize(barrier);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      bool poisoned;
+      derez.deserialize<bool>(poisoned);
+      slice->finish_concurrent_allreduce(lamport_clock, poisoned, barrier);
     }
 
     //--------------------------------------------------------------------------

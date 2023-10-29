@@ -14909,13 +14909,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MustEpochOp::get_concurrent_analysis_precondition(void)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->acquire_concurrent_reservation(mapped_event);
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::instantiate_tasks(InnerContext *ctx,
                                         const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -15196,8 +15189,6 @@ namespace Legion {
       // and perform the concurrent analysis on each of them so that they 
       // all know what their starting preconditions are
       {
-        const RtEvent concurrent_precondition =
-          get_concurrent_analysis_precondition();
         std::map<Processor,SingleTask*> target_procs;
         for (unsigned idx = 0; idx < single_tasks.size(); idx++)
         {
@@ -15228,7 +15219,6 @@ namespace Legion {
           }
           target_procs[proc] = task;
           task->target_proc = proc;
-          task->perform_concurrent_analysis(proc, concurrent_precondition);
         }
       }
       std::set<RtEvent> tasks_all_mapped;

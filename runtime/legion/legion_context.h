@@ -2037,11 +2037,6 @@ namespace Legion {
       // Only valid on the onwer context node
       std::map<RegionTreeID,
                std::vector<CollectiveResult*> >         collective_results;
-    public:
-      // TODO: delete this once we properly replay mapping dependences
-      RtEvent inorder_concurrent_replay_analysis;
-      RtEvent total_hack_function_for_inorder_concurrent_replay_analysis(
-                                                            RtEvent mapped);
     };
 
     /**
@@ -2055,7 +2050,8 @@ namespace Legion {
      */
     class TopLevelContext : public InnerContext {
     public:
-      TopLevelContext(Runtime *runtime);
+      TopLevelContext(Runtime *runtime, 
+          coord_t normal_id, coord_t implicit_id);
       TopLevelContext(const TopLevelContext &rhs) = delete;
       virtual ~TopLevelContext(void);
     public:
@@ -2979,10 +2975,6 @@ namespace Legion {
         { return dependent_partition_execution_barrier.next(this); }
       inline RtBarrier get_next_attach_resource_barrier(void)
         { return attach_resource_barrier.next(this); }
-      inline RtBarrier get_next_concurrent_precondition_barrier(void)
-        { return concurrent_precondition_barrier.next(this); }
-      inline RtBarrier get_next_concurrent_postcondition_barrier(void)
-        { return concurrent_postcondition_barrier.next(this); }
       inline RtBarrier get_next_close_mapped_barrier(void)
         {
           const RtBarrier result =
@@ -3182,8 +3174,6 @@ namespace Legion {
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;
-      RtReplSingleBar concurrent_precondition_barrier;
-      RtReplBar concurrent_postcondition_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtReplBar collective_check_barrier;

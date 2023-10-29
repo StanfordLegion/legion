@@ -2159,6 +2159,10 @@ namespace Legion {
                   const void *metadataptr, size_t metadatasize, ApEvent effects)
     //--------------------------------------------------------------------------
     {
+      // If this was a concurrent task then tell the runtime we're done
+      // running it so the next one can be started
+      if (owner_task->is_concurrent())
+        runtime->end_concurrent_task(executing_processor);
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
       if (!output_regions.empty())
@@ -2170,7 +2174,7 @@ namespace Legion {
         assert(!effects.exists());
 #endif
         effects = ApEvent(Processor::get_current_finish_event());
-      }
+      } 
       // See if we need to pull the data in from a callback in the case
       // where we are going to be doing a reduction immediately, if we
       // are then we're going to overwrite 'owned' so save it to callback_owned
@@ -12124,30 +12128,23 @@ namespace Legion {
     }
 #endif
 
-    //--------------------------------------------------------------------------
-    RtEvent 
-      InnerContext::total_hack_function_for_inorder_concurrent_replay_analysis(
-                                                           RtEvent mapped_event)
-    //--------------------------------------------------------------------------
-    {
-      inorder_concurrent_replay_analysis =
-        runtime->acquire_concurrent_reservation(mapped_event,
-            inorder_concurrent_replay_analysis);
-      return inorder_concurrent_replay_analysis;
-    }
-
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TopLevelContext::TopLevelContext(Runtime *rt)
+    TopLevelContext::TopLevelContext(Runtime *rt, coord_t normal_id, 
+                                     coord_t implicit_id)
       : InnerContext(rt, NULL, -1, false/*full inner*/,
                      dummy_requirements, dummy_output_requirements,
                      dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT),
         root_uid(rt->get_unique_operation_id())
     //--------------------------------------------------------------------------
     {
+      // This coordinate represents the name of the unique top-level task
+      // launched by this instance of the Legion runtime
+      context_coordinates.push_back(ContextCoordinate(0/*context index*/,
+            DomainPoint(Point<2>(normal_id, implicit_id))));
     }
 
     //--------------------------------------------------------------------------
