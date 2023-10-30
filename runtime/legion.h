@@ -1187,7 +1187,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
-      Future(Future &&f);
+      Future(Future &&f) noexcept;
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -9911,4 +9911,3 @@ namespace Legion {
 #endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 // EOF
-

@@ -2151,7 +2151,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Future &&rhs)
+    Future::Future(Future &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -7562,4 +7562,3 @@ namespace Legion {
 }; // namespace Legion
 
 // EOF
-
