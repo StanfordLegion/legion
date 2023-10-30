@@ -556,6 +556,21 @@ namespace Realm {
           out_is_ipc = dst_is_ipc[output_control.current_io_port];
         }
 
+        std::string memcpy_kind;
+        if(in_gpu) {
+          if(out_gpu == in_gpu) {
+            memcpy_kind = "d2d";
+          } else if(out_mapping) {
+            memcpy_kind = "ipc";
+          } else if(!out_gpu) {
+            memcpy_kind = "d2h";
+          } else {
+            memcpy_kind = "p2p";
+          }
+        } else {
+          memcpy_kind = "h2d";
+        }
+
         if (in_port == 0 || out_port == 0) {
           if (in_port) {
             in_port->addrcursor.skip_bytes(max_bytes);
@@ -709,7 +724,7 @@ namespace Realm {
                             << " dstpitch=" << d2_copy_info.dstPitch
                             << " WidthInBytes=" << d2_copy_info.WidthInBytes
                             << " Height=" << d2_copy_info.Height
-                            << " out_is_ipc=" << out_is_ipc;
+                            << " memcpy_kind=" << memcpy_kind;
 
           size_t planes = transpose_copy.extents[2];
           size_t act_planes = 0;
@@ -778,7 +793,7 @@ namespace Realm {
                             << " srcHeight=" << cuda_copy.srcHeight
                             << " dstPitch=" << cuda_copy.dstPitch
                             << " dstHeight=" << cuda_copy.dstHeight
-                            << " out_is_ipc=" << out_is_ipc;
+                            << " memcpy_kind=" << memcpy_kind;
 
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
 
