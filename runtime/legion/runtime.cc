@@ -11239,7 +11239,10 @@ namespace Legion {
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id(LEGION_MAX_APPLICATION_LAYOUT_ID + 
-                        ((unique == 0) ? runtime_stride : unique)),
+            (((LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride) <= unique) ?
+             (runtime_stride - 
+              ((LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride) - unique)) :
+             (unique - (LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride)))),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
@@ -11259,6 +11262,9 @@ namespace Legion {
         unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((unique_constraint_id % runtime_stride) == unique);
+#endif
       if (LEGION_MAX_NUM_NODES <= address_space)
         REPORT_LEGION_ERROR(ERROR_MAXIMUM_NODES_EXCEEDED,
             "Maximum number of nodes exceeded. Detected node %d but "
