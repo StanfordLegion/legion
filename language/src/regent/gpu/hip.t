@@ -229,7 +229,7 @@ function hiphelper.jit_compile_kernels_and_register(kernels)
 
   local register = quote
     var num_devices: int = -1
-    check(RuntimeAPI.hipGetDeviceCount(num_devices))
+    check(RuntimeAPI.hipGetDeviceCount(&num_devices), "hipGetDeviceCount")
     escape
       for _, k in ipairs(kernels) do
         local kernel = k.kernel
@@ -238,14 +238,14 @@ function hiphelper.jit_compile_kernels_and_register(kernels)
         assert(func) -- Hopefully this is always true. If not, then it means we're generating kernels that we don't call anywhere.
         emit quote
           -- FIXME (Elliott): leaks
-          func = c.malloc(sizeof(RuntimeAPI.hipFunction_t) * num_devices)
+          func = [&RuntimeAPI.hipFunction_t](base.c.malloc(sizeof(RuntimeAPI.hipFunction_t) * num_devices))
           base.assert(func ~= nil, "allocating space for HIP functions failed")
         end
       end
     end
 
     for dev_id = 0, num_devices do
-      check(RuntimeAPI.hipSetDevice(dev_id))
+      check(RuntimeAPI.hipSetDevice(dev_id), "hipSetDevice")
       var module : RuntimeAPI.hipModule_t
       check(RuntimeAPI.hipModuleLoadData(&module, bundle_contents), "hipModuleLoadData")
       escape
@@ -499,7 +499,7 @@ function hiphelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size,
       var [grid], [block]
       var [stream] = RuntimeAPI.hipGetTaskStream()
       var dev_id : int
-      check(RuntimeAPI.hipGetDevice(&dev_id))
+      check(RuntimeAPI.hipGetDevice(&dev_id), "hipGetDevice")
       [launch_domain_init]
       [setupArguments]
       [check](
