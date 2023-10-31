@@ -2313,6 +2313,7 @@ pub struct State {
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
     pub has_prof_data: bool,
     pub visible_nodes: Vec<NodeID>,
+    pub source_locator: Vec<String>,
 }
 
 impl State {
