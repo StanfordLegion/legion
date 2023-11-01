@@ -1739,7 +1739,7 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
+        current_template->finalize(parent_ctx, this, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -1928,7 +1928,7 @@ namespace Legion {
         assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
+        current_template->finalize(parent_ctx, this, has_blocking_call);
         PhysicalTrace *physical_trace = trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -5062,8 +5062,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
-                                         ReplTraceOp *op, InnerContext *context,
-                                         UniqueID opid, bool has_blocking_call) 
+                   Operation *op, InnerContext *context, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
@@ -5099,8 +5098,8 @@ namespace Legion {
           assert(req_it->first == it->first);
 #endif
           it->first->perform_versioning_analysis(ctx, context, 
-            &version_infos[index], it->second, opid, IndexSpace::NO_SPACE,
-            req_it->second, eq_events);
+            &version_infos[index], it->second, op, 0/*index*/,
+            IndexSpace::NO_SPACE, req_it->second, eq_events);
         }
 #ifdef DEBUG_LEGION
         assert(req_it == trace_region_parent_req_indexes.end());
@@ -5152,8 +5151,8 @@ namespace Legion {
         // really what we're doing here is registering the condition with 
         // the VersionManager that owns this equivalence set which is a
         // necessary thing for us to do
-        const RtEvent ready = 
-          condition->recompute_equivalence_sets(opid, it->second);
+        const RtEvent ready = condition->recompute_equivalence_sets(
+            op->get_unique_op_id(), it->second);
         if (ready.exists())
           ready_events.push_back(ready);
         condition->capture(it->first, it->second, ready_events);
@@ -5259,12 +5258,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(InnerContext *context, UniqueID opid,
-                                    bool has_blocking_call, ReplTraceOp *op)
+    void PhysicalTemplate::finalize(InnerContext *context, Operation *op,
+                                    bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       recording = false;
-      replayable = check_replayable(op, context, opid, has_blocking_call);
+      replayable = check_replayable(op, context, has_blocking_call);
 
       if (!replayable)
       {
@@ -5297,8 +5296,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::optimize(ReplTraceOp *op,
-                                    bool do_transitive_reduction)
+    void PhysicalTemplate::optimize(Operation *op, bool do_transitive_reduction)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5883,12 +5881,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::sync_compute_frontiers(ReplTraceOp *op,
+    void PhysicalTemplate::sync_compute_frontiers(Operation *op,
                                     const std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(op == NULL);
       assert(frontier_events.empty());
 #endif
     }
@@ -9393,23 +9390,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
-                                         ReplTraceOp *op, InnerContext *context,
-                                         UniqueID opid, bool has_blocking_call)
+                   Operation *op, InnerContext *context, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
+      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
+      assert(repl_op != NULL);
+#else
+      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
 #endif
       // We need everyone else to be done capturing their traces
       // before we can do our own replayable check
-      op->sync_for_replayable_check();
+      repl_op->sync_for_replayable_check();
       // Do the base call first to determine if our local shard is replayable
       const Replayable result = 
-       PhysicalTemplate::check_replayable(op, context, opid, has_blocking_call);
+       PhysicalTemplate::check_replayable(op, context, has_blocking_call);
       if (result)
       {
         // Now we can do the exchange
-        if (op->exchange_replayable(repl_ctx, true/*replayable*/))
+        if (repl_op->exchange_replayable(repl_ctx, true/*replayable*/))
           return result;
         else
           return Replayable(false, "Remote shard not replyable");
@@ -9417,7 +9417,7 @@ namespace Legion {
       else
       {
         // Still need to do the exchange
-        op->exchange_replayable(repl_ctx, false/*replayable*/);
+        repl_op->exchange_replayable(repl_ctx, false/*replayable*/);
         return result;
       }
     }
@@ -10058,17 +10058,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::sync_compute_frontiers(ReplTraceOp *op,
+    void ShardedPhysicalTemplate::sync_compute_frontiers(Operation *op,
                                     const std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
+      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
+#else
+      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
 #endif
       if (!frontier_events.empty())
-        op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
+        repl_op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
       else
-        op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
+        repl_op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
       // Check for any empty remote frontiers which were not actually
       // contained in the trace and therefore need to be pruned out of
       // any event mergers

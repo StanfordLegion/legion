@@ -4391,7 +4391,8 @@ namespace Legion {
                                        VersionInfo *version_info,
                                        RegionNode *region_node,
                                        const FieldMask &version_mask,
-                                       UniqueID opid, unsigned parent_req_index,
+                                       Operation *op, unsigned index,
+                                       unsigned parent_req_index,
                                        IndexSpace root_space,
                                        std::set<RtEvent> &ready,
                                        RtEvent *output_region_ready);

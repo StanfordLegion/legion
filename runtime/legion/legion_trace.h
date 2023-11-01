@@ -1040,8 +1040,8 @@ namespace Legion {
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
-      void finalize(InnerContext *context, UniqueID opid,
-                    bool has_blocking_call, ReplTraceOp *op = NULL);
+      void finalize(InnerContext *context, Operation *op,
+                    bool has_blocking_call);
     public:
       struct Replayable {
         explicit Replayable(bool r)
@@ -1061,11 +1061,10 @@ namespace Legion {
         std::string message;
       };
     protected:
-      virtual Replayable check_replayable(ReplTraceOp *op, 
-          InnerContext *context, UniqueID opid, bool has_blocking_call);
+      virtual Replayable check_replayable(Operation *op, 
+          InnerContext *context, bool has_blocking_call);
     public:
-      void optimize(ReplTraceOp *op,
-                    bool do_transitive_reduction);
+      void optimize(Operation *op, bool do_transitive_reduction);
     private:
       void find_all_last_instance_user_events(
                              std::vector<RtEvent> &frontier_events);
@@ -1084,7 +1083,7 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     protected:
-      virtual void sync_compute_frontiers(ReplTraceOp *op,
+      virtual void sync_compute_frontiers(Operation *op,
                           const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
@@ -1601,8 +1600,8 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
-      virtual Replayable check_replayable(ReplTraceOp *op, 
-          InnerContext *context, UniqueID opid, bool has_blocking_call);
+      virtual Replayable check_replayable(Operation *op,
+          InnerContext *context, bool has_blocking_call);
     protected:
       ShardID find_inst_owner(const UniqueInst &inst);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
@@ -1614,7 +1613,7 @@ namespace Legion {
                                            const FieldMask &mask,
                                            std::set<RtEvent> &applied_events);
       virtual bool are_read_only_users(InstUsers &inst_users);
-      virtual void sync_compute_frontiers(ReplTraceOp *op,
+      virtual void sync_compute_frontiers(Operation *op,
                           const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(

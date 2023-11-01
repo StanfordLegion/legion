@@ -8445,8 +8445,7 @@ namespace Legion {
         assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, 
-                                   has_blocking_call, this);
+        current_template->finalize(parent_ctx, this, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -8712,8 +8711,7 @@ namespace Legion {
         assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, 
-                                   has_blocking_call, this);
+        current_template->finalize(parent_ctx, this, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);

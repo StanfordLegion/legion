@@ -26334,7 +26334,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
                  VersionInfo *version_info, RegionNode *region_node,
-                 const FieldMask &version_mask, UniqueID opid,
+                 const FieldMask &version_mask, Operation *op, unsigned index,
                  unsigned parent_req_index, IndexSpace root_space,
                  std::set<RtEvent> &ready_events, RtEvent *output_region_ready)
     //--------------------------------------------------------------------------
@@ -26359,8 +26359,8 @@ namespace Legion {
         // Launch a meta-task to register this equivalence set with
         // EqKDTree once the index space domain is ready
         RtUserEvent done_event = Runtime::create_rt_user_event();
-        FinalizeOutputEquivalenceSetArgs args(this, opid, context,
-                                parent_req_index, set, root_space, done_event);
+        FinalizeOutputEquivalenceSetArgs args(this, op->get_unique_op_id(),
+            context, parent_req_index, set, root_space, done_event);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
             region_node->row_source->get_ready_event());
         *output_region_ready = done_event;
@@ -26476,14 +26476,14 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
-          LgFinalizeEqSetsArgs args(this, compute_event, opid,
+          LgFinalizeEqSetsArgs args(this, compute_event, op->get_unique_op_id(),
               context, parent_req_index, region_node->row_source);
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
         else
           finalize_equivalence_sets(compute_event, context, runtime,
-              parent_req_index, region_node->row_source, opid);
+             parent_req_index, region_node->row_source, op->get_unique_op_id());
       }
     } 
 
