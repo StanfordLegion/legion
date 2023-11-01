@@ -22,6 +22,8 @@
 
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Point<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Rect<N,T>);
+TEMPLATE_TYPE_IS_SERIALIZABLE3(int M, int N, typename T,
+                               Realm::Matrix<M, N, T>);
 
 namespace Realm {
 
@@ -589,6 +591,21 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  template <int N2, typename T2>
+  REALM_CUDA_HD inline Rect<N2, T2> Rect<N, T>::apply_transform(
+      const Matrix<N2, N, T2>& transform, const Point<N2, T2>& offset) {
+    Point<N2, T2> tf_a = transform * lo + offset;
+    Point<N2, T2> tf_b = transform * hi + offset;
+
+    Rect<N2, T2> bbox;
+    for (int i = 0; i < N2; i++) {
+      bbox.lo[i] = std::min(tf_a[i], tf_b[i]);
+      bbox.hi[i] = std::max(tf_a[i], tf_b[i]);
+    }
+    return bbox;
+  }
+
+  template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p)
   {
     os << p.lo << ".." << p.hi;
@@ -708,6 +725,20 @@ namespace Realm {
   inline const Point<N, T>& Matrix<M,N,T>::operator[](int index) const
   {
     return rows[index];
+  }
+
+  template <int M, int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os,
+                                  const Matrix<M, N, T>& matrix) {
+    os << '[';
+    for (int i = 0; i < M; i++) {
+      for (int j = 0; j < N; j++) {
+        os << matrix[i][j] << (j == N - 1 ? "" : " ");
+      }
+      os << (i == M - 1 ? "" : ";");
+    }
+    os << "]";
+    return os;
   }
 
   ////////////////////////////////////////////////////////////////////////

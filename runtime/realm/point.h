@@ -172,6 +172,10 @@ namespace Realm {
     REALM_CUDA_HD
     Rect<N,T> union_bbox(const Rect<N,T>& other) const;
 
+    template <int N2, typename T2>
+    Rect<N2, T2> REALM_CUDA_HD apply_transform(const Matrix<N2, N, T2> &transform,
+                                               const Point<N2, T2> &offset);
+
     // copy and fill operations (wrappers for IndexSpace versions)
     Event fill(const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
@@ -195,6 +199,9 @@ namespace Realm {
 
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p);
+
+  template <int M, int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const Matrix<M, N, T>& p);
 
   template <int N, typename T, typename T2> REALM_CUDA_HD
   bool operator==(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
