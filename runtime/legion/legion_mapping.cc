@@ -1222,6 +1222,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::get_index_partition_color_space_name(
+                                      MapperContext ctx, IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_partition_color_space_name(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::get_index_space_partition_colors(MapperContext ctx,
                               IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
