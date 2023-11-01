@@ -442,6 +442,8 @@ namespace Legion {
                                    std::vector<Domain> &domains);
       Domain get_index_partition_color_space(MappingCallInfo *info,
                                              IndexPartition p);
+      IndexSpace get_index_partition_color_space_name(MappingCallInfo *info,
+                                                      IndexPartition p);
       void get_index_space_partition_colors(MappingCallInfo *info, 
                                             IndexSpace sp, 
                                             std::set<Color> &colors);

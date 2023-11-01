@@ -2054,6 +2054,9 @@ namespace Legion {
 
       Domain get_index_partition_color_space(MapperContext ctx,
                                                        IndexPartition p) const;
+      
+      IndexSpace get_index_partition_color_space_name(MapperContext ctx,
+                                                      IndexPartition p) const;
 
       void get_index_space_partition_colors(MapperContext ctx, 
                                   IndexSpace sp, std::set<Color> &colors) const;
