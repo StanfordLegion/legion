@@ -19157,7 +19157,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline PieceIteratorT<DIM,T>::PieceIteratorT(PieceIteratorT &&rhs)
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(PieceIteratorT &&rhs) noexcept
       : PieceIterator(rhs), current_rect(rhs.current_rect)
     //--------------------------------------------------------------------------
     {
@@ -19188,7 +19188,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
-                                                           PieceIteratorT &&rhs)
+                                                  PieceIteratorT &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       PieceIterator::operator=(rhs);
