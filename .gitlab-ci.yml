@@ -1310,6 +1310,10 @@ p100_cuda121_clang12_cxx14_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *cmake, *ctest, *regent, *shared]
+p100_cuda121_gcc9_cxx17_debug_maxdim4_external2:
+  <<: [*p100, *external_tests]
+  variables:
+    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *p100_cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
 p100_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
