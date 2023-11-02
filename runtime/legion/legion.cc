@@ -314,7 +314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -387,7 +387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -474,7 +474,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate::Predicate(Predicate &&p)
+    Predicate::Predicate(Predicate &&p) noexcept
     //--------------------------------------------------------------------------
     {
       const_value = p.const_value;
@@ -520,7 +520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate& Predicate::operator=(Predicate &&rhs)
+    Predicate& Predicate::operator=(Predicate &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2333,7 +2333,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Future &&rhs)
+    Future::Future(Future &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2370,7 +2370,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future& Future::operator=(Future &&rhs)
+    Future& Future::operator=(Future &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2547,7 +2547,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(FutureMap &&map)
+    FutureMap::FutureMap(FutureMap &&map) noexcept
       : impl(map.impl)
     //--------------------------------------------------------------------------
     {
@@ -2584,7 +2584,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    FutureMap& FutureMap::operator=(FutureMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2654,7 +2654,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2698,7 +2698,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3194,7 +3194,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources::ExternalResources(ExternalResources &&rhs)
+    ExternalResources::ExternalResources(ExternalResources &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3223,7 +3223,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources& ExternalResources::operator=(ExternalResources &&rhs)
+    ExternalResources& ExternalResources::operator=(
+                                               ExternalResources &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3289,7 +3290,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator::PieceIterator(PieceIterator &&rhs)
+    PieceIterator::PieceIterator(PieceIterator &&rhs) noexcept
       : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
     //--------------------------------------------------------------------------
     {
@@ -3319,7 +3320,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3524,7 +3525,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3565,7 +3566,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -8220,4 +8221,3 @@ namespace Legion {
 }; // namespace Legion
 
 // EOF
-

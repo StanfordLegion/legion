@@ -488,7 +488,7 @@ namespace Legion {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
-      FieldAllocator(FieldAllocator &&allocator);
+      FieldAllocator(FieldAllocator &&allocator) noexcept;
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -496,7 +496,7 @@ namespace Legion {
       FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
-      FieldAllocator& operator=(FieldAllocator &&allocator);
+      FieldAllocator& operator=(FieldAllocator &&allocator) noexcept;
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
       inline bool exists(void) const { return (impl != NULL); }
@@ -664,12 +664,12 @@ namespace Legion {
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
-      ArgumentMap(ArgumentMap &&rhs);
+      ArgumentMap(ArgumentMap &&rhs) noexcept;
       ~ArgumentMap(void);
     public:
       ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
-      ArgumentMap& operator=(ArgumentMap &&rhs);
+      ArgumentMap& operator=(ArgumentMap &&rhs) noexcept;
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
       inline bool operator<(const ArgumentMap &rhs) const
@@ -759,7 +759,7 @@ namespace Legion {
     public:
       Predicate(void);
       Predicate(const Predicate &p);
-      Predicate(Predicate &&p);
+      Predicate(Predicate &&p) noexcept;
       explicit Predicate(bool value);
       ~Predicate(void);
     protected:
@@ -769,7 +769,7 @@ namespace Legion {
       explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
-      Predicate& operator=(Predicate &&p);
+      Predicate& operator=(Predicate &&p) noexcept;
       inline bool operator==(const Predicate &p) const;
       inline bool operator<(const Predicate &p) const;
       inline bool operator!=(const Predicate &p) const;
@@ -1286,7 +1286,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
-      Future(Future &&f);
+      Future(Future &&f) noexcept;
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -1301,7 +1301,7 @@ namespace Legion {
       inline bool operator<(const Future &f) const
         { return impl < f.impl; }
       Future& operator=(const Future &f);
-      Future& operator=(Future &&f);
+      Future& operator=(Future &&f) noexcept;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1488,7 +1488,7 @@ namespace Legion {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
-      FutureMap(FutureMap &&map);
+      FutureMap(FutureMap &&map) noexcept;
       ~FutureMap(void);
     private:
       Internal::FutureMapImpl *impl;
@@ -1505,7 +1505,7 @@ namespace Legion {
       inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
-      FutureMap& operator=(FutureMap &&f);
+      FutureMap& operator=(FutureMap &&f) noexcept;
     public:
       /**
        * Block until we can return the result for the
@@ -2593,7 +2593,7 @@ namespace Legion {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
-      PhysicalRegion(PhysicalRegion &&rhs);
+      PhysicalRegion(PhysicalRegion &&rhs) noexcept;
       ~PhysicalRegion(void);
     private:
       Internal::PhysicalRegionImpl *impl;
@@ -2602,7 +2602,7 @@ namespace Legion {
       explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
-      PhysicalRegion& operator=(PhysicalRegion &&rhs);
+      PhysicalRegion& operator=(PhysicalRegion &&rhs) noexcept;
       inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const PhysicalRegion &reg) const
         { return (impl == reg.impl); }
@@ -2767,7 +2767,7 @@ namespace Legion {
     public:
       ExternalResources(void);
       ExternalResources(const ExternalResources &rhs);
-      ExternalResources(ExternalResources &&rhs);
+      ExternalResources(ExternalResources &&rhs) noexcept;
       ~ExternalResources(void);
     private:
       Internal::ExternalResourcesImpl *impl;
@@ -2776,7 +2776,7 @@ namespace Legion {
       explicit ExternalResources(Internal::ExternalResourcesImpl *impl);
     public:
       ExternalResources& operator=(const ExternalResources &rhs);
-      ExternalResources& operator=(ExternalResources &&rhs);
+      ExternalResources& operator=(ExternalResources &&rhs) noexcept;
       inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const ExternalResources &reg) const
         { return (impl == reg.impl); }
@@ -3622,7 +3622,7 @@ namespace Legion {
     public:
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
-      PieceIterator(PieceIterator &&rhs);
+      PieceIterator(PieceIterator &&rhs) noexcept;
       PieceIterator(const PhysicalRegion &region, FieldID fid,
                     bool privilege_only = true,
                     bool silence_warnings = false,
@@ -3630,7 +3630,7 @@ namespace Legion {
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
-      PieceIterator& operator=(PieceIterator &&rhs);
+      PieceIterator& operator=(PieceIterator &&rhs) noexcept;
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -3665,14 +3665,14 @@ namespace Legion {
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
-      PieceIteratorT(PieceIteratorT &&rhs);
+      PieceIteratorT(PieceIteratorT &&rhs) noexcept;
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
                      bool privilege_only,
                      bool silence_warnings = false,
                      const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
-      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs);
+      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs) noexcept;
     public:
       inline bool step(void);
       inline const Rect<DIM,COORD_T>& operator*(void) const;
@@ -10556,4 +10556,3 @@ namespace Legion {
 #endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 // EOF
-

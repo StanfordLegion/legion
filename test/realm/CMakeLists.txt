@@ -67,6 +67,9 @@ if(Legion_USE_CUDA)
   list(APPEND REALM_TESTS cuda_transpose_test)
   list(APPEND REALM_TESTS task_stream)
   set(CUDASRC_task_stream task_stream_gpu.cu)
+
+  list(APPEND REALM_TESTS test_cuhook)
+  set(CUDASRC_test_cuhook test_cuhook_gpu.cu)
 endif()
 
 if(Legion_USE_HIP)

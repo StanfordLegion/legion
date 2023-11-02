@@ -38,8 +38,8 @@ NVCC_FLAGS	?=
 HIPCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-REALM_CUDA_OBJS ?=
 
+REALM_CUDA_OBJS ?=
 
 CXX ?= g++
 
@@ -77,6 +77,7 @@ TESTS += machine_config
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
+TESTS += test_cuhook
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
@@ -142,14 +143,14 @@ run_machine_config_args : machine_config
 build : $(TESTS)
 
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN)
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
 
 # scatter uses C++11 lambdas
 scatter.o : CC_FLAGS += -std=c++11
 
 machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
-$(TESTS) : % : %.o librealm.a
+$(TESTS) : % : %.o librealm.a $(SLIB_REALM_CUHOOK)
 	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
@@ -161,14 +162,24 @@ EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
 EXTRAOBJS_multiaffine := multiaffine_gpu.o
 EXTRAOBJS_task_stream := task_stream_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream)
+EXTRAOBJS_test_cuhook := test_cuhook_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream) $(EXTRAOBJS_test_cuhook)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 multiaffine : multiaffine_gpu.o
 task_stream : task_stream_gpu.o
+test_cuhook : test_cuhook_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+
+$(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
+	rm -f $@
+	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+
+$(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	# $(NVCC) --compiler-options '-fPIC' -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 endif
 
 ifeq ($(strip $(USE_HIP)),1)

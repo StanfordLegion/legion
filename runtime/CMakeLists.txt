@@ -563,6 +563,21 @@ if(Legion_USE_CUDA)
 
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
+
+  # build cuda hook library
+  add_library(realm_cuhook SHARED
+    realm/cuda/cuda_hook.cc)
+  set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  endif()
+  target_include_directories(realm_cuhook PRIVATE
+                            ${CMAKE_CURRENT_SOURCE_DIR}
+                            ${PROJECT_BINARY_DIR}/runtime)
+  target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
+  add_dependencies(RealmRuntime realm_cuhook)
+  install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
 if(Legion_USE_HIP)
