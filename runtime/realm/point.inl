@@ -597,12 +597,12 @@ namespace Realm {
     Point<N2, T2> tf_a = transform * lo + offset;
     Point<N2, T2> tf_b = transform * hi + offset;
 
-    Rect<N2, T2> bbox;
+    Rect<N2, T2> ordered;
     for (int i = 0; i < N2; i++) {
-      bbox.lo[i] = std::min(tf_a[i], tf_b[i]);
-      bbox.hi[i] = std::max(tf_a[i], tf_b[i]);
+      ordered.lo[i] = std::min(tf_a[i], tf_b[i]);
+      ordered.hi[i] = std::max(tf_a[i], tf_b[i]);
     }
-    return bbox;
+    return ordered;
   }
 
   template <int N, typename T>
