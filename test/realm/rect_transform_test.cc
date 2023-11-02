@@ -18,6 +18,12 @@ bool test_apply_transform(std::vector<T2> transform, Point<N2, T2> offset,
 template <typename T, typename T2>
 void run_tests()
 {
+
+  assert((test_apply_transform<2, T, 2, T2>(
+      /*transform=*/{-1, 0, 0, 1}, /*offset=*/Point<2, T2>({0, 0}),
+      Rect<2, T>(/*lo=*/Point<2, T>({0, 0}), /*hi=*/Point<2, T>({-4, 5})),
+      Rect<2, T2>(/*lo=*/Point<2, T>({4, 0}), /*hi=*/Point<2, T>({0, 5})))));
+
   assert((test_apply_transform<1, T, 1, T2>(
       /*transform=*/{-1}, /*offset=*/{{0}}, Rect<1, T>(/*lo=*/{{0}}, /*hi=*/{{10}}),
       Rect<1, T2>(/*lo=*/{{-10}}, /*hi=*/{{0}}))));

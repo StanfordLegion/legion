@@ -592,17 +592,25 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  REALM_CUDA_HD inline Rect<N2, T2> Rect<N, T>::apply_transform(
-      const Matrix<N2, N, T2>& transform, const Point<N2, T2>& offset) {
-    Point<N2, T2> tf_a = transform * lo + offset;
-    Point<N2, T2> tf_b = transform * hi + offset;
-
-    Rect<N2, T2> ordered;
-    for (int i = 0; i < N2; i++) {
-      ordered.lo[i] = std::min(tf_a[i], tf_b[i]);
-      ordered.hi[i] = std::max(tf_a[i], tf_b[i]);
+  REALM_CUDA_HD inline Rect<N2, T2>
+  Rect<N, T>::apply_transform(const Matrix<N2, N, T2> &transform,
+                              const Point<N2, T2> &offset)
+  {
+    Rect<N2, T2> tranformed_rect(offset, offset);
+    for(int i = 0; i < N2; i++) {
+      for(int j = 0; j < N; j++) {
+        T2 e = transform.rows[i][j];
+        if(e > 0) {
+          tranformed_rect.lo[i] += e * lo[j];
+          tranformed_rect.hi[i] += e * hi[j];
+        }
+        if(e < 0) {
+          tranformed_rect.lo[i] += e * hi[j];
+          tranformed_rect.hi[i] += e * lo[j];
+        }
+      }
     }
-    return ordered;
+    return tranformed_rect;
   }
 
   template <int N, typename T>
