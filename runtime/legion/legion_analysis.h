@@ -1170,7 +1170,23 @@ namespace Legion {
         void serialize(Serializer &rez, unsigned total_shards) const;
         void deserialize(Deserializer &derez, unsigned total_shards);
       private:
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsizeof-pointer-div"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsizeof-pointer-div"
+#endif
+        // Stupid compilers, I mean what I say, this is not a fucking error
+        // I want this to be exactly the same size as ShardID*
         static constexpr unsigned MAX_VALUES = sizeof(ShardID*)/sizeof(ShardID);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
         static_assert(MAX_VALUES > 0, "very strange machine");
         union {
           ShardID *buffer;
