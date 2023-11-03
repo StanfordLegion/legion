@@ -2582,6 +2582,384 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    ProjectionNode::ShardSet::ShardSet(void)
+      : size(0), max(MAX_VALUES)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionNode::ShardSet::~ShardSet(void)
+    //--------------------------------------------------------------------------
+    {
+      if (max > MAX_VALUES)
+        free(set.buffer);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::ShardSet::insert(ShardID shard, unsigned total_shards)
+    //--------------------------------------------------------------------------
+    {
+      if (max == MAX_VALUES)
+      {
+        if (size == 0)
+          set.values[size++] = shard;
+        else if (!std::binary_search(&set.values[0], 
+              &set.values[size], shard, std::less<ShardID>()))
+        {
+          if (size == MAX_VALUES)
+          {
+            // Need to increase to intermediate size
+            unsigned new_max = max*2;
+            unsigned bit_max = 
+              (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+            if (new_max < bit_max)
+            {
+              // Going to sparse buffer representation
+              max = new_max;
+              ShardID *buffer = (ShardID*)malloc(new_max * sizeof(ShardID));
+              for (unsigned idx = 0; idx < MAX_VALUES; idx++)
+                buffer[idx] = set.values[idx];
+              buffer[size++] = shard;
+              std::sort(buffer, buffer+size, std::less<ShardID>());
+              set.buffer = buffer;
+            }
+            else
+            {
+              size = bit_max;
+              max = total_shards + 1;
+              ShardID *buffer = (ShardID*)malloc(bit_max * sizeof(ShardID));
+              constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+              for (unsigned idx = 0; idx < MAX_VALUES; idx++)
+              {
+                unsigned index = set.values[idx] >> power;
+                buffer[idx] |= 
+                  (1U << (set.values[index] & ((1U << power) - 1)));
+              }
+              unsigned index = shard >> power;
+              buffer[index] |= (1U << (shard & ((1U << power) - 1)));
+              set.buffer = buffer;
+            }
+          }
+          else
+          {
+            set.values[size++] = shard;
+            std::sort(&set.values[0], &set.values[size], std::less<ShardID>());
+          }
+        }
+      }
+      else if (total_shards < max)
+      {
+        // We're already in a bitmask mode
+        constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+        unsigned index = shard >> power;
+        set.buffer[index] |= (1U << (shard & ((1U << power) - 1)));
+      }
+      else if (!std::binary_search(&set.buffer[0], &set.buffer[size],
+                                   shard, std::less<ShardID>()))
+      {
+        if (size < max)
+        {
+          set.buffer[size++] = shard;
+          std::sort(set.buffer, set.buffer+size, std::less<ShardID>());
+        }
+        else
+        {
+          unsigned new_max = max*2;
+          unsigned bit_max = 
+            (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+          if (new_max < bit_max)
+          {
+            // Going to sparse buffer representation
+            max = new_max;
+            ShardID *buffer = (ShardID*)malloc(new_max * sizeof(ShardID));
+            for (unsigned idx = 0; idx < size; idx++)
+              buffer[idx] = set.buffer[idx];
+            buffer[size++] = shard;
+            std::sort(buffer, buffer+size, std::less<ShardID>());
+            free(set.buffer);
+            set.buffer = buffer;
+          }
+          else
+          {
+            max = total_shards + 1;
+            ShardID *buffer = (ShardID*)malloc(bit_max * sizeof(ShardID));
+            constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              unsigned index = set.buffer[idx] >> power;
+              buffer[index] |= (1U << (set.buffer[idx] & ((1U << power) - 1)));
+            }
+            unsigned index = shard >> power;
+            buffer[index] |= (1U << (shard & ((1U << power) - 1)));
+            free(set.buffer);
+            set.buffer = buffer;
+            size = bit_max;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ProjectionNode::ShardSet::find_nearest_shard(ShardID local,
+                                                    unsigned total_shards) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      if (max == MAX_VALUES)
+      {
+        if (size == 1)
+          return set.values[0];
+        return find_nearest(local, total_shards, &set.values[0], size);
+      }
+      else if (total_shards < max)
+      {
+        constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+        const unsigned bit_max =
+          (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+        // Find the next set bit both above and below
+        ShardID lower = 0;
+        {
+          int index = local >> power;
+          int offset = local & ((1U << power) - 1);
+#ifdef DEBUG_LEGION
+          // Shouldn't exist in the set
+          assert(!(set.buffer[index] & (1U << offset)));
+#endif
+          offset--;
+          while (true)
+          {
+            while (offset >= 0)
+            {
+              if (set.buffer[index] & (1U << offset))
+              {
+                lower = (index << power) + offset; 
+                break;
+              }
+              else
+                offset--;
+            }
+            if (offset < 0)
+            {
+              offset = ((1U << power) - 1);
+              // Handle wrap around case
+              if (--index < 0)
+                index = bit_max - 1;
+            }
+            else
+              break;
+          }
+        }
+        ShardID upper = 0;
+        {
+          unsigned index = local >> power;
+          unsigned offset = (local & ((1U << power) - 1)) + 1;
+          while (true)
+          {
+            while (offset < (1U << power))
+            {
+              if (set.buffer[index] & (1U << offset))
+              {
+                upper = (index << power) + offset;
+                break;
+              }
+              else
+                offset++;
+            }
+            if (offset == (1U << power))
+            {
+              offset = 0;
+              // Handle wrap around case
+              if (++index == bit_max)
+                index = 0;
+            }
+            else
+              break;
+          }
+        }
+        unsigned lower_dist = find_distance(lower, local, total_shards);
+        unsigned upper_dist = find_distance(local, upper, total_shards);
+        if (lower_dist < upper_dist)
+          return lower;
+        else
+          return upper;
+      }
+      else
+        return find_nearest(local, total_shards, set.buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ProjectionNode::ShardSet::find_nearest(ShardID local,
+       unsigned total_shards, const ShardID *buffer, unsigned buffer_size) const
+    //--------------------------------------------------------------------------
+    {
+      // Find the upper bound if it exists
+      unsigned upper = 0;
+      unsigned count = buffer_size;
+      while (count > 0)
+      {
+        unsigned step = count / 2;
+        if (local >= buffer[upper+step])
+        {
+          upper = step + 1;
+          count -= step + 1;
+        }
+        else
+          count = step;
+      }
+#ifdef DEBUG_LEGION
+      assert(upper <= buffer_size);
+#endif
+      // Check to see if the upper bound exists or not
+      unsigned lower = 0;
+      if (upper == buffer_size)
+      {
+#ifdef DEBUG_LEGION
+        assert(buffer[upper-1] < local);
+#endif
+        lower = buffer_size-1;
+        upper = 0;
+      }
+      else if (upper == 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(local < buffer[0]);
+#endif
+        lower = buffer_size-1;
+      }
+      else
+      {
+        lower = buffer[upper-1];  
+#ifdef DEBUG_LEGION
+        assert(buffer[lower] < local);
+        assert(local < buffer[upper]);
+#endif
+      }
+      // Figure out which of the two is closer
+      unsigned lower_dist = find_distance(buffer[lower], local, total_shards);
+      unsigned upper_dist = find_distance(local, buffer[upper], total_shards);
+      if (lower_dist < upper_dist)
+        return buffer[lower];
+      else
+        return buffer[upper];
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned ProjectionNode::ShardSet::find_distance(
+                                ShardID one, ShardID two, unsigned total_shards)
+    //--------------------------------------------------------------------------
+    {
+      unsigned abs_diff = (one < two) ? (two - one) : (one - two);
+      // closest distance with wrap around
+      if (abs_diff < (total_shards / 2))
+        return abs_diff;
+      else
+        return (total_shards - abs_diff);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::ShardSet::serialize(Serializer &rez,
+                                             unsigned total_shards) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(max);
+      if (max == MAX_VALUES)
+      {
+        rez.serialize(size);
+        for (unsigned idx = 0; idx < size; idx++)
+          rez.serialize(set.values[idx]);
+      }
+      else if (total_shards < max)
+      {
+        for (unsigned idx = 0; idx < size; idx++)
+          rez.serialize(set.buffer[idx]);
+      }
+      else
+      {
+        rez.serialize(size);
+        for (unsigned idx = 0; idx < size; idx++)
+          rez.serialize(set.buffer[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::ShardSet::deserialize(Deserializer &derez,
+                                               unsigned total_shards)
+    //--------------------------------------------------------------------------
+    {
+      unsigned dmax;
+      derez.deserialize(dmax);
+      if (dmax == MAX_VALUES)
+      {
+        unsigned dsize;
+        derez.deserialize(dsize);
+        for (unsigned idx = 0; idx < dsize; idx++)
+        {
+          ShardID shard;
+          derez.deserialize(shard);
+          insert(shard, total_shards);
+        }
+      }
+      else if (total_shards < dmax)
+      {
+        if (total_shards < max)
+        {
+          for (unsigned idx = 0; idx < size; idx++)
+          {
+            ShardID bits;
+            derez.deserialize(bits);
+            set.buffer[idx] |= bits;
+          }
+        }
+        else
+        {
+          unsigned bit_max = 
+            (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+          ShardID *buffer = (ShardID*)malloc(bit_max * sizeof(ShardID));
+          for (unsigned idx = 0; idx < bit_max; idx++)
+            derez.deserialize(buffer[idx]);
+#ifdef DEBUG_LEGION
+          assert(max < bit_max);
+#endif
+          constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+          if (max == MAX_VALUES)
+          {
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              unsigned index = set.values[idx] >> power;
+              buffer[index] |= (1U << (set.values[idx] & ((1U << power) - 1)));
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              unsigned index = set.buffer[idx] >> power;
+              buffer[index] |= (1U << (set.buffer[idx] & ((1U << power) - 1)));
+            }
+            free(set.buffer);
+          }
+          max = total_shards + 1;
+          size = bit_max;
+          set.buffer = buffer;
+        }
+      }
+      else
+      {
+        unsigned dsize;
+        derez.deserialize(dsize);
+        for (unsigned idx = 0; idx < dsize; idx++)
+        {
+          ShardID shard;
+          derez.deserialize(shard);
+          insert(shard, total_shards);
+        }
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // ProjectionRegion
     /////////////////////////////////////////////////////////////
@@ -2679,7 +3057,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionRegion::extract_shard_summaries(bool supports_name_based,
-        ShardID local, std::map<LogicalRegion,RegionSummary> &region_summaries,
+        ShardID local_shard, size_t total_shards,
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
         std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
     //--------------------------------------------------------------------------
     {
@@ -2692,8 +3071,8 @@ namespace Legion {
             it = local_children.begin(); it != local_children.end(); it++)
       {
         summary.children.add_child(it->first);
-        it->second->extract_shard_summaries(supports_name_based, local,
-                                      region_summaries, partition_summaries);
+        it->second->extract_shard_summaries(supports_name_based, local_shard,
+            total_shards, region_summaries, partition_summaries);
       }
     }
 
@@ -2998,7 +3377,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionPartition::extract_shard_summaries(bool supports_name_based,
-        ShardID local, std::map<LogicalRegion,RegionSummary> &region_summaries,
+        ShardID local_shard, size_t total_shards,
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
         std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
     //--------------------------------------------------------------------------
     {
@@ -3011,16 +3391,16 @@ namespace Legion {
             it = local_children.begin(); it != local_children.end(); it++)
       {
         summary.children.add_child(it->first);
-        it->second->extract_shard_summaries(supports_name_based, local,
-                                      region_summaries, partition_summaries);
+        it->second->extract_shard_summaries(supports_name_based, local_shard,
+            total_shards, region_summaries, partition_summaries);
       }
       if (supports_name_based)
       {
         // Record that we know about all of our local children
         for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
               it = local_children.begin(); it != local_children.end(); it++)
-          summary.disjoint_complete_child_shards.insert(
-              std::pair<LegionColor,ShardID>(it->first, local));
+          summary.disjoint_complete_child_shards[it->first].insert(local_shard, 
+                                                                  total_shards);
       }
     }
 
@@ -3052,6 +3432,16 @@ namespace Legion {
         // which we don't know about locally so we know the nearest
         // shard which does have some information about it
         std::unordered_map<LegionColor,ShardID> nearest_shards;  
+        for (std::unordered_map<LegionColor,ShardSet>::const_iterator it =
+              summary.disjoint_complete_child_shards.begin(); it !=
+              summary.disjoint_complete_child_shards.end(); it++)
+        {
+          if (local_children.find(it->first) != local_children.end())
+            continue;
+          nearest_shards[it->first] = 
+            it->second.find_nearest_shard(local_shard, total_shards);
+        }
+#if 0
         std::multimap<LegionColor,ShardID>::const_iterator lower =
           summary.disjoint_complete_child_shards.begin();
         while (lower != summary.disjoint_complete_child_shards.end())
@@ -3093,6 +3483,7 @@ namespace Legion {
           }
           lower = upper;
         }
+#endif
         // Now we can make our ShardedColorMap and save it
 #ifdef DEBUG_LEGION
         assert(name_based_children_shards == NULL);

@@ -1142,6 +1142,45 @@ namespace Legion {
       public:
         std::map<LegionColor/*start*/,LegionColor/*end*/> ranges;
       };
+      /**
+       * This class defines a compact way of representing a set of shards.
+       * It maintains two different representations of the set depending
+       * on how many entries it contains. It stores the names of shards
+       * sorted in order in a contiguous vector of entries up to the point
+       * that the size of the space needed to store the entries exceeds the
+       * size of the bitmask required to represent to encode the entries.
+       * Above this size the set is encoded as a bitmask.
+       */
+      class ShardSet {
+      public:
+        ShardSet(void);
+        ShardSet(const ShardSet &rhs) = delete;
+        ~ShardSet(void);
+      public:
+        ShardSet& operator=(const ShardSet &rhs) = delete;
+      public:
+        void insert(ShardID shard, unsigned total_shards);
+        ShardID find_nearest_shard(ShardID local_shard, 
+                                   unsigned total_shards) const;
+      private:
+        ShardID find_nearest(ShardID local_shard, unsigned total_shards,
+                     const ShardID *buffer, unsigned buffer_size) const;
+        static unsigned find_distance(ShardID one, ShardID two, unsigned total);
+      public:
+        void serialize(Serializer &rez, unsigned total_shards) const;
+        void deserialize(Deserializer &derez, unsigned total_shards);
+      private:
+        static constexpr unsigned MAX_VALUES = sizeof(ShardID*)/sizeof(ShardID);
+        static_assert(MAX_VALUES > 0, "very strange machine");
+        union {
+          ShardID *buffer;
+          ShardID values[MAX_VALUES];
+        } set;
+        // number of entries in the buffer
+        unsigned size;
+        // total possible entries in the buffer
+        unsigned max;
+      };
       // These structures are used for exchanging summary information
       // between different shards with control replication
       struct RegionSummary {
@@ -1153,7 +1192,7 @@ namespace Legion {
         // If we're disjoint and complete we also track the sets
         // of shards that know about each of the children as well
         // so we can record the one nearest for each shard
-        std::multimap<LegionColor,ShardID> disjoint_complete_child_shards;
+        std::unordered_map<LegionColor,ShardSet> disjoint_complete_child_shards;
       };
     public:
       virtual ~ProjectionNode(void) { };
@@ -1168,7 +1207,8 @@ namespace Legion {
       virtual bool is_unique_shards(void) const = 0;
       virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
-          ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
+          ShardID local_shard, size_t total_shards,
+          std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const = 0;
       virtual void update_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
@@ -1198,7 +1238,8 @@ namespace Legion {
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
-          ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
+          ShardID local_shard, size_t total_shards,
+          std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const;
       virtual void update_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
@@ -1241,7 +1282,8 @@ namespace Legion {
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
-          ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
+          ShardID local_shard, size_t total_shards,
+          std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const;
       virtual void update_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,

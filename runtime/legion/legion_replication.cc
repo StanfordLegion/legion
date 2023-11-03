@@ -16759,7 +16759,7 @@ namespace Legion {
     {
       // Extract our local summaries
       node->extract_shard_summaries(disjoint && leaves_only, local_shard,
-                              region_summaries, partition_summaries);
+          ctx->total_shards, region_summaries, partition_summaries);
     }
 
     //--------------------------------------------------------------------------
@@ -16796,12 +16796,12 @@ namespace Legion {
         {
           rez.serialize<size_t>(
               it->second.disjoint_complete_child_shards.size());
-          for (std::multimap<LegionColor,ShardID>::const_iterator cit =
+          for (std::unordered_map<LegionColor,ShardSet>::const_iterator cit =
                 it->second.disjoint_complete_child_shards.begin(); cit !=
                 it->second.disjoint_complete_child_shards.end(); cit++)
           {
             rez.serialize(cit->first);
-            rez.serialize(cit->second);
+            cit->second.serialize(rez, context->total_shards);
           }
         }
       }
@@ -16871,15 +16871,21 @@ namespace Legion {
         summary.children.deserialize(derez);
         if (dis && leaves)
         {
-          size_t num_child_shards;
-          derez.deserialize(num_child_shards);
-          for (unsigned child = 0; child < num_child_shards; child++)
+          size_t num_children;
+          derez.deserialize(num_children);
+          for (unsigned child = 0; child < num_children; child++)
           {
-            std::pair<LegionColor,ShardID> color_shard;
-            derez.deserialize(color_shard.first);
-            derez.deserialize(color_shard.second);
+            LegionColor color;
+            derez.deserialize(color);
             if (disjoint && leaves_only)
-              summary.disjoint_complete_child_shards.insert(color_shard);
+              summary.disjoint_complete_child_shards[color].deserialize(
+                  derez, context->total_shards);
+            else
+            {
+              // Temporary one just to unpack correctly
+              ShardSet temporary;
+              temporary.deserialize(derez, context->total_shards);
+            }
           }
         }
       }

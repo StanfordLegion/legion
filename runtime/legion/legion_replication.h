@@ -1504,6 +1504,7 @@ namespace Legion {
       bool &unique_shards;
       bool leaves_only;
     protected:
+      typedef ProjectionNode::ShardSet ShardSet;
       typedef ProjectionNode::RegionSummary RegionSummary; 
       typedef ProjectionNode::PartitionSummary PartitionSummary; 
       std::map<LogicalRegion,RegionSummary> region_summaries;
