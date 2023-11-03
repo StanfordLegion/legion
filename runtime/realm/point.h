@@ -201,7 +201,7 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p);
 
   template <int M, int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const Matrix<M, N, T>& p);
+  std::ostream &operator<<(std::ostream &os, const Matrix<M, N, T> &p);
 
   template <int N, typename T, typename T2> REALM_CUDA_HD
   bool operator==(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);

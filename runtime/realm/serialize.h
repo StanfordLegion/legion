@@ -89,8 +89,9 @@ char operator,(const is_copy_serializable::inner&, const T&);
   template <P> void *operator,(const is_copy_serializable::inner&, const T&);
 #define TEMPLATE_TYPE_IS_SERIALIZABLE2(P1,P2,T1,T2)			\
   template <P1,P2> void *operator,(const is_copy_serializable::inner&, const T1,T2&);
-#define TEMPLATE_TYPE_IS_SERIALIZABLE3(P1,P2,P3,T1,T2,T3)			\
-  template <P1,P2,P3> void *operator,(const is_copy_serializable::inner&, const T1,T2,T3&);
+#define TEMPLATE_TYPE_IS_SERIALIZABLE3(P1, P2, P3, T1, T2, T3)                           \
+  template <P1, P2, P3>                                                                  \
+  void *operator,(const is_copy_serializable::inner &, const T1, T2, T3 &);
 
 namespace Realm {
   namespace Serialization {
