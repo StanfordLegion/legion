@@ -3188,7 +3188,14 @@ namespace Realm {
 
     gex_System_QueryNbrhdInfo(&neighbor_array, &neighbor_array_size, nullptr);
     for (gex_Rank_t r = 0; r < neighbor_array_size; r++) {
-      Network::shared_peers.add(neighbor_array[r].gex_jobrank);
+      if(static_cast<NodeID>(neighbor_array[r].gex_jobrank) != Network::my_node_id) {
+        Network::shared_peers.add(neighbor_array[r].gex_jobrank);
+      }
+    }
+    if(Network::shared_peers.empty()) {
+      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // then just assume all_peers are shareable
+      Network::shared_peers = Network::all_peers;
     }
 
     // stick a pointer to ourselves in the endpoint CData so that handlers
