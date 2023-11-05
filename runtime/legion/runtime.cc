@@ -962,12 +962,8 @@ namespace Legion {
         // We know futures can never flow up the task tree so the
         // only way they have the same depth is if they are from 
         // the same parent context
-        TaskContext *context = consumer_op->get_context();
-        const int consumer_depth = context->get_depth();
-#ifdef DEBUG_LEGION
-        assert(consumer_depth >= producer_depth);
-#endif
-        if (consumer_depth == producer_depth)
+        TaskContext *consumer_context = consumer_op->get_context();
+        if (consumer_context == context)
         {
           consumer_op->register_dependence(producer_op, op_gen);
 #ifdef LEGION_SPY
@@ -975,6 +971,39 @@ namespace Legion {
               context->get_unique_id(), producer_uid, 0,
               consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
 #endif
+        }
+        else
+        {
+          // Check that the consumer is contained within the task
+          // sub-tree of the producer task
+          std::vector<std::pair<size_t,DomainPoint> > prod_coords, con_coords;
+          context->compute_task_tree_coordinates(prod_coords);
+          consumer_context->compute_task_tree_coordinates(con_coords);
+          bool contained = (prod_coords.size() <= con_coords.size());
+          if (contained)
+          {
+            for (unsigned idx = 0; idx < prod_coords.size(); idx++)
+            {
+              if (prod_coords[idx] == con_coords[idx])
+                continue;
+              contained = false;
+              break;
+            }
+          }
+          if (!contained)
+          {
+            Provenance *provenance = consumer_op->get_provenance();
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_FUTURE_USE,
+                "Illegal use of future produced in context %s (UID %lld) "
+                "but consumed in context %s (UID %lld) by operation %s "
+                "(UID %lld) launched from %s. Futures are only permitted "
+                "to be used in the task sub-tree rooted by the context "
+                "that produced the future.", context->get_task_name(),
+                context->get_unique_id(), consumer_context->get_task_name(), 
+                consumer_context->get_unique_id(),
+                consumer_op->get_logging_name(),
+                consumer_op->get_unique_op_id(), provenance->human.c_str())
+          }
         }
       }
 #ifdef DEBUG_LEGION
