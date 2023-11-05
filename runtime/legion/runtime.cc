@@ -2412,7 +2412,7 @@ namespace Legion {
         {
           // Check that the consumer is contained within the task
           // sub-tree of the producer task
-          std::vector<std::pair<size_t,DomainPoint> > prod_coords, con_coords;
+          TaskTreeCoordinates prod_coords, con_coords;
           context->compute_task_tree_coordinates(prod_coords);
           consumer_context->compute_task_tree_coordinates(con_coords);
           bool contained = (prod_coords.size() <= con_coords.size());
