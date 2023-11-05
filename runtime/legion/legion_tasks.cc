@@ -6406,8 +6406,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMMIT_CALL);
-      if (execution_context != NULL)
-        execution_context->free_region_tree_context();
       if (is_remote())
       {
         Serializer rez;
@@ -7380,8 +7378,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMMIT_CALL);
-      if (execution_context != NULL)
-        execution_context->free_region_tree_context();
       if (profiling_reported.exists())
         finalize_single_task_profiling();
       // A little strange here, but we don't directly commit this
@@ -7966,7 +7962,6 @@ namespace Legion {
     void ShardTask::trigger_task_commit(void)
     //--------------------------------------------------------------------------
     {
-      execution_context->free_region_tree_context();
       // Commit this operation
       // Dont' deactivate ourselves, the shard manager will do that for us
       commit_operation(false/*deactivate*/, profiling_reported);
@@ -7978,14 +7973,6 @@ namespace Legion {
       // Lastly invoke the method on the shard manager, this could
       // delete us so it has to be last
       shard_manager->trigger_task_commit(true/*local*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardTask::perform_physical_traversal(unsigned idx,
-                                      RegionTreeContext ctx, InstanceSet &valid)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
     }
 
     //--------------------------------------------------------------------------

@@ -7517,7 +7517,7 @@ namespace Legion {
     void ProcessorManager::activate_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
-      ContextID ctx_id = context->get_context_id();
+      ContextID ctx_id = context->get_logical_tree_context();
       AutoLock q_lock(queue_lock); 
       ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
@@ -7532,7 +7532,7 @@ namespace Legion {
     void ProcessorManager::deactivate_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
-      ContextID ctx_id = context->get_context_id();
+      ContextID ctx_id = context->get_logical_tree_context();
       // We can do this without holding the lock because we know
       // the size of this vector is fixed
       AutoLock q_lock(queue_lock); 
@@ -7737,7 +7737,8 @@ namespace Legion {
             {
               // Wait until we are no longer holding the lock
               // to mark that this is no longer an outstanding task
-              ContextID ctx_id = (*it)->get_context()->get_context_id();
+              ContextID ctx_id = 
+                (*it)->get_context()->get_logical_tree_context();
               ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
               assert(state.owned_tasks > 0);
@@ -7815,7 +7816,7 @@ namespace Legion {
       task->activate_outstanding_task();
       // We can do this without holding the lock because the
       // vector is of a fixed size
-      ContextID ctx_id = task->get_context()->get_context_id();
+      ContextID ctx_id = task->get_context()->get_logical_tree_context();
       AutoLock q_lock(queue_lock);
 #ifdef DEBUG_LEGION
       assert(mapper_states.find(task->map_id) != mapper_states.end());
@@ -8070,7 +8071,8 @@ namespace Legion {
             for (std::vector<TaskOp*>::const_iterator it = 
                   to_trigger.begin(); it != to_trigger.end(); it++)
             {
-              ContextID ctx_id = (*it)->get_context()->get_context_id(); 
+              ContextID ctx_id = 
+                (*it)->get_context()->get_logical_tree_context(); 
               ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
               assert(state.owned_tasks > 0);
@@ -16964,11 +16966,11 @@ namespace Legion {
       
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
-      for (total_contexts = 0; total_contexts < LEGION_DEFAULT_CONTEXTS; 
-            total_contexts++)
-      {
-        available_contexts.push_back(RegionTreeContext(total_contexts)); 
-      }
+      total_contexts = LEGION_DEFAULT_CONTEXTS;
+      available_contexts.resize(LEGION_DEFAULT_CONTEXTS);
+      // Add in reverse order so lower numbers get popped off first
+      for (unsigned idx = 0; idx < LEGION_DEFAULT_CONTEXTS; idx++)
+        available_contexts[idx] = LEGION_DEFAULT_CONTEXTS-(idx+1);
       // Initialize our random number generator state
       random_state[0] = address_space & 0xFFFF; // low-order bits of node ID 
       random_state[1] = (address_space >> 16) & 0xFFFF; // high-order bits
@@ -29009,45 +29011,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext Runtime::allocate_region_tree_context(void)
+    ContextID Runtime::allocate_region_tree_context(void)
     //--------------------------------------------------------------------------
     {
       // Try getting something off the list of available contexts
       AutoLock ctx_lock(context_lock);
-      if (!available_contexts.empty())
+      if (available_contexts.empty())
       {
-        RegionTreeContext result = available_contexts.front();
-        available_contexts.pop_front();
-        return result;
+        // Double the number of available contexts
+        available_contexts.resize(total_contexts);
+        total_contexts *= 2;
+        for (unsigned idx = 0; idx < available_contexts.size(); idx++)
+          available_contexts[idx] = total_contexts - (idx+1);
+        // Tell all the processor managers about the additional contexts
+        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+              proc_managers.begin(); it != proc_managers.end(); it++)
+          it->second->update_max_context_count(total_contexts);
       }
-      // If we failed to get a context, double the number of total 
-      // contexts and then update the forest nodes to have the right
-      // number of contexts available
-      RegionTreeContext result(total_contexts);
-      for (unsigned idx = 1; idx < total_contexts; idx++)
-        available_contexts.push_back(RegionTreeContext(total_contexts+idx));
-      // Mark that we doubled the total number of contexts
-      // Very important that we do this before calling the
-      // RegionTreeForest's resize method!
-      total_contexts *= 2;
-#ifdef DEBUG_LEGION
-      assert(!available_contexts.empty());
-#endif
-      // Tell all the processor managers about the additional contexts
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->update_max_context_count(total_contexts); 
-      }
+      ContextID result = available_contexts.back();
+      available_contexts.pop_back();
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_region_tree_context(RegionTreeContext context)
+    void Runtime::free_region_tree_context(ContextID context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(context.exists());
       forest->check_context_state(context);
 #endif
       AutoLock ctx_lock(context_lock);

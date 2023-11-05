@@ -9375,7 +9375,8 @@ namespace Legion {
       LogicalUser *user = new LogicalUser(internal_op, 0/*region index*/,
           RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/),
           NULL/*projection*/, internal_index);
-      LogicalState &state = node->get_logical_state(context->get_context_id());
+      LogicalState &state = node->get_logical_state(
+                context->get_logical_tree_context());
       // This will take ownership of the user
       node->register_local_user(state, *user, internal_mask);
       // Record a dependence on the internal operation for ourself

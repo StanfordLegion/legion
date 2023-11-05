@@ -2761,9 +2761,6 @@ namespace Legion {
         last_implicit_creation_gen(0)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(tree_context.exists());
-#endif
       // Set some of the default values for a context
       context_configuration.max_window_size = 
         runtime->initial_task_window_size;
@@ -2810,6 +2807,8 @@ namespace Legion {
     InnerContext::~InnerContext(void)
     //--------------------------------------------------------------------------
     {
+      // At this point we can free our region tree context
+      runtime->free_region_tree_context(tree_context);
       if (ready_comp_queue.exists())
         ready_comp_queue.destroy();
       if (enqueue_task_comp_queue.exists())
@@ -3690,17 +3689,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext InnerContext::get_context(void) const
+    ContextID InnerContext::get_logical_tree_context(void) const
     //--------------------------------------------------------------------------
     {
       return tree_context;
     }
 
     //--------------------------------------------------------------------------
-    ContextID InnerContext::get_context_id(void) const
+    ContextID InnerContext::get_physical_tree_context(void) const
     //--------------------------------------------------------------------------
     {
-      return tree_context.get_id();
+      return tree_context;
     }
 
     //--------------------------------------------------------------------------
@@ -10988,7 +10987,6 @@ namespace Legion {
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
       const ShardID local_shard = get_shard_id();
-      const ContextID ctx = tree_context.get_id();
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,IndividualView*> top_views;
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
@@ -11040,7 +11038,7 @@ namespace Legion {
           // In this case we also tell the region tree that this is
           // already refined so that no read or reduce refinements can
           // be performed in this context
-          region_node->initialize_refined_fields(ctx, user_mask); 
+          region_node->initialize_refined_fields(tree_context, user_mask); 
           continue;
         }
         // Only need to initialize the context if this is
@@ -11172,14 +11170,6 @@ namespace Legion {
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied,
                                                 mapping, source_shard);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::free_region_tree_context(void)
-    //--------------------------------------------------------------------------
-    { 
-      // Now we can free our region tree context
-      runtime->free_region_tree_context(tree_context);
     }
 
     //--------------------------------------------------------------------------
@@ -13035,6 +13025,16 @@ namespace Legion {
         returned_resource_mapped_barrier.destroy_barrier();
       if (returned_resource_execution_barrier.exists())
         returned_resource_execution_barrier.destroy_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    ContextID ReplicateContext::get_physical_tree_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We have all the shards on the same node use the same physical
+      // tree context. This is vital for the correct implementation of
+      // some parts of physical analysis equivalence set discovery.
+      return shard_manager->get_first_shard_tree_context();
     }
 
     //--------------------------------------------------------------------------
@@ -23654,8 +23654,6 @@ namespace Legion {
     RemoteContext::~RemoteContext(void)
     //--------------------------------------------------------------------------
     {
-      // At this point we can free our region tree context
-      runtime->free_region_tree_context(tree_context);
       if (!local_field_infos.empty())
       {
         // If we have any local fields then tell field space that
@@ -23945,14 +23943,6 @@ namespace Legion {
       pack_global_ref();
       runtime->send_created_region_contexts(owner_space, rez);
       applied_events.insert(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::free_region_tree_context(void)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -24413,15 +24403,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext LeafContext::get_context(void) const
+    ContextID LeafContext::get_logical_tree_context(void) const
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return RegionTreeContext();
+      return 0;
     }
 
     //--------------------------------------------------------------------------
-    ContextID LeafContext::get_context_id(void) const
+    ContextID LeafContext::get_physical_tree_context(void) const
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -26042,13 +26032,6 @@ namespace Legion {
     void LeafContext::invalidate_region_tree_contexts(
                        const bool is_top_level_task, std::set<RtEvent> &applied,
                        const ShardMapping *mapping, ShardID source_shard)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do 
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::free_region_tree_context(void)
     //--------------------------------------------------------------------------
     {
       // Nothing to do 

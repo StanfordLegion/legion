@@ -449,7 +449,7 @@ namespace Legion {
                                        std::set<RtEvent> &ready_events,
                                        RtEvent *output_region_ready = NULL,
                                        bool collective_rendezvous = false);
-      void invalidate_current_context(RegionTreeContext ctx,
+      void invalidate_current_context(ContextID ctx,
           const RegionRequirement &req, bool filter_specific_fields);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
@@ -686,7 +686,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
     public:
       // Debugging method for checking context state
-      void check_context_state(RegionTreeContext ctx);
+      void check_context_state(ContextID ctx);
 #endif
     public:
       // We know the domain of the index space

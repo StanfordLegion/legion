@@ -1044,8 +1044,6 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
-      virtual void perform_physical_traversal(unsigned idx,
-                                RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events); 

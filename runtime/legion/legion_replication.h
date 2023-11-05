@@ -3118,6 +3118,9 @@ namespace Legion {
           assert(false);
           return 0;
         }
+      inline ContextID get_first_shard_tree_context(void) const
+        { return local_shards.front()->
+          get_shard_execution_context()->get_logical_tree_context(); }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);

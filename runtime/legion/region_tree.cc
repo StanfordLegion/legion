@@ -1621,7 +1621,7 @@ namespace Legion {
       InnerContext *context = op->get_context();
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
-                                     context->get_context_id(),
+                                     context->get_logical_tree_context(),
                                      true/*before*/, 
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
@@ -1668,7 +1668,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
-                                     context->get_context_id(),
+                                     context->get_logical_tree_context(),
                                      false/*before*/, 
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
@@ -1747,16 +1747,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TaskContext *context = op->get_context();
-      RegionTreeContext ctx = context->get_context(); 
+      ContextID ctx = context->get_logical_tree_context(); 
 #ifdef DEBUG_LEGION
-      assert(ctx.exists());
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
-      region_node->find_open_complete_partitions(ctx.get_id(), user_mask, 
-                                                 partitions);
+      region_node->find_open_complete_partitions(ctx, user_mask, partitions);
     }
 
     //--------------------------------------------------------------------------
@@ -1770,23 +1768,22 @@ namespace Legion {
       if (IS_NO_ACCESS(req))
         return;
       InnerContext *context = op->get_context();
-      RegionTreeContext ctx = context->get_context(); 
+      ContextID ctx = context->get_physical_tree_context(); 
 #ifdef DEBUG_LEGION
-      assert(ctx.exists());
       assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
       ((req.handle_type == LEGION_REGION_PROJECTION) && (req.projection == 0)));
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
-      region_node->perform_versioning_analysis(ctx.get_id(), context,
+      region_node->perform_versioning_analysis(ctx, context,
           &version_info, user_mask, op, index, req.parent.get_index_space(),
           op->find_parent_index(index), ready_events, output_region_ready,
           collective_rendezvous);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
+    void RegionTreeForest::invalidate_current_context(ContextID ctx,
                       const RegionRequirement &req, bool filter_specific_fields)
     //--------------------------------------------------------------------------
     {
@@ -1799,12 +1796,12 @@ namespace Legion {
       {
         FieldMask user_mask =
           region_node->column_source->get_field_mask(req.privilege_fields);
-        DeletionInvalidator invalidator(ctx.get_id(), user_mask);
+        DeletionInvalidator invalidator(ctx, user_mask);
         region_node->visit_node(&invalidator);
       }
       else
       {
-        CurrentInvalidator invalidator(ctx.get_id());
+        CurrentInvalidator invalidator(ctx);
         region_node->visit_node(&invalidator);
       }
     }
@@ -1966,8 +1963,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
 #ifdef DEBUG_LEGION
       InnerContext *context = op->find_physical_context(index);
-      RegionTreeContext ctx = context->get_context();
-      assert(ctx.exists());
+      ContextID ctx = context->get_physical_tree_context();
       assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
               (req.handle_type == LEGION_REGION_PROJECTION));
       assert(!targets.empty());
@@ -1978,7 +1974,7 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     region_node, ctx.get_id(), 
+                                     region_node, ctx, 
                                      true/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
@@ -3287,10 +3283,10 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void RegionTreeForest::check_context_state(RegionTreeContext ctx)
+    void RegionTreeForest::check_context_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      CurrentInitializer init(ctx.get_id());
+      CurrentInitializer init(ctx);
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       // Need to hold references to prevent deletion race
       for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
@@ -16033,7 +16029,7 @@ namespace Legion {
                    LogicalAnalysis &analysis, const ProjectionInfo &proj_info)
     //--------------------------------------------------------------------------
     {
-      const ContextID ctx = analysis.context->get_context_id();
+      const ContextID ctx = analysis.context->get_logical_tree_context();
       LogicalState &state = get_logical_state(ctx);
       return state.find_or_create_projection_summary(op, index, req,
                                                      analysis, proj_info);
@@ -16055,7 +16051,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         REGION_NODE_REGISTER_LOGICAL_USER_CALL);
-      const ContextID ctx = logical_analysis.context->get_context_id();
+      const ContextID ctx = 
+        logical_analysis.context->get_logical_tree_context();
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
       state.sanity_check();
@@ -18093,7 +18090,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_LOGICAL_NODE_CALL);
       LogicalState &state = 
-        get_logical_state(logical_analysis.context->get_context_id());
+        get_logical_state(logical_analysis.context->get_logical_tree_context());
       // Perform closing checks on both the current epoch users
       // as well as the previous epoch users
       perform_closing_checks(logical_analysis, state.curr_epoch_users,

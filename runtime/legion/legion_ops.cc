@@ -2872,7 +2872,7 @@ namespace Legion {
            req->region == LogicalRegion::NO_REGION))
         return;
       InnerContext *context = find_physical_context(idx);
-      RegionTreeContext ctx = context->get_context();
+      ContextID ctx = context->get_physical_tree_context();
       RegionTreeNode *child_node = req->handle_type == 
         LEGION_PARTITION_PROJECTION ?
         static_cast<RegionTreeNode*>(runtime->forest->get_node(req->partition)) :
@@ -2881,7 +2881,7 @@ namespace Legion {
         child_node->column_source->get_field_mask(req->privilege_fields);
       TreeStateLogger::capture_state(runtime, req, idx,
                                      get_logging_name(), unique_op_id,
-                                     child_node, ctx.get_id(),
+                                     child_node, ctx,
                                      before/*before*/, false/*premap*/,
                                      closing/*closing*/, false/*logical*/,
                    FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
@@ -10035,7 +10035,7 @@ namespace Legion {
               dependences.begin(); dit != dependences.end(); dit++)
           register_dependence(dit->first, dit->second);
         // We still need to perform the invalidations in this path as well
-        const RegionTreeContext ctx = parent_ctx->get_context();
+        const ContextID ctx = parent_ctx->get_logical_tree_context();
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_current_context(ctx,
               deletion_requirements[idx], (kind == FIELD_DELETION));
@@ -10079,7 +10079,7 @@ namespace Legion {
 
       // Now we can invalidate the context since all internal operations
       // have been recorded in the tree
-      const RegionTreeContext ctx = parent_ctx->get_context();
+      const ContextID ctx = parent_ctx->get_logical_tree_context();
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         runtime->forest->invalidate_current_context(ctx,
             deletion_requirements[idx], (kind == FIELD_DELETION));

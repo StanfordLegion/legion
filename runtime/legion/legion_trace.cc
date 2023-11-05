@@ -5085,7 +5085,7 @@ namespace Legion {
       {
         unsigned index = 0;
         std::set<RtEvent> eq_events;
-        const ContextID ctx = context->get_context().get_id();
+        const ContextID ctx = context->get_physical_tree_context();
         LegionVector<VersionInfo> version_infos(trace_regions.size());
         std::map<RegionNode*,unsigned>::const_iterator req_it =
           trace_region_parent_req_indexes.begin();

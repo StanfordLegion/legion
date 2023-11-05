@@ -71,8 +71,8 @@ namespace Legion {
       inline int get_depth(void) const { return depth; }
     public:
       // Interface for task contexts
-      virtual RegionTreeContext get_context(void) const = 0;
-      virtual ContextID get_context_id(void) const = 0;
+      virtual ContextID get_logical_tree_context(void) const = 0;
+      virtual ContextID get_physical_tree_context(void) const = 0;
       virtual Task* get_task(void); 
       virtual UniqueID get_unique_id(void) const;
       virtual InnerContext* find_parent_context(void);
@@ -540,9 +540,6 @@ namespace Legion {
                                       std::set<RtEvent> &applied,
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0) = 0;
-      // This is called once all the effects from 
-      // invalidate_region_tree_contexts have been applied 
-      virtual void free_region_tree_context(void) = 0;
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
@@ -1175,8 +1172,8 @@ namespace Legion {
       void perform_window_wait(void);
     public:
       // Interface for task contexts
-      virtual RegionTreeContext get_context(void) const;
-      virtual ContextID get_context_id(void) const;
+      virtual ContextID get_logical_tree_context(void) const;
+      virtual ContextID get_physical_tree_context(void) const;
       virtual bool is_inner_context(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
@@ -1765,7 +1762,6 @@ namespace Legion {
       void invalidate_region_tree_context(const RegionRequirement &req,
           unsigned req_index, std::set<RtEvent> &applied_events, 
           bool filter_specific_fields);
-      virtual void free_region_tree_context(void);
     public:
       virtual ProjectionSummary* construct_projection_summary(
           Operation *op, unsigned index, const RegionRequirement &req,
@@ -1920,7 +1916,7 @@ namespace Legion {
       void register_implicit_replay_dependence(Operation *op);
 #endif
     public:
-      const RegionTreeContext tree_context; 
+      const ContextID tree_context;
       const bool full_inner_context;
     protected:
       // This is immutable except for remote contexts which unpack it 
@@ -2451,6 +2447,7 @@ namespace Legion {
       virtual ShardID get_shard_id(void) const { return owner_shard->shard_id; }
       virtual DistributedID get_replication_id(void) const;
       virtual size_t get_total_shards(void) const { return total_shards; }
+      virtual ContextID get_physical_tree_context(void) const;
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -3543,7 +3540,6 @@ namespace Legion {
                           const ShardMapping *mapping, ShardID source_shard);
       static void handle_created_region_contexts(Runtime *runtime, 
                                                  Deserializer &derez);
-      virtual void free_region_tree_context(void);
     public:
       const Task* get_parent_task(void);
       inline Provenance* get_provenance(void) { return provenance; }
@@ -3624,8 +3620,8 @@ namespace Legion {
               std::set<RtEvent> &preconditions);
     public:
       // Interface for task contexts
-      virtual RegionTreeContext get_context(void) const;
-      virtual ContextID get_context_id(void) const;
+      virtual ContextID get_logical_tree_context(void) const;
+      virtual ContextID get_physical_tree_context(void) const;
       virtual void compute_task_tree_coordinates(
                 TaskTreeCoordinates &coordinatess) const;
       virtual bool attempt_children_complete(void);
@@ -4004,7 +4000,6 @@ namespace Legion {
                                       std::set<RtEvent> &applied,
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0);
-      virtual void free_region_tree_context(void);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,

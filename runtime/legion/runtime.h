@@ -1963,38 +1963,6 @@ namespace Legion {
     };
 
     /**
-     * \struct RegionTreeContext
-     * A struct for storing the necessary data for managering a context
-     * in the region tree.
-     */
-    class RegionTreeContext {
-    public:
-      RegionTreeContext(void)
-        : ctx(-1) { }
-      RegionTreeContext(ContextID c)
-        : ctx(c) { }
-    public:
-      inline bool exists(void) const { return (ctx >= 0); }
-      inline ContextID get_id(void) const 
-      {
-#ifdef DEBUG_LEGION
-        assert(exists());
-#endif
-        return ContextID(ctx);
-      }
-      inline bool operator==(const RegionTreeContext &rhs) const
-      {
-        return (ctx == rhs.ctx);
-      }
-      inline bool operator!=(const RegionTreeContext &rhs) const
-      {
-        return (ctx != rhs.ctx);
-      }
-    private:
-      int ctx;
-    };
-
-    /**
      * \class PendingVariantRegistration
      * A small helper class for deferring the restration of task
      * variants until the runtime is started.
@@ -4233,8 +4201,8 @@ namespace Legion {
       void free_repl_begin_op(ReplTraceBeginOp *op);
       void free_repl_summary_op(ReplTraceSummaryOp *op);
     public:
-      RegionTreeContext allocate_region_tree_context(void);
-      void free_region_tree_context(RegionTreeContext tree_ctx); 
+      ContextID allocate_region_tree_context(void);
+      void free_region_tree_context(ContextID tree_ctx); 
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % total_address_spaces); } 
     public:
@@ -4538,7 +4506,7 @@ namespace Legion {
       // can be re-used by multiple tasks that get sent remotely
       mutable LocalLock context_lock;
       unsigned total_contexts;
-      std::deque<RegionTreeContext> available_contexts;
+      std::vector<ContextID> available_contexts;
     protected:
       // Keep track of managers for control replication execution
       mutable LocalLock shard_lock;

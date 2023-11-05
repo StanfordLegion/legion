@@ -2011,7 +2011,6 @@ namespace Legion {
     class EqKDTree;
     template<int DIM, typename T> class EqKDTreeT;
 
-    class RegionTreeContext;
     class RegionTreePath;
     class PathTraverser;
     class NodeTraverser;
