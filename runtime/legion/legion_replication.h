@@ -2311,6 +2311,14 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
     protected:
       void select_sharding_function(void);
       void find_remote_targets(std::vector<ApEvent> &preconditions);
@@ -2551,6 +2559,14 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       CollectiveID mapping_check, sources_check;
@@ -2591,6 +2607,14 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       RtBarrier collective_map_barrier;
@@ -2669,6 +2693,14 @@ namespace Legion {
       virtual void detach_external_instance(PhysicalManager *manager);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       // Help for unordered detachments
@@ -2740,6 +2772,14 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2768,6 +2808,14 @@ namespace Legion {
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances); 
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);

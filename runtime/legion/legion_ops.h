@@ -538,6 +538,14 @@ namespace Legion {
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
     public:
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
@@ -3940,6 +3948,7 @@ namespace Legion {
                                     const std::vector<size_t> &sizes,
                                     const Realm::ProfilingRequestSet &requests,
                                     PhysicalInstance &instance) const;
+      void attach_ready(bool point);
     public:
       ExternalResource resource;
       RegionRequirement requirement;
@@ -4036,7 +4045,6 @@ namespace Legion {
         const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
         const DomainPoint &point, unsigned index);
     public:
-      virtual void trigger_ready(void);
       virtual void trigger_commit(void);
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -4052,8 +4060,17 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual bool is_point_attach(void) const { return true; }
     protected:
       IndexAttachOp *owner;
       DomainPoint index_point;
@@ -4201,7 +4218,6 @@ namespace Legion {
       void initialize_detach(IndexDetachOp *owner, InnerContext *ctx,
             const PhysicalRegion &region, const DomainPoint &point, bool flush);
     public:
-      virtual void trigger_ready(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
       virtual void record_completion_effect(ApEvent effect);
@@ -4218,8 +4234,17 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual bool is_point_detach(void) const { return true; }
     protected:
       IndexDetachOp *owner;
       DomainPoint index_point;

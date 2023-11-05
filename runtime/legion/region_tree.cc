@@ -1763,7 +1763,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned index, const RegionRequirement &req, 
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     RtEvent *output_region_ready)
+                     RtEvent *output_region_ready, bool collective_rendezvous)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1781,7 +1781,8 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context,
           &version_info, user_mask, op, index, req.parent.get_index_space(),
-          op->find_parent_index(index), ready_events, output_region_ready);
+          op->find_parent_index(index), ready_events, output_region_ready,
+          collective_rendezvous);
     }
 
     //--------------------------------------------------------------------------
@@ -20934,12 +20935,14 @@ namespace Legion {
                                                  IndexSpace root_space,
                                                  unsigned parent_req_index,
                                                  std::set<RtEvent> &applied,
-                                                 RtEvent *output_region_ready)
+                                                 RtEvent *output_region_ready,
+                                                 bool collective_rendezvous)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, mask,
-        op, index, parent_req_index, root_space, applied, output_region_ready);
+          op, index, parent_req_index, root_space, applied, 
+          output_region_ready, collective_rendezvous);
     }
     
 #if 0

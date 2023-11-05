@@ -26727,7 +26727,8 @@ namespace Legion {
                  VersionInfo *version_info, RegionNode *region_node,
                  const FieldMask &version_mask, Operation *op, unsigned index,
                  unsigned parent_req_index, IndexSpace root_space,
-                 std::set<RtEvent> &ready_events, RtEvent *output_region_ready)
+                 std::set<RtEvent> &ready_events, RtEvent *output_region_ready,
+                 bool collective_rendezvous)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -26735,6 +26736,9 @@ namespace Legion {
 #endif
       if (output_region_ready != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(!collective_rendezvous);
+#endif
         // This is a special case for output regions
         // Make a new equivalence set and record it in the current set
         // and then we are done, we'll register this equivalence set
@@ -26857,24 +26861,24 @@ namespace Legion {
       }
       if (compute_event.exists())
       {
-        // If we're an empty region then we can just get the names of any
-        // empty equivalence sets directly from the region itself.
-        // Otherwise, bounce this computation off the context so that we know
+        // Bounce this computation off the context so that we know
         // that we are on the right node to perform it
         const RtEvent ready = context->compute_equivalence_sets(this, 
-                          runtime->address_space, parent_req_index,
-                          region_node->row_source, remaining_mask, root_space);
+                        runtime->address_space, parent_req_index,
+                        region_node->row_source, remaining_mask, root_space);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
-          LgFinalizeEqSetsArgs args(this, compute_event, op->get_unique_op_id(),
-              context, parent_req_index, region_node->row_source);
+          LgFinalizeEqSetsArgs args(this, compute_event, 
+              op->get_unique_op_id(), context, parent_req_index,
+              region_node->row_source);
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
         else
           finalize_equivalence_sets(compute_event, context, runtime,
-             parent_req_index, region_node->row_source, op->get_unique_op_id());
+              parent_req_index, region_node->row_source, 
+              op->get_unique_op_id());
       }
     } 
 

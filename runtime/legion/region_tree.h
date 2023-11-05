@@ -447,7 +447,8 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       RtEvent *output_region_ready = NULL);
+                                       RtEvent *output_region_ready = NULL,
+                                       bool collective_rendezvous = false);
       void invalidate_current_context(RegionTreeContext ctx,
           const RegionRequirement &req, bool filter_specific_fields);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -4722,7 +4723,8 @@ namespace Legion {
                                        IndexSpace root_space,
                                        unsigned parent_req_index,
                                        std::set<RtEvent> &ready_events,
-                                       RtEvent *output_region_ready = NULL);
+                                       RtEvent *output_region_ready = NULL,
+                                       bool collective_rendezvous = false);
 #if 0
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,

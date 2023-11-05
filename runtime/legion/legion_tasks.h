@@ -962,6 +962,14 @@ namespace Legion {
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
+#if 0
+      virtual void perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space, RtUserEvent compute_event);
+      virtual void report_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, const VersionInfo &version_info);
+#endif
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,

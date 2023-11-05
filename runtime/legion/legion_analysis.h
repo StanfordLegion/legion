@@ -4453,7 +4453,8 @@ namespace Legion {
                                        unsigned parent_req_index,
                                        IndexSpace root_space,
                                        std::set<RtEvent> &ready,
-                                       RtEvent *output_region_ready);
+                                       RtEvent *output_region_ready,
+                                       bool collective_rendezvous);
       RtEvent finalize_output_equivalence_set(EquivalenceSet *set,
                                        InnerContext *context,
                                        unsigned parent_req_index,

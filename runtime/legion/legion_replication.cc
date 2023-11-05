@@ -2743,7 +2743,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -3166,7 +3168,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -4146,21 +4150,20 @@ namespace Legion {
       if (kind == FIELD_DELETION)
       {
         // Field deletions need to compute their version infos
-        if (is_first_local_shard)
+        std::set<RtEvent> preconditions;
+        version_infos.resize(deletion_requirements.size());
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+          runtime->forest->perform_versioning_analysis(this, idx,
+                                            deletion_requirements[idx],
+                                            version_infos[idx],
+                                            preconditions,
+                                            NULL/*output region*/,
+                                            true/*collective rendezvous*/);
+        if (!preconditions.empty())
         {
-          std::set<RtEvent> preconditions;
-          version_infos.resize(deletion_requirements.size());
-          for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-            runtime->forest->perform_versioning_analysis(this, idx,
-                                              deletion_requirements[idx],
-                                              version_infos[idx],
-                                              preconditions);
-          if (!preconditions.empty())
-          {
-            preconditions.insert(ready_barrier);
-            enqueue_ready_operation(Runtime::merge_events(preconditions));
-            return;
-          }
+          preconditions.insert(ready_barrier);
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+          return;
         }
       }
       enqueue_ready_operation(ready_barrier);
@@ -4843,7 +4846,22 @@ namespace Legion {
       {
         // In this case we're all going to map the source instance
         // and then perform the partition creation collective
-        DependentPartitionOp::trigger_ready();
+        std::set<RtEvent> preconditions;
+        // Path for a non-index space implementation
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions,
+                                                     NULL/*output region*/,
+                                                     true/*rendezvous*/);
+        // Give these operations slightly higher priority since
+        // they are likely needed for other operations
+        if (!preconditions.empty())
+          enqueue_ready_operation(Runtime::merge_events(preconditions),
+                                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+        else
+          enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                                  LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
     }
 
@@ -6602,7 +6620,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement, 
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (collective_map_barrier.exists())
       {
         if (!collective_map_barrier.has_triggered())
@@ -6877,7 +6897,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -7326,7 +7348,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -7954,7 +7978,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -8141,7 +8167,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   true/*rendezvous*/);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);

@@ -1761,6 +1761,27 @@ namespace Legion {
       return RtEvent::NO_RT_EVENT;
     }
 
+#if 0
+    //--------------------------------------------------------------------------
+    void Operation::perform_collective_versioning_analysis(unsigned index,
+        LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
+        unsigned parent_req_index, IndexSpace root_space, RtUserEvent compute)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called in derived types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::report_collective_versioning_analysis(unsigned index,
+                          LogicalRegion handle, const VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called in derived types
+      assert(false);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
                                  LogicalRegion handle, const RegionUsage usage, 
@@ -20362,7 +20383,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   is_point_attach());
       // Register the instance with the memory manager and make sure it is
       // done before we perform our mapping
 #ifdef DEBUG_LEGION
@@ -21571,14 +21594,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointAttachOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      // Resolve our speculation then do the base case
-      AttachOp::trigger_ready();
-    }
-
-    //--------------------------------------------------------------------------
     void PointAttachOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
@@ -21794,7 +21809,9 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement, 
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   NULL/*output region*/,
+                                                   is_point_detach());
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -22400,14 +22417,6 @@ namespace Legion {
                                    unique_op_id, point);
         log_requirement();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void PointDetachOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      // Resolve our speculation then do the base case
-      DetachOp::trigger_ready();
     }
 
     //--------------------------------------------------------------------------

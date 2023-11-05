@@ -2645,7 +2645,10 @@ namespace Legion {
         }
         else
           runtime->forest->perform_versioning_analysis(this, idx,
-              logical_regions[idx], version_info, ready_events); 
+              logical_regions[idx], version_info, ready_events,
+              NULL/*output region*/, std::binary_search(
+                check_collective_regions.begin(), 
+                check_collective_regions.end(), idx)); 
       }
       if (!output_events.empty())
         record_output_registered(
