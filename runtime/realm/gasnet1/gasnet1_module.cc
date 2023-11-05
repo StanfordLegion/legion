@@ -614,8 +614,11 @@ namespace Realm {
         Network::shared_peers.add(node_info.host);
       }
     }
-    // TODO: do an all gather on the hostname to discover the shared peers.
-    Network::shared_peers = Network::all_peers;
+    if(Network::shared_peers.empty()) {
+      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // then just assume all_peers are shareable
+      Network::shared_peers = Network::all_peers;
+    }
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];

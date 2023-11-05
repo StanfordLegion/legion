@@ -1436,7 +1436,7 @@ ifeq ($(strip $(USE_CUDA)),1)
 $(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	# $(NVCC) --compiler-options '-fPIC' -o $<.d -M -MT $@ $< $(NVCC_FLAGS) $(INC_FLAGS)
 	# $(NVCC) --compiler-options '-fPIC' -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
-  $(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
+	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 
 $(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
 	rm -f $@

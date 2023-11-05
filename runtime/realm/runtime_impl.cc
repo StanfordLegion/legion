@@ -2788,13 +2788,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 #endif
       cleanup_query_caches();
       {
-        // clean up all the module configs
-        for (std::map<std::string, ModuleConfig*>::iterator it = module_configs.begin();
-             it != module_configs.end(); it++) {
-          delete (it->second);
-          it->second = nullptr;
-        }
-
         // Clean up all the modules before tearing down the runtime state.
         for (std::vector<Module *>::iterator it = modules.begin();
              it != modules.end(); it++) {
@@ -2810,6 +2803,14 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
         Network::single_network = 0;
 
+        // clean up all the module configs
+        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
+            it != module_configs.end(); it++) {
+          delete(it->second);
+          it->second = nullptr;
+        }
+
+        // dlclose all dynamic module handles
         module_registrar.unload_module_sofiles();
 
         // delete processors, memories, nodes, etc.
