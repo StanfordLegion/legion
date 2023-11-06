@@ -631,6 +631,8 @@ namespace Legion {
         : args(const_cast<void*>(arg)), arglen(argsize) { }
       UntypedBuffer(const UntypedBuffer &rhs)
         : args(rhs.args), arglen(rhs.arglen) { }
+      UntypedBuffer(UntypedBuffer &&rhs) noexcept
+        : args(rhs.args), arglen(rhs.arglen) { }
     public:
       inline size_t get_size(void) const { return arglen; }
       inline void*  get_ptr(void) const { return args; }
@@ -640,6 +642,8 @@ namespace Legion {
       inline bool operator<(const UntypedBuffer &arg) const
         { return (args < arg.args) && (arglen < arg.arglen); }
       inline UntypedBuffer& operator=(const UntypedBuffer &rhs)
+        { args = rhs.args; arglen = rhs.arglen; return *this; }
+      inline UntypedBuffer& operator=(UntypedBuffer &&rhs) noexcept
         { args = rhs.args; arglen = rhs.arglen; return *this; }
     private:
       void *args;

@@ -19231,6 +19231,8 @@ namespace Legion {
         else
           trigger_execution(); // can do the completion now
       }
+      else if (view_ready.exists() && !view_ready.has_triggered())
+        parent_ctx->add_to_trigger_execution_queue(this, view_ready);
       else
         trigger_execution();
     }

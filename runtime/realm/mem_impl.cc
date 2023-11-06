@@ -1285,7 +1285,7 @@ namespace Realm {
 #if defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
       if(SharedMemoryInfo::create(shared_memory, size, nullptr, numa_node))
 #else
-      std::string name = std::to_string(ID(me).id);
+      std::string name = get_shm_name(mem->memory_id);
       if(SharedMemoryInfo::create(shared_memory, size, name.c_str(), numa_node))
 #endif
       {

@@ -89,12 +89,15 @@
 #if defined(REALM_USE_GASNET1)
 #error Shared memory not supported on GASNET1
 #endif
-#if defined(REALM_HAS_MEMFD)
-#define REALM_USE_ANONYMOUS_SHARED_MEMORY 1
-#elif defined(REALM_ON_WINDOWS)
+
+#if defined(REALM_ON_WINDOWS)
 // ANONYMOUS_SHARED_MEMORY requires ipc mailbox support, which is not yet implemented on windows
 // TODO: Support this on windows
 //#define REALM_USE_ANONYMOUS_SHARED_MEMORY 1
+#elif !defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+// Use anonymous shared memory by default, as it has a lot fewer limitations and there are
+// more fallbacks in place
+#define REALM_USE_ANONYMOUS_SHARED_MEMORY 1
 #endif
 #endif
 
