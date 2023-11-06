@@ -450,8 +450,8 @@ namespace Realm {
         oscale = 1;
       }
 
-      const size_t planes = std::min(std::min(icount, ocount),
-                                     (bytes_left / (contig_bytes * lines)));
+      const size_t planes =
+          std::min(std::min(icount, ocount), (bytes_left / (contig_bytes * lines)));
 
       if(needs_transpose(in_lstride, in_pstride, out_lstride, out_pstride)) {
         transpose_info.src = static_cast<uintptr_t>(in_base + in_offset);
@@ -691,8 +691,7 @@ namespace Realm {
 
         if(in_gpu && in_gpu->can_access_peer(out_gpu) && transpose_copy.extents[0] != 0 &&
            transpose_copy.extents[0] <= CUDA_MAX_FIELD_BYTES) {
-          stream->get_gpu()->launch_transpose_kernel(transpose_copy, min_align,
-                                                    stream);
+          stream->get_gpu()->launch_transpose_kernel(transpose_copy, min_align, stream);
           bytes_to_fence += transpose_copy.extents[0] * transpose_copy.extents[1] *
                             transpose_copy.extents[2];
         } else if(transpose_copy.extents[0] != 0) {

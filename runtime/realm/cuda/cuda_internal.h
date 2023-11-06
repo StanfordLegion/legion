@@ -646,7 +646,7 @@ namespace Realm {
       void launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
                                    size_t elemSize, GPUStream *stream);
 
-     protected:
+    protected:
       CUmodule load_cuda_module(const void *data);
 
     public:

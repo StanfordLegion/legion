@@ -2098,14 +2098,14 @@ namespace Realm {
                                                  stream->get_stream(), args, NULL));
     }
     void GPU::launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
-                                      size_t elem_size, GPUStream *stream) {
+                                      size_t elem_size, GPUStream *stream)
+    {
       size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
                                       CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
       size_t num_elems = copy_info.extents[1] * copy_info.extents[2];
       assert((1ULL << log_elem_size) <= elem_size);
 
-      GPUFuncInfo &func_info =
-          transpose_kernels[log_elem_size];
+      GPUFuncInfo &func_info = transpose_kernels[log_elem_size];
 
       unsigned int num_blocks = 0, num_threads = 0;
       assert(copy_info.extents[0] <= CUDA_MAX_FIELD_BYTES);
