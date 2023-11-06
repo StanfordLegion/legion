@@ -29,6 +29,7 @@
 #endif
 
 #include <cstddef>
+#include <type_traits>
 
 namespace Realm {
 
@@ -125,8 +126,21 @@ namespace Realm {
       template <class REDOP>
       static ReductionOpUntyped *create_reduction_op(void)
       {
-        ReductionOpUntyped *redop = new ReductionOp<REDOP>;
-        return redop;
+        // reduction ops are allowed to use helper constructors, but are
+        //  type-erased inside of realm, so must be trivially copyable and
+        //  trivially destructible (we will use malloc/memcpy/free instead
+        //  of new/delete)
+#if REALM_CXX_STANDARD >= 11
+        static_assert(std::is_trivially_copyable<ReductionOp<REDOP> >::value &&
+                      std::is_trivially_destructible<ReductionOp<REDOP> >::value,
+                      "ReductionOp<REDOP> must be trivially copyable/destructible");
+#endif
+        void *ptr = malloc(sizeof(ReductionOp<REDOP>));
+        if(ptr) {
+          ReductionOpUntyped *redop = new(ptr) ReductionOp<REDOP>;
+          return redop;
+        } else
+          return nullptr;
       }
 
       static ReductionOpUntyped *clone_reduction_op(const ReductionOpUntyped *redop);

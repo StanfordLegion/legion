@@ -11792,7 +11792,8 @@ namespace Legion {
         while (!redop_table.empty())
         {
           ReductionOpTable::iterator it = redop_table.begin();
-          delete it->second;
+          // Free ReductionOp *'s with free, not delete!
+          free(it->second);
           redop_table.erase(it);
         }
       }
