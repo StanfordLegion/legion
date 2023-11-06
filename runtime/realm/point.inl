@@ -594,7 +594,7 @@ namespace Realm {
   template <int N2, typename T2>
   REALM_CUDA_HD inline Rect<N2, T2>
   Rect<N, T>::apply_transform(const Matrix<N2, N, T2> &transform,
-                              const Point<N2, T2> &offset)
+                              const Point<N2, T2> &offset) const
   {
     Rect<N2, T2> tranformed_rect(offset, offset);
     for(int i = 0; i < N2; i++) {
