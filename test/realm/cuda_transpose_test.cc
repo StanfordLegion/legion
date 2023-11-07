@@ -361,8 +361,6 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       dump_and_verify<N, T, FT>(src_inst, 0, src_is, is.bounds.hi[i] + 1, test_data,
                                 TestConfig::verbose, 0);
 
-      log_app.print() << "Verify " << perms[i].name << " " << perms[j].name;
-
       dump_and_verify<N, T, FT>(dst_inst, /*field_id=*/0, is, is.bounds.hi[i] + 1,
                                 test_data, TestConfig::verbose, TestConfig::verify);
 
@@ -495,18 +493,6 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
           do_single_dim_field_size<3, int>(
               *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {}, {},
               domain, src_bounds, dst_bounds, TestConfig::field_size);
-
-          /*do_single_dim_field_size<3, int>(
-              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"XYZ"},
-             {"XZY"}, domain, src_bounds, dst_bounds, TestConfig::field_size);*/
-
-          /*do_single_dim_field_size<3, int>(
-              *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"YXZ"},
-              {"XYZ"}, domain, src_bounds, dst_bounds, TestConfig::field_size);*/
-
-          // do_single_dim_field_size<3, int>(
-          //  *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {"ZYX"},
-          //{"XZY"}, domain, src_bounds, dst_bounds, TestConfig::field_size);
 
         } else {
           const size_t block_cols = TestConfig::block_cols;
