@@ -37,12 +37,11 @@ namespace Realm {
   // class Processor
   //
 
-    /*static*/ const Processor Processor::NO_PROC = { 0 }; 
+    /*static*/ const Processor Processor::NO_PROC = { /* zero-initialization */};
 
   namespace ThreadLocal {
-    // Assume zero initialized
-    REALM_THREAD_LOCAL Processor current_processor = { 0 };
-    
+    REALM_THREAD_LOCAL Processor current_processor = { /* zero-initialization */};
+
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
     REALM_THREAD_LOCAL int scheduler_lock = 0;
@@ -391,8 +390,7 @@ namespace Realm {
   // class ProcessorGroup
   //
 
-    /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP =
-			      ID(ID::ID_NULL).convert<ProcessorGroup>();
+    /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP = { /* zero-initialization */};
 
     /*static*/ ProcessorGroup ProcessorGroup::create_group(const Processor *_members, size_t num_members)
     {

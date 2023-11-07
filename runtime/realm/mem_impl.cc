@@ -74,7 +74,7 @@ namespace Realm {
       assert(0);
     }
 
-    /*static*/ const Memory Memory::NO_MEMORY = { 0 };
+    /*static*/ const Memory Memory::NO_MEMORY = { /* zero-initialization */};
 
 
   ////////////////////////////////////////////////////////////////////////

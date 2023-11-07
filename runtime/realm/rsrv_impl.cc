@@ -155,7 +155,7 @@ namespace Realm {
   // class Reservation
   //
 
-    /*static*/ const Reservation Reservation::NO_RESERVATION = { 0 };
+    /*static*/ const Reservation Reservation::NO_RESERVATION = { /* zero-initialization */};
 
     Event Reservation::acquire(unsigned mode /* = 0 */, bool exclusive /* = true */,
 		     Event wait_on /* = Event::NO_EVENT */) const

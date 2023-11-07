@@ -36,9 +36,8 @@ namespace Realm {
   // class Event
   //
 
-  /*static*/ const Event Event::NO_EVENT = {};
-  // Take this you POS c++ type system
-  /* static */ const UserEvent UserEvent::NO_USER_EVENT = {};
+  /*static*/ const Event Event::NO_EVENT = { /* zero-initialization */};
+  /*static*/ const UserEvent UserEvent::NO_USER_EVENT = { /* zero-initialization */};
 
   bool Event::has_triggered(void) const
   {
@@ -440,17 +439,7 @@ namespace Realm {
   // class Barrier
   //
 
-  namespace {
-    Barrier make_no_barrier(void)
-    {
-      Barrier b;
-      b.id = 0;
-      b.timestamp = 0;
-      return b;
-    }
-  };
-
-  /*static*/ const Barrier Barrier::NO_BARRIER = {};
+  /*static*/ const Barrier Barrier::NO_BARRIER = { /* zero-initialization */};
 
   /*static*/ const ::realm_event_gen_t Barrier::MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
 
@@ -2966,7 +2955,7 @@ static void *bytedup(const void *data, size_t datalen)
   // class CompletionQueue
   //
 
-  /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = { 0 };
+  /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = { /* zero-initialization */};
 
   /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
   {
