@@ -16,11 +16,12 @@
 #ifndef REALM_CUDA_H
 #define REALM_CUDA_H
 
-#include "realm/realm_config.h"
-#include "realm/module.h"
-#include "realm/processor.h"
-#include "realm/network.h"
 #include "realm/atomics.h"
+#include "realm/module.h"
+#include "realm/network.h"
+#include "realm/processor.h"
+#include "realm/realm_config.h"
+#include <memory>
 
 // realm/cuda_module.h is designed to be include-able even when the system
 //  doesn't actually have CUDA installed, so we need to declare types that
@@ -135,9 +136,16 @@ namespace Realm {
 
     // our interface to the rest of the runtime
     class REALM_PUBLIC_API CudaModule : public Module {
+    public:
+      typedef void (*HostMemoryDeleter)(void *);
+
     protected:
       CudaModule(RuntimeImpl *_runtime);
-      
+
+      std::unique_ptr<void, HostMemoryDeleter>
+      allocate_portable_host_memory(size_t sz, bool require_same_va = true);
+      void register_sysmem_to_gpus(Memory mem, void *cpu_ptr, bool check_same_va = true);
+
     public:
       virtual ~CudaModule(void);
 
@@ -200,7 +208,8 @@ namespace Realm {
       std::map<GPU *, GPUWorker *> dedicated_workers;
       std::vector<GPUInfo *> gpu_info;
       std::vector<GPU *> gpus;
-      void *zcmem_cpu_base, *zcib_cpu_base;
+      std::unique_ptr<void, HostMemoryDeleter> zcmem_ptr;
+      std::unique_ptr<void, HostMemoryDeleter> zcib_ptr;
       GPUZCMemory *zcmem;
       void *uvm_base; // guaranteed to be same for CPU and GPU
       GPUZCMemory *uvmmem;
