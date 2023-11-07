@@ -106,6 +106,7 @@ namespace Realm {
       CUuuid uuid;
       int major;
       int minor;
+      bool host_register_uses_same_va;
       static const size_t MAX_NAME_LEN = 256;
       char name[MAX_NAME_LEN];
       size_t totalGlobalMem;
