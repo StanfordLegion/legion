@@ -1572,16 +1572,19 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
                           // (TODO: only do on shared peers)
       // Share all the sharable memories.  Do this AFTER the network barrier to ensure
       // all the intra_node_mailboxes have been created
-      for(NodeSetIterator it = Network::shared_peers.begin();
-          it != Network::shared_peers.end(); ++it) {
+      for(NodeSetIterator iter = Network::shared_peers.begin();
+          iter != Network::shared_peers.end(); ++iter) {
         size_t data_sz;
-        std::string slot_name = get_mailbox_name(*it);
+        std::string slot_name = get_mailbox_name(*iter);
+        if(*iter == Network::my_node_id) {
+          continue;
+        }
         if(!Realm::ipc_mailbox_send(intra_node_mailbox, slot_name, my_handles,
                                     my_mem_ids.data(),
                                     my_mem_ids.size() * sizeof(my_mem_ids[0]))) {
           log_runtime.warning(
               "Unable to send shared memory information to node %u, skipping",
-              (unsigned)*it);
+              (unsigned)*iter);
           continue;
         }
         // TODO: modify ipc_mailbox_recv to peek and resize the data buffer the same as
@@ -1592,7 +1595,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
                                     peer_mem_ids.size() * sizeof(peer_mem_ids[0]))) {
           log_runtime.warning(
               "Unable to recv shared memory information from node %u, skipping",
-              (unsigned)*it);
+              (unsigned)*iter);
           continue;
         }
         assert(peer_handles.size() * sizeof(peer_mem_ids[0]) == data_sz &&
