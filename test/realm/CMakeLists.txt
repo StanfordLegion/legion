@@ -136,7 +136,7 @@ set(TESTARGS_sparse_construct  -verbose)
 set(TESTARGS_cuda_arrays       -ll:gpu 1)
 set(TESTARGS_transpose_test       -ll:gpu 1 -unit_test 1)
 set(TESTARGS_cuda_memcpy_test      -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
-set(TESTARGS_machine_config_args    -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin 1)
+set(TESTARGS_machine_config_args    -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2)
 set(TESTARGS_cuda_transpose_test      -ll:gpu 1)
 
 if(Legion_USE_CUDA)
@@ -151,6 +151,7 @@ endif()
 if(Legion_USE_Python)
   list(APPEND TESTARGS_machine_config_args -ll:py 1 -ll:pystack 4)
 endif()
+
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)

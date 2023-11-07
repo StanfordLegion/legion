@@ -477,6 +477,7 @@ namespace Realm {
 
         copy_info.src.strides[0] = in_lstride;
         copy_info.src.strides[1] = in_pstride / in_lstride;
+
         copy_info.volume = planes * lines * contig_bytes;
       }
 
@@ -780,7 +781,6 @@ namespace Realm {
 
           cuda_copy.srcPitch = copy_info.src.strides[0];
           cuda_copy.srcHeight = copy_info.src.strides[1];
-
           cuda_copy.dstPitch = copy_info.dst.strides[0];
           cuda_copy.dstHeight = copy_info.dst.strides[1];
 

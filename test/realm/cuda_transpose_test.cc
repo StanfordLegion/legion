@@ -300,7 +300,6 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     {
       InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
           src_is, ilc, perms[i].dim_order);
-
       wait_for = RegionInstance::create_instance(src_inst, src_mem, ilg,
                                                  ProfilingRequestSet(), wait_for);
 
@@ -309,7 +308,6 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
         test_data.push_back(index+N);
         return index += N;
       };
-
       init_index_space<N, T, FT>(src_inst, src_inst, is, 0,
                                  src_lambda, false);
     }
