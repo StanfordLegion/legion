@@ -27,7 +27,12 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
+#endif
+
+#if !defined(MFD_CLOEXEC)
+#define MFD_CLOEXEC 0x0001U
 #endif
 
 namespace Realm {
@@ -45,12 +50,12 @@ namespace Realm {
     if(ftruncate(hdl, sz) != 0)
 #endif
     {
-      log_shm.error("failed to resize shared memory region: %d", errno);
+      log_shm.warning("failed to resize shared memory region: %d", errno);
       return false;
     }
     base = mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_SHARED, hdl, 0);
     if(base == nullptr) {
-      log_shm.error("Failed to map shared memory: %d", errno);
+      log_shm.warning("Failed to map shared memory: %d", errno);
       return false;
     }
     if(numa_node >= 0) {
@@ -64,6 +69,7 @@ namespace Realm {
                                            const char *name /* = nullptr*/,
                                            int numa_node /* = -1*/)
   {
+    info.unlink();
     info.size = size;
     info.owner = true;
     info.base = nullptr;
@@ -77,12 +83,12 @@ namespace Realm {
         INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (size >> 32ULL),
         (size & ~(1ULL << 32ULL)), info.name.c_str(), numa_node);
     if(hMapFile == nullptr) {
-      log_shm.error("Failed to create shm %s", info.name.c_str());
+      log_shm.warning("Failed to create shm %s", info.name.c_str());
       return false;
     }
     info.base = MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, size);
     if(info.base == nullptr) {
-      log_shm.error("Failed to map shared memory");
+      log_shm.warning("Failed to map shared memory");
       CloseHandle(hMapFile);
       return false;
     }
@@ -96,33 +102,39 @@ namespace Realm {
       fd = shm_open(path.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     } else {
       // Create anonymous shared memory
-#if defined(REALM_HAS_MEMFD)
-      fd = memfd_create("", MFD_CLOEXEC);
-#else
-      // There's no real portable way across *nixes to share anonymous memory by fd
-      // without a file name.  There are some distro specific extensions (SHM_ANON,
-      // shm_mkstemp, etC), but none of these are standard.  Therefore, we'll just try a
-      // few names and see if they work.
-      static const size_t REALM_SHM_MAX_TRIES = 1;
-      for(size_t i = 0; i < REALM_SHM_MAX_TRIES; i++) {
-        std::string tmpname("/realm-shm.");
-        tmpname += std::to_string(Clock::current_time_in_nanoseconds(true));
-        if(SharedMemoryInfo::create(info, size, tmpname.c_str(), numa_node)) {
-          return true;
-        }
-      }
-      log_shm.error("Failed to find unique shm name");
-      return false;
+      // Try memfd via syscall (as some libc implementations do not provide wrappers
+      // yet...)
+#if defined(SYS_memfd_create)
+      fd = syscall(SYS_memfd_create, "", MFD_CLOEXEC);
 #endif
+      if(fd < 0) {
+        // There's no real portable way across *nixes to share anonymous memory by fd
+        // without a file name.  There are some distro specific extensions (SHM_ANON,
+        // shm_mkstemp, etC), but none of these are standard.  Therefore, we'll just try a
+        // few names and see if they work.
+        static const size_t REALM_SHM_MAX_TRIES = 1;
+        for(size_t i = 0; i < REALM_SHM_MAX_TRIES; i++) {
+          std::string tmp_name("/realm-shm.");
+          tmp_name += std::to_string(Clock::current_time_in_nanoseconds(true));
+          if(SharedMemoryInfo::create(info, size, tmp_name.c_str(), numa_node)) {
+            return true;
+          }
+        }
+        log_shm.warning("Failed to find unique shm name");
+        return false;
+      }
     }
 
     if(fd < 0) {
-      log_shm.error("Failed to create shm %s: %d", name, errno);
+      log_shm.warning("Failed to create shm %s: %d", name, errno);
       return false;
     }
 
     if(!setup_shm(info.base, fd, size, numa_node)) {
-      shm_unlink(name);
+      if(!info.name.empty()) {
+        std::string path = '/' + info.name;
+        shm_unlink(path.c_str());
+      }
       close(fd);
       return false;
     }
@@ -156,12 +168,12 @@ namespace Realm {
     std::string path = '/' + name;
     int fd = shm_open(path.c_str(), O_RDWR, 0);
     if(fd < 0) {
-      log_shm.error("Failed to open shm: %d", errno);
+      log_shm.warning("Failed to open shm: %d", errno);
       return false;
     }
     info.base = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if(info.base == nullptr) {
-      log_shm.error("Failed to map shm: %d", errno);
+      log_shm.warning("Failed to map shm: %d", errno);
       close(fd);
       return false;
     }

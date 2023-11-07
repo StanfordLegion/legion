@@ -1117,20 +1117,8 @@ namespace Realm {
       // if the subrect isn't empty, compute the bounding box of the image
       //  of the subrectangle through the transform - this is a bit ugly
       //  to account for negative elements in the matrix
-      Rect<N2,T2> subrect_image(offset, offset);
-      for(int i = 0; i < N2; i++)
-	for(int j = 0; j < N; j++) {
-	  T2 e = transform.rows[i][j];
-	  if(e > 0) {
-	    subrect_image.lo[i] += e * subrect.lo[j];
-	    subrect_image.hi[i] += e * subrect.hi[j];
-	  }
-	  if(e < 0) {
-	    subrect_image.lo[i] += e * subrect.hi[j];
-	    subrect_image.hi[i] += e * subrect.lo[j];
-	  }
-	}
-    
+      Rect<N2, T2> subrect_image = subrect.apply_transform(transform, offset);
+
       // find the piece that holds the lo corner of the subrect and insist it
       //  exists, covers the whole subrect, and is affine
       const InstanceLayoutPiece<N2,T2> *ilp = ipl.find_piece(subrect_image.lo);

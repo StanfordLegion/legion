@@ -553,6 +553,21 @@ namespace Realm {
           out_is_ipc = dst_is_ipc[output_control.current_io_port];
         }
 
+        std::string memcpy_kind;
+        if(in_gpu) {
+          if(out_gpu == in_gpu) {
+            memcpy_kind = "d2d";
+          } else if(out_mapping) {
+            memcpy_kind = "ipc";
+          } else if(!out_gpu) {
+            memcpy_kind = "d2h";
+          } else {
+            memcpy_kind = "p2p";
+          }
+        } else {
+          memcpy_kind = "h2d";
+        }
+
         if (in_port == 0 || out_port == 0) {
           if (in_port) {
             in_port->addrcursor.skip_bytes(max_bytes);
@@ -708,7 +723,8 @@ namespace Realm {
                             << d2_copy_info.srcPitch
                             << " dstpitch=" << d2_copy_info.dstPitch
                             << " WidthInBytes=" << d2_copy_info.WidthInBytes
-                            << " Height=" << d2_copy_info.Height;
+                            << " Height=" << d2_copy_info.Height
+                            << " memcpy_kind=" << memcpy_kind;
 
           size_t planes = transpose_copy.extents[2];
           size_t act_planes = 0;
@@ -741,10 +757,14 @@ namespace Realm {
             copy_infos.subrects[i].extents[0]     /= min_align;
             copy_infos.subrects[i].volume /= min_align;
           }
-          // TODO: add some heuristics here, like if some rectangles are very large, do a cuMemcpy
-          // instead, possibly utilizing the copy engines or better optimized kernels
-          log_gpudma.info() << "\tLaunching kernel for " << copy_infos.num_rects << " rects " << copy_info_total << " bytes";
-          stream->get_gpu()->launch_batch_affine_kernel(&copy_infos, 3, min_align, copy_info_total / min_align, stream);
+          // TODO: add some heuristics here, like if some rectangles are very large, do a
+          // cuMemcpy instead, possibly utilizing the copy engines or better optimized
+          // kernels
+          log_gpudma.info() << "\tLaunching kernel for rects=" << copy_infos.num_rects
+                            << " bytes=" << copy_info_total
+                            << " out_is_ipc=" << out_is_ipc;
+          stream->get_gpu()->launch_batch_affine_kernel(
+              &copy_infos, 3, min_align, copy_info_total / min_align, stream);
           bytes_to_fence += copy_info_total;
         } else if (copy_infos.num_rects == 1) {
           // Then the affine copies to/from the device
@@ -767,10 +787,15 @@ namespace Realm {
           cuda_copy.dstDevice = copy_info.dst.addr;
           cuda_copy.srcDevice = copy_info.src.addr;
 
-          log_gpudma.info() << "\tLaunching 3D CE for "
+          log_gpudma.info() << "\tLaunching 3D CE bytes="
                             << copy_info.extents[0] * copy_info.extents[1] *
                                    copy_info.extents[2]
-                            << "bytes";
+                            << " srcPitch=" << cuda_copy.srcPitch
+                            << " srcHeight=" << cuda_copy.srcHeight
+                            << " dstPitch=" << cuda_copy.dstPitch
+                            << " dstHeight=" << cuda_copy.dstHeight
+                            << " memcpy_kind=" << memcpy_kind;
+
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
 
           bytes_to_fence += copy_info.extents[0] * copy_info.extents[1] * copy_info.extents[2];

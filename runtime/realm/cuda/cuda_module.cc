@@ -14,8 +14,8 @@
  */
 
 #include "realm/cuda/cuda_module.h"
-#include "realm/cuda/cuda_internal.h"
 #include "realm/cuda/cuda_access.h"
+#include "realm/cuda/cuda_internal.h"
 #include "realm/cuda/cuda_memcpy.h"
 
 #include "realm/tasks.h"
@@ -123,6 +123,23 @@ namespace Realm {
 
     NVML_APIS(DEFINE_FNPTR);
 #undef DEFINE_FNPTR
+
+    // function pointers for cuda hook
+    typedef void (*PFN_cuhook_register_callback)(void);
+    typedef void (*PFN_cuhook_start_task)(GPUProcessor *gpu_proc);
+    typedef void (*PFN_cuhook_end_task)(CUstream current_task_stream);
+
+    static PFN_cuhook_register_callback cuhook_register_callback_fnptr = nullptr;
+    static PFN_cuhook_start_task cuhook_start_task_fnptr = nullptr;
+    static PFN_cuhook_end_task cuhook_end_task_fnptr = nullptr;
+    static bool cuhook_enabled = false;
+
+    namespace ThreadLocal {
+      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
+      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
+      static REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams = 0;
+      static REALM_THREAD_LOCAL int context_sync_required = 0;
+    }; // namespace ThreadLocal
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1505,13 +1522,6 @@ namespace Realm {
     {
     }
 
-    namespace ThreadLocal {
-      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
-      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
-      static REALM_THREAD_LOCAL int context_sync_required = 0;
-    };
-
 #ifdef REALM_USE_CUDART_HIJACK
     // this flag will be set on the first call into any of the hijack code in
     //  cudart_hijack.cc
@@ -1534,6 +1544,11 @@ namespace Realm {
       // TODO: either eliminate these asserts or do TLS swapping when using user threads
       assert(ThreadLocal::current_gpu_proc == 0);
       ThreadLocal::current_gpu_proc = gpu_proc;
+
+      // start record cuda calls if cuda book is enabled
+      if(cuhook_enabled) {
+        cuhook_start_task_fnptr(ThreadLocal::current_gpu_proc);
+      }
 
       // push the CUDA context for this GPU onto this thread
       gpu_proc->gpu->push_context();
@@ -1623,6 +1638,13 @@ namespace Realm {
 
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
+
+      // cuda stream sanity check and clear cuda hook calls
+      // we only check against the current_gpu_stream because it is impossible to launch
+      // tasks onto other realm gpu streams
+      if(cuhook_enabled) {
+        cuhook_end_task_fnptr(ThreadLocal::current_gpu_stream->get_stream());
+      }
 
       assert(ThreadLocal::current_gpu_proc == gpu_proc);
       ThreadLocal::current_gpu_proc = 0;
@@ -4183,6 +4205,10 @@ namespace Realm {
       delete_container_contents(gpu_info);
       assert(cuda_module_singleton == this);
       cuda_module_singleton = 0;
+      cuhook_register_callback_fnptr = nullptr;
+      cuhook_start_task_fnptr = nullptr;
+      cuhook_end_task_fnptr = nullptr;
+      cuhook_enabled = false;
       delete rh_listener;
     }
 
@@ -4742,6 +4768,16 @@ namespace Realm {
       // make sure we hear about any changes to the size of the replicated
       //  heap
       runtime->repl_heap.add_listener(rh_listener);
+
+      cuhook_register_callback_fnptr =
+          (PFN_cuhook_register_callback)dlsym(NULL, "cuhook_register_callback");
+      cuhook_start_task_fnptr = (PFN_cuhook_start_task)dlsym(NULL, "cuhook_start_task");
+      cuhook_end_task_fnptr = (PFN_cuhook_end_task)dlsym(NULL, "cuhook_end_task");
+      if(cuhook_register_callback_fnptr && cuhook_start_task_fnptr &&
+         cuhook_end_task_fnptr) {
+        cuhook_register_callback_fnptr();
+        cuhook_enabled = true;
+      }
     }
 
     // create any memories provided by this module (default == do nothing)
