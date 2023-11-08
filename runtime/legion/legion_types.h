@@ -2108,7 +2108,7 @@ namespace Legion {
     public:
       static const LgEvent NO_LG_EVENT;
     public:
-      constexpr LgEvent(void) noexcept = default;
+      LgEvent(void) noexcept { id = 0; }
       LgEvent(const LgEvent &rhs) = default;
       explicit LgEvent(const Realm::Event e) { id = e.id; }
     public:
@@ -2122,15 +2122,11 @@ namespace Legion {
       void end_context_wait(Context ctx) const;
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr LgEvent LgEvent::NO_LG_EVENT = LgEvent();
-#endif
-
     class PredEvent : public LgEvent {
     public:
       static const PredEvent NO_PRED_EVENT;
     public:
-      constexpr PredEvent(void) noexcept = default;
+      PredEvent(void) noexcept : LgEvent() { } 
       PredEvent(const PredEvent &rhs) = default;
       explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
     public:
@@ -2139,15 +2135,11 @@ namespace Legion {
         { Realm::UserEvent e; e.id = id; return e; }
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
-#endif
-
     class ApEvent : public LgEvent {
     public:
       static const ApEvent NO_AP_EVENT;
     public:
-      constexpr ApEvent(void) noexcept = default;
+      ApEvent(void) noexcept : LgEvent() { }
       ApEvent(const ApEvent &rhs) = default;
       explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit ApEvent(const PredEvent &e) { id = e.id; }
@@ -2165,15 +2157,11 @@ namespace Legion {
       inline void wait(void) const { LgEvent::wait(); }
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr ApEvent ApEvent::NO_AP_EVENT = ApEvent();
-#endif
-
     class ApUserEvent : public ApEvent {
     public:
       static const ApUserEvent NO_AP_USER_EVENT;
     public:
-      constexpr ApUserEvent(void) noexcept = default;
+      ApUserEvent(void) noexcept : ApEvent() { }
       ApUserEvent(const ApUserEvent &rhs) = default;
       explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
     public:
@@ -2182,15 +2170,11 @@ namespace Legion {
         { Realm::UserEvent e; e.id = id; return e; }
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
-#endif
-
     class ApBarrier : public ApEvent {
     public:
       static const ApBarrier NO_AP_BARRIER;
     public:
-      constexpr ApBarrier(void) noexcept : timestamp(0) { }
+      ApBarrier(void) noexcept : ApEvent(), timestamp(0) { }
       ApBarrier(const ApBarrier &rhs) = default; 
       explicit ApBarrier(const Realm::Barrier &b) 
         : ApEvent(b), timestamp(b.timestamp) { }
@@ -2203,15 +2187,11 @@ namespace Legion {
       Realm::Barrier::timestamp_t timestamp;
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
-#endif
-
     class RtEvent : public LgEvent {
     public:
       static const RtEvent NO_RT_EVENT;
     public:
-      constexpr RtEvent(void) noexcept = default;
+      RtEvent(void) noexcept : LgEvent() { }
       RtEvent(const RtEvent &rhs) = default;
       explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit RtEvent(const PredEvent &e) { id = e.id; }
@@ -2219,15 +2199,11 @@ namespace Legion {
       inline RtEvent& operator=(const RtEvent &rhs) = default;
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr RtEvent RtEvent::NO_RT_EVENT = RtEvent();
-#endif
-
     class RtUserEvent : public RtEvent {
     public:
       static const RtUserEvent NO_RT_USER_EVENT;
     public:
-      constexpr RtUserEvent(void) noexcept = default;
+      RtUserEvent(void) noexcept : RtEvent() { }
       RtUserEvent(const RtUserEvent &rhs) = default;
       explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
     public:
@@ -2236,15 +2212,11 @@ namespace Legion {
         { Realm::UserEvent e; e.id = id; return e; }
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
-#endif
-
     class RtBarrier : public RtEvent {
     public:
       static const RtBarrier NO_RT_BARRIER;
     public:
-      constexpr RtBarrier(void) noexcept : timestamp(0) { }
+      RtBarrier(void) noexcept : RtEvent(), timestamp(0) { }
       RtBarrier(const RtBarrier &rhs) = default;
       explicit RtBarrier(const Realm::Barrier &b)
         : RtEvent(b), timestamp(b.timestamp) { }
@@ -2256,10 +2228,6 @@ namespace Legion {
     public:
       Realm::Barrier::timestamp_t timestamp;
     }; 
-
-#if __cplusplus >= 201703L // C++17
-    inline constexpr RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
-#endif
 
     // Local lock for accelerating lock taking
     class LocalLock {

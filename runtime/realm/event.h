@@ -60,10 +60,6 @@ namespace Realm {
        */
       static const Event NO_EVENT;
 
-      constexpr Event(void) noexcept
-        : id(0)
-      {}
-
       /**
        * Check whether an event has a valid ID.
        * \return true if the event has a valid ID, false otherwise
@@ -193,10 +189,6 @@ namespace Realm {
                                         bool all_must_trigger = true);
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr Event Event::NO_EVENT = Event();
-#endif
-
     /**
      * \class UserEvent
      * UserEvents are events that can be scheduled to trigger at a
@@ -207,7 +199,6 @@ namespace Realm {
      */
     class REALM_PUBLIC_API UserEvent : public Event {
     public:
-      constexpr UserEvent(void) noexcept = default;
 
       /**
        * Create a new user event.
@@ -234,10 +225,6 @@ namespace Realm {
       static const UserEvent NO_USER_EVENT;
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr UserEvent UserEvent::NO_USER_EVENT = UserEvent();
-#endif
-
     /**
      * \class Barrier
      * A barrier is similar to a user event, except that it has a count
@@ -251,10 +238,6 @@ namespace Realm {
       timestamp_t timestamp;
 
       static const Barrier NO_BARRIER;
-
-      constexpr Barrier(void) noexcept
-        : timestamp(0)
-      {}
 
       static Barrier create_barrier(unsigned expected_arrivals, ReductionOpID redop_id = 0,
 				    const void *initial_value = 0, size_t initial_value_size = 0);
@@ -309,9 +292,6 @@ namespace Realm {
       bool get_result(void *value, size_t value_size) const;
     };
 
-#if __cplusplus >= 201703L // C++17
-    inline constexpr Barrier Barrier::NO_BARRIER = Barrier();
-#endif
 
     /**
      * \class CompletionQueue
