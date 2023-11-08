@@ -108,8 +108,6 @@ protected:
 #endif
   }
 
-  Realm::ReductionOpUntyped *clone() const override { return new ArrayReductionOp{*this}; }
-
 public:
   static ArrayReductionOp<ELEM_REDOP> *create_reduction_op(unsigned N)
   {
