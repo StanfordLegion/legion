@@ -174,7 +174,7 @@ namespace Realm {
 
     template <int N2, typename T2>
     Rect<N2, T2> REALM_CUDA_HD apply_transform(const Matrix<N2, N, T2> &transform,
-                                               const Point<N2, T2> &offset);
+                                               const Point<N2, T2> &offset) const;
 
     // copy and fill operations (wrappers for IndexSpace versions)
     Event fill(const std::vector<CopySrcDstField> &dsts,
