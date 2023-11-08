@@ -52,7 +52,6 @@
 #include <valgrind/memcheck.h>
 #endif
 
-
 #include <algorithm>
 #include <iomanip>
 #include <memory>
