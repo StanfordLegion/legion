@@ -52,11 +52,12 @@
 #include <valgrind/memcheck.h>
 #endif
 
+#include <algorithm>
+#include <iomanip>
+#include <memory>
+#include <sstream>
 #include <stdio.h>
 #include <string.h>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
 
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
@@ -4158,9 +4159,12 @@ namespace Realm {
       : Module("cuda")
       , config(nullptr)
       , runtime(_runtime)
-      , shared_worker(0), zcmem_cpu_base(0)
-      , zcib_cpu_base(0), zcmem(0)
-      , uvm_base(0), uvmmem(0)
+      , shared_worker(0)
+      , zcmem_ptr(nullptr, nullptr)
+      , zcib_ptr(nullptr, nullptr)
+      , zcmem(0)
+      , uvm_base(0)
+      , uvmmem(0)
       , cudaipc_condvar(cudaipc_mutex)
       , cudaipc_responses_needed(0)
       , cudaipc_releases_needed(0)
@@ -4357,6 +4361,7 @@ namespace Realm {
           }
         } else {
           for(int i = 0; i < config->res_num_gpus; i++) {
+            int value;
             GPUInfo *info = new GPUInfo;
 
             info->index = i;
@@ -4378,6 +4383,10 @@ namespace Realm {
                 &info->pci_deviceid, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
                 &info->pci_domainid, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+                &value, CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM,
+                info->device));
+            info->host_register_uses_same_va = value != 0;
             // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
             // systems
             info->pci_bandwidth = 8000;
@@ -4753,6 +4762,96 @@ namespace Realm {
       }
     }
 
+    static void cuda_host_register_deleter(void *p)
+    {
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostUnregister)(p));
+      free(p); // TODO: replace with a different allocator
+    }
+
+    static void cuda_alloc_host_deleter(void *p)
+    {
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemFreeHost)(p));
+    }
+
+    std::unique_ptr<void, CudaModule::HostMemoryDeleter>
+    CudaModule::allocate_portable_host_memory(size_t sz, bool require_same_va /*= true*/)
+    {
+      bool can_use_host_register = true;
+      CUresult res = CUDA_SUCCESS;
+      CUdeviceptr gpu_ptr = 0;
+      void *host_ptr = nullptr;
+      HostMemoryDeleter deleter = nullptr;
+      AutoGPUContext agc(gpus[0]);
+
+      // If we require the same VA, check if we can use host register, so we can use our
+      // own allocator in place of CUDA's, otherwise fallback to cuMemHostAlloc, where
+      // CUDA controls the VA for both device and host.
+      if(require_same_va) {
+        for(GPU *gpu : gpus) {
+          if(!gpu->info->host_register_uses_same_va) {
+            can_use_host_register = false;
+            break;
+          }
+        }
+      }
+
+      if(can_use_host_register) {
+        deleter = cuda_host_register_deleter;
+        host_ptr = malloc(sz); // TODO: replace with a different allocator
+        res = CUDA_DRIVER_FNPTR(cuMemHostRegister)(
+            host_ptr, sz, CU_MEMHOSTREGISTER_DEVICEMAP | CU_MEMHOSTREGISTER_PORTABLE);
+        // Even though CUDA reports that it can register the same host VA for the device,
+        // if the host VA is larger than the device's VA, then the cuMemHostRegister call
+        // will return INVALID_VALUE, so fallback to cuMemHostAlloc in this case.
+        if(res == CUDA_ERROR_INVALID_VALUE) {
+          free(host_ptr);
+          can_use_host_register = false;
+        } else if(res != CUDA_SUCCESS) {
+          host_ptr = nullptr;
+          REPORT_CU_ERROR("cuMemHostRegister", res);
+        }
+      }
+      // Fallback to cuMemHostAlloc if necessacary
+      if(host_ptr == nullptr) {
+        deleter = cuda_alloc_host_deleter;
+        res = CUDA_DRIVER_FNPTR(cuMemHostAlloc)(
+            &host_ptr, sz, CU_MEMHOSTALLOC_DEVICEMAP | CU_MEMHOSTALLOC_PORTABLE);
+        if(res != CUDA_SUCCESS) {
+          host_ptr = nullptr;
+          REPORT_CU_ERROR("cuMemHostAlloc", res);
+        }
+      }
+
+      if(host_ptr != nullptr) {
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpu_ptr, host_ptr, 0));
+        assert(((reinterpret_cast<void *>(gpu_ptr) == host_ptr) || !require_same_va) &&
+               "Failed to honor same va requirement!");
+      }
+
+      return std::unique_ptr<void, HostMemoryDeleter>(host_ptr, deleter);
+    }
+
+    void CudaModule::register_sysmem_to_gpus(Memory mem, void *cpu_ptr,
+                                             bool check_same_va /*= true*/)
+    {
+      for(GPU *gpu : gpus) {
+        if(check_same_va) {
+          CUdeviceptr gpuptr = 0;
+          CUresult ret = CUDA_SUCCESS;
+          AutoGPUContext agc(gpu);
+          ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr, cpu_ptr, 0);
+          if((ret != CUDA_SUCCESS) || (reinterpret_cast<void *>(gpuptr) != cpu_ptr)) {
+            log_gpu.warning() << "GPU #" << gpu->info->index
+                              << " has an unexpected mapping for mem " << mem;
+            continue;
+          }
+        }
+        std::pair<std::set<Realm::Memory>::iterator, bool> it =
+            gpu->pinned_sysmems.insert(mem);
+        assert(it.second && "Registering same memory twice!");
+      }
+    }
+
     // create any memories provided by this module (default == do nothing)
     //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
     void CudaModule::create_memories(RuntimeImpl *runtime)
@@ -4770,94 +4869,40 @@ namespace Realm {
 
       // a single ZC memory for everybody
       if((config->cfg_zc_mem_size > 0) && !gpus.empty()) {
-        CUdeviceptr zcmem_gpu_base;
-        // borrow GPU 0's context for the allocation call
-        {
-          AutoGPUContext agc(gpus[0]);
+        zcmem_ptr = allocate_portable_host_memory(config->cfg_zc_mem_size, true);
 
-          CUresult ret = CUDA_DRIVER_FNPTR(cuMemHostAlloc)(
-              &zcmem_cpu_base, config->cfg_zc_mem_size,
-              CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
-          if(ret != CUDA_SUCCESS) {
-            if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
-              log_gpu.fatal() << "insufficient device-mappable host memory: "
-                              << config->cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
-            } else {
-              const char *errstring = "error message not available";
-#if CUDA_VERSION >= 6050
-              CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
-#endif
-              log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
-                              << " (" << errstring << ")";
-            }
-            abort();
-          }
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&zcmem_gpu_base,
-                                                                zcmem_cpu_base, 0));
-          // right now there are asssumptions in several places that unified addressing
-          // keeps
-          //  the CPU and GPU addresses the same
-          assert(zcmem_cpu_base == (void *)zcmem_gpu_base);
+        if(!zcmem_ptr) {
+          log_gpu.fatal() << "Unable to allocate zero copy memory: "
+                          << config->cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
+          abort();
         }
 
-        Memory m = runtime->next_local_memory_id();
-        zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, config->cfg_zc_mem_size,
+        CUdeviceptr zcmem_gpu_base = 0;
+        AutoGPUContext agc(gpus[0]);
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&zcmem_gpu_base,
+                                                              zcmem_ptr.get(), 0));
+        zcmem = new GPUZCMemory(runtime->next_local_memory_id(), zcmem_gpu_base,
+                                zcmem_ptr.get(), config->cfg_zc_mem_size,
                                 MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
         runtime->add_memory(zcmem);
-
-        // add the ZC memory as a pinned memory to all GPUs
-        for(unsigned i = 0; i < gpus.size(); i++) {
-          CUdeviceptr gpuptr;
-          CUresult ret;
-          {
-            AutoGPUContext agc(gpus[i]);
-            ret =
-                CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr, zcmem_cpu_base, 0);
-          }
-          if((ret == CUDA_SUCCESS) && (gpuptr == zcmem_gpu_base)) {
-            gpus[i]->pinned_sysmems.insert(zcmem->me);
-          } else {
-            log_gpu.warning() << "GPU #" << i
-                              << " has an unexpected mapping for ZC memory!";
-          }
-        }
+        register_sysmem_to_gpus(zcmem->me, zcmem_ptr.get(), true);
       }
 
       // allocate intermediate buffers in ZC memory for DMA engine
       if((config->cfg_zc_ib_size > 0) && !gpus.empty()) {
-        CUdeviceptr zcib_gpu_base;
-        {
-          AutoGPUContext agc(gpus[0]);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostAlloc)(&zcib_cpu_base, config->cfg_zc_ib_size,
-                                                     CU_MEMHOSTALLOC_PORTABLE |
-                                                         CU_MEMHOSTALLOC_DEVICEMAP));
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&zcib_gpu_base,
-                                                                zcib_cpu_base, 0));
-          // right now there are asssumptions in several places that unified addressing
-          // keeps
-          //  the CPU and GPU addresses the same
-          assert(zcib_cpu_base == (void *)zcib_gpu_base);
+        zcib_ptr = allocate_portable_host_memory(config->cfg_zc_ib_size, false);
+
+        if(!zcib_ptr) {
+          log_gpu.fatal() << "Unable to allocate zero copy memory: "
+                          << config->cfg_zc_ib_size << " bytes needed (from -ll:zsize)";
+          abort();
         }
-        Memory m = runtime->next_local_ib_memory_id();
-        IBMemory *ib_mem;
-        ib_mem = new IBMemory(m, config->cfg_zc_ib_size, MemoryImpl::MKIND_ZEROCOPY,
-                              Memory::Z_COPY_MEM, zcib_cpu_base, 0);
+
+        IBMemory *ib_mem = new IBMemory(
+            runtime->next_local_ib_memory_id(), config->cfg_zc_ib_size,
+            MemoryImpl::MKIND_ZEROCOPY, Memory::Z_COPY_MEM, zcib_ptr.get(), 0);
         runtime->add_ib_memory(ib_mem);
-        // add the ZC memory as a pinned memory to all GPUs
-        for(unsigned i = 0; i < gpus.size(); i++) {
-          CUdeviceptr gpuptr;
-          CUresult ret;
-          {
-            AutoGPUContext agc(gpus[i]);
-            ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr, zcib_cpu_base, 0);
-          }
-          if((ret == CUDA_SUCCESS) && (gpuptr == zcib_gpu_base)) {
-            gpus[i]->pinned_sysmems.insert(ib_mem->me);
-          } else {
-            log_gpu.warning() << "GPU #" << i << "has an unexpected mapping for"
-                              << " intermediate buffers in ZC memory!";
-          }
-        }
+        register_sysmem_to_gpus(ib_mem->me, zcib_ptr.get(), false);
       }
 
       // a single unified (managed) memory for everybody
@@ -4892,21 +4937,18 @@ namespace Realm {
                             MemoryImpl::MKIND_MANAGED, Memory::Kind::GPU_MANAGED_MEM);
         runtime->add_memory(uvmmem);
 
-        // add the managed memory to any GPU capable of coherent access
-        for(unsigned i = 0; i < gpus.size(); i++) {
+        // add the managed memory to any GPU capable of concurrent access
+        for(GPU *gpu : gpus) {
           int concurrent_access;
-          {
-            AutoGPUContext agc(gpus[i]);
-            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &concurrent_access, CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
-                gpus[i]->info->device));
-          }
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
+              &concurrent_access, CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+              gpu->info->device));
 
           if(concurrent_access) {
-            gpus[i]->managed_mems.insert(uvmmem->me);
+            gpu->managed_mems.insert(uvmmem->me);
           } else {
             log_gpu.warning()
-                << "GPU #" << i
+                << "GPU #" << gpu->info->index
                 << " is not capable of concurrent access to managed memory!";
           }
         }
@@ -4934,74 +4976,90 @@ namespace Realm {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with CUDA
       if(config->cfg_pin_sysmem && !gpus.empty()) {
-	const std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
-	// <NEW_DMA> also add intermediate buffers into local_mems
-	const std::vector<IBMemory *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
-	std::vector<MemoryImpl *> all_local_mems;
-	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
-	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
-	// </NEW_DMA>
-	for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
-	    it != all_local_mems.end();
-	    it++) {
-	  // ignore FB/ZC/managed memories or anything that doesn't have a
-          //   "direct" pointer
-	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
-	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY) ||
-             ((*it)->kind == MemoryImpl::MKIND_MANAGED))
-	    continue;
+        struct MemorySegment {
+          Memory me;
+          void *base;
+          size_t size;
+          MemorySegment(Memory _me, void *_base, size_t _sz)
+            : me(_me)
+            , base(_base)
+            , size(_sz)
+          {}
+        };
 
+        std::vector<MemorySegment> all_accessible_segments;
+
+        for(MemoryImpl *mem : runtime->nodes[Network::my_node_id].memories) {
+          switch(mem->kind) {
+          case MemoryImpl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_MANAGED:
+          case MemoryImpl::MKIND_ZEROCOPY:
+            // Skip all local memories that are already registered with the GPU
+            continue;
+          default:
+            break;
+          }
+          void *base = mem->get_direct_ptr(0, mem->size);
+          if((base != nullptr) && (mem->size != 0)) {
+            all_accessible_segments.emplace_back(mem->me, base, mem->size);
+          }
+        }
+        for(MemoryImpl *mem : runtime->nodes[Network::my_node_id].ib_memories) {
+          switch(mem->kind) {
+          case MemoryImpl::MKIND_GPUFB:
+          case MemoryImpl::MKIND_MANAGED:
+          case MemoryImpl::MKIND_ZEROCOPY:
+            // Skip all local memories that are already registered with the GPU
+            continue;
+          default:
+            break;
+          }
+          void *base = mem->get_direct_ptr(0, mem->size);
+          if((base != nullptr) && (mem->size != 0)) {
+            all_accessible_segments.emplace_back(mem->me, base, mem->size);
+          }
+        }
+
+        // Add any remote memories we have direct access to (for now, just shared memory)
+        // We use the shared memory infos directly rather than the memimpl as the remote
+        // memories haven't been created yet.
+        for(std::pair<const realm_id_t, SharedMemoryInfo> &kv :
+            runtime->remote_shared_memory_mappings) {
+          Memory me;
+          me.id = kv.first;
+          SharedMemoryInfo &shared_memory = kv.second;
+          all_accessible_segments.emplace_back(me, shared_memory.get_ptr<void>(),
+                                               shared_memory.get_size());
+        }
+
+        // </NEW_DMA>
+        for(MemorySegment &segment : all_accessible_segments) {
           // skip any memory that's over the max size limit for host
           //  registration
           if((config->cfg_hostreg_limit > 0) &&
-             ((*it)->size > config->cfg_hostreg_limit)) {
-	    log_gpu.info() << "memory " << (*it)->me
-                           << " is larger than hostreg limit ("
-                           << (*it)->size << " > " << config->cfg_hostreg_limit
+             (segment.size > config->cfg_hostreg_limit)) {
+            log_gpu.info() << "memory " << segment.me << " is larger than hostreg limit ("
+                           << segment.size << " > " << config->cfg_hostreg_limit
                            << ") - skipping registration";
             continue;
           }
 
-	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
-	  if(base == 0)
-	    continue;
-
-	  // using GPU 0's context, attempt a portable registration
-	  CUresult ret;
-	  {
-	    AutoGPUContext agc(gpus[0]);
-	    ret = CUDA_DRIVER_FNPTR(cuMemHostRegister)(base,
-                                                       (*it)->size,
+          // using GPU 0's context, attempt a portable registration
+          CUresult ret;
+          {
+            AutoGPUContext agc(gpus[0]);
+            ret = CUDA_DRIVER_FNPTR(cuMemHostRegister)(segment.base, segment.size,
                                                        CU_MEMHOSTREGISTER_PORTABLE |
-                                                       CU_MEMHOSTREGISTER_DEVICEMAP);
-	  }
-	  if(ret != CUDA_SUCCESS) {
-	    log_gpu.info() << "failed to register mem " << (*it)->me << " (" << base << " + " << (*it)->size << ") : "
-			   << ret;
-	    continue;
-	  }
-	  registered_host_ptrs.push_back(base);
-
-	  // now go through each GPU and verify that it got a GPU pointer (it may not match the CPU
-	  //  pointer, but that's ok because we'll never refer to it directly)
-	  for(unsigned i = 0; i < gpus.size(); i++) {
-	    CUdeviceptr gpuptr;
-	    CUresult ret;
-	    {
-	      AutoGPUContext agc(gpus[i]);
-	      ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr,
-                                                                 base,
-                                                                 0);
-	    }
-	    if(ret == CUDA_SUCCESS) {
-	      // no test for && ((void *)gpuptr == base)) {
-	      log_gpu.info() << "memory " << (*it)->me << " successfully registered with GPU " << gpus[i]->proc->me;
-	      gpus[i]->pinned_sysmems.insert((*it)->me);
-	    } else {
-	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << (*it)->me << " at " << base << ") !?";
-	    }
-	  }
-	}
+                                                           CU_MEMHOSTREGISTER_DEVICEMAP);
+          }
+          if(ret != CUDA_SUCCESS) {
+            log_gpu.info() << "failed to register mem " << segment.me << " ("
+                           << segment.base << " + " << segment.size << ") : " << ret;
+            continue;
+          }
+          registered_host_ptrs.push_back(segment.base);
+          register_sysmem_to_gpus(segment.me, segment.base, false);
+        }
       }
 
       // ask any ipc-able nodes to share handles with us
@@ -5010,8 +5068,8 @@ namespace Realm {
 
 #ifdef REALM_ON_LINUX
         if(!ipc_peers.empty()) {
-          log_cudaipc.info() << "requesting cuda ipc handles from "
-                             << ipc_peers.size() << " peers";
+          log_cudaipc.info() << "requesting cuda ipc handles from " << ipc_peers.size()
+                             << " peers";
 
           // we'll need a reponse (and ultimately, a release) from each peer
           cudaipc_responses_needed.fetch_add(ipc_peers.size());
@@ -5033,10 +5091,9 @@ namespace Realm {
       }
 
       // now actually let each GPU make its channels
-      for(std::vector<GPU *>::iterator it = gpus.begin();
-	  it != gpus.end();
-	  it++)
-	(*it)->create_dma_channels(runtime);
+      for(GPU *gpu : gpus) {
+        gpu->create_dma_channels(runtime);
+      }
 
       Module::create_dma_channels(runtime);
     }
@@ -5117,22 +5174,27 @@ namespace Realm {
       dedicated_workers.clear();
 
       // use GPU 0's context to free ZC memory (if any)
-      if(zcmem_cpu_base) {
-	assert(!gpus.empty());
-	AutoGPUContext agc(gpus[0]);
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFreeHost)(zcmem_cpu_base) );
+      // Manually manage these in order to
+      // 1) ensure the correct context is available
+      // 2) ensure the memory is freed before the context is destroyed later
+      // TODO: Move ownership of these to either the GPU or the Realm::Memory containing
+      // them.
+      if(zcmem_ptr) {
+        assert(!gpus.empty());
+        AutoGPUContext agc(gpus[0]);
+        zcmem_ptr.reset();
       }
 
-      if(zcib_cpu_base) {
-	assert(!gpus.empty());
-	AutoGPUContext agc(gpus[0]);
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFreeHost)(zcib_cpu_base) );
+      if(zcib_ptr) {
+        assert(!gpus.empty());
+        AutoGPUContext agc(gpus[0]);
+        zcib_ptr.reset();
       }
 
       if(uvm_base) {
-	assert(!gpus.empty());
-	AutoGPUContext agc(gpus[0]);
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(reinterpret_cast<CUdeviceptr>(uvm_base)) );
+        assert(!gpus.empty());
+        AutoGPUContext agc(gpus[0]);
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuMemFree)(reinterpret_cast<CUdeviceptr>(uvm_base)));
       }
 
       // also unregister any host memory at this time

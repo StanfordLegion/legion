@@ -2490,6 +2490,7 @@ namespace Legion {
             no_physical_tracing(false),
             no_trace_optimization(false),
             no_fence_elision(false),
+            no_transitive_reduction(false),
             replay_on_cpus(false),
             verify_partitions(false),
             runtime_warnings(false),
@@ -2546,6 +2547,7 @@ namespace Legion {
         bool no_physical_tracing;
         bool no_trace_optimization;
         bool no_fence_elision;
+        bool no_transitive_reduction;
         bool replay_on_cpus;
         bool verify_partitions;
         bool runtime_warnings;
@@ -2683,6 +2685,7 @@ namespace Legion {
       const bool no_physical_tracing;
       const bool no_trace_optimization;
       const bool no_fence_elision;
+      const bool no_transitive_reduction;
       const bool replay_on_cpus;
       const bool verify_partitions;
       const bool runtime_warnings;

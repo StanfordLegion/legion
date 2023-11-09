@@ -31,6 +31,10 @@
 #include <unistd.h>
 #endif
 
+#if !defined(MFD_CLOEXEC)
+#define MFD_CLOEXEC 0x0001U
+#endif
+
 namespace Realm {
 
   Logger log_shm("shm");

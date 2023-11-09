@@ -5269,7 +5269,7 @@ namespace Legion {
       {
         if (trace->runtime->dump_physical_traces)
         {
-          optimize(op, true/*do transitive reduction inline*/);
+          optimize(op, !trace->runtime->no_transitive_reduction);
           dump_template();
         }
         return;
@@ -5282,7 +5282,8 @@ namespace Legion {
       // the transitive reduction in the background once all the other
       // optimizations are done so that they don't race on mutating
       // the instruction and event data structures
-      if (!trace->runtime->no_trace_optimization)
+      if (!trace->runtime->no_trace_optimization &&
+          !trace->runtime->no_transitive_reduction)
       {
         TransitiveReductionState *state = 
           new TransitiveReductionState(Runtime::create_rt_user_event());
