@@ -1142,6 +1142,7 @@ namespace Legion {
       public:
         std::map<LegionColor/*start*/,LegionColor/*end*/> ranges;
       };
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       /**
        * This class defines a compact way of representing a set of shards.
        * It maintains two different representations of the set depending
@@ -1197,6 +1198,7 @@ namespace Legion {
         // total possible entries in the buffer
         unsigned max;
       };
+#endif // LEGION_NAME_BASED_CHILDREN_SHARDS
       // These structures are used for exchanging summary information
       // between different shards with control replication
       struct RegionSummary {
@@ -1205,10 +1207,12 @@ namespace Legion {
       };
       struct PartitionSummary {
         ProjectionNode::IntervalTree children;
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
         // If we're disjoint and complete we also track the sets
         // of shards that know about each of the children as well
         // so we can record the one nearest for each shard
         std::unordered_map<LegionColor,ShardSet> disjoint_complete_child_shards;
+#endif // LEGION_NAME_BASED_CHILDREN_SHARDS
       };
     public:
       virtual ~ProjectionNode(void) { };
@@ -1282,7 +1286,11 @@ namespace Legion {
 
     class ProjectionPartition : public ProjectionNode {
     public:
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       ProjectionPartition(PartitionNode *node, ShardedColorMap *map = NULL);
+#else
+      ProjectionPartition(PartitionNode *node);
+#endif
       ProjectionPartition(const ProjectionPartition &rhs) = delete;
       virtual ~ProjectionPartition(void);
     public:
@@ -1320,9 +1328,11 @@ namespace Legion {
     public:
       PartitionNode *const partition;
       std::unordered_map<LegionColor,ProjectionRegion*> local_children;
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       // This is only filled in if we support name-based dependence
       // analysis (disjoint and all users at the leaves)
       ShardedColorMap *name_based_children_shards;
+#endif
     };
 
 #if 0

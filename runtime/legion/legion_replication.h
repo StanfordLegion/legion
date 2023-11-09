@@ -1504,7 +1504,9 @@ namespace Legion {
       bool &unique_shards;
       bool leaves_only;
     protected:
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       typedef ProjectionNode::ShardSet ShardSet;
+#endif
       typedef ProjectionNode::RegionSummary RegionSummary; 
       typedef ProjectionNode::PartitionSummary PartitionSummary; 
       std::map<LogicalRegion,RegionSummary> region_summaries;

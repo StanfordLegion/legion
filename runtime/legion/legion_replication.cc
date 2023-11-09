@@ -16816,6 +16816,7 @@ namespace Legion {
       {
         rez.serialize(it->first);
         it->second.children.serialize(rez);
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
         if (disjoint && leaves_only)
         {
           rez.serialize<size_t>(
@@ -16828,6 +16829,7 @@ namespace Legion {
             cit->second.serialize(rez, context->total_shards);
           }
         }
+#endif
       }
     }
 
@@ -16893,6 +16895,7 @@ namespace Legion {
         derez.deserialize(partition);
         PartitionSummary &summary = partition_summaries[partition];
         summary.children.deserialize(derez);
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
         if (dis && leaves)
         {
           size_t num_children;
@@ -16912,6 +16915,7 @@ namespace Legion {
             }
           }
         }
+#endif
       }
     }
 

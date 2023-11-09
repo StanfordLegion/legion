@@ -2582,6 +2582,7 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
     //--------------------------------------------------------------------------
     ProjectionNode::ShardSet::ShardSet(void)
       : size(0), max(MAX_VALUES)
@@ -2959,6 +2960,7 @@ namespace Legion {
         }
       }
     }
+#endif // LEGION_NAME_BASED_CHILDREN_SHARDS
 
     /////////////////////////////////////////////////////////////
     // ProjectionRegion
@@ -3283,6 +3285,7 @@ namespace Legion {
     // ProjectionPartition
     /////////////////////////////////////////////////////////////
 
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
     //--------------------------------------------------------------------------
     ProjectionPartition::ProjectionPartition(PartitionNode *node, 
                                              ShardedColorMap *map)
@@ -3293,6 +3296,15 @@ namespace Legion {
       if (name_based_children_shards != NULL)
         name_based_children_shards->add_reference();
     }
+#else
+    //--------------------------------------------------------------------------
+    ProjectionPartition::ProjectionPartition(PartitionNode *node) 
+      : partition(node)
+    //--------------------------------------------------------------------------
+    {
+      partition->add_base_gc_ref(PROJECTION_REF);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     ProjectionPartition::~ProjectionPartition(void)
@@ -3304,9 +3316,11 @@ namespace Legion {
           delete it->second;
       if (partition->remove_base_gc_ref(PROJECTION_REF))
         delete partition;
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       if ((name_based_children_shards != NULL) &&
           name_based_children_shards->remove_reference())
         delete name_based_children_shards;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3394,6 +3408,7 @@ namespace Legion {
         it->second->extract_shard_summaries(supports_name_based, local_shard,
             total_shards, region_summaries, partition_summaries);
       }
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       if (supports_name_based)
       {
         // Record that we know about all of our local children
@@ -3402,6 +3417,7 @@ namespace Legion {
           summary.disjoint_complete_child_shards[it->first].insert(local_shard, 
                                                                   total_shards);
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3425,6 +3441,7 @@ namespace Legion {
         it->second->update_shard_summaries(supports_name_based, local_shard,
             total_shards, region_summaries, partition_summaries);
       }
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
       if (supports_name_based &&
           (local_children.size() < partition->get_num_children()))
       {
@@ -3492,6 +3509,7 @@ namespace Legion {
           new ShardedColorMap(std::move(nearest_shards));
         name_based_children_shards->add_reference();
       }
+#endif // LEGION_NAME_BASED_CHILDREN_SHARDS
     }
 
     //--------------------------------------------------------------------------
