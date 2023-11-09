@@ -4887,16 +4887,10 @@ namespace Legion {
             else
               gather->contribute_instances(
                   Runtime::merge_events(NULL, preconditions));
-            if (gather->target != repl_ctx->owner_shard->shard_id)
-            {
-              ready = scatter->perform_collective_wait(false/*block*/);
-              // We're not going to have any updates to perform so 
-              // we can just return immediately
-              complete_execution(ready);
-              return;
-            }
+            if (gather->target == repl_ctx->owner_shard->shard_id)
+              ready = gather->perform_collective_wait(false/*block*/);
             else
-              ready = gather->get_done_event();
+              ready = scatter->perform_collective_wait(false/*block*/);
           }
 #ifdef DEBUG_LEGION
           assert(ready.exists());
