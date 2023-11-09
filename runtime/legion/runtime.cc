@@ -11187,6 +11187,7 @@ namespace Legion {
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
+        no_transitive_reduction(config.no_transitive_reduction),
         replay_on_cpus(config.replay_on_cpus),
         verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
@@ -11399,6 +11400,7 @@ namespace Legion {
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
+        no_transitive_reduction(rhs.no_transitive_reduction),
         replay_on_cpus(rhs.replay_on_cpus),
         verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
@@ -22475,6 +22477,8 @@ namespace Legion {
                          config.no_trace_optimization, !filter)
         .add_option_bool("-lg:no_fence_elision",
                          config.no_fence_elision, !filter)
+        .add_option_bool("-lg:no_transitive_reduction",
+                         config.no_transitive_reduction, !filter)
         .add_option_bool("-lg:replay_on_cpus",
                          config.replay_on_cpus, !filter)
         .add_option_bool("-lg:disjointness",
