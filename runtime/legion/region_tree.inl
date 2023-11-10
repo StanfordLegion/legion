@@ -912,8 +912,14 @@ namespace Legion {
       // expressions match and we can reuse this as the expression
       if (total_volume == get_volume())
         return this;
-      return new InternalExpression<DIM,T>(&rectangles.front(), 
-                                           rectangles.size(), forest);
+      InternalExpression<DIM,T> *result = new InternalExpression<DIM,T>(
+          &rectangles.front(), rectangles.size(), forest);
+      // Do a little test to see if there is already a canonical expression
+      // that we know about that matches this expression if so we'll use that
+      // Note that we don't need to explicitly delete it if it is not the
+      // canonical expression since it has a live expression reference that
+      // will be cleaned up after this meta-task is done running
+      return forest->find_canonical_expression(result);
     }
 
     //--------------------------------------------------------------------------
@@ -6702,8 +6708,14 @@ namespace Legion {
       std::vector<Rect<DIM,T> > rectangles(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         rectangles[idx] = rects[idx];
-      return new InternalExpression<DIM,T>(&rectangles.front(), 
-                                           rectangles.size(), forest);
+      InternalExpression<DIM,T> *result = new InternalExpression<DIM,T>(
+          &rectangles.front(), rectangles.size(), forest);
+      // Do a little test to see if there is already a canonical expression
+      // that we know about that matches this expression if so we'll use that
+      // Note that we don't need to explicitly delete it if it is not the
+      // canonical expression since it has a live expression reference that
+      // will be cleaned up after this meta-task is done running
+      return forest->find_canonical_expression(result);
     }
 
     //--------------------------------------------------------------------------
