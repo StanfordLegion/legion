@@ -4058,7 +4058,7 @@ namespace Legion {
 #endif
           Realm::IndexSpace<DIM,T> result = finder->domain;
           if (child->set_realm_index_space(result, instances_ready,
-                false/*initialization*/, true/*broadcast*/, source_space))
+                false/*initialization*/, false/*broadcast*/, source_space))
             delete child;
         }
         return ApEvent::NO_AP_EVENT;
@@ -4137,12 +4137,12 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child =
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(subspaces[index++], result,
-              false/*initialization*/, true/*broadcast*/, source_space))
+              false/*initialization*/, (results == NULL), source_space))
           delete child;
       }
       if (results != NULL)
       {
-        // Save the results to be shared if necessary
+        // Save the results to be broadcast if necessary
         for (unsigned idx = 0; idx < subspaces.size(); idx++)
           results->at(idx).domain = subspaces[idx];
       }
@@ -4446,7 +4446,7 @@ namespace Legion {
 #endif
           Realm::IndexSpace<DIM1,T1> result = finder->domain;
           if (child->set_realm_index_space(result, instances_ready,
-                false/*initialization*/, true/*broadcast*/, source_space))
+                false/*initialization*/, false/*broadcast*/, source_space))
             delete child;
         }
         return ApEvent::NO_AP_EVENT;
@@ -4547,12 +4547,12 @@ namespace Legion {
         IndexSpaceNodeT<DIM1,T1> *child =
             static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(subspaces[index++], result,
-              false/*initialization*/, true/*broadcast*/, source_space))
+              false/*initialization*/, (results == NULL), source_space))
           delete child;
       }
       if (results != NULL)
       {
-        // Save the results to be shared if necessary
+        // Save the results to be broadcast if necessary
         for (unsigned idx = 0; idx < subspaces.size(); idx++)
           results->at(idx).domain = subspaces[idx];
       }
@@ -4618,7 +4618,7 @@ namespace Legion {
 #endif
           Realm::IndexSpace<DIM1,T1> result = finder->domain;
           if (child->set_realm_index_space(result, instances_ready,
-                false/*initialization*/, true/*broadcast*/, source_space))
+                false/*initialization*/, false/*broadcast*/, source_space))
             delete child;
         }
         return ApEvent::NO_AP_EVENT;
@@ -4720,12 +4720,12 @@ namespace Legion {
         IndexSpaceNodeT<DIM1,T1> *child =
             static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(subspaces[index++], result,
-              false/*initialization*/, true/*broadcast*/, source_space))
+              false/*initialization*/, (results == NULL), source_space))
           delete child;
       }
       if (results != NULL)
       {
-        // Save the results to be shared if necessary
+        // Save the results to be broadcast if necessary
         for (unsigned idx = 0; idx < subspaces.size(); idx++)
           results->at(idx).domain = subspaces[idx];
       }
