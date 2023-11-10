@@ -4879,8 +4879,10 @@ namespace Legion {
         equivalence_sets_ready->insert(
             std::make_pair(compute_event, invalid_mask));
       }
-      RtEvent ready = context->compute_equivalence_sets(this, space,
-                      parent_req_index, condition_expr, invalid_mask);
+      std::vector<EqSetTracker*> targets(1, this);
+      std::vector<AddressSpaceID> target_spaces(1, space);
+      RtEvent ready = context->compute_equivalence_sets(parent_req_index,
+          targets, target_spaces, condition_expr, invalid_mask);
       if (ready.exists() && !ready.has_triggered())
       {
         // Launch a meta-task to finalize this trace condition set

@@ -1397,9 +1397,11 @@ namespace Legion {
                                         const FieldMask &mask,
                                         ShardID local_shard,
                                         bool current) = 0;
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -1724,9 +1726,11 @@ namespace Legion {
                                         const FieldMask &mask,
                                         ShardID local_shard,
                                         bool current);
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -2671,9 +2675,11 @@ namespace Legion {
                                         const FieldMask &mask,
                                         ShardID local_shard,
                                         bool current);
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3079,9 +3085,11 @@ namespace Legion {
     public:
       virtual ~EqKDTree(void) { }
     public:
-      virtual unsigned compute_shard_equivalence_sets(
+      virtual void compute_shard_equivalence_sets(
           const Domain &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3095,7 +3103,8 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &new_subscriptions, ShardID local_shard) = 0;
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
-          EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators) = 0;
       virtual void find_local_equivalence_sets(
           FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const = 0;
       virtual void find_shard_equivalence_sets(
@@ -3133,9 +3142,11 @@ namespace Legion {
                                   const FieldMask &mask,
                                   ShardID local_shard,
                                   bool current) = 0;
-      virtual unsigned compute_shard_equivalence_sets(
+      virtual void compute_shard_equivalence_sets(
           const Domain &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3143,9 +3154,11 @@ namespace Legion {
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           ShardID local_shard);
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3160,7 +3173,8 @@ namespace Legion {
           FieldMaskSet<EqKDTree> &new_subscriptions, ShardID local_shard);
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
-          EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators) = 0;
       virtual unsigned record_output_equivalence_set(
           EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -3216,9 +3230,11 @@ namespace Legion {
                                   const FieldMask &mask,
                                   ShardID local_shard,
                                   bool current);
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3229,7 +3245,8 @@ namespace Legion {
           ShardID local_shard = 0); 
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
-          EqSetTracker *tracker, AddressSpaceID tracker_space);
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators);
       virtual unsigned record_output_equivalence_set(
           EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -3331,9 +3348,11 @@ namespace Legion {
                                   const FieldMask &mask,
                                   ShardID local_shard,
                                   bool current);
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3344,7 +3363,8 @@ namespace Legion {
           ShardID local_shard = 0); 
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
-          EqSetTracker *tracker, AddressSpaceID tracker_space);
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators);
       virtual unsigned record_output_equivalence_set(
           EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,
@@ -3396,9 +3416,11 @@ namespace Legion {
                                   const FieldMask &mask,
                                   ShardID local_shard,
                                   bool current);
-      virtual unsigned compute_equivalence_sets(
+      virtual void compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -3409,7 +3431,8 @@ namespace Legion {
           ShardID local_shard = 0); 
       virtual void record_equivalence_set(
           EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
-          EqSetTracker *tracker, AddressSpaceID tracker_space);
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators);
       virtual unsigned record_output_equivalence_set(
           EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
           EqSetTracker *tracker, AddressSpaceID tracker_space,

@@ -3458,49 +3458,6 @@ namespace Legion {
           nearest_shards[it->first] = 
             it->second.find_nearest_shard(local_shard, total_shards);
         }
-#if 0
-        std::multimap<LegionColor,ShardID>::const_iterator lower =
-          summary.disjoint_complete_child_shards.begin();
-        while (lower != summary.disjoint_complete_child_shards.end())
-        {
-          std::multimap<LegionColor,ShardID>::const_iterator  upper = lower;
-          while ((upper != summary.disjoint_complete_child_shards.end()) &&
-                  (lower->first == upper->first))
-            upper++;
-#ifdef DEBUG_LEGION
-          assert(lower != upper);
-#endif
-          // Skip if we already have a local child for it
-          if (local_children.find(lower->first) == local_children.end())
-          {
-            // Find the shard closest to our local shard including wrap around
-            ShardID closest_shard = 0;
-            size_t closest_distance = total_shards;
-            for (std::multimap<LegionColor,ShardID>::const_iterator it =
-                  lower; it != upper; it++)
-            {
-#ifdef DEBUG_LEGION
-              assert(it->second != local_shard);
-#endif
-              size_t abs_diff = (local_shard < it->second) ? 
-                (it->second - local_shard) : (local_shard - it->second);
-              // closest distance by shard ID with wrap around
-              size_t distance = (abs_diff < (total_shards/2)) ? 
-                abs_diff : total_shards - abs_diff;
-              if (distance < closest_distance)
-              {
-                closest_shard = it->second;
-                closest_distance = distance;
-              }
-            }
-#ifdef DEBUG_LEGION
-            assert(closest_distance != total_shards);
-#endif
-            nearest_shards[lower->first] = closest_shard;
-          }
-          lower = upper;
-        }
-#endif
         // Now we can make our ShardedColorMap and save it
 #ifdef DEBUG_LEGION
         assert(name_based_children_shards == NULL);
@@ -24819,12 +24776,29 @@ namespace Legion {
                                 FieldMaskSet<EqKDTree> &new_subscriptions,
                                 unsigned new_references, AddressSpaceID source,
                                 unsigned total_responses,
-                                std::vector<RtEvent> &ready_events)
+                                std::vector<RtEvent> &ready_events,
+                                const CollectiveMapping &target_mapping,
+                                const std::vector<EqSetTracker*> &targets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!targets.empty());
       assert(total_responses > 0);
+      assert(target_mapping.size() == targets.size());
+      assert(target_mapping.contains(context->runtime->address_space));
+      assert(this == targets[
+          target_mapping.find_index(context->runtime->address_space)]);
 #endif
+      // If there are multiple targets then we only want to perform any
+      // creations on the first target and then we'll broadcast the results
+      // out to any other targets when we create the equivalence sets
+      if ((targets.size() > 1) && 
+          (context->runtime->address_space != target_mapping.get_origin()))
+      {
+        to_create.clear();
+        creation_rects.clear();
+        creation_srcs.clear();
+      }
       LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > create_now;
       LegionMap<Domain,FieldMask> create_now_rectangles;
       std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > create_now_sources;
@@ -24957,7 +24931,8 @@ namespace Legion {
       // See if we have any equivalence sets for us to create right now
       if (!create_now.empty())
         create_new_equivalence_sets(context, ready_events,
-            create_now, create_now_rectangles, create_now_sources);
+            create_now, create_now_rectangles, create_now_sources,
+            target_mapping, targets);
     }
 
     //--------------------------------------------------------------------------
@@ -25276,7 +25251,9 @@ namespace Legion {
          std::vector<RtEvent> &ready_events,
          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
          LegionMap<Domain,FieldMask> &create_now_rectangles,
-         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs)
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+         const CollectiveMapping &target_mapping,
+         const std::vector<EqSetTracker*> &targets)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime;
@@ -25367,7 +25344,7 @@ namespace Legion {
         if (!(rit->set_mask * unique_sources.get_valid_mask()) &&
             check_for_congruent_source_equivalence_sets(*rit, runtime,
               ready_events, pending_sets, unique_sources,
-              create_now, set_sources))
+              create_now, set_sources, target_mapping, targets))
           continue;
         // First we need an expression for this equivalence set
         // If the total volume of all the rectangles is the same as the
@@ -25399,13 +25376,18 @@ namespace Legion {
         for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
               it = to_notify.begin(); it != to_notify.end(); it++)
           spaces.push_back(it->first);
-        // Make sure we include our local space too
-        if (!spaces.empty() && !std::binary_search(spaces.begin(), 
-                            spaces.end(), runtime->address_space))
+        // Also add in any spaces for any targets that we need to send to also
+        bool need_sort = false;
+        for (unsigned idx = 0; idx < target_mapping.size(); idx++)
         {
-          spaces.push_back(runtime->address_space);
-          std::sort(spaces.begin(), spaces.end());
+          const AddressSpace target_space = target_mapping[idx];
+          if (to_notify.find(target_space) != to_notify.end())
+            continue;
+          spaces.push_back(target_space);
+          need_sort = true;
         }
+        if (need_sort)
+          std::sort(spaces.begin(), spaces.end());
         CollectiveMapping *mapping = NULL;
         if (spaces.size() > 1)
           mapping = 
@@ -25479,6 +25461,11 @@ namespace Legion {
                   rez.serialize(it->second);
                 }
               }
+              // Also pack up any targets
+              target_mapping.pack(rez);
+              for (unsigned idx = 0; idx < targets.size(); idx++)
+                rez.serialize(targets[idx]);
+              rez.serialize(rit->set_mask);
               rez.serialize(notified);
             }
             runtime->send_equivalence_set_creation(*cit, rez);
@@ -25498,7 +25485,7 @@ namespace Legion {
             if (!overlap)
               continue;
             it->first->record_equivalence_set(set, overlap, ready,
-                                    this, runtime->address_space);
+                                              target_mapping, targets);
             it.filter(overlap);
             if (!it->second)
               to_delete.push_back(it->first);
@@ -25532,7 +25519,9 @@ namespace Legion {
         FieldMaskSet<EquivalenceSet> &pending_sets,
         FieldMaskSet<EquivalenceSet> &unique_sources,
         LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
-        std::map<EquivalenceSet*,LegionList<SourceState> > &set_sources)
+        std::map<EquivalenceSet*,LegionList<SourceState> > &set_sources,
+        const CollectiveMapping &target_mapping,
+        const std::vector<EqSetTracker*> &targets)
     //--------------------------------------------------------------------------
     {
       size_t destination_volume = 0;
@@ -25588,11 +25577,19 @@ namespace Legion {
                            FieldMaskSet<EqKDTree> >::const_iterator
                   it = to_notify.begin(); it != to_notify.end(); it++)
               spaces.push_back(it->first);
-            if (!spaces.empty())
+            bool need_sort = false;
+            for (unsigned idx = 0; idx < target_mapping.size(); idx++)
             {
-              // Make sure we include our local space too
-              spaces.push_back(local_space);
+              const AddressSpaceID target_space = target_mapping[idx];
+              if (to_notify.find(target_space) != to_notify.end())
+                continue;
+              spaces.push_back(target_space);
+              need_sort = true;
+            }
+            if (need_sort)
               std::sort(spaces.begin(), spaces.end());
+            if (spaces.size() > 1)
+            {
               CollectiveMapping mapping(spaces, 
                   runtime->legion_collective_radix);
               std::vector<AddressSpaceID> children;
@@ -25629,6 +25626,11 @@ namespace Legion {
                       rez.serialize(it->second);
                     }
                   }
+                  // Also pack information about targets
+                  target_mapping.pack(rez);
+                  for (unsigned idx = 0; idx < targets.size(); idx++)
+                    rez.serialize(targets[idx]);
+                  rez.serialize(overlap);
                   rez.serialize(notified);
                 }
                 runtime->send_equivalence_set_reuse(*cit, rez);
@@ -25650,7 +25652,7 @@ namespace Legion {
                 if (!local_overlap)
                   continue;
                 it->first->record_equivalence_set(eit->first, local_overlap,
-                    RtEvent::NO_RT_EVENT, this, local_space);
+                    RtEvent::NO_RT_EVENT, target_mapping, targets);
                 it.filter(local_overlap);
                 if (!it->second)
                   to_delete.push_back(it->first);
@@ -25906,8 +25908,15 @@ namespace Legion {
             }
           }
           // Now redo the computation
-          const RtEvent ready = context->compute_equivalence_sets(this,
-              runtime->address_space, parent_req_index, expr, invalidated);
+          // Note that if there was an initial collective rendezvous to
+          // compute these equivalence sets, we won't try to redo it here
+          // because we can't guarantee convergence between the different
+          // points as to whether they all saw the same invalidations at
+          // the same time and therefore the rendezvous is no longer safe
+          std::vector<EqSetTracker*> targets(1, this);
+          std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
+          const RtEvent ready = context->compute_equivalence_sets(
+              parent_req_index, targets, target_spaces, expr, invalidated);
           if (ready.exists() && !ready.has_triggered())
           {
             // Launch task to finalize the sets once they are ready
@@ -26121,6 +26130,14 @@ namespace Legion {
           trees.insert(tree, mask);
         }
       }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      const CollectiveMapping target_mapping(derez, num_targets);
+      std::vector<EqSetTracker*> targets(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+        derez.deserialize(targets[idx]);
+      FieldMask recording_mask;
+      derez.deserialize(recording_mask);
       RtUserEvent notified_event;
       derez.deserialize(notified_event);
 
@@ -26181,6 +26198,10 @@ namespace Legion {
                 rez.serialize(it->second);
               }
             }
+            target_mapping.pack(rez);
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+              rez.serialize(targets[idx]);
+            rez.serialize(recording_mask);
             rez.serialize(notified);
           }
           runtime->send_equivalence_set_creation(*cit, rez);
@@ -26206,8 +26227,14 @@ namespace Legion {
             local_finder->second.begin(); it != 
             local_finder->second.end(); it++)
         it->first->record_equivalence_set(set, it->second, ready_event,
-                                          owner, root);
+                                          target_mapping, targets);
       to_notify.erase(local_finder);
+      // Check to see if we have a local target to notify here
+      if (target_mapping.contains(runtime->address_space))
+      {
+        unsigned index = target_mapping.find_index(runtime->address_space);
+        targets[index]->record_pending_equivalence_set(set, recording_mask); 
+      }
       // Trigger the event that we're done
       if (!notified_events.empty())
         Runtime::trigger_event(notified_event,
@@ -26252,6 +26279,14 @@ namespace Legion {
           trees.insert(tree, mask);
         }
       }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      const CollectiveMapping target_mapping(derez, num_targets);
+      std::vector<EqSetTracker*> targets(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+        derez.deserialize(targets[idx]);
+      FieldMask recording_mask;
+      derez.deserialize(recording_mask);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
@@ -26287,6 +26322,11 @@ namespace Legion {
               rez.serialize(it->second);
             }
           }
+          // Also pack the target information
+          target_mapping.pack(rez);
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+            rez.serialize(targets[idx]);
+          rez.serialize(recording_mask);
           rez.serialize(notified);
         }
         runtime->send_equivalence_set_reuse(*cit, rez);
@@ -26301,7 +26341,13 @@ namespace Legion {
       for (FieldMaskSet<EqKDTree>::const_iterator it =
             local_trees.begin(); it != local_trees.end(); it++)
         it->first->record_equivalence_set(set, it->second,
-            RtEvent::NO_RT_EVENT, owner, owner_space);
+            RtEvent::NO_RT_EVENT, target_mapping, targets);
+      // Check to see if a we have a local target
+      if (target_mapping.contains(runtime->address_space))
+      {
+        unsigned index = target_mapping.find_index(runtime->address_space);
+        targets[index]->record_pending_equivalence_set(set, recording_mask);
+      }
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else
@@ -26882,8 +26928,10 @@ namespace Legion {
       {
         // Bounce this computation off the context so that we know
         // that we are on the right node to perform it
-        const RtEvent ready = context->compute_equivalence_sets(this, 
-                        runtime->address_space, parent_req_index,
+        std::vector<EqSetTracker*> targets(1, this);
+        std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
+        const RtEvent ready = context->compute_equivalence_sets(
+                        parent_req_index, targets, target_spaces, 
                         region_node->row_source, remaining_mask, root_space);
         if (ready.exists() && !ready.has_triggered())
         {

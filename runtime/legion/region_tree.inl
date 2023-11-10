@@ -1520,9 +1520,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    unsigned IndexSpaceOperationT<DIM,T>::compute_equivalence_sets(
+    void IndexSpaceOperationT<DIM,T>::compute_equivalence_sets(
           EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -1536,15 +1538,14 @@ namespace Legion {
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
       DomainT<DIM,T> realm_index_space;
       get_realm_index_space(realm_index_space, true/*tight*/);
-      unsigned new_subs = 0;
       // Need non-exclusive access to the tree for non-invalidations
       AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
-        new_subs += typed_tree->compute_equivalence_sets(itr.rect, mask,tracker,
-            tracker_space, eq_sets, pending_sets, subscriptions, to_create,
-            creation_rects, creation_srcs, remote_shard_rects, local_shard);
-      return new_subs;
+        typed_tree->compute_equivalence_sets(itr.rect, mask, trackers,
+            tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+            subscriptions, to_create, creation_rects, creation_srcs,
+            remote_shard_rects, local_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -5180,9 +5181,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    unsigned IndexSpaceNodeT<DIM,T>::compute_equivalence_sets(
+    void IndexSpaceNodeT<DIM,T>::compute_equivalence_sets(
           EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -5196,15 +5199,14 @@ namespace Legion {
       DomainT<DIM,T> realm_index_space;
       get_realm_index_space(realm_index_space, true/*tight*/);
       EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
-      unsigned new_subs = 0;
       // Need non-exclusive access to the tree for non-invalidations
       AutoLock t_lock(*tree_lock,1,false/*exclusive*/);
       for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
-        new_subs += typed_tree->compute_equivalence_sets(itr.rect, mask,tracker,
-            tracker_space, eq_sets, pending_sets, subscriptions, to_create,
-            creation_rects, creation_srcs, remote_shard_rects, local_shard);
-      return new_subs;
+        typed_tree->compute_equivalence_sets(itr.rect, mask, trackers,
+            tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+            subscriptions, to_create, creation_rects, creation_srcs,
+            remote_shard_rects, local_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -6652,9 +6654,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    unsigned EqKDTreeT<DIM,T>::compute_shard_equivalence_sets(
+    void EqKDTreeT<DIM,T>::compute_shard_equivalence_sets(
           const Domain &domain, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -6666,14 +6670,14 @@ namespace Legion {
     {
       const Rect<DIM,T> rect = domain;
       std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
-      unsigned new_subs = compute_equivalence_sets(rect, mask, tracker, 
-          tracker_space, eq_sets, pending_sets, subscriptions, to_create,
-          creation_rects, creation_srcs, remote_shard_rects, local_shard);
+      compute_equivalence_sets(rect, mask, trackers, tracker_spaces,
+          new_tracker_references, eq_sets, pending_sets, subscriptions,
+          to_create, creation_rects, creation_srcs, remote_shard_rects,
+          local_shard);
 #ifdef DEBUG_LEGION
       // Should not have any of these at this point
       assert(remote_shard_rects.empty());
 #endif
-      return new_subs;
     }
 
     //--------------------------------------------------------------------------
@@ -6891,9 +6895,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    unsigned EqKDNode<DIM,T>::compute_equivalence_sets( 
+    void EqKDNode<DIM,T>::compute_equivalence_sets( 
           const Rect<DIM,T> &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &new_subscriptions,
@@ -6907,7 +6913,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(this->bounds.contains(rect));
 #endif
-      unsigned new_subs = 0;
       FieldMaskSet<EqKDNode<DIM,T> > 
         to_traverse, to_get_previous, to_invalidate_previous;
       {
@@ -6928,7 +6933,9 @@ namespace Legion {
             eq_sets.insert(cit->first, overlap);
             remaining -= overlap;
             new_subscriptions.insert(this, overlap);
-            new_subs += record_subscription(tracker, tracker_space, overlap);
+            for (unsigned idx = 0; idx < trackers.size(); idx++)
+              new_tracker_references[idx] += record_subscription(
+                  trackers[idx], tracker_spaces[idx],overlap);
             if (current_set_preconditions != NULL)
               check_preconditions |= overlap;
             if (!remaining)
@@ -6987,7 +6994,9 @@ namespace Legion {
               pending_sets.push_back(it->first);
               remaining -= overlap;
               new_subscriptions.insert(this, overlap);
-              new_subs += record_subscription(tracker, tracker_space, overlap);
+              for (unsigned idx = 0; idx < trackers.size(); idx++)
+                new_tracker_references[idx] += record_subscription(
+                    trackers[idx], tracker_spaces[idx], overlap);
               if (!remaining)
                 break;
             }
@@ -7058,8 +7067,9 @@ namespace Legion {
                     std::make_pair(ready, remaining));
                 // Record the subscription now so we know whether to 
                 // add a reference to the tracker or not
-                new_subs += 
-                  record_subscription(tracker, tracker_space, remaining);
+                for (unsigned idx = 0; idx < trackers.size(); idx++)
+                  new_tracker_references[idx] += record_subscription(
+                      trackers[idx], tracker_spaces[idx], remaining);
                 to_create.insert(this, remaining);
                 creation_rects[this] = Domain(rect);
                 // Find any creation sources
@@ -7176,10 +7186,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!overlap.empty());
 #endif
-        new_subs += it->first->compute_equivalence_sets(overlap, it->second,
-            tracker, tracker_space, eq_sets, pending_sets, new_subscriptions,
-            to_create, creation_rects, creation_srcs, remote_shard_rects,
-            local_shard);
+        it->first->compute_equivalence_sets(overlap, it->second, trackers, 
+            tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+            new_subscriptions, to_create, creation_rects, creation_srcs,
+            remote_shard_rects, local_shard);
       }
       for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
             to_get_previous.begin(); it != to_get_previous.end(); it++)
@@ -7192,7 +7202,6 @@ namespace Legion {
         if (it->first->remove_reference())
           delete it->first;
       }
-      return new_subs;
     }
 
     //--------------------------------------------------------------------------
@@ -7442,9 +7451,14 @@ namespace Legion {
     template<int DIM, typename T>
     void EqKDNode<DIM,T>::record_equivalence_set(EquivalenceSet *set,
                                   const FieldMask &mask, RtEvent ready,
-                                  EqSetTracker *tracker, AddressSpaceID source)
+                                  const CollectiveMapping &creator_spaces,
+                                  const std::vector<EqSetTracker*> &creators)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!creators.empty());
+      assert(creator_spaces.size() == creators.size());
+#endif
       FieldMaskSet<EqKDNode<DIM,T> > to_invalidate_previous;
       {
         AutoLock n_lock(node_lock);
@@ -7466,6 +7480,13 @@ namespace Legion {
           {
             if (sit->second.get_valid_mask() * mask)
               continue;
+            // See if there is a creator to ignore on this space
+            EqSetTracker *creator = NULL;
+            if (creator_spaces.contains(sit->first))
+            {
+              const unsigned index = creator_spaces.find_index(sit->first);
+              creator = creators[index];
+            }
             if (sit->first != runtime->address_space)
             {
               FieldMaskSet<EqSetTracker> to_notify;
@@ -7473,7 +7494,7 @@ namespace Legion {
                     sit->second.begin(); it != sit->second.end(); it++)
               {
                 // Skip the creator tracker since it made it
-                if ((sit->first == source) && (it->first == tracker))
+                if (it->first == creator)
                   continue;
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
@@ -7522,7 +7543,7 @@ namespace Legion {
                     sit->second.begin(); it != sit->second.end(); it++)
               {
                 // Skip the creator tracker since it made it
-                if ((sit->first == source) && (it->first == tracker))
+                if (it->first == creator)
                   continue;
                 const FieldMask overlap = mask & it->second;
                 if (!overlap)
@@ -8659,9 +8680,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    unsigned EqKDSparse<DIM,T>::compute_equivalence_sets(
-        const Rect<DIM,T> &rect, const FieldMask &mask, EqSetTracker *tracker,
-        AddressSpaceID tracker_space, FieldMaskSet<EquivalenceSet> &eq_sets,
+    void EqKDSparse<DIM,T>::compute_equivalence_sets(
+        const Rect<DIM,T> &rect, const FieldMask &mask, 
+        const std::vector<EqSetTracker*> &trackers,
+        const std::vector<AddressSpaceID> &tracker_spaces,
+        std::vector<unsigned> &new_tracker_references,
+        FieldMaskSet<EquivalenceSet> &eq_sets,
         std::vector<RtEvent> &pending_sets,
         FieldMaskSet<EqKDTree> &subscriptions,
         FieldMaskSet<EqKDTree> &to_create,
@@ -8671,24 +8695,24 @@ namespace Legion {
         ShardID local_shard)
     //--------------------------------------------------------------------------
     {
-      unsigned new_subs = 0;
       for (typename std::vector<EqKDTreeT<DIM,T>*>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
         const Rect<DIM,T> overlap = rect.intersection((*it)->bounds);
         if (!overlap.empty())
-          new_subs += (*it)->compute_equivalence_sets(overlap, mask, tracker,
-              tracker_space, eq_sets, pending_sets, subscriptions, to_create,
-              creation_rects, creation_srcs, remote_shard_rects, local_shard);
+          (*it)->compute_equivalence_sets(overlap, mask, trackers,
+              tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+              subscriptions, to_create, creation_rects, creation_srcs,
+              remote_shard_rects, local_shard);
       }
-      return new_subs;
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDSparse<DIM,T>::record_equivalence_set(EquivalenceSet *set,
-        const FieldMask &mask, RtEvent ready, EqSetTracker *tracker, 
-        AddressSpaceID tracker_space)
+        const FieldMask &mask, RtEvent ready, 
+        const CollectiveMapping &creator_spaces, 
+        const std::vector<EqSetTracker*> &creators)
     //--------------------------------------------------------------------------
     {
       // This should never be called on a sparse tree node
@@ -8863,9 +8887,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    unsigned EqKDSharded<DIM,T>::compute_equivalence_sets(
+    void EqKDSharded<DIM,T>::compute_equivalence_sets(
           const Rect<DIM,T> &rect, const FieldMask &mask,
-          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           std::vector<RtEvent> &pending_sets,
           FieldMaskSet<EqKDTree> &subscriptions,
@@ -8893,15 +8919,15 @@ namespace Legion {
             EqKDTreeT<DIM,T> *local = left.load();
             if (local == NULL)
               local = refine_local();
-            return local->compute_equivalence_sets(rect, mask, tracker,
-              tracker_space, eq_sets, pending_sets, subscriptions, to_create,
-              creation_rects, creation_srcs, remote_shard_rects, local_shard);
+            local->compute_equivalence_sets(rect, mask, trackers,
+                tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+                subscriptions, to_create, creation_rects, creation_srcs,
+                remote_shard_rects, local_shard);
           }
           else
-          {
             remote_shard_rects[lower][rect] |= mask;
-            return 0;
-          }
+          // We're done
+          return;
         }
         else // Create the refinement
         {
@@ -8909,27 +8935,25 @@ namespace Legion {
           next = right.load();
         }
       }
-      unsigned new_subs = 0;
 #ifdef DEBUG_LEGION
       assert(next != NULL);
 #endif
       const Rect<DIM,T> right_overlap = next->bounds.intersection(rect);
       if (!right_overlap.empty())
-        new_subs += next->compute_equivalence_sets(right_overlap, mask,
-            tracker, tracker_space, eq_sets, pending_sets, subscriptions,
-            to_create, creation_rects, creation_srcs, remote_shard_rects, 
-            local_shard);
+        next->compute_equivalence_sets(right_overlap, mask, trackers,
+            tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+            subscriptions, to_create, creation_rects, creation_srcs,
+            remote_shard_rects, local_shard);
       next = left.load();
 #ifdef DEBUG_LEGION
       assert(next != NULL);
 #endif
       const Rect<DIM,T> left_overlap = next->bounds.intersection(rect);
       if (!left_overlap.empty())
-        new_subs += next->compute_equivalence_sets(left_overlap, mask,
-            tracker, tracker_space, eq_sets, pending_sets, subscriptions,
-            to_create, creation_rects, creation_srcs, remote_shard_rects, 
-            local_shard);
-      return new_subs;
+        next->compute_equivalence_sets(left_overlap, mask, trackers,
+            tracker_spaces, new_tracker_references, eq_sets, pending_sets,
+            subscriptions, to_create, creation_rects, creation_srcs,
+            remote_shard_rects, local_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -9015,8 +9039,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDSharded<DIM,T>::record_equivalence_set(EquivalenceSet *set,
-        const FieldMask &mask, RtEvent ready, EqSetTracker *tracker, 
-        AddressSpaceID tracker_space)
+        const FieldMask &mask, RtEvent ready,
+        const CollectiveMapping &creator_spaces,
+        const std::vector<EqSetTracker*> &creators)
     //--------------------------------------------------------------------------
     {
       // This should never be called on a sharded tree node

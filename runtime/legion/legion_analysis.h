@@ -3664,15 +3664,17 @@ namespace Legion {
       EqSetTracker(LocalLock &lock);
       virtual ~EqSetTracker(void);
     public:
-      void record_equivalence_sets(
-          InnerContext *context, const FieldMask &mask,
+      void record_equivalence_sets(InnerContext *context,
+          const FieldMask &mask,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           FieldMaskSet<EqKDTree> &to_create,
           std::map<EqKDTree*,Domain> &creation_rects,
           std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
           FieldMaskSet<EqKDTree> &subscriptions, unsigned new_references,
           AddressSpaceID source, unsigned expected_responses,
-          std::vector<RtEvent> &ready_events);
+          std::vector<RtEvent> &ready_events,
+          const CollectiveMapping &target_mapping,
+          const std::vector<EqSetTracker*> &targets);
       void record_output_subscriptions(AddressSpaceID source,
           FieldMaskSet<EqKDTree> &new_subscriptions);
     public:
@@ -3723,7 +3725,9 @@ namespace Legion {
          std::vector<RtEvent> &ready_events,
          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
          LegionMap<Domain,FieldMask> &create_now_rectangles,
-         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+         const CollectiveMapping &target_mapping,
+         const std::vector<EqSetTracker*> &targets);
       struct SourceState : public FieldSet<Domain> {
       public:
         SourceState(void) : source_expr(NULL), source_volume(0) { }
@@ -3743,7 +3747,9 @@ namespace Legion {
           FieldMaskSet<EquivalenceSet> &pending_sets,
           FieldMaskSet<EquivalenceSet> &unique_sources,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
-          std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
+          std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources,
+          const CollectiveMapping &target_mapping,
+          const std::vector<EqSetTracker*> &targets);
       void extract_remote_notifications(const FieldMask &mask,
           AddressSpaceID local_space,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
