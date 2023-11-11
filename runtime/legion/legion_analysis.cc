@@ -25612,8 +25612,6 @@ namespace Legion {
                                  FieldMaskSet<EqKDTree> >::const_iterator nit =
                         to_notify.begin(); nit != to_notify.end(); nit++)
                   {
-                    if (nit->first == local_space)
-                      continue;
                     rez.serialize(nit->first);
                     rez.serialize(nit->second.size());
                     for (FieldMaskSet<EqKDTree>::const_iterator it =
@@ -25815,13 +25813,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EqSetTracker::record_pending_equivalence_set(EquivalenceSet *set,
-                                                      const FieldMask &mask)
+     const FieldMask &mask,
+     const LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > *new_subscriptions)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(tracker_lock);
       if (pending_equivalence_sets == NULL)
         pending_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
       pending_equivalence_sets->insert(set, mask);
+      if (new_subscriptions != NULL)
+      {
+        for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+              it = new_subscriptions->begin(); 
+              it != new_subscriptions->end(); it++)
+          record_subscriptions(it->first, it->second);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -26140,12 +26146,7 @@ namespace Legion {
       derez.deserialize(recording_mask);
       RtUserEvent notified_event;
       derez.deserialize(notified_event);
-
-      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator local_finder =
-        to_notify.find(runtime->address_space);
-#ifdef DEBUG_LEGION
-      assert(local_finder != to_notify.end());
-#endif
+ 
       // Send it off to any children nodes
       std::vector<RtEvent> notified_events;
       std::vector<AddressSpaceID> children;
@@ -26182,13 +26183,11 @@ namespace Legion {
             context->pack_task_context(rez);
             mapping->pack(rez);
             rez.serialize(local_ready);
-            rez.serialize<size_t>(to_notify.size() - 1);
+            rez.serialize<size_t>(to_notify.size());
             for (LegionMap<AddressSpaceID,
                            FieldMaskSet<EqKDTree> >::const_iterator nit =
                   to_notify.begin(); nit != to_notify.end(); nit++)
             {
-              if (nit == local_finder)
-                continue;
               rez.serialize(nit->first);
               rez.serialize(nit->second.size());
               for (FieldMaskSet<EqKDTree>::const_iterator it =
@@ -26208,11 +26207,28 @@ namespace Legion {
           notified_events.push_back(notified);
         }
       }
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator local_finder =
+        to_notify.find(runtime->address_space);
+      EqSetTracker *local_target = NULL;
+      std::set<Domain> rectangles_set;
+      // Check to see if we have a local target to notify here
+      if (target_mapping.contains(runtime->address_space))
+      {
+        unsigned index = target_mapping.find_index(runtime->address_space);
+        local_target = targets[index];
+        if (!handle.exists() && (local_finder == to_notify.end()))
+          rectangles_set.insert(rectangles.begin(), rectangles.end());
+      }
+#ifdef DEBUG_LEGION
+      assert((local_finder != to_notify.end()) || (local_target != NULL));
+#endif
       // Make the equivalence set
       IndexSpaceExpression *expr = handle.exists() ? 
-        runtime->forest->get_node(handle) :
+        runtime->forest->get_node(handle) : (local_finder != to_notify.end()) ? 
         local_finder->second.begin()->first->create_from_rectangles(
-                                          runtime->forest, rectangles);
+            runtime->forest, rectangles) :
+        local_target->get_tracker_expression()->create_from_rectangles(
+            rectangles_set);
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
       void *location = 
@@ -26223,18 +26239,17 @@ namespace Legion {
       // Once construction is complete then we do the registration
       set->register_with_runtime();
       // Register it with any local trees 
-      for (FieldMaskSet<EqKDTree>::const_iterator it =
-            local_finder->second.begin(); it != 
-            local_finder->second.end(); it++)
-        it->first->record_equivalence_set(set, it->second, ready_event,
-                                          target_mapping, targets);
-      to_notify.erase(local_finder);
-      // Check to see if we have a local target to notify here
-      if (target_mapping.contains(runtime->address_space))
+      if (local_finder != to_notify.end())
       {
-        unsigned index = target_mapping.find_index(runtime->address_space);
-        targets[index]->record_pending_equivalence_set(set, recording_mask); 
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              local_finder->second.begin(); it != 
+              local_finder->second.end(); it++)
+          it->first->record_equivalence_set(set, it->second, ready_event,
+                                            target_mapping, targets);
       }
+      if (local_target != NULL)
+        local_target->record_pending_equivalence_set(set, recording_mask,
+                                                     &to_notify);
       // Trigger the event that we're done
       if (!notified_events.empty())
         Runtime::trigger_event(notified_event,
@@ -26306,13 +26321,11 @@ namespace Legion {
           rez.serialize(owner);
           rez.serialize(owner_space);
           mapping.pack(rez);
-          rez.serialize<size_t>(to_notify.size() - 1);
+          rez.serialize<size_t>(to_notify.size());
           for (LegionMap<AddressSpaceID,
                          FieldMaskSet<EqKDTree> >::const_iterator nit =
                 to_notify.begin(); nit != to_notify.end(); nit++)
           {
-            if (nit->first == runtime->address_space)
-              continue;
             rez.serialize(nit->first);
             rez.serialize(nit->second.size());
             for (FieldMaskSet<EqKDTree>::const_iterator it =
@@ -26332,21 +26345,24 @@ namespace Legion {
         runtime->send_equivalence_set_reuse(*cit, rez);
         done_events.push_back(notified);
       }
-#ifdef DEBUG_LEGION
-      assert(to_notify.find(runtime->address_space) != to_notify.end());
-#endif
-      FieldMaskSet<EqKDTree> &local_trees = to_notify[runtime->address_space];
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator local_finder =
+        to_notify.find(runtime->address_space);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      for (FieldMaskSet<EqKDTree>::const_iterator it =
-            local_trees.begin(); it != local_trees.end(); it++)
-        it->first->record_equivalence_set(set, it->second,
-            RtEvent::NO_RT_EVENT, target_mapping, targets);
+      if (local_finder != to_notify.end())
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              local_finder->second.begin(); it !=
+              local_finder->second.end(); it++)
+          it->first->record_equivalence_set(set, it->second,
+              RtEvent::NO_RT_EVENT, target_mapping, targets);
+      }
       // Check to see if a we have a local target
       if (target_mapping.contains(runtime->address_space))
       {
         unsigned index = target_mapping.find_index(runtime->address_space);
-        targets[index]->record_pending_equivalence_set(set, recording_mask);
+        targets[index]->record_pending_equivalence_set(set, recording_mask,
+                                                       &to_notify);
       }
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));

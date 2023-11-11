@@ -3706,8 +3706,9 @@ namespace Legion {
                                                   Runtime *runtime);
       static void handle_equivalence_set_reuse(Deserializer &derez,
                                                Runtime *runtime);
-      void record_pending_equivalence_set(EquivalenceSet *set, 
-                                          const FieldMask &mask);
+      void record_pending_equivalence_set(EquivalenceSet *set,
+          const FieldMask &mask, const LegionMap<AddressSpaceID,
+                FieldMaskSet<EqKDTree> > *new_subcriptions = NULL);
       static void handle_pending_equivalence_set(Deserializer &derez,
                                                  Runtime *runtime);
       static void handle_finalize_eq_sets(const void *args, Runtime *runtime);
