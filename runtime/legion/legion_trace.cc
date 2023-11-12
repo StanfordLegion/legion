@@ -2713,7 +2713,7 @@ namespace Legion {
       {
         if (trace->runtime->dump_physical_traces)
         {
-          optimize(true/*do transitive reduction inline*/);
+          optimize(!trace->runtime->no_transitive_reduction);
           dump_template();
         }
         if (!remote_memos.empty())
@@ -2734,7 +2734,8 @@ namespace Legion {
         release_remote_memos();
       // Defer performing the transitive reduction because it might
       // be expensive (see comment above)
-      if (!trace->runtime->no_trace_optimization)
+      if (!trace->runtime->no_trace_optimization &&
+          !trace->runtime->no_transitive_reduction)
       {
         TransitiveReductionState *state = 
           new TransitiveReductionState(Runtime::create_rt_user_event());

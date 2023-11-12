@@ -169,15 +169,12 @@ namespace Realm {
       dst_is_ipc.resize(outputs_info.size(), false);
       for(size_t i = 0; i < output_ports.size(); i++) {
         dst_gpus[i] = mem_to_gpu(output_ports[i].mem);
-        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+	if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
           // sanity-check
           assert(dst_gpus[i]);
         } else {
-          // assume a memory owned by another node and cannot be directly accessed needs
-          // to use an IPC mapping
-          if((output_ports[i].mem->get_direct_ptr(0, 0) == nullptr) &&
-             NodeID(ID(output_ports[i].mem->me).memory_owner_node()) !=
-                 Network::my_node_id)
+          // assume a memory owned by another node is ipc
+          if(NodeID(ID(output_ports[i].mem->me).memory_owner_node()) != Network::my_node_id)
             dst_is_ipc[i] = true;
         }
       }

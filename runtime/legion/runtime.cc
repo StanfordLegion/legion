@@ -11187,6 +11187,7 @@ namespace Legion {
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
+        no_transitive_reduction(config.no_transitive_reduction),
         replay_on_cpus(config.replay_on_cpus),
         verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
@@ -11238,7 +11239,10 @@ namespace Legion {
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id(LEGION_MAX_APPLICATION_LAYOUT_ID + 
-                        ((unique == 0) ? runtime_stride : unique)),
+            (((LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride) <= unique) ?
+             (runtime_stride - 
+              ((LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride) - unique)) :
+             (unique - (LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride)))),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
@@ -11258,6 +11262,9 @@ namespace Legion {
         unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((unique_constraint_id % runtime_stride) == unique);
+#endif
       if (LEGION_MAX_NUM_NODES <= address_space)
         REPORT_LEGION_ERROR(ERROR_MAXIMUM_NODES_EXCEEDED,
             "Maximum number of nodes exceeded. Detected node %d but "
@@ -11399,6 +11406,7 @@ namespace Legion {
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
+        no_transitive_reduction(rhs.no_transitive_reduction),
         replay_on_cpus(rhs.replay_on_cpus),
         verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
@@ -22475,6 +22483,8 @@ namespace Legion {
                          config.no_trace_optimization, !filter)
         .add_option_bool("-lg:no_fence_elision",
                          config.no_fence_elision, !filter)
+        .add_option_bool("-lg:no_transitive_reduction",
+                         config.no_transitive_reduction, !filter)
         .add_option_bool("-lg:replay_on_cpus",
                          config.replay_on_cpus, !filter)
         .add_option_bool("-lg:disjointness",

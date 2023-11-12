@@ -1439,7 +1439,7 @@ $(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HE
 
 $(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
 	rm -f $@
-	$(CXX) --shared $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 
 ifneq ($(USE_PGI),1)

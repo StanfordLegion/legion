@@ -10625,8 +10625,8 @@ namespace Legion {
         // that the common sub-expression code will give the same
         // result if there is a race
         IndexSpaceExpression *expr = context->union_index_spaces(child_spaces);
-        expr->add_nested_expression_reference(did);
-        union_expr.store(expr);
+        if (union_expr.compare_exchange_strong(result, expr))
+          expr->add_nested_expression_reference(did);
       }
       else // if we're complete the parent is our expression
       {
