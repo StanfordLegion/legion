@@ -7657,6 +7657,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent PointTask::perform_collective_versioning_analysis(unsigned index,
+        LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
+        unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->perform_collective_versioning_analysis(index,
+          handle, tracker, mask, parent_req_index, root_space);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
@@ -10549,6 +10559,76 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::unpack_slice_collective_versioning_rendezvous(
+        Deserializer &derez, unsigned index, size_t total_points)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      LegionMap<LogicalRegion,RegionVersioning> to_perform;
+      {
+        size_t num_regions;
+        derez.deserialize(num_regions);
+        AutoLock o_lock(op_lock);
+        std::map<unsigned,PendingVersioning>::iterator finder =
+          pending_versioning.find(index);
+        if (finder == pending_versioning.end())
+        {
+          finder = pending_versioning.insert(
+              std::make_pair(index, PendingVersioning())).first;
+          finder->second.remaining_arrivals = this->get_collective_points();
+        }
+        for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+        {
+          LogicalRegion region;
+          derez.deserialize(region);
+          RtUserEvent ready_event;
+          derez.deserialize(ready_event);
+          LegionMap<LogicalRegion,RegionVersioning>::iterator region_finder =
+            finder->second.region_versioning.find(region);
+          if (region_finder == finder->second.region_versioning.end())
+          {
+            region_finder = finder->second.region_versioning.emplace(
+                std::make_pair(region,RegionVersioning())).first;
+            region_finder->second.ready_event = ready_event;
+          }
+          else
+            Runtime::trigger_event(ready_event,
+                region_finder->second.ready_event);
+          size_t num_trackers;
+          derez.deserialize(num_trackers);
+          for (unsigned idx2 = 0; idx2 < num_trackers; idx2++)
+          {
+            std::pair<EqSetTracker*,AddressSpaceID> key;
+            derez.deserialize(key.first);
+            derez.deserialize(key.second);
+#ifdef DEBUG_LEGION
+            assert(region_finder->second.trackers.find(key) ==
+                    region_finder->second.trackers.end());
+#endif
+            derez.deserialize(region_finder->second.trackers[key]);
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_arrivals >= total_points);
+#endif
+        finder->second.remaining_arrivals -= total_points;
+        if (finder->second.remaining_arrivals == 0)
+        {
+          done = true;
+          to_perform.swap(finder->second.region_versioning);
+          pending_versioning.erase(finder);
+        }
+      }
+      if (done)
+      {
+        IndexSpace root_space = regions[index].parent.get_index_space();
+        const unsigned parent_req_index = find_parent_index(index);
+        finalize_collective_versioning_analysis(index, parent_req_index,
+                                                root_space, to_perform);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
@@ -12600,6 +12680,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent SliceTask::perform_collective_versioning_analysis(unsigned index,
+        LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
+        unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return MultiTask::rendezvous_collective_versioning_analysis(index,
+            handle, tracker, runtime->address_space, mask, parent_req_index,
+            root_space);
+      else
+        return index_owner->rendezvous_collective_versioning_analysis(index,
+            handle, tracker, runtime->address_space, mask, parent_req_index,
+            root_space);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::finalize_collective_versioning_analysis(unsigned index,
+                          unsigned parent_req_index, IndexSpace root_space,
+                          LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_remote());
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        rez.serialize(index);
+        rez.serialize<size_t>(points.size());
+        rez.serialize<size_t>(to_perform.size());
+        for (LegionMap<LogicalRegion,RegionVersioning>::const_iterator pit =
+              to_perform.begin(); pit != to_perform.end(); pit++)
+        {
+          rez.serialize(pit->first);
+#ifdef DEBUG_LEGION
+          assert(pit->second.ready_event.exists());
+#endif
+          rez.serialize(pit->second.ready_event);
+          rez.serialize<size_t>(pit->second.trackers.size());
+          for (LegionMap<std::pair<EqSetTracker*,AddressSpaceID>,FieldMask>::
+                const_iterator it = pit->second.trackers.begin(); it != 
+                pit->second.trackers.end(); it++)
+          {
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
+            rez.serialize(it->second);
+          }
+        }
+      }
+      runtime->send_slice_remote_versioning_rendezvous(orig_proc, rez);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent SliceTask::convert_collective_views(unsigned requirement_index,
                        unsigned analysis_index, LogicalRegion region,
                        const InstanceSet &targets, InnerContext *physical_ctx,
@@ -12675,6 +12809,22 @@ namespace Legion {
 
       index_owner->rendezvous_collective_mapping(requirement_index,
           analysis_index, region, result, source, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_versioning_rendezvous(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *index_owner;
+      derez.deserialize(index_owner);
+      unsigned index;
+      derez.deserialize(index);
+      size_t total_points;
+      derez.deserialize(total_points);
+      index_owner->unpack_slice_collective_versioning_rendezvous(derez, index, 
+                                                                 total_points);
     }
     
   }; // namespace Internal 

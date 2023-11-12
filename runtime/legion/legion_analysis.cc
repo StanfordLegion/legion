@@ -26942,13 +26942,20 @@ namespace Legion {
       }
       if (compute_event.exists())
       {
-        // Bounce this computation off the context so that we know
-        // that we are on the right node to perform it
-        std::vector<EqSetTracker*> targets(1, this);
-        std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
-        const RtEvent ready = context->compute_equivalence_sets(
-                        parent_req_index, targets, target_spaces, 
-                        region_node->row_source, remaining_mask, root_space);
+        RtEvent ready;
+        if (!collective_rendezvous)
+        {
+          // Bounce this computation off the context so that we know
+          // that we are on the right node to perform it
+          std::vector<EqSetTracker*> targets(1, this);
+          std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
+          ready = context->compute_equivalence_sets(parent_req_index, targets,
+            target_spaces, region_node->row_source, remaining_mask, root_space);
+        }
+        else
+          ready = op->perform_collective_versioning_analysis(index, 
+              region_node->handle, this, remaining_mask, parent_req_index,
+              root_space);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -26962,6 +26969,15 @@ namespace Legion {
           finalize_equivalence_sets(compute_event, context, runtime,
               parent_req_index, region_node->row_source, 
               op->get_unique_op_id());
+      }
+      else if (collective_rendezvous)
+      {
+#ifdef DEBUG_LEGION
+        assert(!remaining_mask);
+#endif
+        // Just need to rendezvous, no need to wait for any computation
+        op->perform_collective_versioning_analysis(index, region_node->handle,
+            this, remaining_mask, parent_req_index, root_space);
       }
     } 
 

@@ -3182,6 +3182,8 @@ namespace Legion {
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
+      void send_slice_remote_versioning_rendezvous(Processor target_proc,
+                                                   Serializer &rez);
       void send_slice_remote_output_extents(Processor target, Serializer &rez);
       void send_slice_remote_output_registration(Processor target, 
                                                  Serializer &rez);
@@ -3594,6 +3596,8 @@ namespace Legion {
       void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
+      void handle_slice_remote_collective_versioning_rendezvous(
+                                                     Deserializer &derez);
       void handle_slice_remote_output_extents(Deserializer &derez);
       void handle_slice_remote_output_registration(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
@@ -5873,6 +5877,8 @@ namespace Legion {
           break;
         case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
           break;
+        case SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS:
+          break;
         case SLICE_REMOTE_OUTPUT_EXTENTS:
           break;
         case SLICE_REMOTE_OUTPUT_REGISTRATION:
@@ -6329,6 +6335,7 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE:
         case SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR:
         case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
+        case SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
         case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
         case SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE:

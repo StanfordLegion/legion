@@ -369,12 +369,12 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Repl Collective View Creator
+    // Repl Collective Versioning
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    ReplCollectiveViewCreator<OP>::ReplCollectiveViewCreator(Runtime *r)
+    ReplCollectiveVersioning<OP>::ReplCollectiveVersioning(Runtime *r)
       : OP(r)
     //--------------------------------------------------------------------------
     {
@@ -382,13 +382,113 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    ReplCollectiveViewCreator<OP>::ReplCollectiveViewCreator(
-                                       const ReplCollectiveViewCreator<OP> &rhs)
-      : OP(rhs)
+    void ReplCollectiveVersioning<OP>::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      OP::deactivate(freeop);
+      for (typename std::map<unsigned,
+                             CollectiveVersioningRendezvous*>::const_iterator
+            it = collective_versioning_rendezvous.begin();
+            it != collective_versioning_rendezvous.end(); it++)
+        delete it->second;
+      collective_versioning_rendezvous.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveVersioning<OP>::finalize_collective_versioning_analysis(
+        unsigned index, unsigned parent_req_index, IndexSpace root_space,
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned,CollectiveVersioningRendezvous*>::const_iterator
+        finder = collective_versioning_rendezvous.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_versioning_rendezvous.end());
+#endif
+      finder->second->perform_rendezvous(parent_req_index, root_space,
+                                         to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveVersioning<OP>::finalize_collective_versioning(
+        unsigned index, unsigned parent_req_index, IndexSpace root_space,
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      // Invoke the base class version of the finalize method
+      OP::finalize_collective_versioning_analysis(index, parent_req_index,
+                                                  root_space, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveVersioning<OP>::create_collective_rendezvous(
+                                                     unsigned requirement_index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_versioning_rendezvous.find(requirement_index) ==
+              collective_versioning_rendezvous.end());
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      const CollectiveID id =
+       repl_ctx->get_next_collective_index(COLLECTIVE_LOC_20,true/*logical*/);
+      // Round-robin the collective analysis creation around the shards
+      const ShardID owner = requirement_index % repl_ctx->total_shards;
+      CollectiveVersioningRendezvous *analysis =
+        new CollectiveVersioningRendezvous(id, repl_ctx, this, this, owner,
+                                           requirement_index);
+      collective_versioning_rendezvous[requirement_index] = analysis;
+      // Make sure these are always included in the mapping analysis
+      const RtEvent done = analysis->get_done_event();
+      if (done.exists())
+        this->map_applied_conditions.insert(done);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveVersioning<OP>::shard_off_collective_rendezvous(
+                                               std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalRegion,RegionVersioning> empty_versions;
+      for (typename std::map<unsigned,
+                             CollectiveVersioningRendezvous*>::const_iterator
+            it = collective_versioning_rendezvous.begin();
+            it != collective_versioning_rendezvous.end(); it++)
+        it->second->perform_rendezvous(0, IndexSpace::NO_SPACE, empty_versions);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveVersioning<OP>::
+                                     predicate_false_collective_rendezvous(void)
+    //--------------------------------------------------------------------------
+    {
+      for (typename std::map<unsigned,
+                             CollectiveVersioningRendezvous*>::const_iterator
+            it = collective_versioning_rendezvous.begin();
+            it != collective_versioning_rendezvous.end(); it++)
+        it->second->elide_collective();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Collective View Creator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    ReplCollectiveViewCreator<OP>::ReplCollectiveViewCreator(Runtime *r)
+      : ReplCollectiveVersioning<OP>(r)
+    //--------------------------------------------------------------------------
+    {
     }
 
     //--------------------------------------------------------------------------
@@ -403,7 +503,7 @@ namespace Legion {
             it != collective_view_rendezvous.end(); it++)
         delete it->second;
       collective_view_rendezvous.clear();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     template<typename OP>
@@ -434,7 +534,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void ReplCollectiveViewCreator<OP>::create_collective_view_rendezvous(
+    void ReplCollectiveViewCreator<OP>::create_collective_rendezvous(
           RegionTreeID tid, unsigned requirement_index, unsigned analysis_index)
     //--------------------------------------------------------------------------
     {
@@ -466,14 +566,21 @@ namespace Legion {
         if (done.exists())
           this->map_applied_conditions.insert(done);
       }
+      // If this is the first analysis then make the collective rendezvous
+      // for performing the versioning analysis
+      if (analysis_index == 0)
+        ReplCollectiveVersioning<OP>::create_collective_rendezvous(
+                                                  requirement_index);
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void ReplCollectiveViewCreator<OP>::shard_off_collective_view_rendezvous(
+    void ReplCollectiveViewCreator<OP>::shard_off_collective_rendezvous(
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+      ReplCollectiveVersioning<OP>::shard_off_collective_rendezvous(
+                                                      preconditions);
       std::map<LogicalRegion,CollectiveRendezvous> empty_rendezvous;
       for (typename std::map<RendezvousKey,
                              CollectiveViewRendezvous*>::const_iterator
@@ -488,9 +595,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     void ReplCollectiveViewCreator<OP>::
-                                predicate_false_collective_view_rendezvous(void)
+                                     predicate_false_collective_rendezvous(void)
     //--------------------------------------------------------------------------
     {
+      ReplCollectiveVersioning<OP>::predicate_false_collective_rendezvous();
       for (typename std::map<RendezvousKey,
                              CollectiveViewRendezvous*>::const_iterator
             it = collective_view_rendezvous.begin(); 
@@ -865,27 +973,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplIndexTask::ReplIndexTask(const ReplIndexTask &rhs)
-      : ReplCollectiveViewCreator<IndexTask>(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplIndexTask::~ReplIndexTask(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplIndexTask& ReplIndexTask::operator=(const ReplIndexTask &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -1129,7 +1219,7 @@ namespace Legion {
           premap_task();
         // Still need to participate in any collective view rendezvous
         if (!collective_view_rendezvous.empty())
-          shard_off_collective_view_rendezvous(complete_preconditions);
+          shard_off_collective_rendezvous(complete_preconditions);
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
         LegionSpy::log_operation_events(unique_op_id, 
@@ -1275,7 +1365,7 @@ namespace Legion {
       for (std::vector<unsigned>::const_iterator it =
             check_collective_regions.begin(); it != 
             check_collective_regions.end(); it++)
-        create_collective_view_rendezvous(
+        create_collective_rendezvous(
             logical_regions[*it].parent.get_tree_id(), *it);
     }
 
@@ -1461,7 +1551,7 @@ namespace Legion {
         output_size_collective->elide_collective();
         Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
       }
-      predicate_false_collective_view_rendezvous();
+      predicate_false_collective_rendezvous();
       // Now continue through and do the base case
       IndexTask::predicate_false();
     }
@@ -2643,33 +2733,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFillOp::ReplFillOp(Runtime *rt)
-      : FillOp(rt)
+      : ReplCollectiveVersioning<CollectiveVersioning<FillOp> >(rt)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplFillOp::ReplFillOp(const ReplFillOp &rhs)
-      : FillOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     ReplFillOp::~ReplFillOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplFillOp& ReplFillOp::operator=(const ReplFillOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2686,7 +2758,7 @@ namespace Legion {
     void ReplFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      FillOp::activate();
+      ReplCollectiveVersioning<CollectiveVersioning<FillOp> >::activate();
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       collective = NULL;
       collective_id = 0;
@@ -2702,7 +2774,8 @@ namespace Legion {
       // Make sure we didn't leak our barrier
       assert(!collective_map_barrier.exists());
 #endif
-      FillOp::deactivate(false/*free*/);
+      ReplCollectiveVersioning<CollectiveVersioning<FillOp> >::deactivate(
+                                                            false/*free*/);
       if (collective != NULL)
         delete collective;
       if (freeop)
@@ -2723,6 +2796,7 @@ namespace Legion {
       // so we're going to need a collective fill barrier to sync
       // execution of our physical analysis before and after
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      create_collective_rendezvous(0/*requirement index*/);
       // Then do the base class analysis
       FillOp::trigger_dependence_analysis();
     }
@@ -2753,6 +2827,16 @@ namespace Legion {
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
         enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplFillOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
     }
 
     //--------------------------------------------------------------------------
@@ -2815,6 +2899,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplFillOp::trigger_replay(void)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger the first generation of the collective_map_barrier
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Advance the first generation of the barrier for trigger_ready
+      Runtime::advance_barrier(collective_map_barrier);
+      predicate_false_collective_rendezvous();
+      // Second generation triggered by callback to finalize_complete_mapping
+      FillOp::trigger_replay();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplFillOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
@@ -2822,6 +2919,7 @@ namespace Legion {
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       // Advance the first generation of the barrier for trigger_ready
       Runtime::advance_barrier(collective_map_barrier);
+      predicate_false_collective_rendezvous();
       // Second generation triggered by callback to finalize_complete_mapping
       FillOp::predicate_false();
     }
@@ -3101,7 +3199,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDiscardOp::ReplDiscardOp(Runtime *rt)
-      : DiscardOp(rt)
+      : ReplCollectiveVersioning<CollectiveVersioning<DiscardOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -3124,7 +3222,7 @@ namespace Legion {
     void ReplDiscardOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      DiscardOp::activate();
+      ReplCollectiveVersioning<CollectiveVersioning<DiscardOp> >::activate();
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       is_first_local_shard = false;
     }
@@ -3137,7 +3235,8 @@ namespace Legion {
       // Make sure we didn't leak our barrier
       assert(!collective_map_barrier.exists());
 #endif
-      DiscardOp::deactivate(false/*free*/);
+      ReplCollectiveVersioning<CollectiveVersioning<DiscardOp> >::deactivate(
+                                                                false/*free*/);
       if (free)
         runtime->free_repl_discard_op(this);
     }
@@ -3153,6 +3252,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      create_collective_rendezvous(0/*requirement index*/);
       // Then do the base class analysis
       DiscardOp::trigger_dependence_analysis();
     }
@@ -3215,6 +3315,16 @@ namespace Legion {
       first_local = is_first_local_shard;
       return true;
     }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplDiscardOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
+    } 
 
     /////////////////////////////////////////////////////////////
     // Repl Copy Op 
@@ -4751,7 +4861,7 @@ namespace Legion {
       }
       else
       {
-        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+        create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
 #ifdef DEBUG_LEGION
         sharding_collective->elide_collective();
 #endif
@@ -5083,6 +5193,16 @@ namespace Legion {
             preconditions.push_back(ready);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplDependentPartitionOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6521,27 +6641,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplMapOp::ReplMapOp(const ReplMapOp &rhs)
-      : ReplCollectiveViewCreator<CollectiveViewCreator<MapOp> >(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplMapOp::~ReplMapOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplMapOp& ReplMapOp::operator=(const ReplMapOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -6601,7 +6703,7 @@ namespace Legion {
         collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       }
       // We're always going to do collective rendezvous for this requirement
-      create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+      create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
     }
 
     //--------------------------------------------------------------------------
@@ -6734,6 +6836,16 @@ namespace Legion {
         runtime->free_repl_map_op(this);
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent ReplMapOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Attach Op 
     /////////////////////////////////////////////////////////////
@@ -6746,27 +6858,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplAttachOp::ReplAttachOp(const ReplAttachOp &rhs)
-      : ReplCollectiveViewCreator<CollectiveViewCreator<AttachOp> >(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplAttachOp::~ReplAttachOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplAttachOp& ReplAttachOp::operator=(const ReplAttachOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -6877,7 +6971,7 @@ namespace Legion {
       // updates to the equivalence sets across the shards
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       if (collective_instances)
-        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+        create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
     }
 
     //--------------------------------------------------------------------------
@@ -7241,6 +7335,16 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent ReplAttachOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Detach Op 
     /////////////////////////////////////////////////////////////
@@ -7253,27 +7357,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplDetachOp::ReplDetachOp(const ReplDetachOp &rhs)
-      : ReplCollectiveViewCreator<CollectiveViewCreator<DetachOp> >(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplDetachOp::~ReplDetachOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplDetachOp& ReplDetachOp::operator=(const ReplDetachOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -7323,10 +7409,10 @@ namespace Legion {
       effects_barrier = repl_ctx->get_next_detach_effects_barrier();
       if (collective_instances)
       {
-        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+        create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
         // If we're flushing we need a second analysis rendezvous
         if (flush)
-          create_collective_view_rendezvous(requirement.parent.get_tree_id(),
+          create_collective_rendezvous(requirement.parent.get_tree_id(),
               0/*requirement index*/, 1/*analysis index*/);
       }
     }
@@ -7452,6 +7538,16 @@ namespace Legion {
         manager->detach_external_instance();
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent ReplDetachOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Attach Op 
     /////////////////////////////////////////////////////////////
@@ -7464,28 +7560,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplIndexAttachOp::ReplIndexAttachOp(const ReplIndexAttachOp &rhs)
-      : ReplCollectiveViewCreator<IndexAttachOp>(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplIndexAttachOp::~ReplIndexAttachOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplIndexAttachOp& ReplIndexAttachOp::operator=(
-                                                   const ReplIndexAttachOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -7572,7 +7649,7 @@ namespace Legion {
       analyze_region_requirements(launch_space,
                                   sharding_function);
       // Always perform a collective rendezvous for these points
-      create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+      create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
     }
 
     //--------------------------------------------------------------------------
@@ -7589,7 +7666,7 @@ namespace Legion {
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
-        shard_off_collective_view_rendezvous(done_events);
+        shard_off_collective_rendezvous(done_events);
         if (!done_events.empty())
         {
           if (collective_done.exists() && ! collective_done.has_triggered())
@@ -7677,28 +7754,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplIndexDetachOp::ReplIndexDetachOp(const ReplIndexDetachOp &rhs)
-      : ReplCollectiveViewCreator<IndexDetachOp>(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplIndexDetachOp::~ReplIndexDetachOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplIndexDetachOp& ReplIndexDetachOp::operator=(
-                                                   const ReplIndexDetachOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -7791,10 +7849,10 @@ namespace Legion {
         log_requirement();
       analyze_region_requirements(launch_space,
                                   sharding_function);
-      create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+      create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
       // If we're flushing we need a second analysis rendezvous
       if (flush)
-        create_collective_view_rendezvous(requirement.parent.get_tree_id(),0,1);
+        create_collective_rendezvous(requirement.parent.get_tree_id(),0,1);
       effects_barrier = repl_ctx->get_next_detach_effects_barrier();
     }
 
@@ -7812,7 +7870,7 @@ namespace Legion {
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
-        shard_off_collective_view_rendezvous(done_events);
+        shard_off_collective_rendezvous(done_events);
         if (!done_events.empty())
         {
           if (collective_done.exists() && ! collective_done.has_triggered())
@@ -7858,27 +7916,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplAcquireOp::ReplAcquireOp(const ReplAcquireOp &rhs)
-      : ReplCollectiveViewCreator<CollectiveViewCreator<AcquireOp> >(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplAcquireOp::~ReplAcquireOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplAcquireOp& ReplAcquireOp::operator=(const ReplAcquireOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -7956,7 +7996,7 @@ namespace Legion {
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       // See if we need to make a collective view rendezvous
       if (restricted_region.impl->collective)
-        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+        create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
       // Then do the base class analysis
       AcquireOp::trigger_dependence_analysis();
     }
@@ -8028,8 +8068,31 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_view_rendezvous();
+      predicate_false_collective_rendezvous();
       AcquireOp::predicate_false();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::trigger_replay(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      Runtime::advance_barrier(collective_map_barrier);
+      predicate_false_collective_rendezvous();
+      AcquireOp::trigger_replay();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplAcquireOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8044,27 +8107,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplReleaseOp::ReplReleaseOp(const ReplReleaseOp &rhs)
-      : ReplCollectiveViewCreator<CollectiveViewCreator<ReleaseOp> >(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplReleaseOp::~ReplReleaseOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplReleaseOp& ReplReleaseOp::operator=(const ReplReleaseOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -8145,7 +8190,7 @@ namespace Legion {
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       // See if we need to make a collective view rendezvous
       if (restricted_region.impl->collective)
-        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+        create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
       // Then do the base class analysis
       ReleaseOp::trigger_dependence_analysis();
     }
@@ -8217,8 +8262,21 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_view_rendezvous();
+      predicate_false_collective_rendezvous();
       ReleaseOp::predicate_false();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::trigger_replay(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      Runtime::advance_barrier(collective_map_barrier);
+      predicate_false_collective_rendezvous();
+      ReleaseOp::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -8250,6 +8308,16 @@ namespace Legion {
               mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplReleaseOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return rendezvous_collective_versioning_analysis(index, handle, tracker,
+          runtime->address_space, mask, parent_req_index, root_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -16682,6 +16750,127 @@ namespace Legion {
     {
       rendezvous.swap(to_rendezvous); 
       perform_collective_async(); 
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Collective Versioning Rendezvous
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveVersioningRendezvous::CollectiveVersioningRendezvous(
+        CollectiveID id, ReplicateContext *ctx, Operation *o, Finalizer *f, 
+        ShardID owner, unsigned idx)
+      : GatherCollective(ctx, id, owner), op(o), finalizer(f), index(idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+      assert(finalizer != NULL);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveVersioningRendezvous::~CollectiveVersioningRendezvous(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveVersioningRendezvous::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(pending_versions.size());
+      for (LegionMap<LogicalRegion,RegionVersioning>::const_iterator pit =
+            pending_versions.begin(); pit != pending_versions.end(); pit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(pit->second.ready_event.exists());
+#endif
+        rez.serialize(pit->first);
+        rez.serialize(pit->second.ready_event);
+        rez.serialize<size_t>(pit->second.trackers.size());
+        for (LegionMap<std::pair<EqSetTracker*,AddressSpaceID>,FieldMask>::
+              const_iterator it = pit->second.trackers.begin(); it !=
+              pit->second.trackers.end(); it++)
+        {
+          rez.serialize(it->first.first);
+          rez.serialize(it->first.second);
+          rez.serialize(it->second);
+        }
+      }
+      if (!pending_versions.empty())
+      {
+        rez.serialize(root_space);
+        rez.serialize(parent_req_index);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveVersioningRendezvous::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+      {
+        LogicalRegion region;
+        derez.deserialize(region);
+        RtUserEvent ready_event;
+        derez.deserialize(ready_event);
+        LegionMap<LogicalRegion,RegionVersioning>::iterator finder =
+          pending_versions.find(region);
+        if (finder == pending_versions.end())
+        {
+          finder = pending_versions.emplace(
+              std::make_pair(region,RegionVersioning())).first;
+          finder->second.ready_event = ready_event;
+        }
+        else
+          Runtime::trigger_event(ready_event, finder->second.ready_event);
+        size_t num_trackers;
+        derez.deserialize(num_trackers);
+        for (unsigned idx2 = 0; idx2 < num_trackers; idx2++)
+        {
+          std::pair<EqSetTracker*,AddressSpaceID> key;
+          derez.deserialize(key.first);
+          derez.deserialize(key.second);
+#ifdef DEBUG_LEGION
+          assert(finder->second.trackers.find(key) ==
+                  finder->second.trackers.end());
+#endif
+          derez.deserialize(finder->second.trackers[key]);
+        }
+      }
+      if (num_regions > 0)
+      {
+        derez.deserialize(root_space);
+        derez.deserialize(parent_req_index);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveVersioningRendezvous::post_gather(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!pending_versions.empty())
+        finalizer->finalize_collective_versioning(index, parent_req_index,
+            root_space, pending_versions);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveVersioningRendezvous::perform_rendezvous(
+        unsigned parent_index, IndexSpace root,
+        LegionMap<LogicalRegion,RegionVersioning> &pending)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(root.exists() || pending.empty());
+#endif
+      root_space = root;
+      parent_req_index = parent_index;
+      pending_versions.swap(pending);
+      perform_collective_async();
     }
 
     /////////////////////////////////////////////////////////////

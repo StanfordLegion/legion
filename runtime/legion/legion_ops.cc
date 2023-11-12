@@ -1761,26 +1761,15 @@ namespace Legion {
       return RtEvent::NO_RT_EVENT;
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void Operation::perform_collective_versioning_analysis(unsigned index,
+    RtEvent Operation::perform_collective_versioning_analysis(unsigned index,
         LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
-        unsigned parent_req_index, IndexSpace root_space, RtUserEvent compute)
+        unsigned parent_req_index, IndexSpace root_space)
     //--------------------------------------------------------------------------
     {
       // Should only be called in derived types
       assert(false);
     }
-
-    //--------------------------------------------------------------------------
-    void Operation::report_collective_versioning_analysis(unsigned index,
-                          LogicalRegion handle, const VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called in derived types
-      assert(false);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
@@ -3375,7 +3364,155 @@ namespace Legion {
           delete it->first;
       if (mapping->remove_reference())
         delete mapping;
-    } 
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveVersioning
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveVersioning<OP>::CollectiveVersioning(Runtime *rt)
+      : OP(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveVersioning<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveVersioning<OP>::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      OP::deactivate(freeop);
+#ifdef DEBUG_LEGION
+      assert(pending_versioning.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent 
+      CollectiveVersioning<OP>::rendezvous_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        AddressSpaceID space, const FieldMask &mask, unsigned parent_req_index,
+        IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent result;
+      bool done = false;
+      LegionMap<LogicalRegion,RegionVersioning> to_perform;
+      {
+        AutoLock o_lock(this->op_lock);
+        std::map<unsigned,PendingVersioning>::iterator finder =
+          pending_versioning.find(index);
+        if (finder == pending_versioning.end())
+        {
+          finder = pending_versioning.insert(
+              std::make_pair(index, PendingVersioning())).first;
+          finder->second.remaining_arrivals = this->get_collective_points();
+        }
+        // Only need to record this target if it has actual fields
+        if (!!mask)
+        {
+          std::map<LogicalRegion,RegionVersioning>::iterator region_finder =
+            finder->second.region_versioning.find(handle);
+          if (region_finder == finder->second.region_versioning.end())
+          {
+            region_finder = finder->second.region_versioning.insert(
+                std::make_pair(handle, RegionVersioning())).first;
+            region_finder->second.ready_event = Runtime::create_rt_user_event();
+          }
+          const std::pair<EqSetTracker*,AddressSpaceID> key(tracker, space);
+#ifdef DEBUG_LEGION
+          assert(region_finder->second.trackers.find(key) ==
+              region_finder->second.trackers.end());
+#endif
+          region_finder->second.trackers.emplace(std::make_pair(key, mask));
+          result = region_finder->second.ready_event;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_arrivals > 0);
+#endif
+        if ((--finder->second.remaining_arrivals) == 0)
+        {
+          done = true;
+          to_perform.swap(finder->second.region_versioning);
+          pending_versioning.erase(finder);
+        }
+      }
+      if (done)
+        finalize_collective_versioning_analysis(index, parent_req_index,
+                                                root_space, to_perform);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveVersioning<OP>::finalize_collective_versioning_analysis(
+        unsigned index, unsigned parent_req_index, IndexSpace root_space,
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext *context = this->get_context();
+      for (LegionMap<LogicalRegion,RegionVersioning>::const_iterator pit =
+            to_perform.begin(); pit != to_perform.end(); pit++)
+      {
+        IndexSpaceNode *expr =
+          this->runtime->forest->get_node(pit->first.get_index_space());
+        std::vector<RtEvent> preconditions;
+        LegionList<FieldSet<std::pair<EqSetTracker*,AddressSpaceID> > > 
+          fields;
+        compute_field_sets(FieldMask(), pit->second.trackers, fields);
+        for (LegionList<FieldSet<std::pair<EqSetTracker*,AddressSpaceID> > >::
+              const_iterator fit = fields.begin(); fit != fields.end(); fit++)
+        {
+          std::vector<EqSetTracker*> targets;
+          std::vector<AddressSpaceID> target_spaces;
+          targets.reserve(fit->elements.size());
+          target_spaces.reserve(fit->elements.size());
+          for (std::set<std::pair<EqSetTracker*,AddressSpaceID> >::
+                const_iterator it = fit->elements.begin(); 
+                it != fit->elements.end(); it++)
+          {
+            targets.push_back(it->first);
+            target_spaces.push_back(it->second);
+          }
+          RtEvent precondition = context->compute_equivalence_sets(
+              parent_req_index, targets, target_spaces, expr, 
+              fit->set_mask, root_space); 
+          if (precondition.exists())
+            preconditions.push_back(precondition);
+        }
+#ifdef DEBUG_LEGION
+        assert(pit->second.ready_event.exists());
+#endif
+        if (!preconditions.empty())
+          Runtime::trigger_event(pit->second.ready_event,
+              Runtime::merge_events(preconditions));
+        else
+          Runtime::trigger_event(pit->second.ready_event);
+      }
+    }
+
+    // Explicit instantiations
+    template class CollectiveVersioning<Operation>;
+    template class CollectiveVersioning<MapOp>;
+    template class CollectiveVersioning<FillOp>;
+    template class CollectiveVersioning<AttachOp>;
+    template class CollectiveVersioning<DetachOp>;
+    template class CollectiveVersioning<AcquireOp>;
+    template class CollectiveVersioning<ReleaseOp>;
+    template class CollectiveVersioning<DiscardOp>;
+    template class CollectiveVersioning<DependentPartitionOp>;
+    template class CollectiveVersioning<TaskOp>;
 
     ///////////////////////////////////////////////////////////// 
     // CollectiveViewCreator
@@ -3384,20 +3521,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     CollectiveViewCreator<OP>::CollectiveViewCreator(Runtime *rt)
-      : OP(rt)
+      : CollectiveVersioning<OP>(rt)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    CollectiveViewCreator<OP>::CollectiveViewCreator(
-                                           const CollectiveViewCreator<OP> &rhs)
-      : OP(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -3418,7 +3544,7 @@ namespace Legion {
       assert(pending_rendezvous.empty());
       assert(pending_collectives.empty());
 #endif
-    }
+    } 
 
     //--------------------------------------------------------------------------
     template<typename OP>
@@ -12616,7 +12742,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      complete_mapping();
+      complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     }
 
     //--------------------------------------------------------------------------
@@ -13462,7 +13588,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      complete_mapping();
+      complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     }
 
     //--------------------------------------------------------------------------
@@ -18953,7 +19079,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      complete_mapping();
+      complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     }
 
     //--------------------------------------------------------------------------
@@ -20823,27 +20949,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexAttachOp::IndexAttachOp(const IndexAttachOp &rhs)
-      : CollectiveViewCreator<Operation>(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     IndexAttachOp::~IndexAttachOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAttachOp& IndexAttachOp::operator=(const IndexAttachOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -21666,6 +21774,16 @@ namespace Legion {
       return true;
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent PointAttachOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return owner->rendezvous_collective_versioning_analysis(index, handle,
+          tracker, runtime->address_space, mask, parent_req_index, root_space);
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Detach Op 
     /////////////////////////////////////////////////////////////
@@ -22016,27 +22134,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexDetachOp::IndexDetachOp(const IndexDetachOp &rhs)
-      : CollectiveViewCreator<Operation>(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     IndexDetachOp::~IndexDetachOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexDetachOp& IndexDetachOp::operator=(const IndexDetachOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -22498,6 +22598,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PointDetachOp::perform_collective_versioning_analysis(
+        unsigned index, LogicalRegion handle, EqSetTracker *tracker,
+        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+    //--------------------------------------------------------------------------
+    {
+      return owner->rendezvous_collective_versioning_analysis(index, handle,
+          tracker, runtime->address_space, mask, parent_req_index, root_space);
     }
 
     ///////////////////////////////////////////////////////////// 

@@ -12291,6 +12291,12 @@ namespace Legion {
                                                   remote_address_space);
               break;
             }
+          case SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS:
+            {
+              runtime->handle_slice_remote_collective_versioning_rendezvous(
+                                                                      derez);
+              break;
+            }
           case SLICE_REMOTE_OUTPUT_EXTENTS:
             {
               runtime->handle_slice_remote_output_extents(derez);
@@ -13395,6 +13401,7 @@ namespace Legion {
           case SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE:
           case SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR:
           case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
+          case SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS:
           case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
           case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
           case SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE:
@@ -22149,6 +22156,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_remote_versioning_rendezvous(Processor target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_output_extents(Processor target, 
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24641,6 +24657,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SliceTask::handle_collective_rendezvous(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_remote_collective_versioning_rendezvous(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_versioning_rendezvous(derez, this);
     }
 
     //--------------------------------------------------------------------------

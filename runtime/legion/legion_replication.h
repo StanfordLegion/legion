@@ -1406,7 +1406,11 @@ namespace Legion {
       CollectiveViewRendezvous(CollectiveID, ReplicateContext *ctx, 
           Operation *op, Finalizer *finalizer, 
           const RendezvousKey &key, RegionTreeID tid);
+      CollectiveViewRendezvous(const CollectiveViewRendezvous &rhs) = delete;
       virtual ~CollectiveViewRendezvous(void);
+    public:
+      CollectiveViewRendezvous& operator=(
+          const CollectiveViewRendezvous &rhs) = delete;
     public:
       virtual MessageKind get_message_kind(void) const
         { return SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS; }
@@ -1422,6 +1426,48 @@ namespace Legion {
       Finalizer *const finalizer;
     protected:
       std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
+    };
+
+    /**
+     * \class CollectiveVersioningRendezvous
+     * A gather collective to perform the rendezvous for performing
+     * versioning analysis for collective region requirements
+     */
+    class CollectiveVersioningRendezvous : public GatherCollective {
+    public:
+      typedef CollectiveVersioningBase::RegionVersioning RegionVersioning;
+      class Finalizer {
+      public:
+        virtual void finalize_collective_versioning(unsigned index,
+            unsigned parent_req_index, IndexSpace root_space,
+            LegionMap<LogicalRegion,RegionVersioning> &pending_versions) = 0;
+      };
+    public:
+      CollectiveVersioningRendezvous(CollectiveID, ReplicateContext *ctx, 
+          Operation *op, Finalizer *finalizer, ShardID owner, unsigned index);
+      CollectiveVersioningRendezvous(
+          const CollectiveVersioningRendezvous &rhs) = delete;
+      virtual ~CollectiveVersioningRendezvous(void);
+    public:
+      CollectiveVersioningRendezvous& operator=(
+          const CollectiveVersioningRendezvous &rhs) = delete;
+    public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS; }
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_gather(void);
+    public:
+      void perform_rendezvous(unsigned parent_req_index, IndexSpace root_space,
+          LegionMap<LogicalRegion,RegionVersioning> &pending_versions);
+    public:
+      Operation *const op;
+      Finalizer *const finalizer;
+      const unsigned index;
+    protected:
+      LegionMap<LogicalRegion,RegionVersioning> pending_versions;
+      IndexSpace root_space;
+      unsigned parent_req_index;
     };
 
     /**
@@ -1756,31 +1802,69 @@ namespace Legion {
     };
 
     /**
+     * \class ReplCollectiveVersioning
+     */
+    template<typename OP>
+    class ReplCollectiveVersioning : public OP,
+      public CollectiveVersioningRendezvous::Finalizer{
+    public:
+      typedef typename OP::RegionVersioning RegionVersioning;
+    public:
+      ReplCollectiveVersioning(Runtime *rt);
+      ReplCollectiveVersioning(
+          const ReplCollectiveVersioning<OP> &rhs) = delete;
+    public:
+      ReplCollectiveVersioning<OP>& operator=(
+          const ReplCollectiveVersioning<OP> &rhs) = delete;
+    public:
+      virtual void deactivate(bool free = true);
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index, IndexSpace root_space,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      virtual void finalize_collective_versioning(unsigned index,
+            unsigned parent_req_index, IndexSpace root_space,
+            LegionMap<LogicalRegion,RegionVersioning> &pending_versions);
+    public:
+      void create_collective_rendezvous(unsigned requirement_index);
+      virtual void shard_off_collective_rendezvous(
+          std::set<RtEvent> &done_events);
+      virtual void predicate_false_collective_rendezvous(void);
+    protected:
+      std::map<unsigned,
+             CollectiveVersioningRendezvous*> collective_versioning_rendezvous;
+    };
+
+    /**
      * \class ReplCollectiveViewCreator
      * This class provides additional functionality for creating collective
      * views in control replication contexts by helping to manage the 
      * rendezvous between the shards.
      */
     template<typename OP>
-    class ReplCollectiveViewCreator : public OP, 
+    class ReplCollectiveViewCreator : public ReplCollectiveVersioning<OP>, 
       public CollectiveViewRendezvous::Finalizer {
     public:
       typedef typename OP::RendezvousKey RendezvousKey;
       typedef typename OP::CollectiveRendezvous CollectiveRendezvous;
     public:
       ReplCollectiveViewCreator(Runtime *rt);
-      ReplCollectiveViewCreator(const ReplCollectiveViewCreator<OP> &rhs);
+      ReplCollectiveViewCreator(
+          const ReplCollectiveViewCreator<OP> &rhs) = delete;
     public:
-      virtual void deactivate(bool free = true);
+      ReplCollectiveViewCreator<OP>& operator=(
+          const ReplCollectiveViewCreator<OP> &rhs) = delete;
+    public:
+      virtual void deactivate(bool free = true); 
       virtual void construct_collective_mapping(const RendezvousKey &key,
                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       virtual void finalize_collective_mapping(const RendezvousKey &key,
                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
-      void create_collective_view_rendezvous(RegionTreeID tid,
+      void create_collective_rendezvous(RegionTreeID tid,
           unsigned requirement_index, unsigned analysis_index = 0);
-      void shard_off_collective_view_rendezvous(std::set<RtEvent> &done_events);
-      void predicate_false_collective_view_rendezvous(void);
-    protected:
+      virtual void shard_off_collective_rendezvous(
+          std::set<RtEvent> &done_events);
+      virtual void predicate_false_collective_rendezvous(void);
+    protected: 
       std::map<RendezvousKey,
                CollectiveViewRendezvous*> collective_view_rendezvous;
     };
@@ -1841,10 +1925,10 @@ namespace Legion {
     class ReplIndexTask : public ReplCollectiveViewCreator<IndexTask> {
     public:
       ReplIndexTask(Runtime *rt);
-      ReplIndexTask(const ReplIndexTask &rhs);
+      ReplIndexTask(const ReplIndexTask &rhs) = delete;
       virtual ~ReplIndexTask(void);
     public:
-      ReplIndexTask& operator=(const ReplIndexTask &rhs);
+      ReplIndexTask& operator=(const ReplIndexTask &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2024,13 +2108,14 @@ namespace Legion {
      * A copy operation that is aware that it is being
      * executed in a control replication context.
      */
-    class ReplFillOp : public FillOp {
+    class ReplFillOp : 
+      public ReplCollectiveVersioning<CollectiveVersioning<FillOp> > {
     public:
       ReplFillOp(Runtime *rt);
-      ReplFillOp(const ReplFillOp &rhs);
+      ReplFillOp(const ReplFillOp &rhs) = delete;
       virtual ~ReplFillOp(void);
     public:
-      ReplFillOp& operator=(const ReplFillOp &rhs);
+      ReplFillOp& operator=(const ReplFillOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   DistributedID fresh_did,
@@ -2041,11 +2126,16 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       virtual bool is_collective_first_local_shard(void) const
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space);
       virtual RtEvent initialize_fill_view(void);
       virtual void predicate_false(void);
     public:
@@ -2105,7 +2195,8 @@ namespace Legion {
      * A discard operation that is aware that it is being
      * exected in a control replication context.
      */
-    class ReplDiscardOp : public DiscardOp {
+    class ReplDiscardOp : 
+      public ReplCollectiveVersioning<CollectiveVersioning<DiscardOp> > {
     public:
       ReplDiscardOp(Runtime *rt);
       ReplDiscardOp(const ReplDiscardOp &rhs) = delete;
@@ -2122,6 +2213,10 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2313,14 +2408,10 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
     protected:
       void select_sharding_function(void);
       void find_remote_targets(std::vector<ApEvent> &preconditions);
@@ -2544,10 +2635,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<MapOp> > {
     public:
       ReplMapOp(Runtime *rt);
-      ReplMapOp(const ReplMapOp &rhs);
+      ReplMapOp(const ReplMapOp &rhs) = delete;
       virtual ~ReplMapOp(void);
     public:
-      ReplMapOp& operator=(const ReplMapOp &rhs);
+      ReplMapOp& operator=(const ReplMapOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx);
     public:
@@ -2561,14 +2652,10 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       CollectiveID mapping_check, sources_check;
@@ -2584,10 +2671,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<AttachOp> > {
     public:
       ReplAttachOp(Runtime *rt);
-      ReplAttachOp(const ReplAttachOp &rhs);
+      ReplAttachOp(const ReplAttachOp &rhs) = delete;
       virtual ~ReplAttachOp(void);
     public:
-      ReplAttachOp& operator=(const ReplAttachOp &rhs);
+      ReplAttachOp& operator=(const ReplAttachOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   bool collective_instances,
@@ -2609,14 +2696,10 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       RtBarrier collective_map_barrier;
@@ -2647,10 +2730,10 @@ namespace Legion {
     class ReplIndexAttachOp : public ReplCollectiveViewCreator<IndexAttachOp> {
     public:
       ReplIndexAttachOp(Runtime *rt);
-      ReplIndexAttachOp(const ReplIndexAttachOp &rhs);
+      ReplIndexAttachOp(const ReplIndexAttachOp &rhs) = delete;
       virtual ~ReplIndexAttachOp(void);
     public:
-      ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs);
+      ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2678,10 +2761,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<DetachOp> > {
     public:
       ReplDetachOp(Runtime *rt);
-      ReplDetachOp(const ReplDetachOp &rhs);
+      ReplDetachOp(const ReplDetachOp &rhs) = delete;
       virtual ~ReplDetachOp(void);
     public:
-      ReplDetachOp& operator=(const ReplDetachOp &rhs);
+      ReplDetachOp& operator=(const ReplDetachOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   bool collective_instances,
@@ -2695,14 +2778,10 @@ namespace Legion {
       virtual void detach_external_instance(PhysicalManager *manager);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       // Help for unordered detachments
@@ -2724,10 +2803,10 @@ namespace Legion {
     class ReplIndexDetachOp : public ReplCollectiveViewCreator<IndexDetachOp> {
     public:
       ReplIndexDetachOp(Runtime *rt);
-      ReplIndexDetachOp(const ReplIndexDetachOp &rhs);
+      ReplIndexDetachOp(const ReplIndexDetachOp &rhs) = delete;
       virtual ~ReplIndexDetachOp(void);
     public:
-      ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs);
+      ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2757,10 +2836,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<AcquireOp> > {
     public:
       ReplAcquireOp(Runtime *rt);
-      ReplAcquireOp(const ReplAcquireOp &rhs);
+      ReplAcquireOp(const ReplAcquireOp &rhs) = delete;
       virtual ~ReplAcquireOp(void);
     public:
-      ReplAcquireOp& operator=(const ReplAcquireOp &rhs);
+      ReplAcquireOp& operator=(const ReplAcquireOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *context,
                                   bool first_local_shard);
@@ -2770,18 +2849,15 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       virtual void predicate_false(void);
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2795,29 +2871,26 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<ReleaseOp> > {
     public:
       ReplReleaseOp(Runtime *rt);
-      ReplReleaseOp(const ReplReleaseOp &rhs);
+      ReplReleaseOp(const ReplReleaseOp &rhs) = delete;
       virtual ~ReplReleaseOp(void);
     public:
-      ReplReleaseOp& operator=(const ReplReleaseOp &rhs);
+      ReplReleaseOp& operator=(const ReplReleaseOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *context,
                                   bool first_local_shard);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       virtual void predicate_false(void);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances); 
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);

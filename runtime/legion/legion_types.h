@@ -811,6 +811,7 @@ namespace Legion {
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
+      SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS,
       SLICE_REMOTE_OUTPUT_EXTENTS,
       SLICE_REMOTE_OUTPUT_REGISTRATION,
       DISTRIBUTED_REMOTE_REGISTRATION,
@@ -1045,6 +1046,7 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE,
       SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR,
       SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW,
+      SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION,
       SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE,
@@ -1129,6 +1131,7 @@ namespace Legion {
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
+        "Slice Remote Collective Versioning Rendezvous",              \
         "Slice Remote Output Region Extents",                         \
         "Slice Remote Output Region Registration",                    \
         "Distributed Remote Registration",                            \
@@ -1363,6 +1366,7 @@ namespace Legion {
         "Control Replication Collective Shard Participants Exchange", \
         "Control Replication Collective Implicit Sharding Functor",   \
         "Control Replication Collective Create Fill View",            \
+        "Control Replication Collective Versioning Rendezvous",       \
         "Control Replication Collective View Rendezvous",             \
         "Control Replication Collective Concurrent Execution Validation",\
         "Control Replication Collective Projection Tree Exchange",    \
@@ -1722,7 +1726,7 @@ namespace Legion {
       COLLECTIVE_LOC_17 = 17, 
       COLLECTIVE_LOC_18 = 18, 
       COLLECTIVE_LOC_19 = 19,
-      //COLLECTIVE_LOC_20 = 20,
+      COLLECTIVE_LOC_20 = 20,
       COLLECTIVE_LOC_21 = 21, 
       COLLECTIVE_LOC_22 = 22, 
       COLLECTIVE_LOC_23 = 23,

@@ -962,14 +962,10 @@ namespace Legion {
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -1260,6 +1256,8 @@ namespace Legion {
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
       void unpack_slice_commit(Deserializer &derez);
+      void unpack_slice_collective_versioning_rendezvous(Deserializer &derez,
+                                        unsigned index, size_t total_points);
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -1448,6 +1446,13 @@ namespace Legion {
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index,
+                       IndexSpace root_space);
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index, IndexSpace root_space,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
       virtual RtEvent convert_collective_views(unsigned requirement_index,
                        unsigned analysis_index, LogicalRegion region,
                        const InstanceSet &targets, InnerContext *physical_ctx,
@@ -1463,6 +1468,8 @@ namespace Legion {
                                    std::pair<DistributedID,FieldMask> > &insts);
       static void handle_collective_rendezvous(Deserializer &derez,
                                        Runtime *runtime, AddressSpaceID source);
+      static void handle_collective_versioning_rendezvous(Deserializer &derez,
+                                                          Runtime *runtime);
       static void handle_verify_concurrent_execution(Deserializer &derez);
       static void handle_remote_output_extents(Deserializer &derez);
       static void handle_remote_output_registration(Deserializer &derez);

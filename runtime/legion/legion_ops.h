@@ -538,14 +538,10 @@ namespace Legion {
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
     public:
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
@@ -810,6 +806,48 @@ namespace Legion {
     };
 
     /**
+     * \class CollectiveVersioningBase
+     */
+    class CollectiveVersioningBase {
+    public:
+      struct RegionVersioning {
+        LegionMap<std::pair<EqSetTracker*,AddressSpaceID>,FieldMask> trackers;
+        RtUserEvent ready_event;
+      };
+      struct PendingVersioning {
+        LegionMap<LogicalRegion,RegionVersioning> region_versioning;
+        size_t remaining_arrivals;
+      };
+    protected:
+      std::map<unsigned,PendingVersioning>              pending_versioning;
+    };
+
+    /**
+     * \class CollectiveVersioning
+     */
+    template<typename OP>
+    class CollectiveVersioning : public OP,
+                                 public CollectiveVersioningBase {
+    public:
+      CollectiveVersioning(Runtime *rt);
+      CollectiveVersioning(const CollectiveVersioning<OP> &rhs) = delete; 
+    public:
+      CollectiveVersioning<OP>& operator=(
+          const CollectiveVersioning<OP> &rhs) = delete;
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      RtEvent rendezvous_collective_versioning_analysis(unsigned index,
+          LogicalRegion handle, EqSetTracker *tracker, AddressSpaceID space,
+          const FieldMask &mask, unsigned parent_req_index, 
+          IndexSpace root_space);
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index, IndexSpace root_space,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+    };
+
+    /**
      * \class CollectiveViewCreatorBase
      * The base class that has most of the implementations for 
      * collective views creation, modulo the parts that hook in
@@ -946,7 +984,7 @@ namespace Legion {
       mutable LocalLock                                 collective_lock;
       std::map<PendingRendezvousKey,
                std::vector<RendezvousResult*> >         pending_rendezvous;
-      std::map<RendezvousKey,PendingCollective>         pending_collectives;
+      std::map<RendezvousKey,PendingCollective>         pending_collectives; 
     };
 
     /**
@@ -956,10 +994,14 @@ namespace Legion {
      * point ops/tasks that need to create collective views 
      */
     template<typename OP>
-    class CollectiveViewCreator : public OP, public CollectiveViewCreatorBase {
+    class CollectiveViewCreator : public CollectiveVersioning<OP>, 
+                                  public CollectiveViewCreatorBase {
     public:
       CollectiveViewCreator(Runtime *rt);
-      CollectiveViewCreator(const CollectiveViewCreator<OP> &rhs); 
+      CollectiveViewCreator(const CollectiveViewCreator<OP> &rhs) = delete; 
+    public:
+      CollectiveViewCreator<OP>& operator=(
+          const CollectiveViewCreator<OP> &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -3977,10 +4019,10 @@ namespace Legion {
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
     public:
       IndexAttachOp(Runtime *rt);
-      IndexAttachOp(const IndexAttachOp &rhs);
+      IndexAttachOp(const IndexAttachOp &rhs) = delete;
       virtual ~IndexAttachOp(void);
     public:
-      IndexAttachOp& operator=(const IndexAttachOp &rhs);
+      IndexAttachOp& operator=(const IndexAttachOp &rhs) = delete;
     public:
       ExternalResources initialize(InnerContext *ctx,
                                    RegionTreeNode *upper_bound,
@@ -4060,14 +4102,10 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_attach(void) const { return true; }
@@ -4145,10 +4183,10 @@ namespace Legion {
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
       IndexDetachOp(Runtime *rt);
-      IndexDetachOp(const IndexDetachOp &rhs);
+      IndexDetachOp(const IndexDetachOp &rhs) = delete;
       virtual ~IndexDetachOp(void);
     public:
-      IndexDetachOp& operator=(const IndexDetachOp &rhs);
+      IndexDetachOp& operator=(const IndexDetachOp &rhs) = delete;
     public:
       Future initialize_detach(InnerContext *ctx, LogicalRegion parent,
                                RegionTreeNode *upper_bound,
@@ -4234,14 +4272,10 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
-#if 0
-      virtual void perform_collective_versioning_analysis(unsigned index,
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space, RtUserEvent compute_event);
-      virtual void report_collective_versioning_analysis(unsigned index,
-                       LogicalRegion handle, const VersionInfo &version_info);
-#endif
+                       IndexSpace root_space);
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_detach(void) const { return true; }
