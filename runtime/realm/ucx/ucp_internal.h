@@ -110,7 +110,7 @@ namespace UCP {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
       int pollers_max{2};
-      int num_priorities{1};
+      int num_priorities{2};
       int prog_boff_max{4}; //progress thread maximum backoff
       int prog_itr_max{16};
       int rdesc_rel_max{16};
