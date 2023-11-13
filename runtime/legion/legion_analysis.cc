@@ -26870,12 +26870,13 @@ namespace Legion {
             record_equivalence_sets(version_info, version_mask);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
-          if (!remaining_mask)
+          if (!remaining_mask && !collective_rendezvous)
             return;
         }
       }
       // Retake the lock in exclusive mode and make sure we don't lose the race
       RtUserEvent compute_event;
+      if (!!remaining_mask)
       {
         FieldMask waiting_mask;
         AutoLock m_lock(manager_lock);
@@ -26904,7 +26905,7 @@ namespace Legion {
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields here and we're not waiting 
           // on any other computations then we're done
-          if (!remaining_mask && !waiting_mask)
+          if (!remaining_mask && !waiting_mask && !collective_rendezvous)
             return;
         }
         // If we still have remaining fields then we need to
