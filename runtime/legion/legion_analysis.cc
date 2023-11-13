@@ -24792,7 +24792,7 @@ namespace Legion {
       // If there are multiple targets then we only want to perform any
       // creations on the first target and then we'll broadcast the results
       // out to any other targets when we create the equivalence sets
-      if ((targets.size() > 1) && 
+      if (!to_create.empty() && (targets.size() > 1) && 
           (context->runtime->address_space != target_mapping.get_origin()))
       {
         to_create.clear();
@@ -25813,21 +25813,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EqSetTracker::record_pending_equivalence_set(EquivalenceSet *set,
-     const FieldMask &mask,
-     const LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > *new_subscriptions)
+                                                      const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(tracker_lock);
       if (pending_equivalence_sets == NULL)
         pending_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
       pending_equivalence_sets->insert(set, mask);
-      if (new_subscriptions != NULL)
-      {
-        for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
-              it = new_subscriptions->begin(); 
-              it != new_subscriptions->end(); it++)
-          record_subscriptions(it->first, it->second);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -26248,8 +26240,7 @@ namespace Legion {
                                             target_mapping, targets);
       }
       if (local_target != NULL)
-        local_target->record_pending_equivalence_set(set, recording_mask,
-                                                     &to_notify);
+        local_target->record_pending_equivalence_set(set, recording_mask);
       // Trigger the event that we're done
       if (!notified_events.empty())
         Runtime::trigger_event(notified_event,
@@ -26361,8 +26352,7 @@ namespace Legion {
       if (target_mapping.contains(runtime->address_space))
       {
         unsigned index = target_mapping.find_index(runtime->address_space);
-        targets[index]->record_pending_equivalence_set(set, recording_mask,
-                                                       &to_notify);
+        targets[index]->record_pending_equivalence_set(set, recording_mask);
       }
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));

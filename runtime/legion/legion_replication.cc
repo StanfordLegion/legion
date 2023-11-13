@@ -496,7 +496,7 @@ namespace Legion {
     void ReplCollectiveViewCreator<OP>::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      OP::deactivate(freeop);
+      ReplCollectiveVersioning<OP>::deactivate(freeop);
       for (typename std::map<RendezvousKey,
                              CollectiveViewRendezvous*>::const_iterator
             it = collective_view_rendezvous.begin(); 
@@ -16789,7 +16789,7 @@ namespace Legion {
         rez.serialize(pit->first);
         rez.serialize(pit->second.ready_event);
         rez.serialize<size_t>(pit->second.trackers.size());
-        for (LegionMap<std::pair<EqSetTracker*,AddressSpaceID>,FieldMask>::
+        for (LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,FieldMask>::
               const_iterator it = pit->second.trackers.begin(); it !=
               pit->second.trackers.end(); it++)
         {
@@ -16831,7 +16831,7 @@ namespace Legion {
         derez.deserialize(num_trackers);
         for (unsigned idx2 = 0; idx2 < num_trackers; idx2++)
         {
-          std::pair<EqSetTracker*,AddressSpaceID> key;
+          std::pair<AddressSpaceID,EqSetTracker*> key;
           derez.deserialize(key.first);
           derez.deserialize(key.second);
 #ifdef DEBUG_LEGION
@@ -16852,7 +16852,7 @@ namespace Legion {
     RtEvent CollectiveVersioningRendezvous::post_gather(void)
     //--------------------------------------------------------------------------
     {
-      if (!pending_versions.empty())
+      if (!pending_versions.empty() && (local_shard == target))
         finalizer->finalize_collective_versioning(index, parent_req_index,
             root_space, pending_versions);
       return RtEvent::NO_RT_EVENT;

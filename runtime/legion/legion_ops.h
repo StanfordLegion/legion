@@ -811,7 +811,7 @@ namespace Legion {
     class CollectiveVersioningBase {
     public:
       struct RegionVersioning {
-        LegionMap<std::pair<EqSetTracker*,AddressSpaceID>,FieldMask> trackers;
+        LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,FieldMask> trackers;
         RtUserEvent ready_event;
       };
       struct PendingVersioning {

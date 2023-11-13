@@ -1769,6 +1769,7 @@ namespace Legion {
     {
       // Should only be called in derived types
       assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3430,7 +3431,7 @@ namespace Legion {
                 std::make_pair(handle, RegionVersioning())).first;
             region_finder->second.ready_event = Runtime::create_rt_user_event();
           }
-          const std::pair<EqSetTracker*,AddressSpaceID> key(tracker, space);
+          const std::pair<AddressSpaceID,EqSetTracker*> key(space, tracker);
 #ifdef DEBUG_LEGION
           assert(region_finder->second.trackers.find(key) ==
               region_finder->second.trackers.end());
@@ -3468,22 +3469,22 @@ namespace Legion {
         IndexSpaceNode *expr =
           this->runtime->forest->get_node(pit->first.get_index_space());
         std::vector<RtEvent> preconditions;
-        LegionList<FieldSet<std::pair<EqSetTracker*,AddressSpaceID> > > 
+        LegionList<FieldSet<std::pair<AddressSpaceID,EqSetTracker*> > >
           fields;
         compute_field_sets(FieldMask(), pit->second.trackers, fields);
-        for (LegionList<FieldSet<std::pair<EqSetTracker*,AddressSpaceID> > >::
+        for (LegionList<FieldSet<std::pair<AddressSpaceID,EqSetTracker*> > >::
               const_iterator fit = fields.begin(); fit != fields.end(); fit++)
         {
           std::vector<EqSetTracker*> targets;
           std::vector<AddressSpaceID> target_spaces;
           targets.reserve(fit->elements.size());
           target_spaces.reserve(fit->elements.size());
-          for (std::set<std::pair<EqSetTracker*,AddressSpaceID> >::
+          for (std::set<std::pair<AddressSpaceID,EqSetTracker*> >::
                 const_iterator it = fit->elements.begin(); 
                 it != fit->elements.end(); it++)
           {
-            targets.push_back(it->first);
-            target_spaces.push_back(it->second);
+            targets.push_back(it->second);
+            target_spaces.push_back(it->first);
           }
           RtEvent precondition = context->compute_equivalence_sets(
               parent_req_index, targets, target_spaces, expr, 

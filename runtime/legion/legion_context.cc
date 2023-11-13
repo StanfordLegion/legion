@@ -3719,6 +3719,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(targets.size() == target_spaces.size());
+      assert(std::is_sorted(target_spaces.begin(), target_spaces.end()));
 #endif
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
@@ -22632,6 +22633,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(targets.size() == target_spaces.size());
+      assert(std::is_sorted(target_spaces.begin(), target_spaces.end()));
 #endif
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;

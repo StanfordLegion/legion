@@ -10598,7 +10598,7 @@ namespace Legion {
           derez.deserialize(num_trackers);
           for (unsigned idx2 = 0; idx2 < num_trackers; idx2++)
           {
-            std::pair<EqSetTracker*,AddressSpaceID> key;
+            std::pair<AddressSpaceID,EqSetTracker*> key;
             derez.deserialize(key.first);
             derez.deserialize(key.second);
 #ifdef DEBUG_LEGION
@@ -10617,6 +10617,12 @@ namespace Legion {
           done = true;
           to_perform.swap(finder->second.region_versioning);
           pending_versioning.erase(finder);
+        }
+        if (num_regions == 0)
+        {
+          RtUserEvent done_event;
+          derez.deserialize(done_event);
+          Runtime::trigger_event(done_event);
         }
       }
       if (done)
@@ -12720,7 +12726,7 @@ namespace Legion {
 #endif
           rez.serialize(pit->second.ready_event);
           rez.serialize<size_t>(pit->second.trackers.size());
-          for (LegionMap<std::pair<EqSetTracker*,AddressSpaceID>,FieldMask>::
+          for (LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,FieldMask>::
                 const_iterator it = pit->second.trackers.begin(); it != 
                 pit->second.trackers.end(); it++)
           {
@@ -12728,6 +12734,15 @@ namespace Legion {
             rez.serialize(it->first.second);
             rez.serialize(it->second);
           }
+        }
+        if (to_perform.empty())
+        {
+          // If we don't have any local points depending on the result
+          // then we need to pack an event to make sure this message gets
+          // there before the index task is cleaned up
+          const RtUserEvent done_event = Runtime::create_rt_user_event();
+          rez.serialize(done_event);
+          map_applied_conditions.insert(done_event);  
         }
       }
       runtime->send_slice_remote_versioning_rendezvous(orig_proc, rez);
