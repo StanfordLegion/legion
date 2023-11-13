@@ -3,8 +3,8 @@
 using namespace Realm;
 
 template <int N, typename T, int N2 = N, typename T2 = T>
-bool test_apply_transform(std::vector<T2> transform, Point<N2, T2> offset,
-                          Rect<N, T> rect, Rect<N2, T2> exp_rect)
+bool test_apply_transform(std::vector<T2> transform, const Point<N2, T2> &offset,
+                          const Rect<N, T> &rect, const Rect<N2, T2> &exp_rect)
 {
   Matrix<N2, N, T2> transpose;
   for(int i = 0; i < N2; i++) {
