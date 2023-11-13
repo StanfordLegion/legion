@@ -14474,7 +14474,10 @@ namespace Legion {
       if (!ready_events.empty())
       {
         const RtEvent ready = Runtime::merge_events(ready_events);
-        parent_ctx->add_to_trigger_execution_queue(this, ready);
+        if (ready.exists() && !ready.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+        else
+          trigger_execution();
       }
       else
         trigger_execution();
@@ -14618,7 +14621,10 @@ namespace Legion {
       if (!ready_events.empty())
       {
         const RtEvent ready = Runtime::merge_events(ready_events);
-        parent_ctx->add_to_trigger_execution_queue(this, ready);
+        if (ready.exists() && !ready.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+        else
+          trigger_execution();
       }
       else
         trigger_execution();
