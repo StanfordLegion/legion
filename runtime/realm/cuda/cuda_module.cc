@@ -54,6 +54,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -2117,6 +2118,32 @@ namespace Realm {
                                                  num_threads, 1, 1, 0,
                                                  stream->get_stream(), args, NULL));
     }
+    void GPU::launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                      size_t elem_size, GPUStream *stream)
+    {
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+      size_t num_elems = copy_info.extents[1] * copy_info.extents[2];
+      assert((1ULL << log_elem_size) <= elem_size);
+
+      GPUFuncInfo &func_info = transpose_kernels[log_elem_size];
+
+      unsigned int num_blocks = 0, num_threads = 0;
+      assert(copy_info.extents[0] <= CUDA_MAX_FIELD_BYTES);
+      copy_info.tile_size = sqrt(func_info.occ_num_threads);
+      size_t shared_mem_bytes =
+          (copy_info.tile_size * (copy_info.tile_size + 1)) * copy_info.extents[0];
+
+      num_threads = copy_info.tile_size * copy_info.tile_size;
+      num_blocks =
+          std::min(static_cast<unsigned int>((num_elems + num_threads - 1) / num_threads),
+                   static_cast<unsigned int>(func_info.occ_num_blocks));
+
+      void *args[] = {&copy_info};
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
+                                                 num_threads, 1, 1, shared_mem_bytes,
+                                                 stream->get_stream(), args, NULL));
+    }
 
     void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim,
                                          size_t elem_size, size_t volume,
@@ -3400,59 +3427,58 @@ namespace Realm {
         CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
                                                         device_module, name));
 
-        // We use MaxActiveBlocksPerMultiprocessor here since we have a static
-        // tile size here based on the size of the static shared memory
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+        auto blocksize_to_sharedmem = [](int block_size) -> size_t {
+          int tile_size = sqrt(block_size);
+          return static_cast<size_t>(tile_size * (tile_size + 1) * CUDA_MAX_FIELD_BYTES);
+        };
 
-        func_info.occ_num_blocks *=
-            numSMs; // Fill up the GPU with the number of blocks if possible
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+            &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func,
+            blocksize_to_sharedmem, 0, 0));
+
+        // func_info.occ_num_blocks *=
+        //  numSMs; // Fill up the GPU with the number of blocks if possible
         transpose_kernels[log_bit_sz] = func_info;
 
         for(unsigned int d = 1; d <= CUDA_MAX_DIM; d++) {
-          std::snprintf(name, sizeof(name), "memcpy_affine_batch%uD_%u", d,
-                        bit_sz);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          std::snprintf(name, sizeof(name), "memcpy_affine_batch%uD_%u", d, bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
           // Here, we don't have a constraint on the block size, so allow
           // the driver to decide the best combination we can launch
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
           batch_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "fill_affine_large%uD_%u", d,
-                        bit_sz);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          std::snprintf(name, sizeof(name), "fill_affine_large%uD_%u", d, bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
           // Here, we don't have a constraint on the block size, so allow
           // the driver to decide the best combination we can launch
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
           fill_affine_large_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "fill_affine_batch%uD_%u", d,
-                        bit_sz);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          std::snprintf(name, sizeof(name), "fill_affine_batch%uD_%u", d, bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
           // Here, we don't have a constraint on the block size, so allow
           // the driver to decide the best combination we can launch
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
           batch_fill_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d,
-                        bit_sz);
+          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d, bit_sz);
 
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
 
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
 
           indirect_copy_kernels[d - 1][log_bit_sz] = func_info;
         }

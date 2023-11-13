@@ -466,8 +466,6 @@ namespace Realm {
         transpose_info.extents[0] = contig_bytes;
         transpose_info.extents[1] = lines;
         transpose_info.extents[2] = planes;
-        // Remove this rectangle from the copy info, since we've put
-        // this in the transpose info.
         copy_infos.num_rects--;
       } else {
         copy_info.dst.strides[0] = out_lstride;
@@ -632,6 +630,7 @@ namespace Realm {
             if(!in_gpu || (!out_gpu && !out_is_ipc)) {
               bytes_left = std::min(bytes_left, (size_t)(4U << 20U));
             }
+
             const size_t bytes_to_copy = populate_affine_copy_info(
                 copy_infos, min_align, transpose_copy, in_alc, in_base, in_gpu, out_alc,
                 out_base, out_gpu, bytes_left);
@@ -706,10 +705,12 @@ namespace Realm {
           bytes_to_fence += bytes;
         }
 
-        // TODO(apryakhin@): Once we make sure that cuMemcpy3DAsync handles
-        // transpose copies, make it a default path and remove the
-        // underlying implementation.
-        if(transpose_copy.extents[0] != 0) {
+        if(in_gpu && in_gpu->can_access_peer(out_gpu) && transpose_copy.extents[0] != 0 &&
+           transpose_copy.extents[0] <= CUDA_MAX_FIELD_BYTES) {
+          stream->get_gpu()->launch_transpose_kernel(transpose_copy, min_align, stream);
+          bytes_to_fence += transpose_copy.extents[0] * transpose_copy.extents[1] *
+                            transpose_copy.extents[2];
+        } else if(transpose_copy.extents[0] != 0) {
           CUDA_MEMCPY2D d2_copy_info;
           memset(&d2_copy_info, 0, sizeof(d2_copy_info));
           d2_copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
