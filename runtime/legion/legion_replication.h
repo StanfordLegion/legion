@@ -2318,13 +2318,14 @@ namespace Legion {
      * A deletion operation that is aware that it is
      * being executed in a control replication context.
      */
-    class ReplDeletionOp : public DeletionOp {
+    class ReplDeletionOp : 
+      public ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> > {
     public:
       ReplDeletionOp(Runtime *rt);
-      ReplDeletionOp(const ReplDeletionOp &rhs);
+      ReplDeletionOp(const ReplDeletionOp &rhs) = delete;
       virtual ~ReplDeletionOp(void);
     public:
-      ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
+      ReplDeletionOp& operator=(const ReplDeletionOp &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);

@@ -3513,6 +3513,7 @@ namespace Legion {
     template class CollectiveVersioning<ReleaseOp>;
     template class CollectiveVersioning<DiscardOp>;
     template class CollectiveVersioning<DependentPartitionOp>;
+    template class CollectiveVersioning<DeletionOp>;
     template class CollectiveVersioning<TaskOp>;
 
     ///////////////////////////////////////////////////////////// 

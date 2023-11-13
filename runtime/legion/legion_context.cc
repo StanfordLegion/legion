@@ -3785,7 +3785,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(get_replication_id());
           rez.serialize(did);
-          rez.serialize(origin_space);
+          rez.serialize(runtime->address_space);
           target_mapping.pack(rez);
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
@@ -3862,7 +3862,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void InnerContext::handle_compute_equivalence_sets_response(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -3881,11 +3881,16 @@ namespace Legion {
       RtEvent ctx_ready;
       if (context == NULL)
         context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
-      AddressSpaceID origin;
-      derez.deserialize(origin);
+      AddressSpaceID source_space;
+      derez.deserialize(source_space);
       size_t total_spaces;
       derez.deserialize(total_spaces);
       const CollectiveMapping target_mapping(derez, total_spaces);
+      const AddressSpaceID origin_space = target_mapping.contains(source_space)
+        ? source_space : target_mapping.find_nearest(source_space);
+      // Check to see if there are any children to continue sending this to
+      std::vector<AddressSpaceID> children;
+      target_mapping.get_children(origin_space,runtime->address_space,children);
       std::vector<EqSetTracker*> targets(target_mapping.size());
       std::vector<unsigned> new_target_references(target_mapping.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -3898,6 +3903,7 @@ namespace Legion {
       size_t num_sets;
       derez.deserialize(num_sets);
       FieldMaskSet<EquivalenceSet> eq_sets;
+      std::map<EquivalenceSet*,DistributedID> did_map;
       std::vector<RtEvent> done_events;
       for (unsigned idx = 0; idx < num_sets; idx++)
       {
@@ -3911,6 +3917,8 @@ namespace Legion {
         FieldMask set_mask;
         derez.deserialize(set_mask);
         eq_sets.insert(set, set_mask);
+        if (!children.empty())
+          did_map.emplace(std::make_pair(set, did));
       }
       size_t num_subscriptions;
       derez.deserialize(num_subscriptions);
@@ -3963,6 +3971,7 @@ namespace Legion {
       derez.deserialize(expected_responses);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      
       if (!ready_events.empty())
       {
         if (ctx_ready.exists())
@@ -3972,10 +3981,7 @@ namespace Legion {
           wait_on.wait();
       }
       else if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
-      // Check to see if there are any children to continue sending this to
-      std::vector<AddressSpaceID> children;
-      target_mapping.get_children(origin, runtime->address_space, children);
+        ctx_ready.wait(); 
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
@@ -3986,7 +3992,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(repl_did);
           rez.serialize(ctx_did);
-          rez.serialize(origin);
+          rez.serialize(source_space);
           target_mapping.pack(rez);
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
@@ -3998,7 +4004,10 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
           {
-            rez.serialize(it->first->did);
+#ifdef DEBUG_LEGION
+            assert(did_map.find(it->first) != did_map.end());
+#endif
+            rez.serialize(did_map[it->first]);
             rez.serialize(it->second);
           }
           rez.serialize<size_t>(new_subscriptions.size());
@@ -4052,8 +4061,8 @@ namespace Legion {
 #endif
       targets[target_index]->record_equivalence_sets(context,
           mask, eq_sets, to_create, creation_rects, creation_srcs, 
-          new_subscriptions, new_target_references[target_index], 
-          source, expected_responses, done_events, target_mapping, targets);
+          new_subscriptions, new_target_references[target_index], source_space,
+          expected_responses, done_events, target_mapping, targets);
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else

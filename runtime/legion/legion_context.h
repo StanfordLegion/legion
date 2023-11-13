@@ -1837,7 +1837,7 @@ namespace Legion {
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
       static void handle_compute_equivalence_sets_response(Deserializer &derez,
-                                     Runtime *runtime, AddressSpaceID source);
+                                                           Runtime *runtime);
       static void handle_output_equivalence_set_request(Deserializer &derez,
                                      Runtime *runtime);
       static void handle_output_equivalence_set_response(Deserializer &derez,

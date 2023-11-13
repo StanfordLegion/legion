@@ -6935,7 +6935,7 @@ namespace Legion {
             new_subscriptions.insert(this, overlap);
             for (unsigned idx = 0; idx < trackers.size(); idx++)
               new_tracker_references[idx] += record_subscription(
-                  trackers[idx], tracker_spaces[idx],overlap);
+                  trackers[idx], tracker_spaces[idx], overlap);
             if (current_set_preconditions != NULL)
               check_preconditions |= overlap;
             if (!remaining)
@@ -8162,7 +8162,7 @@ namespace Legion {
       // of the equivalence set tree with an exclusive lock, that means that
       // any invalidation traversing the tree does not need to protect against
       // races with compute_equivalence_set traversals since.
-      // This property is what allows us to safely propogate the information
+      // This property is what allows us to safely propagate the information
       // about the all_previous_below safely up the tree. While it's expensive
       // to have a whole-tree lock like this, invalidations being done by
       // refinements should be pretty rare so it shouldn't impact performance.

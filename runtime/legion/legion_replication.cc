@@ -4172,18 +4172,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDeletionOp::ReplDeletionOp(Runtime *rt)
-      : DeletionOp(rt)
+      : ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> >(rt)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplDeletionOp::ReplDeletionOp(const ReplDeletionOp &rhs)
-      : DeletionOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -4193,19 +4184,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplDeletionOp& ReplDeletionOp::operator=(const ReplDeletionOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplDeletionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      DeletionOp::activate();
+      ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> >::activate();
       ready_barrier = RtBarrier::NO_RT_BARRIER;
       mapping_barrier = RtBarrier::NO_RT_BARRIER;
       execution_barrier = RtBarrier::NO_RT_BARRIER;
@@ -4216,7 +4198,8 @@ namespace Legion {
     void ReplDeletionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      DeletionOp::deactivate(false/*freeop*/);
+      ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> >::deactivate(
+                                                              false/*freeop*/);
       if (freeop)
         runtime->free_repl_deletion_op(this);
     }
@@ -4247,7 +4230,10 @@ namespace Legion {
         // Only field deletions need a mapping barrier for downward facing
         // dependences in other shards
         if (kind == FIELD_DELETION)
+        {
           mapping_barrier = repl_ctx->get_next_deletion_mapping_barrier();
+          create_collective_rendezvous(0/*requirement index*/);
+        }
       }
       // All deletion kinds need an execution barrier
       execution_barrier = repl_ctx->get_next_deletion_execution_barrier();

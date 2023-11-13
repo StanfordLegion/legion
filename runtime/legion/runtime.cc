@@ -12901,8 +12901,7 @@ namespace Legion {
             }
           case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
             {
-              runtime->handle_compute_equivalence_sets_response(derez,
-                                                 remote_address_space);
+              runtime->handle_compute_equivalence_sets_response(derez);
               break;
             }
           case SEND_COMPUTE_EQUIVALENCE_SETS_PENDING:
@@ -25540,12 +25539,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_compute_equivalence_sets_response(Deserializer &derez,
-                                                          AddressSpaceID source)
+    void Runtime::handle_compute_equivalence_sets_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      InnerContext::handle_compute_equivalence_sets_response(derez, this, 
-                                                             source);
+      InnerContext::handle_compute_equivalence_sets_response(derez, this); 
     }
 
     //--------------------------------------------------------------------------
