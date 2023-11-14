@@ -710,6 +710,7 @@ namespace Realm {
 
     void detach();
 
+    void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
     void broadcast(gex_Rank_t root, const void *val_in, void *val_out, size_t bytes);
     void gather(gex_Rank_t root, const void *val_in, void *vals_out, size_t bytes);

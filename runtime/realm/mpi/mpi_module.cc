@@ -640,8 +640,21 @@ namespace Realm {
     Network::all_peers.add_range(0, mpi_size - 1);
     Network::all_peers.remove(mpi_rank);
 
-    {
-      // Enumerate all the local ranks
+#ifdef DEBUG_REALM_STARTUP
+    { // once we're convinced there isn't skew here, reduce this to rank 0
+      char s[80];
+      gethostname(s, 79);
+      strcat(s, " exit MPI init");
+      TimeStamp ts(s, false);
+      fflush(stdout);
+    }
+#endif
+    return new MPIModule;
+  }
+
+  void MPIModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    // Enumerate all the local ranks
 #if defined(REALM_MPI_HAS_COMM_SPLIT_TYPE)
       // This version is more accurate as it uses topology information rather than hostname,
       // but this is only available on certain versions of MPI.
@@ -653,12 +666,12 @@ namespace Realm {
       if(shared_peers_size > 0) {
         // Request the global rank ids from all the shared peers
         std::vector<int> shared_ranks(shared_peers_size, -1);
-        CHECK_MPI(MPI_Allgather(&mpi_rank, 1, MPI_INT, shared_ranks.data(), 1,
+        CHECK_MPI(MPI_Allgather(&Network::my_node_id, 1, MPI_INT, shared_ranks.data(), 1,
                                 MPI_INT, shared_comm));
         for(int i = 0; i < shared_peers_size; i++) {
-          if(shared_ranks[i] == mpi_rank)
+          if(shared_ranks[i] == Network::my_node_id)
             continue;
-          Network::shared_peers.add(shared_ranks[i]);
+          shared_peers.add(shared_ranks[i]);
         }
       }
       CHECK_MPI(MPI_Comm_free(&shared_comm));
@@ -666,30 +679,18 @@ namespace Realm {
       char mpi_proc_name[MPI_MAX_PROCESSOR_NAME];
       int mpi_proc_name_len = sizeof(mpi_proc_name) - 1;
       unsigned mpi_name_hash = 5381;
-      std::vector<unsigned> all_hashes(mpi_size, 0);
+      std::vector<unsigned> all_hashes(Network::max_node_id + 1, 0);
       CHECK_MPI(MPI_Get_processor_name(mpi_proc_name, &mpi_proc_name_len));
-      for (int i = 0; i < mpi_proc_name_len; i++) {
+      for(int i = 0; i < mpi_proc_name_len; i++) {
         mpi_name_hash = (((mpi_name_hash << 5)) + mpi_name_hash) + static_cast<unsigned>(mpi_proc_name[i]);
       }
       CHECK_MPI(MPI_Allgather(&mpi_name_hash, 1, MPI_UNSIGNED, all_hashes.data(), 1, MPI_UNSIGNED, MPI_COMM_WORLD));
-      for (int i = 0; i < mpi_size; i++) {
-        if ((i != Network::my_node_id) && (all_hashes[i] == mpi_name_hash)) {
-          Network::shared_peers.add(i);
+      for(NodeID i = 0; i < (Network::max_node_id + 1); i++) {
+        if((i != Network::my_node_id) && (all_hashes[i] == mpi_name_hash)) {
+          shared_peers.add(i);
         }
       }
 #endif
-    }
-
-#ifdef DEBUG_REALM_STARTUP
-    { // once we're convinced there isn't skew here, reduce this to rank 0
-      char s[80];
-      gethostname(s, 79);
-      strcat(s, " exit MPI init");
-      TimeStamp ts(s, false);
-      fflush(stdout);
-    }
-#endif
-    return new MPIModule;
   }
 
   // actual parsing of the command line should wait until here if at all
