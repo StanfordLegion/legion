@@ -432,7 +432,7 @@ namespace Realm {
     }
 
     return pgrp;
-    }
+  }
 
     void ProcessorGroup::destroy(Event wait_on /*= NO_EVENT*/) const
     {

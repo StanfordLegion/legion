@@ -2974,7 +2974,7 @@ static void *bytedup(const void *data, size_t datalen)
       log_compqueue.info() << "created completion queue: cq=" << cq->me
                            << " size=" << max_size;
       return cq->me;
-  }
+    }
 
   // destroy a completion queue
   void CompletionQueue::destroy(Event wait_on /*= Event::NO_EVENT*/)
