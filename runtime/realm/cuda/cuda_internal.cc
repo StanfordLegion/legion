@@ -720,13 +720,6 @@ namespace Realm {
           d2_copy_info.WidthInBytes = transpose_copy.extents[0];
           d2_copy_info.Height = transpose_copy.extents[1];
 
-          log_gpudma.info() << "\t Launching 2D CE transpose srcPitch="
-                            << d2_copy_info.srcPitch
-                            << " dstpitch=" << d2_copy_info.dstPitch
-                            << " WidthInBytes=" << d2_copy_info.WidthInBytes
-                            << " Height=" << d2_copy_info.Height
-                            << " memcpy_kind=" << memcpy_kind;
-
           size_t planes = transpose_copy.extents[2];
           size_t act_planes = 0;
           while(act_planes < planes) {
@@ -739,6 +732,15 @@ namespace Realm {
                 transpose_copy.dst + act_planes * transpose_copy.dst_strides[1];
             d2_copy_info.srcDevice =
                 transpose_copy.src + act_planes * transpose_copy.src_strides[1];
+
+            log_gpudma.info() << "\t Launching 2D CE transpose srcPitch="
+                              << d2_copy_info.srcPitch
+                              << " dstpitch=" << d2_copy_info.dstPitch
+                              << " WidthInBytes=" << d2_copy_info.WidthInBytes
+                              << " Height=" << d2_copy_info.Height
+                              << " dstDevice=" << d2_copy_info.dstDevice
+                              << " srcDevice=" << d2_copy_info.srcDevice
+                              << " memcpy_kind=" << memcpy_kind;
 
             CHECK_CU(
                 CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(&d2_copy_info, stream->get_stream()));
@@ -792,8 +794,10 @@ namespace Realm {
                                    copy_info.extents[2]
                             << " srcPitch=" << cuda_copy.srcPitch
                             << " srcHeight=" << cuda_copy.srcHeight
+                            << " srcDevice=" << cuda_copy.srcDevice
                             << " dstPitch=" << cuda_copy.dstPitch
                             << " dstHeight=" << cuda_copy.dstHeight
+                            << " dstDevice=" << cuda_copy.dstDevice
                             << " memcpy_kind=" << memcpy_kind;
 
           CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)(&cuda_copy, stream->get_stream()));
