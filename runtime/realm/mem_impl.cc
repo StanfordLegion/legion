@@ -74,13 +74,12 @@ namespace Realm {
       assert(0);
     }
 
-    /*static*/ const Memory Memory::NO_MEMORY = { /* zero-initialization */};
+    /*static*/ const Memory Memory::NO_MEMORY = {/* zero-initialization */};
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class MemoryImpl
-  //
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class MemoryImpl
+    //
 
     MemoryImpl::MemoryImpl(Memory _me, size_t _size,
 			   MemoryKind _kind, Memory::Kind _lowlevel_kind,

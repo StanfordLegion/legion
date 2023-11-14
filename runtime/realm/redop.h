@@ -131,8 +131,8 @@ namespace Realm {
         //  trivially destructible (we will use malloc/memcpy/free instead
         //  of new/delete)
 #if REALM_CXX_STANDARD >= 11
-        static_assert(std::is_trivially_copyable<ReductionOp<REDOP> >::value &&
-                      std::is_trivially_destructible<ReductionOp<REDOP> >::value,
+        static_assert(std::is_trivially_copyable<ReductionOp<REDOP>>::value &&
+                          std::is_trivially_destructible<ReductionOp<REDOP>>::value,
                       "ReductionOp<REDOP> must be trivially copyable/destructible");
 #endif
         void *ptr = malloc(sizeof(ReductionOp<REDOP>));

@@ -36,8 +36,8 @@ namespace Realm {
   // class Event
   //
 
-  /*static*/ const Event Event::NO_EVENT = { /* zero-initialization */};
-  /*static*/ const UserEvent UserEvent::NO_USER_EVENT = { /* zero-initialization */};
+  /*static*/ const Event Event::NO_EVENT = {/* zero-initialization */};
+  /*static*/ const UserEvent UserEvent::NO_USER_EVENT = {/* zero-initialization */};
 
   bool Event::has_triggered(void) const
   {
@@ -439,7 +439,7 @@ namespace Realm {
   // class Barrier
   //
 
-  /*static*/ const Barrier Barrier::NO_BARRIER = { /* zero-initialization */};
+  /*static*/ const Barrier Barrier::NO_BARRIER = {/* zero-initialization */};
 
   /*static*/ const ::realm_event_gen_t Barrier::MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
 
@@ -2955,23 +2955,25 @@ static void *bytedup(const void *data, size_t datalen)
   // class CompletionQueue
   //
 
-  /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = { /* zero-initialization */};
+    /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = {
+        /* zero-initialization */};
 
-  /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
-  {
-    CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
-    // sanity-check that we haven't exhausted the space of cq IDs
-    if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
-      log_compqueue.fatal() << "completion queue ID space exhausted!";
-      abort();
-    }
-    if(max_size > 0)
-      cq->set_capacity(max_size, false /*!resizable*/);
-    else
-      cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
+    /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
+    {
+      CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
+      // sanity-check that we haven't exhausted the space of cq IDs
+      if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
+        log_compqueue.fatal() << "completion queue ID space exhausted!";
+        abort();
+      }
+      if(max_size > 0)
+        cq->set_capacity(max_size, false /*!resizable*/);
+      else
+        cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
 
-    log_compqueue.info() << "created completion queue: cq=" << cq->me << " size=" << max_size;
-    return cq->me;
+      log_compqueue.info() << "created completion queue: cq=" << cq->me
+                           << " size=" << max_size;
+      return cq->me;
   }
 
   // destroy a completion queue

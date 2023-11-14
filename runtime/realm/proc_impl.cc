@@ -37,10 +37,10 @@ namespace Realm {
   // class Processor
   //
 
-    /*static*/ const Processor Processor::NO_PROC = { /* zero-initialization */};
+  /*static*/ const Processor Processor::NO_PROC = {/* zero-initialization */};
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL Processor current_processor = { /* zero-initialization */};
+    REALM_THREAD_LOCAL Processor current_processor = {/* zero-initialization */};
 
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
@@ -390,45 +390,48 @@ namespace Realm {
   // class ProcessorGroup
   //
 
-    /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP = { /* zero-initialization */};
+  /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP = {
+      /* zero-initialization */};
 
-    /*static*/ ProcessorGroup ProcessorGroup::create_group(const Processor *_members, size_t num_members)
-    {
-      NodeID owner_node;
-      span<const Processor> members(_members, num_members);
-      if(members.empty()) {
-	// create empty groups locally
-	owner_node = Network::my_node_id;
-      } else {
-	// owner of pgroup is owner of (all) processors
-	owner_node = ID(members[0]).proc_owner_node();
-	for(size_t i = 1; i < members.size(); i++)
-	  assert(NodeID(ID(members[i]).proc_owner_node()) == owner_node);
-      }
+  /*static*/ ProcessorGroup ProcessorGroup::create_group(const Processor *_members,
+                                                         size_t num_members)
+  {
+    NodeID owner_node;
+    span<const Processor> members(_members, num_members);
+    if(members.empty()) {
+      // create empty groups locally
+      owner_node = Network::my_node_id;
+    } else {
+      // owner of pgroup is owner of (all) processors
+      owner_node = ID(members[0]).proc_owner_node();
+      for(size_t i = 1; i < members.size(); i++)
+        assert(NodeID(ID(members[i]).proc_owner_node()) == owner_node);
+    }
 
-      ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_lists[owner_node]->alloc_entry();
-      grp->set_group_members(members);
+    ProcessorGroupImpl *grp =
+        get_runtime()->local_proc_group_free_lists[owner_node]->alloc_entry();
+    grp->set_group_members(members);
 
-      // fix ID to include creator node
-      ID id = grp->me;
-      id.pgroup_creator_node() = Network::my_node_id;
-      ProcessorGroup pgrp = ID(id).convert<ProcessorGroup>();
-      grp->me = pgrp;
+    // fix ID to include creator node
+    ID id = grp->me;
+    id.pgroup_creator_node() = Network::my_node_id;
+    ProcessorGroup pgrp = ID(id).convert<ProcessorGroup>();
+    grp->me = pgrp;
 
-      log_pgroup.info() << "creating processor group: pgrp=" << pgrp
-			<< " members=" << PrettyVector<Processor>(members);
+    log_pgroup.info() << "creating processor group: pgrp=" << pgrp
+                      << " members=" << PrettyVector<Processor>(members);
 
-      // if we're creating a remote group, send a message as well
-      if(owner_node != Network::my_node_id) {
-	ActiveMessage<ProcGroupCreateMessage> amsg(owner_node,
-						   members.size() * sizeof(Processor));
-	amsg->pgrp = pgrp;
-	amsg->num_members = members.size();
-	amsg.add_payload(members.data(), members.size() * sizeof(Processor));
-	amsg.commit();
-      }
+    // if we're creating a remote group, send a message as well
+    if(owner_node != Network::my_node_id) {
+      ActiveMessage<ProcGroupCreateMessage> amsg(owner_node,
+                                                 members.size() * sizeof(Processor));
+      amsg->pgrp = pgrp;
+      amsg->num_members = members.size();
+      amsg.add_payload(members.data(), members.size() * sizeof(Processor));
+      amsg.commit();
+    }
 
-      return pgrp;
+    return pgrp;
     }
 
     void ProcessorGroup::destroy(Event wait_on /*= NO_EVENT*/) const

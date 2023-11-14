@@ -498,7 +498,7 @@ namespace Realm {
 					      read_only);
     }
 
-    /*static*/ const RegionInstance RegionInstance::NO_INST = { /* zero-initialization */};
+    /*static*/ const RegionInstance RegionInstance::NO_INST = {/* zero-initialization */};
 
     // before you can get an instance's index space or construct an accessor for
     //  a given processor, the necessary metadata for the instance must be
