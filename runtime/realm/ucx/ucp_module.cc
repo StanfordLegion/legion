@@ -74,8 +74,13 @@ err_del_mod:
     return NULL;
   }
 
+  void UCPModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    internal->get_shared_peers(shared_peers);
+  }
+
   void UCPModule::parse_command_line(RuntimeImpl *runtime,
-      std::vector<std::string>& cmdline)
+                                     std::vector<std::string> &cmdline)
   {
     CommandLineParser cp;
     Realm::UCP::UCPInternal::Config config;
