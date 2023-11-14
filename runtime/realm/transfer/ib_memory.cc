@@ -368,8 +368,9 @@ namespace Realm {
 
   void *IBMemory::get_direct_ptr(off_t offset, size_t size)
   {
+    assert(NodeID(ID(me).memory_owner_node()) == Network::my_node_id);
     assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
-    return (base == nullptr) ? base : base + offset;
+    return (base + offset);
   }
 
   // not used by IB memories

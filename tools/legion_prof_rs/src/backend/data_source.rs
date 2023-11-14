@@ -340,7 +340,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", src_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    src_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -358,7 +363,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", dst_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    dst_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
