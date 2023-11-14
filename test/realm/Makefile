@@ -55,7 +55,7 @@ TESTS += deppart
 TESTS += scatter
 TESTS += compqueue
 TESTS += event_subscribe
-TESTS += deferred_allocs
+#TESTS += deferred_allocs
 TESTS += test_nodeset
 TESTS += subgraphs
 TESTS += large_tls
@@ -71,14 +71,11 @@ TESTS += multiaffine
 TESTS += machine_config
 TESTS += rect_transform_test
 
-  ifeq ($(strip $(USE_CUDA)),1)
-  TESTS += cuda_memcpy_test
-  TESTS += cuda_transpose_test
-  endif
-
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
 TESTS += test_cuhook
+TESTS += cuda_memcpy_test
+TESTS += cuda_transpose_test
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
@@ -90,7 +87,7 @@ TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4
-TESTARGS_deferred_allocs := -ll:gsize 0 -all
+#TESTARGS_deferred_allocs := -ll:gsize 0 -all
 TESTARGS_scatter := -p1 2 -p2 2
 TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose

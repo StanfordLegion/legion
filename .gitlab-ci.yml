@@ -498,19 +498,22 @@ before_script:
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 .p100_cuda117: &p100_cuda117
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.7"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.7"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 .p100_cuda121: &p100_cuda121
   <<: *p100_base
   CUDA: "/usr/local/cuda-12.1"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-12.1"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 ###

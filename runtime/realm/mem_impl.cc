@@ -1415,8 +1415,8 @@ namespace Realm {
 
   void *LocalCPUMemory::get_direct_ptr(off_t offset, size_t size)
   {
-    //    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
-    return (base == nullptr) ? base : (base + offset);
+//    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
+    return (base + offset);
   }
 
   
@@ -1524,7 +1524,10 @@ namespace Realm {
 
     void *RemoteMemory::get_direct_ptr(off_t offset, size_t size)
     {
-      return (base == nullptr) ? base : static_cast<char *>(base) + offset;
+      if (base != nullptr) {
+        return static_cast<char *>(base) + offset;
+      }
+      return nullptr;
     }
 
 

@@ -106,7 +106,6 @@ namespace Realm {
       CUuuid uuid;
       int major;
       int minor;
-      bool host_register_uses_same_va;
       static const size_t MAX_NAME_LEN = 256;
       char name[MAX_NAME_LEN];
       size_t totalGlobalMem;
@@ -644,8 +643,10 @@ namespace Realm {
       void launch_batch_affine_kernel(void *copy_info, size_t dim,
                                       size_t elemSize, size_t volume,
                                       GPUStream *stream);
+      void launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                   size_t elemSize, GPUStream *stream);
 
-     protected:
+    protected:
       CUmodule load_cuda_module(const void *data);
 
     public:
