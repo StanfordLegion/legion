@@ -1291,13 +1291,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         local_argv = dummy_cmdline_args;
       }
 
-      module_registrar.create_network_modules(network_modules,
-					      &local_argc, &local_argv);
+      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
 
-      for (NodeSetIterator it = Network::shared_peers.begin(); it != Network::shared_peers.end(); ++it) {
-        log_runtime.debug() << Network::my_node_id << " is shareable with " << *it;
-      }
-      
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
 
@@ -1965,10 +1960,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
       // network-specific memories are created after attachment
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->create_memories(this);
+      for(NetworkModule *module : network_modules) {
+        module->get_shared_peers(Network::shared_peers);
+        module->create_memories(this);
+      }
+      for(NodeID node_id : Network::shared_peers) {
+        log_runtime.debug() << Network::my_node_id << " is shareable with " << node_id;
+      }
 
       LocalCPUMemory *regmem;
       if(config->reg_mem_size > 0) {
@@ -2850,6 +2848,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
         // same for code translators
         delete_container_contents(code_translators);
+
+        // Clear the global nodesets that potentially reference dynamic bitmasks that will
+        // be free'd when we free the allocations.
+        // TODO: properly manage the life-time of the nodeset bitmask allocations to avoid
+        // this issue for future nodesets
+        Network::all_peers.clear();
+        Network::shared_peers.clear();
 
         NodeSetBitmask::free_allocations();
       }

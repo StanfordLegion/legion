@@ -35,7 +35,6 @@
 
 #include <gasnet_coll.h>
 #include <gasnet_mk.h>
-
 namespace Realm {
 
   // defined in gasnetex_module.cc
@@ -3182,21 +3181,7 @@ namespace Realm {
     Network::my_node_id = prim_rank;
     Network::max_node_id = prim_size - 1;
     Network::all_peers.add_range(0, prim_size - 1);
-    Network::all_peers.remove(prim_rank);  
-    gex_RankInfo_t *neighbor_array = nullptr;
-    gex_Rank_t neighbor_array_size = 0;
-
-    gex_System_QueryNbrhdInfo(&neighbor_array, &neighbor_array_size, nullptr);
-    for (gex_Rank_t r = 0; r < neighbor_array_size; r++) {
-      if(static_cast<NodeID>(neighbor_array[r].gex_jobrank) != Network::my_node_id) {
-        Network::shared_peers.add(neighbor_array[r].gex_jobrank);
-      }
-    }
-    if(Network::shared_peers.empty()) {
-      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
-      // then just assume all_peers are shareable
-      Network::shared_peers = Network::all_peers;
-    }
+    Network::all_peers.remove(prim_rank);
 
     // stick a pointer to ourselves in the endpoint CData so that handlers
     //  can find us
@@ -3432,6 +3417,24 @@ namespace Realm {
     for(size_t i = 0; i < xmitsrcs.size(); i++)
       delete xmitsrcs[i];
     xmitsrcs.clear();
+  }
+
+  void GASNetEXInternal::get_shared_peers(Realm::NodeSet &shared_peers)
+  {
+    gex_RankInfo_t *neighbor_array = nullptr;
+    gex_Rank_t neighbor_array_size = 0;
+
+    gex_System_QueryNbrhdInfo(&neighbor_array, &neighbor_array_size, nullptr);
+    for(gex_Rank_t r = 0; r < neighbor_array_size; r++) {
+      if(static_cast<NodeID>(neighbor_array[r].gex_jobrank) != Network::my_node_id) {
+        shared_peers.add(neighbor_array[r].gex_jobrank);
+      }
+    }
+    if(Network::shared_peers.empty()) {
+      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // then just assume all_peers are shareable
+      shared_peers = Network::all_peers;
+    }
   }
 
   void GASNetEXInternal::barrier()

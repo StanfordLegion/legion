@@ -38,6 +38,9 @@ namespace Realm {
     static NetworkModule *create_network_module(RuntimeImpl *runtime,
 						int *argc, const char ***argv);
 
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers);
+
     // actual parsing of the command line should wait until here if at all
     //  possible
     virtual void parse_command_line(RuntimeImpl *runtime,
