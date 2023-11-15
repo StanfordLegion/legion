@@ -3750,6 +3750,9 @@ namespace Legion {
           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources,
           const CollectiveMapping &target_mapping,
           const std::vector<EqSetTracker*> &targets);
+      EquivalenceSet* find_congruent_existing_equivalence_set(
+          IndexSpaceExpression *expr, const FieldMask &mask,
+          FieldMaskSet<EquivalenceSet> &pending_sets, Runtime *runtime);
       void extract_remote_notifications(const FieldMask &mask,
           AddressSpaceID local_space,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
@@ -3778,6 +3781,9 @@ namespace Legion {
       // Equivalence sets that are about to become part of the canonical
       // equivalence sets once the compute_equivalence_sets process completes
       FieldMaskSet<EquivalenceSet> *pending_equivalence_sets;
+      // This data structure tracks references on pending equivalence sets
+      // that were created so we can remove references once we finalize them
+      std::unordered_set<EquivalenceSet*> *created_equivalence_set_refs;
       // User events marking when our current equivalence sets are ready
       LegionMap<RtUserEvent,FieldMask> *equivalence_sets_ready;
       // Version infos that need to be updated once equivalence sets are ready
