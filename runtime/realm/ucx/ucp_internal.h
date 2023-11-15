@@ -147,6 +147,7 @@ namespace UCP {
     void finalize();
     void attach(std::vector<NetworkSegment *>& segments);
     void detach(std::vector<NetworkSegment *>& segments);
+    void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
     void broadcast(NodeID root, const void *val_in, void *val_out, size_t bytes);
     void gather(NodeID root, const void *val_in, void *vals_out, size_t bytes);

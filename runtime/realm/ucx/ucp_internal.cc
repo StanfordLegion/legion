@@ -792,12 +792,6 @@ err:
     Network::all_peers.add_range(0, boot_handle.pg_size - 1);
     Network::all_peers.remove(boot_handle.pg_rank);
 
-    for(int i = 0; i < boot_handle.num_shared_ranks; i++) {
-      if (boot_handle.shared_ranks[i] != boot_handle.pg_rank) {
-        Network::shared_peers.add(boot_handle.shared_ranks[i]);
-      }
-    }
-
     initialized_boot = true;
     log_ucp.info() << "bootstrapped UCP network module";
 
@@ -1452,6 +1446,14 @@ err:
     log_ucp.info() << "unmapped attached segments";
   }
 
+  void UCPInternal::get_shared_peers(Realm::NodeSet &shared_peers)
+  {
+    for(int i = 0; i < boot_handle.num_shared_ranks; i++) {
+      if(boot_handle.shared_ranks[i] != boot_handle.pg_rank) {
+        shared_peers.add(boot_handle.shared_ranks[i]);
+      }
+    }
+  }
   void UCPInternal::barrier()
   {
     int rc;

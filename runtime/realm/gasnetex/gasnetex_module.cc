@@ -472,6 +472,11 @@ namespace Realm {
     return mod;
   }
 
+  void GASNetEXModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    internal->get_shared_peers(shared_peers);
+  }
+
   // actual parsing of the command line should wait until here if at all
   //  possible
   void GASNetEXModule::parse_command_line(RuntimeImpl *runtime,
