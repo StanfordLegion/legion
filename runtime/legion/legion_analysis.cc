@@ -12637,6 +12637,7 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      assert(!IS_READ_ONLY(usage));
       if (!uninitialized)
       {
 #ifdef DEBUG_LEGION
@@ -24740,7 +24741,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EqSetTracker::EqSetTracker(LocalLock &lock)
       : tracker_lock(lock), pending_equivalence_sets(NULL),
-        created_equivalence_set_refs(NULL),
+        created_equivalence_sets(NULL),
         equivalence_sets_ready(NULL), waiting_infos(NULL),
         creation_requests(NULL), creation_rectangles(NULL),
         creation_sources(NULL), remaining_responses(NULL)
@@ -24755,7 +24756,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(equivalence_sets.empty());
       assert(pending_equivalence_sets == NULL);
-      assert(created_equivalence_set_refs == NULL);
+      assert(created_equivalence_sets == NULL);
       assert(equivalence_sets_ready == NULL);
       assert(waiting_infos == NULL);
       assert(current_subscriptions.empty());
@@ -25331,7 +25332,7 @@ namespace Legion {
         universe_mask |= it->second.get_valid_mask();
 #endif
       compute_field_sets(universe_mask, create_now_rectangles, rectangle_sets);
-      FieldMaskSet<EquivalenceSet> pending_sets;
+      FieldMaskSet<EquivalenceSet> created_sets;
       IndexSpaceExpression *tracker_expr = get_tracker_expression();
       for (LegionList<FieldSet<Domain> >::iterator rit =
             rectangle_sets.begin(); rit != rectangle_sets.end(); rit++)
@@ -25345,7 +25346,7 @@ namespace Legion {
         // just reuse the existing one
         if (!(rit->set_mask * unique_sources.get_valid_mask()) &&
             check_for_congruent_source_equivalence_sets(*rit, runtime,
-              ready_events, pending_sets, unique_sources,
+              ready_events, created_sets, unique_sources,
               create_now, set_sources, target_mapping, targets))
           continue;
         // First we need an expression for this equivalence set
@@ -25397,14 +25398,14 @@ namespace Legion {
         // that is congruent with these points but aren't used for the fields
         // so we can reuse it if possible
         EquivalenceSet *set = find_congruent_existing_equivalence_set(expr,
-            rit->set_mask, pending_sets, runtime);
+            rit->set_mask, created_sets, context);
         if (set == NULL)
         {
           const DistributedID did = runtime->get_available_distributed_id();
           set = new EquivalenceSet(runtime, did,
               runtime->address_space/*logical owner*/, expr, 
               get_region_tree_id(), context, true/*register*/, mapping);
-          if (pending_sets.insert(set, rit->set_mask))
+          if (created_sets.insert(set, rit->set_mask))
             set->add_base_gc_ref(VERSION_MANAGER_REF);
         }
         // Clone any meta-data from the source equivalence sets to
@@ -25509,34 +25510,27 @@ namespace Legion {
         if ((mapping != NULL) && mapping->remove_reference())
           delete mapping;
       }
+#ifdef DEBUG_LEGION
+      assert(!created_sets.empty());
+#endif
       // Retake the lock and record these pending equivalence sets
       AutoLock t_lock(tracker_lock); 
-      if (pending_equivalence_sets == NULL)
+      if (created_equivalence_sets == NULL)
       {
-#ifdef DEBUG_LEGION
-        assert(created_equivalence_set_refs == NULL);
-#endif
-        created_equivalence_set_refs = 
-          new std::unordered_set<EquivalenceSet*>();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              pending_sets.begin(); it != pending_sets.end(); it++)
-          created_equivalence_set_refs->insert(it->first);
-        pending_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
-        pending_equivalence_sets->swap(pending_sets);
+        created_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
+        created_equivalence_sets->swap(created_sets);
       }
       else
       {
-        if (created_equivalence_set_refs == NULL)
-          created_equivalence_set_refs =
-            new std::unordered_set<EquivalenceSet*>(); 
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              pending_sets.begin(); it != pending_sets.end(); it++)
+              created_sets.begin(); it != created_sets.end(); it++)
         {
-          pending_equivalence_sets->insert(it->first, it->second);
-          // Record the new reference and remove any duplicates
-          if (!created_equivalence_set_refs->insert(it->first).second &&
+          // Add the new set and remove any duplicate references
+          // which should never lead to the deletion of the set
+          // since we should already be holding a reference
+          if (!created_equivalence_sets->insert(it->first, it->second) &&
               it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
-            assert(false); // should never actually delete the object
+            assert(false); // should never actaully delete the object
         }
       }
     }
@@ -25545,7 +25539,7 @@ namespace Legion {
     bool EqSetTracker::check_for_congruent_source_equivalence_sets(
         FieldSet<Domain> &dest, Runtime *runtime,
         std::vector<RtEvent> &ready_events,
-        FieldMaskSet<EquivalenceSet> &pending_sets,
+        FieldMaskSet<EquivalenceSet> &created_sets,
         FieldMaskSet<EquivalenceSet> &unique_sources,
         LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
         std::map<EquivalenceSet*,LegionList<SourceState> > &set_sources,
@@ -25694,7 +25688,7 @@ namespace Legion {
               else if (to_delete.size() == local_finder->second.size())
                 create_now.erase(local_finder);
             }
-            if (pending_sets.insert(eit->first, overlap))
+            if (created_sets.insert(eit->first, overlap))
               eit->first->add_base_gc_ref(VERSION_MANAGER_REF);
             dest.set_mask -= overlap;
             sit->set_mask -= overlap;
@@ -25724,14 +25718,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet* EqSetTracker::find_congruent_existing_equivalence_set(
         IndexSpaceExpression *expr, const FieldMask &mask,
-        FieldMaskSet<EquivalenceSet> &pending_sets, Runtime *runtime)
+        FieldMaskSet<EquivalenceSet> &created_sets, InnerContext *context)
     //--------------------------------------------------------------------------
     {
+      const int depth = context->get_depth();
+      RegionTreeForest *forest = context->runtime->forest;
       // Find the canonical expression for this expr and then we can use that
       // to compare against the canonical expression of each of the existing
       // equivalence sets to see if we can find a match
       const size_t volume = expr->get_volume();
-      expr = expr->get_canonical_expression(runtime->forest); 
+      expr = expr->get_canonical_expression(forest); 
       // Need the lock since the equivalence set data structure might 
       // change at the same time that we're iterating over it
       // We're just reading though so we don't need exclusive access
@@ -25739,16 +25735,24 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
       {
+        // Only allow this optimization for equivalence sets made
+        // in the same context, which we check by depth because we
+        // still want to allow equivalence sets from the other
+        // ReplicateContexts in the case of control replication
+        if (depth != it->first->context->get_depth())
+          continue;
+        // If the volumes are not the same then the shapes can't be the same
         if (volume != it->first->set_expr->get_volume())
           continue;
         IndexSpaceExpression *set_expr = 
-          it->first->set_expr->get_canonical_expression(runtime->forest);
+          it->first->set_expr->get_canonical_expression(forest);
         if (expr == set_expr)
         {
           // Found one, add it to the pending sets and add a reference
           // if its the first time we're reusing it
-          if (pending_sets.insert(it->first, mask))
+          if (created_sets.insert(it->first, mask))
             it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+          return it->first;
         }
       }
       return NULL;
@@ -25926,60 +25930,77 @@ namespace Legion {
           if ((pending_equivalence_sets != NULL) &&
               !(invalidated * pending_equivalence_sets->get_valid_mask()))
           {
-            std::vector<EquivalenceSet*> to_delete;
-            for (FieldMaskSet<EquivalenceSet>::iterator it =
-                  pending_equivalence_sets->begin(); it !=
-                  pending_equivalence_sets->end(); it++)
+            if (invalidated == pending_equivalence_sets->get_valid_mask())
             {
-              it.filter(invalidated);
-              if (!it->second)
-                to_delete.push_back(it->first);
+              // Invalidate everything so we can just delete the sets
+              delete pending_equivalence_sets;
+              pending_equivalence_sets = NULL;
             }
-            if (!to_delete.empty())
+            else
             {
-              if (to_delete.size() < pending_equivalence_sets->size())
+              // Partial invalidation of only some fields
+              std::vector<EquivalenceSet*> to_delete;
+              for (FieldMaskSet<EquivalenceSet>::iterator it =
+                    pending_equivalence_sets->begin(); it !=
+                    pending_equivalence_sets->end(); it++)
+              {
+                it.filter(invalidated);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (!to_delete.empty())
+              {
+                for (std::vector<EquivalenceSet*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  pending_equivalence_sets->erase(*it);
+              }
+#ifdef DEBUG_LEGION
+              assert(!pending_equivalence_sets->empty());
+#endif
+              pending_equivalence_sets->tighten_valid_mask();
+            }
+          }
+          // Also need to prune states out of the created equivalence sets
+          if ((created_equivalence_sets != NULL) &&
+              !(invalidated * created_equivalence_sets->get_valid_mask()))
+          {
+            if (invalidated == created_equivalence_sets->get_valid_mask())
+            {
+              // Invalidate everyhting so we can just delete things
+              for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                    created_equivalence_sets->begin(); it !=
+                    created_equivalence_sets->end(); it++)
+                if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                  delete it->first;
+              delete created_equivalence_sets;
+              created_equivalence_sets = NULL;
+            }
+            else
+            {
+              std::vector<EquivalenceSet*> to_delete;
+              for (FieldMaskSet<EquivalenceSet>::iterator it =
+                    created_equivalence_sets->begin(); it !=
+                    created_equivalence_sets->end(); it++)
+              {
+                it.filter(invalidated);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (!to_delete.empty())
               {
                 for (std::vector<EquivalenceSet*>::const_iterator it =
                       to_delete.begin(); it != to_delete.end(); it++)
                 {
-                  pending_equivalence_sets->erase(*it);
-                  if (created_equivalence_set_refs != NULL)
-                  {
-                    std::unordered_set<EquivalenceSet*>::iterator finder =
-                      created_equivalence_set_refs->find(*it);
-                    if (finder != created_equivalence_set_refs->end())
-                    {
-                      if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
-                        delete (*it);
-                      created_equivalence_set_refs->erase(finder);
-                      if (created_equivalence_set_refs->empty())
-                      {
-                        delete created_equivalence_set_refs;
-                        created_equivalence_set_refs = NULL;
-                      }
-                    }
-                  }
-                }
-                pending_equivalence_sets->tighten_valid_mask();
-              }
-              else
-              {
-                delete pending_equivalence_sets;
-                pending_equivalence_sets = NULL;
-                if (created_equivalence_set_refs != NULL)
-                {
-                  for (std::unordered_set<EquivalenceSet*>::const_iterator it =
-                        created_equivalence_set_refs->begin(); it !=
-                        created_equivalence_set_refs->end(); it++)
-                    if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
-                      delete (*it);
-                  delete created_equivalence_set_refs;
-                  created_equivalence_set_refs = NULL;
+                  created_equivalence_sets->erase(*it);
+                  if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
+                    delete (*it);
                 }
               }
+#ifdef DEBUG_LEGION
+              assert(!created_equivalence_sets->empty());
+#endif
+              created_equivalence_sets->tighten_valid_mask();
             }
-            else
-              pending_equivalence_sets->tighten_valid_mask();
           }
           pending_invalidations -= invalidated;
           t_lock.release();
@@ -26030,50 +26051,15 @@ namespace Legion {
                 pending_equivalence_sets->begin(); it !=
                 pending_equivalence_sets->end(); it++)
           {
-            // Once it's valid for any field then it's valid for all of them
-            if (it->second * finder->second)
+            // Find what fields are overlapping
+            const FieldMask overlap = it->second & finder->second;
+            if (!overlap)
               continue;
-            if (equivalence_sets.insert(it->first, it->second))
-            {
-              if (created_equivalence_set_refs != NULL)
-              {
-                std::unordered_set<EquivalenceSet*>::iterator finder =
-                  created_equivalence_set_refs->find(it->first);
-                if (finder != created_equivalence_set_refs->end())
-                {
-                  // Already had a reference so we don't need to
-                  // add another one here
-                  created_equivalence_set_refs->erase(finder);
-                  if (created_equivalence_set_refs->empty())
-                  {
-                    delete created_equivalence_set_refs;
-                    created_equivalence_set_refs = NULL;
-                  }
-                }
-                else
-                  it->first->add_base_gc_ref(VERSION_MANAGER_REF);
-              }
-              else
-                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
-            }
-            else if (created_equivalence_set_refs != NULL)
-            {
-              std::unordered_set<EquivalenceSet*>::iterator finder =
-                created_equivalence_set_refs->find(it->first);
-              if (finder != created_equivalence_set_refs->end())
-              {
-                // Remove the duplicate reference
-                if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
-                  assert(false); // should never delete this
-                created_equivalence_set_refs->erase(finder);
-                if (created_equivalence_set_refs->empty())
-                {
-                  delete created_equivalence_set_refs;
-                  created_equivalence_set_refs = NULL;
-                }
-              }
-            }
-            to_delete.push_back(it->first);
+            if (equivalence_sets.insert(it->first, overlap))
+              it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
           }
           if (!to_delete.empty())
           {
@@ -26090,6 +26076,58 @@ namespace Legion {
               pending_equivalence_sets = NULL;
             }
           }
+          else
+            pending_equivalence_sets->tighten_valid_mask();
+        }
+        // If there are any created equivalence sets, move them over too
+        if ((created_equivalence_sets != NULL) &&
+            !(finder->second * created_equivalence_sets->get_valid_mask()))
+        {
+          std::vector<EquivalenceSet*> to_delete;
+          for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                created_equivalence_sets->begin(); it !=
+                created_equivalence_sets->end(); it++)
+          {
+            // Find what fields are overlapping
+            const FieldMask overlap = it->second & finder->second;
+            if (!overlap)
+              continue;
+            if (overlap == it->second)
+            {
+              // Moving over all of the fields so we can move over
+              // our reference to or deduplicate the reference if
+              // the set already exists in the equivalence_sets
+              if (!equivalence_sets.insert(it->first, it->second) &&
+                  it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                assert(false); // should never delete the object
+              to_delete.push_back(it->first);
+            }
+            else
+            {
+              // Just moving over some of the fields which means
+              // we need to add a reference if this is the first
+              if (equivalence_sets.insert(it->first, overlap))
+                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+              it.filter(overlap);
+            }
+          }
+          if (!to_delete.empty())
+          {
+            if (to_delete.size() < created_equivalence_sets->size())
+            {
+              for (std::vector<EquivalenceSet*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                created_equivalence_sets->erase(*it);
+              created_equivalence_sets->tighten_valid_mask();
+            }
+            else
+            {
+              delete created_equivalence_sets;
+              created_equivalence_sets = NULL;
+            }
+          }
+          else
+            created_equivalence_sets->tighten_valid_mask();
         }
         if (waiting_infos != NULL)
         {
@@ -27271,7 +27309,7 @@ namespace Legion {
         // All these other resource should already be empty by the time
         // we are being finalized
         assert(pending_equivalence_sets == NULL);
-        assert(created_equivalence_set_refs == NULL);
+        assert(created_equivalence_sets == NULL);
         assert(waiting_infos == NULL);
         assert(equivalence_sets_ready == NULL);
 #if 0

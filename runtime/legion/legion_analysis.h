@@ -3744,7 +3744,7 @@ namespace Legion {
       bool check_for_congruent_source_equivalence_sets(
           FieldSet<Domain> &dest, Runtime *runtime,
           std::vector<RtEvent> &ready_events,
-          FieldMaskSet<EquivalenceSet> &pending_sets,
+          FieldMaskSet<EquivalenceSet> &created_sets,
           FieldMaskSet<EquivalenceSet> &unique_sources,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources,
@@ -3752,7 +3752,7 @@ namespace Legion {
           const std::vector<EqSetTracker*> &targets);
       EquivalenceSet* find_congruent_existing_equivalence_set(
           IndexSpaceExpression *expr, const FieldMask &mask,
-          FieldMaskSet<EquivalenceSet> &pending_sets, Runtime *runtime);
+          FieldMaskSet<EquivalenceSet> &created_sets, InnerContext *context);
       void extract_remote_notifications(const FieldMask &mask,
           AddressSpaceID local_space,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
@@ -3781,9 +3781,10 @@ namespace Legion {
       // Equivalence sets that are about to become part of the canonical
       // equivalence sets once the compute_equivalence_sets process completes
       FieldMaskSet<EquivalenceSet> *pending_equivalence_sets;
-      // This data structure tracks references on pending equivalence sets
-      // that were created so we can remove references once we finalize them
-      std::unordered_set<EquivalenceSet*> *created_equivalence_set_refs;
+      // The created equivalence sets are similar to the pending equivalence
+      // sets but they have been newly created and already have a 
+      // VERSION_MANAGER_REF on this local node
+      FieldMaskSet<EquivalenceSet> *created_equivalence_sets;
       // User events marking when our current equivalence sets are ready
       LegionMap<RtUserEvent,FieldMask> *equivalence_sets_ready;
       // Version infos that need to be updated once equivalence sets are ready
