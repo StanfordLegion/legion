@@ -14822,7 +14822,7 @@ namespace Legion {
         const FieldMask overlap = sources.get_valid_mask() & restricted_mask;
         if (!overlap)
           continue;
-        copy_out(expr, expr_covers, restricted_mask, sources, analysis,
+        copy_out(expr, expr_covers, overlap, sources, analysis,
                  trace_info, aggregator);
       }
     }
