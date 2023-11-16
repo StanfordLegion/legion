@@ -25930,7 +25930,7 @@ namespace Legion {
           if ((pending_equivalence_sets != NULL) &&
               !(invalidated * pending_equivalence_sets->get_valid_mask()))
           {
-            if (invalidated == pending_equivalence_sets->get_valid_mask())
+            if (!(pending_equivalence_sets->get_valid_mask() - invalidated))
             {
               // Invalidate everything so we can just delete the sets
               delete pending_equivalence_sets;
@@ -25964,7 +25964,7 @@ namespace Legion {
           if ((created_equivalence_sets != NULL) &&
               !(invalidated * created_equivalence_sets->get_valid_mask()))
           {
-            if (invalidated == created_equivalence_sets->get_valid_mask())
+            if (!(created_equivalence_sets->get_valid_mask() - invalidated))
             {
               // Invalidate everyhting so we can just delete things
               for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -26046,88 +26046,104 @@ namespace Legion {
         if ((pending_equivalence_sets != NULL) &&
             !(finder->second * pending_equivalence_sets->get_valid_mask()))
         {
-          std::vector<EquivalenceSet*> to_delete;
-          for (FieldMaskSet<EquivalenceSet>::iterator it = 
-                pending_equivalence_sets->begin(); it !=
-                pending_equivalence_sets->end(); it++)
+          if (!(pending_equivalence_sets->get_valid_mask() - finder->second))
           {
-            // Find what fields are overlapping
-            const FieldMask overlap = it->second & finder->second;
-            if (!overlap)
-              continue;
-            if (equivalence_sets.insert(it->first, overlap))
-              it->first->add_base_gc_ref(VERSION_MANAGER_REF);
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
+            // They're all ready so we can move them over
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  pending_equivalence_sets->begin(); it !=
+                  pending_equivalence_sets->end(); it++)
+              if (equivalence_sets.insert(it->first, it->second))
+                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+            delete pending_equivalence_sets;
+            pending_equivalence_sets = NULL;
           }
-          if (!to_delete.empty())
+          else
           {
-            if (to_delete.size() < pending_equivalence_sets->size())
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  pending_equivalence_sets->begin(); it !=
+                  pending_equivalence_sets->end(); it++)
+            {
+              // Find what fields are overlapping
+              const FieldMask overlap = it->second & finder->second;
+              if (!overlap)
+                continue;
+              if (equivalence_sets.insert(it->first, overlap))
+                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            if (!to_delete.empty())
             {
               for (std::vector<EquivalenceSet*>::const_iterator it =
                     to_delete.begin(); it != to_delete.end(); it++)
                 pending_equivalence_sets->erase(*it);
-              pending_equivalence_sets->tighten_valid_mask();
             }
-            else
-            {
-              delete pending_equivalence_sets;
-              pending_equivalence_sets = NULL;
-            }
-          }
-          else
+#ifdef DEBUG_LEGION
+            assert(!pending_equivalence_sets->empty());
+#endif
             pending_equivalence_sets->tighten_valid_mask();
+          }
         }
         // If there are any created equivalence sets, move them over too
         if ((created_equivalence_sets != NULL) &&
             !(finder->second * created_equivalence_sets->get_valid_mask()))
         {
-          std::vector<EquivalenceSet*> to_delete;
-          for (FieldMaskSet<EquivalenceSet>::iterator it = 
-                created_equivalence_sets->begin(); it !=
-                created_equivalence_sets->end(); it++)
+          if (!(created_equivalence_sets->get_valid_mask() - finder->second))
           {
-            // Find what fields are overlapping
-            const FieldMask overlap = it->second & finder->second;
-            if (!overlap)
-              continue;
-            if (overlap == it->second)
-            {
-              // Moving over all of the fields so we can move over
-              // our reference to or deduplicate the reference if
-              // the set already exists in the equivalence_sets
+            // All fields are ready so we can move them all over
+            // Make sure to remove duplicate references
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  created_equivalence_sets->begin(); it !=
+                  created_equivalence_sets->end(); it++)
               if (!equivalence_sets.insert(it->first, it->second) &&
                   it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
                 assert(false); // should never delete the object
-              to_delete.push_back(it->first);
-            }
-            else
-            {
-              // Just moving over some of the fields which means
-              // we need to add a reference if this is the first
-              if (equivalence_sets.insert(it->first, overlap))
-                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
-              it.filter(overlap);
-            }
+            delete created_equivalence_sets;
+            created_equivalence_sets = NULL;
           }
-          if (!to_delete.empty())
+          else
           {
-            if (to_delete.size() < created_equivalence_sets->size())
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  created_equivalence_sets->begin(); it !=
+                  created_equivalence_sets->end(); it++)
+            {
+              // Find what fields are overlapping
+              const FieldMask overlap = it->second & finder->second;
+              if (!overlap)
+                continue;
+              if (overlap == it->second)
+              {
+                // Moving over all of the fields so we can move over
+                // our reference to or deduplicate the reference if
+                // the set already exists in the equivalence_sets
+                if (!equivalence_sets.insert(it->first, it->second) &&
+                    it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                  assert(false); // should never delete the object
+                to_delete.push_back(it->first);
+              }
+              else
+              {
+                // Just moving over some of the fields which means
+                // we need to add a reference if this is the first
+                if (equivalence_sets.insert(it->first, overlap))
+                  it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+                it.filter(overlap);
+              }
+            }
+            if (!to_delete.empty())
             {
               for (std::vector<EquivalenceSet*>::const_iterator it =
                     to_delete.begin(); it != to_delete.end(); it++)
                 created_equivalence_sets->erase(*it);
-              created_equivalence_sets->tighten_valid_mask();
             }
-            else
-            {
-              delete created_equivalence_sets;
-              created_equivalence_sets = NULL;
-            }
-          }
-          else
+#ifdef DEBUG_LEGION
+            assert(!created_equivalence_sets->empty());
+#endif
             created_equivalence_sets->tighten_valid_mask();
+          }
         }
         if (waiting_infos != NULL)
         {
