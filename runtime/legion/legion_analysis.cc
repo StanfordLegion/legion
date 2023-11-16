@@ -25397,6 +25397,7 @@ namespace Legion {
         // Do a check to see if we already have an existing equivalence set
         // that is congruent with these points but aren't used for the fields
         // so we can reuse it if possible
+        bool set_created = false;
         EquivalenceSet *set = find_congruent_existing_equivalence_set(expr,
             rit->set_mask, created_sets, context);
         if (set == NULL)
@@ -25407,6 +25408,7 @@ namespace Legion {
               get_region_tree_id(), context, true/*register*/, mapping);
           if (created_sets.insert(set, rit->set_mask))
             set->add_base_gc_ref(VERSION_MANAGER_REF);
+          set_created = true;
         }
         // Clone any meta-data from the source equivalence sets to
         // bring this new equivalence set up to date 
@@ -25423,64 +25425,105 @@ namespace Legion {
         {
           // Broadcast this out to all the spaces and have them notify
           // their EqKDTree objects
+          const AddressSpaceID local_space = runtime->address_space;
           std::vector<AddressSpaceID> children;
-          mapping->get_children(runtime->address_space, 
-                                runtime->address_space, children);
+          mapping->get_children(local_space, local_space, children);
 #ifdef DEBUG_LEGION
           assert(!children.empty());
 #endif
-          // See if this is an index space node for easy packing
-          // otherwise we're going to pack all the rectangles so
-          // we can make an expression on the remote nodes
-          IndexSpaceNode *node = NULL;
-          if (expr == tracker_expr)
-            node = dynamic_cast<IndexSpaceNode*>(expr);
-          for (std::vector<AddressSpaceID>::const_iterator cit =
-                children.begin(); cit != children.end(); cit++)
+          if (set_created)
           {
-            const RtUserEvent notified = Runtime::create_rt_user_event();
-            Serializer rez;
+            // See if this is an index space node for easy packing
+            // otherwise we're going to pack all the rectangles so
+            // we can make an expression on the remote nodes
+            IndexSpaceNode *node = NULL;
+            if (expr == tracker_expr)
+              node = dynamic_cast<IndexSpaceNode*>(expr);
+            for (std::vector<AddressSpaceID>::const_iterator cit =
+                  children.begin(); cit != children.end(); cit++)
             {
-              RezCheck z(rez);
-              rez.serialize(this);
-              rez.serialize(set->did);
-              if (node == NULL)
+              const RtUserEvent notified = Runtime::create_rt_user_event();
+              Serializer rez;
               {
-                rez.serialize(IndexSpace::NO_SPACE);
-                rez.serialize(rit->elements.size());
-                for (std::set<Domain>::const_iterator it =
-                      rit->elements.begin(); it != rit->elements.end(); it++)
-                  rez.serialize(*it);
-              }
-              else
-                rez.serialize(node->handle);
-              rez.serialize(set->tree_id);
-              context->pack_task_context(rez);
-              mapping->pack(rez);
-              rez.serialize(ready);
-              rez.serialize<size_t>(to_notify.size());
-              for (LegionMap<AddressSpaceID,
-                             FieldMaskSet<EqKDTree> >::const_iterator nit =
-                    to_notify.begin(); nit != to_notify.end(); nit++)
-              {
-                rez.serialize(nit->first);
-                rez.serialize(nit->second.size());
-                for (FieldMaskSet<EqKDTree>::const_iterator it =
-                      nit->second.begin(); it != nit->second.end(); it++)
+                RezCheck z(rez);
+                rez.serialize(this);
+                rez.serialize(set->did);
+                if (node == NULL)
                 {
-                  rez.serialize(it->first);
-                  rez.serialize(it->second);
+                  rez.serialize(IndexSpace::NO_SPACE);
+                  rez.serialize(rit->elements.size());
+                  for (std::set<Domain>::const_iterator it =
+                        rit->elements.begin(); it != rit->elements.end(); it++)
+                    rez.serialize(*it);
                 }
+                else
+                  rez.serialize(node->handle);
+                rez.serialize(set->tree_id);
+                context->pack_task_context(rez);
+                mapping->pack(rez);
+                rez.serialize(ready);
+                rez.serialize<size_t>(to_notify.size());
+                for (LegionMap<AddressSpaceID,
+                               FieldMaskSet<EqKDTree> >::const_iterator nit =
+                      to_notify.begin(); nit != to_notify.end(); nit++)
+                {
+                  rez.serialize(nit->first);
+                  rez.serialize(nit->second.size());
+                  for (FieldMaskSet<EqKDTree>::const_iterator it =
+                        nit->second.begin(); it != nit->second.end(); it++)
+                  {
+                    rez.serialize(it->first);
+                    rez.serialize(it->second);
+                  }
+                }
+                // Also pack up any targets
+                target_mapping.pack(rez);
+                for (unsigned idx = 0; idx < targets.size(); idx++)
+                  rez.serialize(targets[idx]);
+                rez.serialize(rit->set_mask);
+                rez.serialize(notified);
               }
-              // Also pack up any targets
-              target_mapping.pack(rez);
-              for (unsigned idx = 0; idx < targets.size(); idx++)
-                rez.serialize(targets[idx]);
-              rez.serialize(rit->set_mask);
-              rez.serialize(notified);
+              runtime->send_equivalence_set_creation(*cit, rez);
+              ready_events.push_back(notified);
             }
-            runtime->send_equivalence_set_creation(*cit, rez);
-            ready_events.push_back(notified);
+          }
+          else
+          {
+            for (std::vector<AddressSpaceID>::const_iterator cit =
+                  children.begin(); cit != children.end(); cit++)
+            {
+              const RtUserEvent notified = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(set->did);
+                rez.serialize(this);
+                rez.serialize(local_space);
+                mapping->pack(rez);
+                rez.serialize<size_t>(to_notify.size());
+                for (LegionMap<AddressSpaceID,
+                               FieldMaskSet<EqKDTree> >::const_iterator nit =
+                      to_notify.begin(); nit != to_notify.end(); nit++)
+                {
+                  rez.serialize(nit->first);
+                  rez.serialize(nit->second.size());
+                  for (FieldMaskSet<EqKDTree>::const_iterator it =
+                        nit->second.begin(); it != nit->second.end(); it++)
+                  {
+                    rez.serialize(it->first);
+                    rez.serialize(it->second);
+                  }
+                }
+                // Also pack up any targets
+                target_mapping.pack(rez);
+                for (unsigned idx = 0; idx < targets.size(); idx++)
+                  rez.serialize(targets[idx]);
+                rez.serialize(rit->set_mask);
+                rez.serialize(notified);
+              }
+              runtime->send_equivalence_set_reuse(*cit, rez);
+              ready_events.push_back(notified);
+            }
           }
         }
         // Notify any local EqKDTree objects
