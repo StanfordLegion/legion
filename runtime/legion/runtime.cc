@@ -11793,6 +11793,10 @@ namespace Legion {
         {
           ReductionOpTable::iterator it = redop_table.begin();
           // Free ReductionOp *'s with free, not delete!
+          static_assert(
+            std::is_trivially_destructible<typename std::decay<decltype(*(it->second))>::type>::value,
+            "ReducionOp must be trivially destructible"
+          );
           free(it->second);
           redop_table.erase(it);
         }
