@@ -4676,6 +4676,8 @@ function codegen.expr_region(cx, node)
       c.legion_physical_region_wait_until_valid([pr])
       [pr_actions]
     end
+
+    cx:add_cleanup_item(quote c.legion_physical_region_destroy([pr]) end)
   else -- make sure all regions are unmapped in inner tasks
     actions = quote
       [actions];
