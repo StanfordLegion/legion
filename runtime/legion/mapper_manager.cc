@@ -3056,6 +3056,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace MapperManager::get_index_partition_color_space_name(
+                                         MappingCallInfo *ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = runtime->get_index_partition_color_space_name(p);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::get_index_space_partition_colors(MappingCallInfo *ctx,
                                      IndexSpace handle, std::set<Color> &colors)
     //--------------------------------------------------------------------------

@@ -81,6 +81,26 @@
   #endif
 #endif
 
+#if defined(REALM_USE_SHM)
+// Unfortunately, the use of shared memory requires a named resource on the system, which
+// requires coordination of the name before the resources are allocated.  GASNET1 does not
+// have the capability to communicate to other nodes before resource allocation is done,
+// so we cannot support shared memory with it at this time
+#if defined(REALM_USE_GASNET1)
+#error Shared memory not supported on GASNET1
+#endif
+
+#if defined(REALM_ON_WINDOWS)
+// ANONYMOUS_SHARED_MEMORY requires ipc mailbox support, which is not yet implemented on windows
+// TODO: Support this on windows
+//#define REALM_USE_ANONYMOUS_SHARED_MEMORY 1
+#elif !defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+// Use anonymous shared memory by default, as it has a lot fewer limitations and there are
+// more fallbacks in place
+#define REALM_USE_ANONYMOUS_SHARED_MEMORY 1
+#endif
+#endif
+
 #ifdef __cplusplus
 // runtime configuration settings
 namespace Realm {
@@ -92,6 +112,10 @@ namespace Realm {
     // if true, worker threads that might have used user-level thread switching
     //  fall back to kernel threading
     extern bool force_kernel_threads;
+    // Unique identifier for the job assigned to this instance of the machine.  Useful
+    // when dealing with named system resources while running parallel jobs on the same
+    // machine
+    extern unsigned long long job_id;
   };
 };
 #endif

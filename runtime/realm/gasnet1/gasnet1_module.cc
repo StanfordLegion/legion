@@ -618,6 +618,23 @@ namespace Realm {
     return new GASNet1Module;
   }
 
+  void GASNet1Module::get_shared_peers(NodeSet &shared_peers)
+  {
+    std::vector<gasnet_nodeinfo_t> node_info_table(gasnet_nodes());
+    gasnet_getNodeInfo(node_info_table.data(), node_info_table.size());
+    gex_Rank_t my_supernode = node_info_table[0].supernode;
+    for(gasnet_nodeinfo_t &node_info : node_info_table) {
+      if((Realm::NodeID(node_info.host) != Network::my_node_id) &&
+         (node_info.supernode == my_supernode)) {
+        shared_peers.add(node_info.host);
+      }
+    }
+    if(shared_peers.empty()) {
+      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // then just assume all_peers are shareable
+      shared_peers = Network::all_peers;
+    }
+  }
   // actual parsing of the command line should wait until here if at all
   //  possible
   void GASNet1Module::parse_command_line(RuntimeImpl *runtime,

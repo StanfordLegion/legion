@@ -21,7 +21,7 @@
 #include <vector>
 #include "realm/point.h"
 
-#define CUDA_MAX_FIELD_BYTES 40
+#define CUDA_MAX_FIELD_BYTES 64
 #define CUDA_MAX_BLOCKS_PER_GRID 2048
 
 namespace Realm {
@@ -30,7 +30,7 @@ namespace Realm {
     template <size_t N, typename Offset_t = size_t>
     struct alignas(8) AffineSubRect {
       // Extent of the ND array
-      Offset_t strides[N];
+      Offset_t strides[N - 1];
       // Address of the ND array
       uintptr_t addr;
     };
@@ -39,9 +39,6 @@ namespace Realm {
     struct alignas(AffineSubRect<N, Offset_t>) AffineCopyPair {
       AffineSubRect<N, Offset_t> src;
       AffineSubRect<N, Offset_t> dst;
-
-      Offset_t in_pstride;
-      Offset_t out_pstride;
       // Extent of the ND sub-rect
       Offset_t extents[N];
       // Product of the extents for fast lookup, which is the same across
@@ -102,16 +99,14 @@ namespace Realm {
       unsigned short num_rects;
     };
 
-    template<typename Offset_t>
+    template <typename Offset_t>
     struct MemcpyTransposeInfo {
-      size_t width;
-      size_t height;
-      size_t src_stride;
-      size_t dst_stride;
-      size_t field_size;
-      size_t tile_size;
-      void *dst;
-      void *src;
+      Offset_t extents[3];
+      Offset_t src_strides[2];
+      Offset_t dst_strides[2];
+      Offset_t tile_size;
+      uintptr_t dst;
+      uintptr_t src;
     };
 
     template <size_t N, typename Offset_t = size_t>

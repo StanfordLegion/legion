@@ -440,6 +440,15 @@ ifeq ($(strip $(USE_DLMOPEN)),1)
   REALM_CC_FLAGS += -DREALM_USE_DLMOPEN
 endif
 
+# The full capabilities of shared memory require configure-time checks that would be difficult to replicate in the makefile.
+# The following features would need to be tested for in the toolchain and enabled:
+# - posix_fallocate64 (for proper error handling when allocating shared memory)
+# - memfd_create (for anonymous memory sharing)
+USE_SHM ?= 0
+ifeq ($(strip $(USE_SHM)),1)
+  REALM_CC_FLAGS += -DREALM_USE_SHM
+endif
+
 USE_SPY ?= 0
 ifeq ($(strip $(USE_SPY)),1)
   LEGION_CC_FLAGS += -DLEGION_SPY
@@ -679,6 +688,13 @@ NVCC_FLAGS += -gencode arch=compute_$(lastword $(GPU_ARCH))$(COMMA)code=compute_
 endif
 
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
+
+# cuhook lib
+ifeq ($(shell uname -s),Darwin)
+SLIB_REALM_CUHOOK := librealm_cuhook.dylib
+else
+SLIB_REALM_CUHOOK := librealm_cuhook.so
+endif
 endif
 
 # Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
@@ -954,6 +970,7 @@ GEN_GPU_SRC	?=
 CUDA_SRC	+= $(GEN_GPU_SRC)
 HIP_SRC         += $(GEN_GPU_SRC)
 REALM_SRC	?=
+REALM_CUHOOK_CUDA_SRC	?=
 LEGION_SRC	?=
 REALM_CUDA_DIR  ?=
 REALM_CUDA_SRC  ?=
@@ -963,38 +980,39 @@ MAPPER_SRC	?=
 
 # Set the source files
 REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
-		   $(LG_RT_DIR)/realm/bgwork.cc \
-	           $(LG_RT_DIR)/realm/transfer/transfer.cc \
-	           $(LG_RT_DIR)/realm/transfer/channel.cc \
-	           $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
-	           $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
-	           $(LG_RT_DIR)/realm/transfer/ib_memory.cc \
-	           $(LG_RT_DIR)/realm/mutex.cc \
-	           $(LG_RT_DIR)/realm/module.cc \
-		   $(LG_RT_DIR)/realm/module_config.cc \
-	           $(LG_RT_DIR)/realm/threads.cc \
-	           $(LG_RT_DIR)/realm/faults.cc \
-		   $(LG_RT_DIR)/realm/operation.cc \
-	           $(LG_RT_DIR)/realm/tasks.cc \
-	           $(LG_RT_DIR)/realm/metadata.cc \
-	           $(LG_RT_DIR)/realm/repl_heap.cc \
-	           $(LG_RT_DIR)/realm/deppart/partitions.cc \
-	           $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
-	           $(LG_RT_DIR)/realm/deppart/image.cc \
-	           $(LG_RT_DIR)/realm/deppart/preimage.cc \
-	           $(LG_RT_DIR)/realm/deppart/byfield.cc \
-	           $(LG_RT_DIR)/realm/deppart/setops.cc \
-		   $(LG_RT_DIR)/realm/event_impl.cc \
-		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
-		   $(LG_RT_DIR)/realm/proc_impl.cc \
-		   $(LG_RT_DIR)/realm/mem_impl.cc \
-		   $(LG_RT_DIR)/realm/idx_impl.cc \
-		   $(LG_RT_DIR)/realm/inst_impl.cc \
-		   $(LG_RT_DIR)/realm/inst_layout.cc \
-		   $(LG_RT_DIR)/realm/machine_impl.cc \
-		   $(LG_RT_DIR)/realm/sampling_impl.cc \
-		   $(LG_RT_DIR)/realm/subgraph_impl.cc \
-                   $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc
+    $(LG_RT_DIR)/realm/bgwork.cc \
+    $(LG_RT_DIR)/realm/transfer/transfer.cc \
+    $(LG_RT_DIR)/realm/transfer/channel.cc \
+    $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
+    $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
+    $(LG_RT_DIR)/realm/transfer/ib_memory.cc \
+    $(LG_RT_DIR)/realm/mutex.cc \
+    $(LG_RT_DIR)/realm/module.cc \
+    $(LG_RT_DIR)/realm/module_config.cc \
+    $(LG_RT_DIR)/realm/threads.cc \
+    $(LG_RT_DIR)/realm/faults.cc \
+    $(LG_RT_DIR)/realm/operation.cc \
+    $(LG_RT_DIR)/realm/tasks.cc \
+    $(LG_RT_DIR)/realm/metadata.cc \
+    $(LG_RT_DIR)/realm/repl_heap.cc \
+    $(LG_RT_DIR)/realm/deppart/partitions.cc \
+    $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
+    $(LG_RT_DIR)/realm/deppart/image.cc \
+    $(LG_RT_DIR)/realm/deppart/preimage.cc \
+    $(LG_RT_DIR)/realm/deppart/byfield.cc \
+    $(LG_RT_DIR)/realm/deppart/setops.cc \
+    $(LG_RT_DIR)/realm/event_impl.cc \
+    $(LG_RT_DIR)/realm/rsrv_impl.cc \
+    $(LG_RT_DIR)/realm/proc_impl.cc \
+    $(LG_RT_DIR)/realm/mem_impl.cc \
+    $(LG_RT_DIR)/realm/idx_impl.cc \
+    $(LG_RT_DIR)/realm/inst_impl.cc \
+    $(LG_RT_DIR)/realm/inst_layout.cc \
+    $(LG_RT_DIR)/realm/machine_impl.cc \
+    $(LG_RT_DIR)/realm/sampling_impl.cc \
+    $(LG_RT_DIR)/realm/subgraph_impl.cc \
+    $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc \
+    $(LG_RT_DIR)/realm/shm.cc
 # REALM_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 REALM_INST_SRC  += $(LG_RT_DIR)/realm/deppart/image_tmpl.cc \
 	           $(LG_RT_DIR)/realm/deppart/preimage_tmpl.cc \
@@ -1045,6 +1063,7 @@ REALM_CUDA_SRC := $(REALM_CUDA_DIR)/cuda_memcpy.cu
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
 endif
+REALM_CUHOOK_SRC += $(LG_RT_DIR)/realm/cuda/cuda_hook.cc
 endif
 ifeq ($(strip $(USE_HIP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/hip/hip_module.cc \
@@ -1269,6 +1288,7 @@ MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
 ifeq ($(strip $(USE_CUDA)),1)
 APP_OBJS	+= $(CUDA_SRC:.cu=.cu.o)
 LEGION_OBJS 	+= $(LEGION_CUDA_SRC:.cu=.cu.o)
+REALM_CUHOOK_OBJS := $(REALM_CUHOOK_SRC:.cc=.cc.o)
 endif
 
 # Only compile the hip objects if we need to 
@@ -1300,7 +1320,7 @@ ifndef NO_BUILD_RULES
 # Provide an all unless the user asks us not to
 ifndef NO_BUILD_ALL
 .PHONY: all
-all: $(OUTFILE)
+all: $(OUTFILE) $(SLIB_REALM_CUHOOK)
 endif
 # Provide support for installing legion with the make build system
 .PHONY: install COPY_FILES_AFTER_BUILD
@@ -1411,6 +1431,17 @@ endif
 $(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 
+ifeq ($(strip $(USE_CUDA)),1)
+$(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	# $(NVCC) --compiler-options '-fPIC' -o $<.d -M -MT $@ $< $(NVCC_FLAGS) $(INC_FLAGS)
+	# $(NVCC) --compiler-options '-fPIC' -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
+	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
+
+$(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
+	rm -f $@
+	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+endif
+
 ifneq ($(USE_PGI),1)
 $(LG_RT_DIR)/legion/region_tree_%.cc.o : $(LG_RT_DIR)/legion/region_tree_tmpl.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) $(patsubst %,-DINST_N2=%,$(word 2,$(subst _, ,$*))) $(LEGION_DEFCHECK)
@@ -1481,7 +1512,7 @@ endif
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)

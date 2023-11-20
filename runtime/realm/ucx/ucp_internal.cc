@@ -1266,7 +1266,7 @@ err:
 #if defined(REALM_USE_CUDA)
     std::unordered_set<Cuda::GPU*> gpus;
     for (NetworkSegment *segment : segments) {
-      if(segment->base == nullptr) continue;
+      if (segment->base == nullptr) continue;
       if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
         uintptr_t base_as_uint = reinterpret_cast<uintptr_t>(segment->base);
         segments_by_addr.push_back({
@@ -1280,9 +1280,9 @@ err:
           << "tracking pre-allocated gpu segment " << segment
           << " (base " << segment->base << " length " << segment->bytes
           << " with device index " << gpu->info->index;
-      } else if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
-        log_ucp.fatal() << "Cuda Managed Memory not supported";
-        return;
+      } else if (segment->memtype == NetworkSegmentInfo::CudaManagedMem) {
+        log_ucp_seg.debug() << "cuda managed memory passed to attach."
+                            << " seg " << segment << " size " << segment->bytes;
       }
     }
 
@@ -1310,7 +1310,8 @@ err:
       // Must be host memory
       // TODO: Have two separate allocations: one for host and one for device
       if (segment->memtype != NetworkSegmentInfo::HostMem) {
-        log_ucp.info() << "non-host-memory allocation request not supported in attach";
+        log_ucp.info() << "non-host-memory allocation not supported in attach"
+                       << " seg " << segment;
         continue;
       }
       total_alloc_size += segment->bytes;
@@ -1335,7 +1336,11 @@ err:
     for (NetworkSegment *segment : segments) {
       if(segment->base == nullptr) continue;
 #if defined(REALM_USE_CUDA)
-      if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
+      if (segment->memtype == NetworkSegmentInfo::CudaManagedMem) {
+        log_ucp_seg.debug() << "cuda managed memory attach not supported"
+                            << " seg " << segment;
+        continue;
+      } else if (segment->memtype == NetworkSegmentInfo::CudaDeviceMem) {
         if (!config.bind_cudamem) continue;
         Cuda::GPU *gpu = reinterpret_cast<Cuda::GPU *>(segment->memextra);
         context = get_context_device(gpu->info->index);
@@ -1345,6 +1350,7 @@ err:
           << ") in gpu context " << context
           << " device index " << gpu->info->index;
       } else {
+        assert(segment->memtype == NetworkSegmentInfo::HostMem);
         context = get_context_host();
         log_ucp_seg.info()
           << "attaching pre-allocated segment " << segment
@@ -1440,6 +1446,14 @@ err:
     log_ucp.info() << "unmapped attached segments";
   }
 
+  void UCPInternal::get_shared_peers(Realm::NodeSet &shared_peers)
+  {
+    for(int i = 0; i < boot_handle.num_shared_ranks; i++) {
+      if(boot_handle.shared_ranks[i] != boot_handle.pg_rank) {
+        shared_peers.add(boot_handle.shared_ranks[i]);
+      }
+    }
+  }
   void UCPInternal::barrier()
   {
     int rc;
@@ -1874,7 +1888,7 @@ err:
   {
     const SegmentInfo *segment_info = internal->find_segment(src_payload_addr);
     const UCPContext *context       = internal->get_context(segment_info);
-    uint8_t priority                = (header_size + _max_payload_size <=
+    uint8_t priority                = (_header_size + _max_payload_size <=
                                        internal->config.priority_size_max) ?
                                       internal->config.num_priorities - 1 : 0;
 

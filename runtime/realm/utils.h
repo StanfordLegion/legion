@@ -30,6 +30,13 @@
 #include <cstdint>
 #include <sstream>
 
+#if defined(REALM_ON_WINDOWS)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <windows.h>
+#endif
+
 // Define the intrinsic for yielding a core's resources temporarily in order to
 // relieve some pressure on the memory bus and give other threads a chance to
 // make some forward progress to unblock us.  This does *not* yield the thread
@@ -412,6 +419,52 @@ namespace Realm {
 
   // Finds first-bit-set
   unsigned ctz(uint64_t v);
+
+#ifdef REALM_ON_WINDOWS
+    typedef HANDLE OsHandle;
+    static const OsHandle INVALID_OS_HANDLE = 0;
+#else
+    typedef int OsHandle;
+    static const OsHandle INVALID_OS_HANDLE = -1;
+#endif
+
+    /// @brief Creates an ipc mailbox useful for sending and receiving other OSHandles
+    /// between ranks on the same physical node.
+    /// @param name Name of the mailbox that acts as the endpoint address for other ranks
+    /// to access
+    /// @return A valid OS handle it successful, Realm::INVALID_OS_HANDLE if not
+    OsHandle ipc_mailbox_create(const std::string &name);
+
+    /// @brief Send the \p handles and \p data given via the \p mailbox created by
+    /// ipc_mailbox_create to the receiving mailbox given by \p to
+    /// @param mailbox Mailbox created via ipc_mailbox_create
+    /// @param to Name of the mailbox to send to
+    /// @param handles OS handles to send to the receiver.  These will have different
+    /// "values" in the receiver, but will map to the same resource
+    /// @param data Bytes to send to receiver
+    /// @param data_sz Length of \p data to send to receiver
+    /// @return True if successful, false otherwise
+    bool ipc_mailbox_send(OsHandle mailbox, const std::string &to,
+                          const std::vector<OsHandle> &handles, const void *data,
+                          size_t data_sz);
+
+    /// @brief Receive in \p handles and \p data via the \p mailbox created by
+    /// ipc_mailbox_create from the sending mailbox given by \p from
+    /// @param mailbox Mailbox created via ipc_mailbox_create
+    /// @param from Name of the mailbox to receive from
+    /// @param[out] handles OS handles to receive from
+    /// @param[out] data Bytes recieved from
+    /// @param[out] data_sz Length of data in bytes received
+    /// @param max_data_sz Maximum length of \p data that can be received.  If the
+    /// incoming message is larger, this function will fail (return false)
+    /// @return True if successful, false otherwise
+    bool ipc_mailbox_recv(OsHandle mailbox, const std::string &from,
+                          std::vector<OsHandle> &handles, void *data, size_t &data_sz,
+                          size_t max_data_sz);
+
+    /// @brief Close the given OS handle.
+    /// @param handle
+    void close_handle(OsHandle handle);
 
 }; // namespace Realm
 

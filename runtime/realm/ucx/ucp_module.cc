@@ -74,14 +74,19 @@ err_del_mod:
     return NULL;
   }
 
+  void UCPModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    internal->get_shared_peers(shared_peers);
+  }
+
   void UCPModule::parse_command_line(RuntimeImpl *runtime,
-      std::vector<std::string>& cmdline)
+                                     std::vector<std::string> &cmdline)
   {
     CommandLineParser cp;
     Realm::UCP::UCPInternal::Config config;
     // deferred_allocs realm test always passes -ll:gsize
-    size_t global_mem_size;
-    cp.add_option_int_units("-ll:gsize", global_mem_size, 'm');
+    size_t deprecated_gsize = 0;
+    cp.add_option_int_units("-ll:gsize", deprecated_gsize, 'm');
 
     std::string am_mode;
     cp.add_option_string("-ucx:am_mode", am_mode);
@@ -145,6 +150,12 @@ err_del_mod:
 
     bool ok = cp.parse_command_line(cmdline);
     assert(ok);
+
+    if(deprecated_gsize > 0) {
+      log_ucp.fatal() << "Realm UCX backend does not provide a 'global' memory."
+                      << " '-ll:gsize' not permitted";
+      abort();
+    }
 
     //// set internal config ////
 

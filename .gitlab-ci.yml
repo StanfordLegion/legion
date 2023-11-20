@@ -498,19 +498,22 @@ before_script:
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 .p100_cuda117: &p100_cuda117
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.7"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.7"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 .p100_cuda121: &p100_cuda121
   <<: *p100_base
   CUDA: "/usr/local/cuda-12.1"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-12.1"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 ###
@@ -546,11 +549,11 @@ before_script:
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
       when: never
-    # do not automatically run pipelines for pull requests
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # Do not automatically run a push branch pipeline if there is an open merge request
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"'
       when: never
     # commits only run a short suite of jobs
-    - if: '$CI_PIPELINE_SOURCE == "push" && $IS_SHORT_JOB != "1"'
+    - if: '$CI_PIPELINE_SOURCE =~ "push|merge_request_event" && $IS_SHORT_JOB != "1"'
       when: never
     # if none of the above exclusions apply, run the job
     - when: always
@@ -643,6 +646,20 @@ before_script:
     - make -j8
     - ctest --output-on-failure .
     - echo OK
+
+.realm_clang_format: &realm_clang_format
+  script:
+    - apt update -qq -yy && apt install -qq -yy clang-format-14
+    - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
+    - |
+      if grep -q '[^[:space:]]' /tmp/not-formatted.diff; then
+        echo 'Code is not formatted'
+        echo 'Run clang-format-diff on your changes to fix these:'
+        echo "    git diff -U0 --no-color origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 -i"
+        echo "Diff formatting result:"
+        cat /tmp/not-formatted.diff
+        exit 1
+      fi
 
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
@@ -1379,3 +1396,13 @@ gcc9_asan_realm:
   <<: [*linux, *image_2004, *realm_sanitizer_tests]
   variables:
     <<: [*gcc9, *cxx11_normal, *asan, *short, *libdw]
+clang_format_realm:
+  rules:
+    # Always during a merge request update
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    # Never any other time
+    - when: never
+  <<: [*linux, *image_2204, *realm_clang_format]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *short]

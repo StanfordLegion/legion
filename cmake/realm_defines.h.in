@@ -55,6 +55,7 @@
 #cmakedefine GASNET_CONDUIT_OFI 1
 
 #cmakedefine REALM_USE_MPI
+#cmakedefine REALM_MPI_HAS_COMM_SPLIT_TYPE
 
 #cmakedefine REALM_USE_UCX
 
@@ -75,5 +76,8 @@
 #cmakedefine REALM_USE_UNWIND
 
 #cmakedefine REALM_USE_LIBDW
+
+#cmakedefine REALM_USE_SHM
+#cmakedefine REALM_HAS_POSIX_FALLOCATE64
 
 #cmakedefine REALM_RESPONSIVE_TIMELIMIT @REALM_RESPONSIVE_TIMELIMIT@

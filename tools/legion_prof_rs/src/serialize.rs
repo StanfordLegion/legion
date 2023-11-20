@@ -12,9 +12,11 @@ use nom::{
     character::{is_alphanumeric, is_digit},
     combinator::{map, map_opt, map_res, opt},
     multi::{many1, many_m_n, separated_list1},
-    number::complete::{le_i32, le_u32, le_u64, le_u8},
+    number::complete::{le_i32, le_i64, le_u32, le_u64, le_u8},
     IResult,
 };
+
+use serde::Serialize;
 
 use crate::state::{
     EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID,
@@ -42,6 +44,7 @@ pub enum ValueFormat {
     Timestamp,
     U32,
     U64,
+    I64,
     UniqueID,
     VariantID,
 }
@@ -70,14 +73,14 @@ type MemKind = i32;
 type ProcKind = i32;
 type UniqueID = u64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Array(pub Vec<u64>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Point(pub Vec<u64>);
 
 #[rustfmt::skip]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Record {
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
@@ -85,6 +88,7 @@ pub enum Record {
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
     MachineDesc { node_id: NodeID, num_nodes: u32 },
+    ZeroTime { zero_time: i64 },
     ProcDesc { proc_id: ProcID, kind: ProcKind },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
@@ -113,7 +117,7 @@ pub enum Record {
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
-    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, request_type: u32, fevent: EventID },
+    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID },
     CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_hops: u32, indirect: bool },
     FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID },
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
@@ -145,6 +149,7 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "timestamp_t" => Some(ValueFormat::Timestamp),
         "unsigned" => Some(ValueFormat::U32),
         "unsigned long long" => Some(ValueFormat::U64),
+        "long long" => Some(ValueFormat::I64),
         "UniqueID" => Some(ValueFormat::UniqueID),
         "VariantID" => Some(ValueFormat::VariantID),
         _ => None,
@@ -365,6 +370,10 @@ fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, num_nodes) = le_u32(input)?;
     let node_id = NodeID(u64::from(nodeid));
     Ok((input, Record::MachineDesc { node_id, num_nodes }))
+}
+fn parse_zero_time(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, zero_time) = le_i64(input)?;
+    Ok((input, Record::ZeroTime { zero_time }))
 }
 fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
@@ -742,7 +751,6 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, request_type) = le_u32(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -753,7 +761,6 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             ready,
             start,
             stop,
-            request_type,
             fevent,
         },
     ))
@@ -984,6 +991,7 @@ fn parse<'a>(
     parsers.insert(ids["OpDesc"], parse_op_desc);
     parsers.insert(ids["MaxDimDesc"], parse_max_dim_desc);
     parsers.insert(ids["MachineDesc"], parse_machine_desc);
+    parsers.insert(ids["ZeroTime"], parse_zero_time);
     parsers.insert(ids["ProcDesc"], parse_proc_desc);
     parsers.insert(ids["MemDesc"], parse_mem_desc);
     parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);

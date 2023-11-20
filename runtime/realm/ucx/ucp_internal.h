@@ -110,7 +110,7 @@ namespace UCP {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
       int pollers_max{2};
-      int num_priorities{1};
+      int num_priorities{2};
       int prog_boff_max{4}; //progress thread maximum backoff
       int prog_itr_max{16};
       int rdesc_rel_max{16};
@@ -147,6 +147,7 @@ namespace UCP {
     void finalize();
     void attach(std::vector<NetworkSegment *>& segments);
     void detach(std::vector<NetworkSegment *>& segments);
+    void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
     void broadcast(NodeID root, const void *val_in, void *val_out, size_t bytes);
     void gather(NodeID root, const void *val_in, void *vals_out, size_t bytes);

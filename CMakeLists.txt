@@ -233,6 +233,8 @@ else()
   set(CXX_BUILD_WARNING_FLAGS "")
 endif()
 
+include(CheckFunctionExists)
+
 #------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#
@@ -400,6 +402,13 @@ if("${Legion_NETWORKS}" MATCHES .*ucx.*)
   # define variable for realm_defines.h
   set(REALM_USE_UCX ON)
   set(Legion_MPI_INTEROP ON)
+endif()
+
+if (MPI_FOUND)
+  list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_mpi_LIBRARY})
+  # Check if MPI has comm split type available
+  check_function_exists(MPI_Comm_split_type REALM_MPI_HAS_COMM_SPLIT_TYPE)
+  list(POP_BACK CMAKE_REQUIRED_LIBRARIES)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -727,6 +736,22 @@ set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
 if(NOT WIN32)
   option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
 endif()
+
+# Only enable shm on linux and if GASNET1 is not available.
+# OSX is not well tested yet, so disable by default for the time being
+# GASNET1 does not allow communication before network attach, which is needed
+# in order to coordinate a job identifier required to set up named system
+# resources
+if (UNIX AND NOT APPLE AND NOT REALM_USE_GASNET1)
+  option(REALM_USE_SHM "Enable shared memory usage" ON)  
+else()
+  option(REALM_USE_SHM "Enable shared memory usage" OFF)
+endif()
+
+if (UNIX)
+  # Look for posix_fallocate64 for better error reporting of file mapping
+  check_function_exists(posix_fallocate64 REALM_HAS_POSIX_FALLOCATE64)
+endif ()
 
 #------------------------------------------------------------------------------#
 # Hacks for building only Realm

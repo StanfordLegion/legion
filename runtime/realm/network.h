@@ -46,7 +46,7 @@ namespace Realm {
 	uintptr_t ptr;
 	uintptr_t extra;
       };
-      unsigned char raw_bytes[256];
+      unsigned char raw_bytes[384];
     };
   };
   
@@ -55,6 +55,10 @@ namespace Realm {
     extern NodeID my_node_id;
     extern NodeID max_node_id;
     extern NodeSet all_peers;
+    // all peers that can access shared memory from this node
+    // NOTE: This is an over-estimation.  Users should be robust to the fact that this may
+    //       include peers that are not able to access shared memory.
+    extern NodeSet shared_peers;
 
     // in most cases, there will be a single network module - if so, we set
     //  this so we don't have to do a per-node lookup
@@ -157,6 +161,9 @@ namespace Realm {
     // 2) fix the command line if the spawning system hijacked it
     //static NetworkModule *create_network_module(RuntimeImpl *runtime,
     //                                            int *argc, const char ***argv);
+
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers) = 0;
 
     // actual parsing of the command line should wait until here if at all
     //  possible

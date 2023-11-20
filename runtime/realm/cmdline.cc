@@ -137,6 +137,11 @@ namespace Realm {
     errno = 0;  // no errors from before
     char *pos;
     unsigned long v = strtoul(s.c_str(), &pos, 10);
+    // if s == "-1", strtoul convert it to ULONG_MAX, however, since
+    // target is an unsigned int, it should be UINT_MAX
+    if (v == ULONG_MAX) {
+      v = UINT_MAX;
+    }
     if((errno == 0) && (*pos == 0) && (v <= UINT_MAX)) {
       target = v;
       return true;

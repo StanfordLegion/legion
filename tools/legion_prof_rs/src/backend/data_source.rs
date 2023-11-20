@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use legion_prof_viewer::{
     data::{
-        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, FieldID, FieldSchema, Item,
-        ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData,
-        SummaryTile, SummaryTileData, TileID, TileSet, UtilPoint,
+        Color32, DataSource, DataSourceDescription, DataSourceInfo, EntryID, EntryInfo, Field,
+        FieldID, FieldSchema, Item, ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile,
+        SlotMetaTileData, SlotTile, SlotTileData, SummaryTile, SummaryTileData, TileID, TileSet,
+        UtilPoint,
     },
     timestamp as ts,
 };
@@ -313,7 +314,9 @@ impl StateDataSource {
 
             // Channels
             loop {
-                let Some(chans) = chan_groups.get(node) else { break; };
+                let Some(chans) = chan_groups.get(node) else {
+                    break;
+                };
 
                 let kind_id = node_id.child(kind_index);
 
@@ -337,7 +340,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", src_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    src_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -355,7 +363,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", dst_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    dst_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -1232,6 +1245,12 @@ impl StateDataSource {
 }
 
 impl DataSource for StateDataSource {
+    fn fetch_description(&self) -> DataSourceDescription {
+        DataSourceDescription {
+            source_locator: self.state.source_locator.clone(),
+        }
+    }
+
     fn fetch_info(&self) -> DataSourceInfo {
         DataSourceInfo {
             entry_info: self.info.clone(),

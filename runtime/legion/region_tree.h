@@ -3411,7 +3411,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceRef create_external_instance(
+      InstanceRef create_external_instance(const std::set<FieldID> &priv_fields,
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
       PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 
