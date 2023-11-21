@@ -9249,7 +9249,7 @@ namespace Legion {
         remaining_global_disjoint_complete_notifications = 0;
       // Add a reference to be removed only after both the disjointness 
       // and the completeness is set
-      add_base_gc_ref(REGION_TREE_REF);
+      add_base_valid_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -10344,7 +10344,7 @@ namespace Legion {
         RemoteDisjointnessFunctor functor(rez, context->runtime);
         map_over_remote_instances(functor);
       }
-      return remove_base_gc_ref(REGION_TREE_REF);
+      return remove_base_valid_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
