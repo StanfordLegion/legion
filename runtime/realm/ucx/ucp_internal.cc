@@ -1299,7 +1299,7 @@ err:
 #endif
     if (!ok) {
       log_ucp.fatal() << "failed to initialized ucp contexts";
-      return;
+      abort();
     }
 
     // Try to register allocation requests first
