@@ -46,7 +46,7 @@ namespace Realm {
 	uintptr_t ptr;
 	uintptr_t extra;
       };
-      unsigned char raw_bytes[256];
+      unsigned char raw_bytes[384];
     };
   };
   
