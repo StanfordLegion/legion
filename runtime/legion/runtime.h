@@ -2244,6 +2244,10 @@ namespace Legion {
       virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
                           const Domain &launch_domain,
                           std::vector<DomainPoint> &ordered_points);
+      virtual bool is_complete(LogicalRegion upper_bound, 
+                               const Domain &launch_domain);
+      virtual bool is_complete(LogicalPartition upper_bound,
+                               const Domain &launch_domain);
       virtual bool is_functional(void) const;
       virtual bool is_exclusive(void) const;
       virtual unsigned get_depth(void) const;

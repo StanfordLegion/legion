@@ -15422,6 +15422,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IdentityProjectionFunctor::is_complete(LogicalRegion upper_bound,
+                                                const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IdentityProjectionFunctor::is_complete(LogicalPartition upper_bound,
+                                                const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      const Domain color_space_domain =
+        runtime->get_index_partition_color_space(
+            upper_bound.get_index_partition());
+      return ((color_space_domain == launch_domain) ||
+              (color_space_domain.get_volume() == launch_domain.get_volume()));
+    }
+
+    //--------------------------------------------------------------------------
     bool IdentityProjectionFunctor::is_functional(void) const
     //--------------------------------------------------------------------------
     {
