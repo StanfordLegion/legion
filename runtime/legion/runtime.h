@@ -2226,6 +2226,7 @@ namespace Legion {
       virtual ~IdentityProjectionFunctor(void);
     public:
       using ProjectionFunctor::project;
+      using ProjectionFunctor::is_complete;
       virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalRegion upper_bound,
                                     const DomainPoint &point);
