@@ -839,9 +839,12 @@ namespace Legion {
         switch ((Realm::ProfilingMeasurementID)*it)
         {
           case Realm::PMID_OP_STATUS:
+          case Realm::PMID_OP_STATUS_ABNORMAL:
           case Realm::PMID_OP_BACKTRACE:
           case Realm::PMID_OP_TIMELINE:
+          case Realm::PMID_OP_TIMELINE_GPU:
           case Realm::PMID_OP_MEM_USAGE:
+          case Realm::PMID_OP_COPY_INFO:
             {
               results.push_back(*it);
               break;
