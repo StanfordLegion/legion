@@ -1291,8 +1291,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         local_argv = dummy_cmdline_args;
       }
 
-      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
-
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
 
@@ -1354,6 +1352,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  }
 	}
       }
+
+      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
 
       if(argc) *argc = local_argc;
       if(argv) *argv = const_cast<char **>(local_argv);
