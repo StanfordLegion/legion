@@ -1110,6 +1110,12 @@ namespace Legion {
       return get_realm_index_space(*space, need_tight_result);
     }
 
+    template<int DIM, typename T>
+    bool IndexSpaceOperationT<DIM,T>::is_sparse()
+    {
+      return !realm_index_space.dense();
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceOperationT<DIM,T>::get_domain(Domain &domain, bool tight)
@@ -2153,6 +2159,12 @@ namespace Legion {
       ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
       if (linear != NULL)
         delete linear;
+    }
+
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::is_sparse()
+    {
+      return !realm_index_space.dense();
     }
 
     //--------------------------------------------------------------------------

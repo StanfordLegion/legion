@@ -26,6 +26,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 // templates in legion/region_tree.inl are instantiated by region_tree_tmpl.cc
 
@@ -5754,7 +5755,7 @@ namespace Legion {
       if (exprs.size() == 1)
         return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
-      // Do a quick pass to see if any of them are empty in which case we 
+      // Do a quick pass to see if any of them are empty in which case we
       // know that the result of the whole intersection is empty
       for (unsigned idx = 0; idx < expressions.size(); idx++)
       {
@@ -22013,6 +22014,27 @@ namespace Legion {
       logger->up();
     }
 #endif 
+
+    /* static */
+    IndexSpaceOperation *
+    InstanceExpressionCreator::create_with_domain(TypeTag tag,
+                                                 const Domain &dom)
+    {
+      InstanceExpressionCreator creator(tag, dom);
+      creator.create_operation();
+
+      IndexSpaceOperation *out = creator.result;
+      out->add_base_expression_reference(LIVE_EXPR_REF);
+      ImplicitReferenceTracker::record_live_expression(out);
+
+      return out;
+    }
+
+    /* static */
+    RegionTreeForest *InstanceExpressionCreator::forest()
+    {
+      return implicit_runtime->forest;
+    }
 
   }; // namespace Internal 
 }; // namespace Legion

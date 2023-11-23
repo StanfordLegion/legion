@@ -26,6 +26,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -5749,17 +5750,16 @@ namespace Legion {
                        deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
-          IndexSpaceExpression *expr = 
-           runtime->forest->intersect_index_spaces(set->set_expr,analysis_expr);
-          if (expr->is_empty())
+          IndexSpaceValue expr = IndexSpaceValue(set->set_expr) & analysis_expr;
+          if (expr.is_empty())
             return;
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
-          if (expr->get_volume() == set->set_expr->get_volume())
+          if (expr.get_volume() == set->set_expr->get_volume())
             set->analyze(*this, set->set_expr, true/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
           else
-            set->analyze(*this, expr, false/*covers*/, mask,
+            set->analyze(*this, *expr, false/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
         }
         else
