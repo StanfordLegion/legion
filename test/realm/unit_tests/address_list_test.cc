@@ -1,4 +1,4 @@
-#include "realm/transfer/channel.h"
+#include "realm/transfer/address_list.h"
 
 #include <tuple>
 #include <gtest/gtest.h>
@@ -8,6 +8,7 @@ using namespace Realm;
 class AddressListTestsWithParams : public ::testing::TestWithParam<std::tuple<int, int>> {
 };
 
+// TODO(apryakhin): consider merging tests below
 TEST_P(AddressListTestsWithParams, AdvanceContiguous)
 {
   const size_t dim = 1;
