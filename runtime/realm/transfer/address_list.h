@@ -34,10 +34,6 @@
 #include <string.h>
 
 #include "realm/id.h"
-#include "realm/runtime_impl.h"
-#include "realm/mem_impl.h"
-#include "realm/inst_impl.h"
-#include "realm/bgwork.h"
 #include "realm/utils.h"
 
 namespace Realm {
