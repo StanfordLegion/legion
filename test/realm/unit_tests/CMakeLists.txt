@@ -24,7 +24,7 @@ endif()
 
 list(APPEND REALM_TESTS
   address_list_test
-  )
+ )
 
 include(FetchContent)
 FetchContent_Declare(
@@ -37,11 +37,9 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 foreach(test IN LISTS REALM_TESTS)
-   add_executable(${test} ${test}.cc)
+  add_executable(${test} ${test}.cc)
   target_link_libraries(${test} Legion::Realm GTest::gtest_main)
   target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-
-
   include(GoogleTest)
   gtest_discover_tests(${test})
 endforeach()
@@ -49,34 +47,4 @@ endforeach()
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
-endif()
-
-#add_executable(
-#ddress_list_test
-#address_list_test.cc
-#)
-#target_link_libraries(
-#  address_list_test
-#  GTest::gtest_main
-#)
-
-#include(GoogleTest)
-#gtest_discover_tests(address_list_test)
-
-if(Legion_ENABLE_TESTING)
-  foreach(test IN LISTS REALM_TESTS)
-    add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
-  endforeach()
-  # test machine_config with -test_args 1
-  add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${Legion_TEST_ARGS} ${TESTARGS_machine_config_args})
-
-  if(Legion_NETWORKS)
-    # For verifying the -ll:networks arguments, try each network we've compiled with
-    string(REPLACE "," ";" NETWORK_LIST "${Legion_NETWORKS}")
-    foreach(ITEM IN LISTS NETWORK_LIST)
-      set(NETWORK_ARGS "-ll:networks ${ITEM}")
-      message(${NETWORK_ARGS})
-      add_test(NAME version_check_network_${ITEM} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:version_check> ${NETWORK_ARGS} ${Legion_TEST_ARGS} ${TESTARGS_version_check})
-    endforeach()
-  endif()
 endif()
