@@ -159,7 +159,8 @@ namespace Realm {
     // if we haven't fetched the layout, now's our last chance
     if(inst_layout == 0) {
       assert(inst_impl->metadata.is_valid());
-      inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst_impl->metadata.layout);
+      inst_layout =
+          checked_cast<const InstanceLayout<N, T> *>(inst_impl->metadata.layout);
     }
 
     // try to get a new (non-empty) rectangle
