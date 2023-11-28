@@ -8,8 +8,8 @@ using namespace Realm;
 class AddressListTestsWithParams : public ::testing::TestWithParam<std::tuple<int, int>> {
 };
 
-// TODO(apryakhin): consider merging tests below
-TEST_P(AddressListTestsWithParams, AdvanceContiguous)
+// TODO(apryakhin): Consider merging tests and testing for edge cases
+TEST_P(AddressListTestsWithParams, Create1DEntry)
 {
   const size_t dim = 1;
   const size_t stride = std::get<0>(GetParam());
@@ -31,14 +31,17 @@ TEST_P(AddressListTestsWithParams, AdvanceContiguous)
   addrcursor.advance(dim - 1, stride);
   EXPECT_EQ(addrcursor.remaining(dim - 1), bytes - stride);
 
-  addrcursor.advance(dim - 1, bytes - stride);
+  addrcursor.skip_bytes(stride);
+  EXPECT_EQ(addrcursor.remaining(dim - 1), bytes - 2 * stride);
+
+  addrcursor.advance(dim - 1, bytes - 2 * stride);
   EXPECT_EQ(addrlist.bytes_pending(), 0);
 }
 
-TEST_P(AddressListTestsWithParams, AdvanceNonContigus)
+TEST_P(AddressListTestsWithParams, Create3DEntry)
 {
   AddressList addrlist;
-  // TODO(apryakhin): parameterize this
+  // TODO(apryakhin): parameterize dimensions
   const size_t dim = 3;
   const size_t stride = std::get<0>(GetParam());
   const size_t bytes = std::get<1>(GetParam());
@@ -66,7 +69,7 @@ TEST_P(AddressListTestsWithParams, AdvanceNonContigus)
   EXPECT_EQ(addrlist.bytes_pending(), 0);
 }
 
-TEST_P(AddressListTestsWithParams, CommitMaxEntries)
+TEST_P(AddressListTestsWithParams, CommitMax1DEntries)
 {
   const size_t dim = 1;
   const size_t stride = std::get<0>(GetParam());
