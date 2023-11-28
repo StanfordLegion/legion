@@ -15,9 +15,8 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-project(LegionTest_realm)
+project(LegionTest_realm_unittest)
 
-# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
@@ -43,8 +42,3 @@ foreach(test IN LISTS REALM_TESTS)
   include(GoogleTest)
   gtest_discover_tests(${test})
 endforeach()
-
-if(REALM_LIMIT_SYMBOL_VISIBILITY)
-  set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
-  set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
-endif()
