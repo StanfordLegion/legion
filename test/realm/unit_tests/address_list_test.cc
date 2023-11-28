@@ -1,19 +1,18 @@
-#include "realm.h"
 #include "realm/transfer/channel.h"
 
 #include <tuple>
-
 #include <gtest/gtest.h>
 
 using namespace Realm;
 
-class AddressListTestsWithParams : public ::testing::TestWithParam<std::tuple<int>> {};
+class AddressListTestsWithParams : public ::testing::TestWithParam<std::tuple<int, int>> {
+};
 
 TEST_P(AddressListTestsWithParams, AdvanceContiguous)
 {
   const size_t dim = 1;
-  const size_t stride = 8;
-  const size_t bytes = std::get<0>(GetParam());
+  const size_t stride = std::get<0>(GetParam());
+  const size_t bytes = std::get<1>(GetParam());
   assert(stride <= bytes);
 
   AddressList addrlist;
@@ -40,8 +39,9 @@ TEST_P(AddressListTestsWithParams, AdvanceNonContigus)
   AddressList addrlist;
   // TODO(apryakhin): parameterize this
   const size_t dim = 3;
-  const size_t bytes = std::get<0>(GetParam());
-  const std::vector<size_t> strides{8, 8 * 8, 8 * 8 * 8};
+  const size_t stride = std::get<0>(GetParam());
+  const size_t bytes = std::get<1>(GetParam());
+  const std::vector<size_t> strides{stride, stride * stride, stride * stride * stride};
   const size_t total_bytes = strides[0];
   size_t *addr_data = addrlist.begin_nd_entry(dim);
 
@@ -65,5 +65,37 @@ TEST_P(AddressListTestsWithParams, AdvanceNonContigus)
   EXPECT_EQ(addrlist.bytes_pending(), 0);
 }
 
+TEST_P(AddressListTestsWithParams, CommitMaxEntries)
+{
+  const size_t dim = 1;
+  const size_t stride = std::get<0>(GetParam());
+  const size_t bytes = std::get<1>(GetParam());
+  const size_t max_entries = 499;
+  assert(stride <= bytes);
+
+  AddressList addrlist;
+  for(size_t i = 0; i < max_entries; i++) {
+    size_t *addr_data = addrlist.begin_nd_entry(dim);
+    EXPECT_NE(addr_data, nullptr);
+    addr_data[0] = (bytes << 4) + dim;
+    addrlist.commit_nd_entry(dim, bytes);
+  }
+
+  AddressListCursor addrcursor;
+  addrcursor.set_addrlist(&addrlist);
+
+  EXPECT_EQ(addrcursor.remaining(dim - 1), bytes);
+  EXPECT_EQ(addrcursor.get_dim(), dim);
+  EXPECT_EQ(addrcursor.get_offset(), 0);
+
+  addrcursor.advance(dim - 1, stride);
+  EXPECT_EQ(addrcursor.remaining(dim - 1), bytes - stride);
+
+  // advance rest of first entry
+  addrcursor.advance(dim - 1, bytes - stride);
+  EXPECT_EQ(addrlist.bytes_pending(), bytes * (max_entries - 1));
+}
+
 INSTANTIATE_TEST_CASE_P(AddressListTest, AddressListTestsWithParams,
-                        ::testing::Values(std::make_tuple(1024), std::make_tuple(2048)));
+                        ::testing::Values(std::make_tuple(8, 1024),
+                                          std::make_tuple(8, 2048)));
