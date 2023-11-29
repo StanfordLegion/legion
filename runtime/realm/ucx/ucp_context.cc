@@ -23,6 +23,7 @@
 
 #include "realm/ucx/ucp_context.h"
 #include "realm/ucx/ucp_utils.h"
+#include "realm/ucx/ucp_dyn_load.h"
 
 #include <ucp/api/ucp.h>
 #include <unordered_map>
@@ -49,7 +50,7 @@ namespace UCP {
     ev.data.u64 = 0;
     ucs_status_t status;
 
-    status = ucp_worker_get_efd(worker, &efd);
+    status = UCP_FNPTR(ucp_worker_get_efd)(worker, &efd);
     CHKERR_JUMP(status != UCS_OK, "ucp_worker_get_efd failed", log_ucp, err);
 
     worker_efd = epoll_create(1);
@@ -60,7 +61,7 @@ namespace UCP {
     ret        = epoll_ctl(worker_efd, EPOLL_CTL_ADD, efd, &ev);
     CHKERR_JUMP(ret < 0, "epoll_ctl ADD failed", log_ucp, err_close_efd);
 
-    status = ucp_worker_arm(worker);
+    status = UCP_FNPTR(ucp_worker_arm)(worker);
     CHKERR_JUMP(status != UCS_OK, "ucp_worker_arm failed", log_ucp, err_close_efd);
 
     log_ucp.info() << "armed ucp worker " << worker << " context " << context;
@@ -102,10 +103,10 @@ err:
 #endif
 
     int c = prog_itr_max;
-    while (c-- && ucp_worker_progress(worker));
+    while (c-- && UCP_FNPTR(ucp_worker_progress)(worker));
 
-    if (!ucp_worker_progress(worker)) {
-      status = ucp_worker_arm(worker);
+    if (!UCP_FNPTR(ucp_worker_progress)(worker)) {
+      status = UCP_FNPTR(ucp_worker_arm)(worker);
       if (status == UCS_OK) {
         have_residual_events = false;
       } else if (status == UCS_ERR_BUSY) {
@@ -128,7 +129,7 @@ err:
     Cuda::AutoGPUContext agc(context->gpu);
 #endif
     int c = prog_itr_max;
-    while (c-- && ucp_worker_progress(worker));
+    while (c-- && UCP_FNPTR(ucp_worker_progress)(worker));
 
     return true;
   }
@@ -140,7 +141,7 @@ err:
       if (am_rdesc_q_spinlock.trylock()) {
         int c = rdesc_rel_max;
         while (c-- && !am_rdesc_q.empty()) {
-          ucp_am_data_release(worker, am_rdesc_q.front());
+          UCP_FNPTR(ucp_am_data_release)(worker, am_rdesc_q.front());
           am_rdesc_q.pop();
         }
         am_rdesc_q_spinlock.unlock();
@@ -172,7 +173,7 @@ err:
     param.cb         = cb;
     param.arg        = args;
 
-    status           = ucp_worker_set_am_recv_handler(worker, &param);
+    status           = UCP_FNPTR(ucp_worker_set_am_recv_handler)(worker, &param);
     if (status != UCS_OK) return false;
 
     return true;
@@ -203,7 +204,7 @@ err:
     param.flags        = UCP_AM_SEND_FLAG_COPY_HEADER;
 
     scount.fetch_add_acqrel(1);
-    status_ptr = ucp_am_send_nbx(ep, am_id,
+    status_ptr = UCP_FNPTR(ucp_am_send_nbx)(ep, am_id,
         header, header_size, payload, payload_size, &param);
     pcount.fetch_add_acqrel(1);
 
@@ -233,21 +234,21 @@ err:
     switch (req->op_type) {
       case AM_SEND:
         param.flags |= UCP_AM_SEND_FLAG_COPY_HEADER;
-        status_ptr = ucp_am_send_nbx(req->ep, req->am.id,
+        status_ptr = UCP_FNPTR(ucp_am_send_nbx)(req->ep, req->am.id,
             req->am.header, req->am.header_size,
             req->payload, req->payload_size, &param);
         CHKERR_JUMP(UCS_PTR_IS_ERR(status_ptr),
             "ucp_am_send_nbx failed", log_ucp, err);
         break;
       case PUT:
-        status_ptr = ucp_put_nbx(req->ep,
+        status_ptr = UCP_FNPTR(ucp_put_nbx)(req->ep,
             req->payload, req->payload_size,
             req->rma.remote_addr, req->rma.rkey, &param);
         CHKERR_JUMP(UCS_PTR_IS_ERR(status_ptr),
             "ucp_put_nbx failed", log_ucp, err);
         break;
       case EP_FLUSH:
-        status_ptr = ucp_ep_flush_nbx(req->ep, &param);
+        status_ptr = UCP_FNPTR(ucp_ep_flush_nbx)(req->ep, &param);
         CHKERR_JUMP(UCS_PTR_IS_ERR(status_ptr),
             "ucp_ep_flush_nbx failed", log_ucp, err);
         break;
@@ -328,15 +329,16 @@ err:
     worker_params.thread_mode  = thread_mode;
     worker_params.am_alignment = am_alignment;
 
-    status = ucp_worker_create(context->get_ucp_context(),
+    status = UCP_FNPTR(ucp_worker_create)(context->get_ucp_context(),
         &worker_params, &worker);
     CHKERR_JUMP(status != UCS_OK, "ucp_worker_create failed", log_ucp, err);
 
     worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE |
                              UCP_WORKER_ATTR_FIELD_MAX_AM_HEADER;
 
-    status = ucp_worker_query(worker, &worker_attr);
-    CHKERR_JUMP(status != UCS_OK, "ucp_worker_query failed", log_ucp, err_destroy_worker);
+    status = UCP_FNPTR(ucp_worker_query)(worker, &worker_attr);
+    CHKERR_JUMP(status != UCS_OK,
+        "ucp_worker_query failed", log_ucp, err_destroy_worker);
 
     if (thread_mode == UCS_THREAD_MODE_MULTI &&
         worker_attr.thread_mode != UCS_THREAD_MODE_MULTI) {
@@ -357,7 +359,7 @@ err:
     return true;
 
 err_destroy_worker:
-    ucp_worker_destroy(worker);
+    UCP_FNPTR(ucp_worker_destroy)(worker);
 err:
     return false;
   }
@@ -373,7 +375,7 @@ err:
 #endif
 
     if (use_wakeup) close(worker_efd);
-    ucp_worker_destroy(worker);
+    UCP_FNPTR(ucp_worker_destroy)(worker);
     log_ucp.debug() << "destroyed ucp worker " << worker;
     initialized = false;
   }
@@ -403,7 +405,7 @@ err:
 
     attr.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS |
                       UCP_MEM_ATTR_FIELD_LENGTH;
-    CHKERR_JUMP(ucp_mem_query(mem_h, &attr) != UCS_OK,
+    CHKERR_JUMP(UCP_FNPTR(ucp_mem_query)(mem_h, &attr) != UCS_OK,
         "pbuf_chunk_alloc mem_query failed", log_ucp, err);
 
     assert(worker->pbuf_mp_mem_hs.count(attr.address) == 0);
@@ -438,7 +440,7 @@ err:
     Cuda::AutoGPUContext agc(context->gpu);
 #endif
 
-    ucs_status_t status = ucp_ep_create(worker, &ep_params, &ep);
+    ucs_status_t status = UCP_FNPTR(ucp_ep_create)(worker, &ep_params, &ep);
     CHKERR_JUMP(status != UCS_OK, "ucp_ep_create failed", log_ucp, err);
 
     // make sure we're not overwriting an existing ep
@@ -473,15 +475,15 @@ err:
     Cuda::AutoGPUContext agc(context->gpu);
 #endif
 
-    close_req = ucp_ep_close_nbx(ep, &param);
+    close_req = UCP_FNPTR(ucp_ep_close_nbx)(ep, &param);
     if (UCS_PTR_IS_ERR(close_req)) return false;
 
     if (close_req != NULL) {
       do {
-          ucp_worker_progress(worker);
-          status = ucp_request_check_status(close_req);
+          UCP_FNPTR(ucp_worker_progress)(worker);
+          status = UCP_FNPTR(ucp_request_check_status)(close_req);
       } while (status == UCS_INPROGRESS);
-      ucp_request_free(close_req);
+      UCP_FNPTR(ucp_request_free)(close_req);
     }
 
     return true;
@@ -567,14 +569,15 @@ err:
 #endif
 
     // read ucp config once for all contexts
-    status = ucp_config_read(NULL, NULL, &ucp_config);
+    status = UCP_FNPTR(ucp_config_read)(NULL, NULL, &ucp_config);
     CHKERR_JUMP(status != UCS_OK, "ucp_config_read failed", log_ucp, err);
 
     for (const auto &kv : ev_map) {
       // "UCX_" should be removed from config name
       const char *config_name = &kv.first.c_str()[4];
 
-      status = ucp_config_modify(ucp_config, config_name, kv.second.c_str());
+      status = UCP_FNPTR(ucp_config_modify)(ucp_config,
+          config_name, kv.second.c_str());
       if (status != UCS_OK) {
         log_ucp.error() << "ucp_config_modify failed "
                         << kv.first << " " << kv.second;
@@ -599,18 +602,21 @@ err:
       ucp_params.estimated_num_eps = ep_nums_est;
     }
 
-    status = ucp_init(&ucp_params, ucp_config, &context);
+    // ucp_init is inline in ucp.h; can't use function ptr for it.
+    // we call ucp_init_version directly.
+    status = UCP_FNPTR(ucp_init_version)(UCP_API_MAJOR, UCP_API_MINOR,
+        &ucp_params, ucp_config, &context);
 
     CHKERR_JUMP(status != UCS_OK, "ucp_init failed", log_ucp, err_rel_config);
 
     context_attr.field_mask = UCP_ATTR_FIELD_REQUEST_SIZE;
-    status = ucp_context_query(context, &context_attr);
+    status = UCP_FNPTR(ucp_context_query)(context, &context_attr);
     CHKERR_JUMP(status != UCS_OK, "ucp_context_query failed",
         log_ucp, err_cleanup_context);
 
     ucp_req_size = context_attr.request_size;
 
-    ucp_config_release(ucp_config);
+    UCP_FNPTR(ucp_config_release)(ucp_config);
 
     initialized = true;
     log_ucp.info() << "initialized ucp context " << this
@@ -623,9 +629,9 @@ err:
     return true;
 
 err_cleanup_context:
-    ucp_cleanup(context);
+    UCP_FNPTR(ucp_cleanup)(context);
 err_rel_config:
-    ucp_config_release(ucp_config);
+    UCP_FNPTR(ucp_config_release)(ucp_config);
 err:
     return false;
   }
@@ -640,7 +646,7 @@ err:
     Cuda::AutoGPUContext agc(gpu);
 #endif
 
-    ucp_cleanup(context);
+    UCP_FNPTR(ucp_cleanup)(context);
 
     log_ucp.debug() << "cleaned up ucp context " << this;
     initialized = false;
@@ -655,7 +661,7 @@ err:
     Cuda::AutoGPUContext agc(gpu);
 #endif
 
-    status = ucp_mem_map(context, params, mem_h_ptr);
+    status = UCP_FNPTR(ucp_mem_map)(context, params, mem_h_ptr);
     if (status != UCS_OK) {
       log_ucp.error() << "ucp_mem_map failed";
       return false;
@@ -672,7 +678,7 @@ err:
     Cuda::AutoGPUContext agc(gpu);
 #endif
 
-    status = ucp_mem_unmap(context, mem_h);
+    status = UCP_FNPTR(ucp_mem_unmap)(context, mem_h);
     if (status != UCS_OK) {
       log_ucp.error() << "ucp_mem_unmap failed";
       return false;
