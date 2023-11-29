@@ -326,6 +326,19 @@ if(Legion_USE_Kokkos)
 endif()
 
 #------------------------------------------------------------------------------#
+# libdl configuration
+#------------------------------------------------------------------------------#
+# NOTE: although the name of the variable is "libdl", this is dynamic linking
+#  support on any system, even if it doesn't have a libdl
+option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
+if(Legion_USE_LIBDL)
+  # define variable for legion_defines.h
+  set(LEGION_USE_LIBDL ON)
+  # define variable for realm_defines.h
+  set(REALM_USE_LIBDL ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # network interface configuration
 #------------------------------------------------------------------------------#
 set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
@@ -396,12 +409,19 @@ endif()
 # UCX configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES .*ucx.*)
+  if (NOT REALM_USE_LIBDL)
+    message(FATAL_ERROR "UCX backend requires run-time support for dynamic shared objects")
+  endif()
   find_package(ucx 1.14.0 REQUIRED CONFIG)
   message(STATUS "Found UCX: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES})")
   find_package(MPI REQUIRED) # for MPI bootstrap plugin
   # define variable for realm_defines.h
   set(REALM_USE_UCX ON)
   set(Legion_MPI_INTEROP ON)
+  option(Legion_UCX_DYNAMIC_LOAD "Load ucx libraries at runtime" OFF)
+  if(Legion_UCX_DYNAMIC_LOAD)
+    set(REALM_UCX_DYNAMIC_LOAD ON)
+  endif()
 endif()
 
 if (MPI_FOUND)
@@ -575,19 +595,6 @@ if(Legion_USE_HDF5)
   # define variable for both legion_defines.h and realm_defines.h
   set(LEGION_USE_HDF5 ON)
   set(REALM_USE_HDF5 ON)
-endif()
-
-#------------------------------------------------------------------------------#
-# libdl configuration
-#------------------------------------------------------------------------------#
-# NOTE: although the name of the variable is "libdl", this is dynamic linking
-#  support on any system, even if it doesn't have a libdl
-option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
-if(Legion_USE_LIBDL)
-  # define variable for legion_defines.h
-  set(LEGION_USE_LIBDL ON)
-  # define variable for realm_defines.h
-  set(REALM_USE_LIBDL ON)
 endif()
 
 #------------------------------------------------------------------------------#
