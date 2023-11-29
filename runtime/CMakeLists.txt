@@ -794,6 +794,7 @@ list(APPEND LEGION_SRC
   legion/bitmask.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
+  legion/index_space_value.h              legion/index_space_value.cc
   legion/interval_tree.h
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc

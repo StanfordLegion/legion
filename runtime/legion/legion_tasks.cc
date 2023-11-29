@@ -10325,6 +10325,7 @@ namespace Legion {
               if (fold_reduction_future(it->second, reduction_effects,
                                         deterministic_redop)) 
               {
+                delete it->second;
                 std::map<DomainPoint,FutureInstance*>::iterator 
                   to_delete = it++;
                 temporary_futures.erase(to_delete);

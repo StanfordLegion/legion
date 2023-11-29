@@ -26,6 +26,7 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -641,6 +642,7 @@ namespace Legion {
       if (!subviews.empty() && 
           !(subviews.get_valid_mask() * user_mask))
       {
+        IndexSpaceValue user_expr_val(user_expr);
         FieldMaskSet<ExprView> to_traverse;
         std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
         for (FieldMaskSet<ExprView>::const_iterator it = 
@@ -662,12 +664,11 @@ namespace Legion {
             traverse_exprs[it->first] = user_expr;
             continue;
           }
-          IndexSpaceExpression *expr_overlap = 
-            forest->intersect_index_spaces(it->first->view_expr, user_expr);
-          if (!expr_overlap->is_empty())
+          IndexSpaceValue expr_overlap = user_expr_val & it->first->view_expr;
+          if (!expr_overlap.is_empty())
           {
             to_traverse.insert(it->first, overlap);
-            traverse_exprs[it->first] = expr_overlap;
+            traverse_exprs[it->first] = *expr_overlap;
           }
         }
         if (!to_traverse.empty())
@@ -896,6 +897,8 @@ namespace Legion {
     ExprView* ExprView::find_congruent_view(IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
+      IndexSpaceValue expr_val(expr);
+
       // Handle the base case first
       if ((expr == view_expr) || (expr->get_volume() == get_view_volume()))
         return const_cast<ExprView*>(this);
@@ -904,9 +907,9 @@ namespace Legion {
       {
         if (it->first->view_expr == expr)
           return it->first;
-        IndexSpaceExpression *overlap =
-          forest->intersect_index_spaces(expr, it->first->view_expr);
-        const size_t overlap_volume = overlap->get_volume();
+
+        IndexSpaceValue overlap = expr_val & it->first->view_expr;
+        const size_t overlap_volume = overlap.get_volume();
         if (overlap_volume == 0)
           continue;
         // See if we dominate or just intersect
@@ -940,6 +943,8 @@ namespace Legion {
         bool need_tighten = true;
         std::vector<ExprView*> to_delete;
         FieldMaskSet<ExprView> dominating_subviews;
+        IndexSpaceValue subview_val(subview->view_expr);
+
         for (FieldMaskSet<ExprView>::iterator it = 
               subviews.begin(); it != subviews.end(); it++)
         {
@@ -947,10 +952,8 @@ namespace Legion {
           FieldMask overlap_mask = it->second & subview_mask;
           if (!overlap_mask)
             continue;
-          IndexSpaceExpression *overlap =
-            forest->intersect_index_spaces(subview->view_expr,
-                                            it->first->view_expr);
-          const size_t overlap_volume = overlap->get_volume();
+          IndexSpaceValue overlap = subview_val & it->first->view_expr;
+          const size_t overlap_volume = overlap.get_volume();
           if (overlap_volume == 0)
             continue;
           // See if we dominate or just intersect

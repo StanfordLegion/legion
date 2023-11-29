@@ -1301,6 +1301,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
+      virtual bool is_sparse() = 0;
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1655,6 +1656,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
+      virtual bool is_sparse();
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1901,6 +1903,34 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
+    };
+
+    class InternalExpressionCreator
+    {
+    public:
+      InternalExpressionCreator(TypeTag t, const Domain &d, RegionTreeForest *f)
+        : type_tag(t), dom(d), forest(f) { }
+
+      virtual void create_operation()
+      {
+        NT_TemplateHelper::demux<InternalExpressionCreator>(type_tag, this);
+      }
+
+      template<typename N, typename T>
+      static inline void demux(InternalExpressionCreator *creator)
+      {
+        Rect<N::N, T> rect = creator->dom;
+        creator->result = new InternalExpression<N::N, T>(&rect, 1,
+                                                  creator->forest);
+      }
+
+      static IndexSpaceOperation *create_with_domain(TypeTag tag,
+                                                     const Domain &dom);
+    public:
+      const TypeTag type_tag;
+      const Domain dom;
+      RegionTreeForest *const forest;
+      IndexSpaceOperation *result;
     };
 
     /**
@@ -2416,6 +2446,7 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
+      virtual bool is_sparse();
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
