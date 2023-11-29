@@ -22,7 +22,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
-  address_list_test
+  transfer_utils_test
  )
 
 include(FetchContent)
