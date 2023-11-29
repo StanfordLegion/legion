@@ -867,6 +867,8 @@ namespace Realm {
 
       virtual Memory suggest_ib_memories(Memory memory) const;
 
+      virtual bool needs_wrapping_iterator() const { return false; }
+
       virtual RemoteChannelInfo *construct_remote_info() const;
 
       void print(std::ostream& os) const;

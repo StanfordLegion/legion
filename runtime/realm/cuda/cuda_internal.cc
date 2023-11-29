@@ -185,7 +185,7 @@ namespace Realm {
       // unused
       assert(0);
       return 0;
-    }
+   }
 
     static GPUStream *select_stream(GPU* dst, GPU* src, const GPU::CudaIpcMapping *dst_mapping = 0)
     {
@@ -841,37 +841,26 @@ namespace Realm {
       memcpy_info.dst_ind = dst_ind_base;
       memcpy_info.src.addr = in_base;
       memcpy_info.dst.addr = out_base;
-      if(do_scatter)
-        memcpy_info.dst.addr += info.base_offset;
-      else
-        memcpy_info.src.addr += info.base_offset;
       memcpy_info.field_size = info.bytes_per_chunk;
       assert(memcpy_info.field_size);
-      memcpy_info.volume = bytes / info.bytes_per_chunk;
+      memcpy_info.volume = bytes / memcpy_info.field_size;
       assert(memcpy_info.volume);
-
       if(do_scatter) {
-        if(N >= 2)
-          memcpy_info.dst.strides[0] = info.num_lines;
-        if(N >= 3)
-          memcpy_info.dst.strides[1] = info.num_planes;
+        memcpy_info.dst.addr += info.base_offset;
       } else {
-        if(N >= 2)
-          memcpy_info.src.strides[0] = info.num_lines;
-        if(N >= 3)
-          memcpy_info.src.strides[1] = info.num_planes;
+        memcpy_info.src.addr += info.base_offset;
       }
-
       return memcpy_info;
     }
 
-    static void launch_indirect_copy(GPU *gpu, GPUStream *stream, uintptr_t in_base,
-                                     uintptr_t out_base, uintptr_t src_ind_base,
-                                     uintptr_t dst_ind_base, size_t bytes,
-                                     size_t addr_size,
-                                     const TransferIterator::AddressInfo &info,
-                                     bool do_scatter)
+    static void
+    launch_indirect_copy(GPU *gpu, GPUStream *stream, uintptr_t in_base,
+                         uintptr_t out_base, uintptr_t src_ind_base,
+                         uintptr_t dst_ind_base, size_t bytes,
+                         size_t addr_size, // TODO(apryakhin): Use address size
+                         const TransferIterator::AddressInfo &info)
     {
+      bool do_scatter = (dst_ind_base != 0);
       if(info.num_lines == 0 && info.num_planes == 0) {
         auto memcpy_info = make_indirect_info<1>(info, bytes, in_base, out_base,
                                                  src_ind_base, dst_ind_base, do_scatter);
@@ -884,12 +873,20 @@ namespace Realm {
         gpu->launch_indirect_copy_kernel(&memcpy_info, 2, addr_size,
                                          memcpy_info.field_size, memcpy_info.volume,
                                          stream);
+        if(do_scatter)
+          memcpy_info.dst.strides[0] = info.num_lines;
+        else
+          memcpy_info.dst.strides[0] = info.num_lines;
       } else {
         auto memcpy_info = make_indirect_info<3>(info, bytes, in_base, out_base,
                                                  src_ind_base, dst_ind_base, do_scatter);
         gpu->launch_indirect_copy_kernel(&memcpy_info, 3, addr_size,
                                          memcpy_info.field_size, memcpy_info.volume,
                                          stream);
+        if(do_scatter)
+          memcpy_info.dst.strides[1] = info.num_planes;
+        else
+          memcpy_info.dst.strides[1] = info.num_planes;
       }
     }
 
@@ -945,13 +942,11 @@ namespace Realm {
         XferPort *in_port = 0, *out_port = 0;
         GPU *in_gpu = 0, *out_gpu = 0;
         bool out_is_ipc = false;
-        int src_io_port = 0, dst_io_port = 0;
 
         if(input_control.current_io_port >= 0) {
           in_port = &input_ports[input_control.current_io_port];
           in_gpu = this->src_gpus[input_control.current_io_port];
           in_span_start = in_port->local_bytes_total;
-          src_io_port = input_control.current_io_port;
         }
 
         if(output_control.current_io_port >= 0) {
@@ -959,33 +954,27 @@ namespace Realm {
           out_gpu = this->dst_gpus[output_control.current_io_port];
           out_is_ipc = this->dst_is_ipc[output_control.current_io_port];
           out_span_start = out_port->local_bytes_total;
-          dst_io_port = input_control.current_io_port;
         }
 
-        if(in_port->indirect_port_idx >= 0)
-          input_control.current_io_port = -1;
-
-        if(out_port->indirect_port_idx >= 0)
-          output_control.current_io_port = -1;
+        assert(in_port != nullptr);
+        assert(out_port != nullptr);
 
         size_t max_bytes =
             get_addresses(min_xfer_size, &rseqcache, in_nonaffine, out_nonaffine);
-        if(max_bytes == 0)
+
+        if(max_bytes == 0) {
           break;
-
-        input_control.current_io_port = src_io_port;
-        output_control.current_io_port = dst_io_port;
-
-        // assert(in_gpu && out_gpu);
-        assert(in_port != nullptr && out_port != nullptr);
+        }
 
         size_t total_bytes = 0;
-        log_xd.info() << "cuda memcpy chunk: min=" << min_xfer_size
-                      << " max=" << max_bytes;
+        log_xd.info() << "cuda gather/scatter min_xfer_size=" << min_xfer_size
+                      << " max_bytes=" << max_bytes;
 
         uintptr_t in_base = 0;
-        if(!in_nonaffine)
+        if(!in_nonaffine) {
           in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+        }
+
         uintptr_t out_base = 0;
         const GPU::CudaIpcMapping *out_mapping = 0;
         if(!out_nonaffine) {
@@ -1002,91 +991,88 @@ namespace Realm {
         memset(&address_info, 0, sizeof(TransferIterator::AddressInfo));
 
         uintptr_t dst_ind_base = 0;
+        size_t addr_size = 0;
+
+        AddressListCursor &in_alc = in_port->addrcursor;
+        AddressListCursor &out_alc = out_port->addrcursor;
+
         if(out_port->indirect_port_idx >= 0) {
+          // scatter
           size_t iter_bytes = out_port->iter->step(max_bytes, address_info, 0, 0);
-          assert(iter_bytes == 0);
+          log_gpudma.info() << "gpu scatter bytes_per_chunk="
+                            << address_info.bytes_per_chunk
+                            << " num_lines=" << address_info.num_lines
+                            << " num_planes=" << address_info.num_planes
+                            << " iter_bytes=" << iter_bytes;
+          max_bytes = std::min(max_bytes, iter_bytes);
+          addr_size = out_port->iter->get_address_size();
           dst_ind_base = reinterpret_cast<uintptr_t>(
               input_ports[out_port->indirect_port_idx].mem->get_direct_ptr(
                   input_ports[out_port->indirect_port_idx].iter->get_base_offset(), 0));
+          dst_ind_base +=
+              (out_alc.get_offset() / address_info.bytes_per_chunk) * addr_size;
+        } else {
+          out_base += out_alc.get_offset();
         }
 
         uintptr_t src_ind_base = 0;
         if(in_port->indirect_port_idx >= 0) {
+          // gather
           size_t iter_bytes = in_port->iter->step(max_bytes, address_info, 0, 0);
-          assert(iter_bytes == 0);
+          // TODO(apryakhin): we can't do partial gather/scatter
+          // transfers yet as we don't have a way to record the state
+          // after we copied part of data to an intermediate buffer.
+          ///assert(iter_bytes > 0 && iter_bytes <= max_bytes);
+          log_gpudma.info() << "gpu gather bytes_per_chunk="
+                            << address_info.bytes_per_chunk
+                            << " num_lines=" << address_info.num_lines
+                            << " num_planes=" << address_info.num_planes
+                            << " iter_bytes=" << iter_bytes;
+          max_bytes = std::min(max_bytes, iter_bytes);
+          addr_size = in_port->iter->get_address_size();
           src_ind_base = reinterpret_cast<uintptr_t>(
               input_ports[in_port->indirect_port_idx].mem->get_direct_ptr(
                   input_ports[in_port->indirect_port_idx].iter->get_base_offset(), 0));
+          src_ind_base +=
+              (in_alc.get_offset() / address_info.bytes_per_chunk) * addr_size;
+        } else {
+          in_base += in_alc.get_offset();
         }
 
         auto stream = select_stream(out_gpu, in_gpu, out_mapping);
         AutoGPUContext agc(stream->get_gpu());
+
         // We can't do gather-scatter yet.
         assert(!(out_port->indirect_port_idx >= 0 && in_port->indirect_port_idx >= 0));
+        assert(!in_nonaffine && !out_nonaffine);
 
-        size_t bytes_to_fence = 0;
-        size_t addr_size = out_port->indirect_port_idx >= 0
-                               ? out_port->iter->get_address_size()
-                               : in_port->iter->get_address_size();
-        assert(addr_size > 0);
-
-        while(total_bytes < max_bytes) {
-          AddressListCursor &in_alc = in_port->addrcursor;
-          AddressListCursor &out_alc = out_port->addrcursor;
-
-          size_t bytes_left = max_bytes - total_bytes;
-
-          if(!in_nonaffine && !out_nonaffine) {
-            if(in_port->indirect_port_idx == -1) {
-              in_base += in_alc.get_offset();
-            }
-            if(out_port->indirect_port_idx == -1) {
-              out_base += out_alc.get_offset();
-            }
-
-            launch_indirect_copy(in_gpu, stream, in_base, out_base, src_ind_base,
-                                 dst_ind_base, max_bytes, addr_size, address_info,
-                                 out_port->indirect_port_idx >= 0);
-
-            if(in_port->indirect_port_idx == -1)
-              in_alc.advance(0, max_bytes);
-            else
-              out_alc.advance(0, max_bytes);
-
-            bytes_to_fence += max_bytes;
-          } else {
-            // Unsupported yet.
-            assert(0);
-          }
-
-          assert(max_bytes <= bytes_left);
-          total_bytes += max_bytes;
-          if((total_bytes >= min_xfer_size) && work_until.is_expired()) {
-            break;
-          }
+        log_gpudma.info() << "\t Launching gather/scatter copy bytes=" << max_bytes
+                          << " addr_size=" << addr_size;
+        launch_indirect_copy(in_gpu, stream, in_base, out_base, src_ind_base,
+                             dst_ind_base, max_bytes, addr_size, address_info);
+        in_alc.advance(0, max_bytes);
+        out_alc.advance(0, max_bytes);
+        // TODO(apryakhin@): Add control flow
+        total_bytes += max_bytes;
+        size_t bytes_to_fence = total_bytes;
+        if((total_bytes >= min_xfer_size) && work_until.is_expired()) {
+          break;
         }
 
         if(bytes_to_fence > 0) {
-          add_reference(); // released by transfer completion
-          log_gpudma.info() << "gpu indirect copy fence: stream=" << stream << " "
+          add_reference();
+          log_gpudma.info() << "gpu gather/scatter copy fence: stream=" << stream << " "
                             << " xd=" << std::hex << guid << std::dec
-                            << " bytes=" << total_bytes;
-
+                            << " bytes=" << bytes_to_fence;
           stream->add_notification(new GPUTransferCompletion(
               this, input_control.current_io_port, /*_read_offset=*/in_span_start,
               total_bytes, output_control.current_io_port,
-              /*_write_offset=*/out_span_start, total_bytes));
+              /*_write_offset=*/out_span_start, bytes_to_fence));
         }
 
         if(total_bytes > 0) {
           did_work = true;
           bool done = record_address_consumption(total_bytes, total_bytes);
-
-          if(in_port->indirect_port_idx == -1)
-            out_port->iter->reset();
-          else
-            in_port->iter->reset();
-
           if(done || work_until.is_expired()) {
             break;
           }
@@ -1094,7 +1080,6 @@ namespace Realm {
       }
 
       rseqcache.flush();
-
       return did_work;
     }
 
@@ -1106,8 +1091,11 @@ namespace Realm {
                                              NodeID node)
     {
       // TODO(apryakhin): remove this condition when it's supported.
+      // is_directt=false means we gather/scatter to the buffer which
+      // won't be correct if ib smaller that overall size of
+      // gather/scatter
       if(channel_copy_info.addr_size != sizeof(size_t) ||
-         channel_copy_info.is_ranges == true || channel_copy_info.is_direct == false) {
+         channel_copy_info.is_ranges == true) {
         log_gpudma.debug() << "gpu scatter/gather is not supported addr_size="
                            << channel_copy_info.addr_size
                            << " is_ranges=" << channel_copy_info.is_ranges
@@ -1118,23 +1106,28 @@ namespace Realm {
       if(channel_copy_info.src_mem.kind() != Memory::GPU_FB_MEM ||
          channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM ||
          channel_copy_info.ind_mem.kind() != Memory::GPU_FB_MEM) {
-        log_gpudma.debug() << "gpu scatter/gather is not supported on none device memory";
+        //log_gpudma.debug() << "gpu scatter/gather is not supported on none device memory";
         return false;
       }
 
-      GPU *src_gpu =
-          mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.src_mem));
-      GPU *dst_gpu =
-          mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.dst_mem));
+      // TODO(apryakhin): fix this for mpirun -n 2 -cuda:ipc=1 -scatter 1
+      if(channel_copy_info.is_scatter) {
+        GPU *src_gpu =
+            mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.src_mem));
+        GPU *dst_gpu =
+            mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.dst_mem));
 
-      if(src_gpu == nullptr || dst_gpu == nullptr) {
-        log_gpudma.debug() << "could not access get src/dst gpus has_src_gpu="
-                           << (src_gpu == nullptr)
-                           << " has_dst_gpu=" << (dst_gpu == nullptr);
-        return false;
+        if(src_gpu == nullptr || dst_gpu == nullptr) {
+          log_gpudma.debug() << "could not access get src/dst gpus has_src_gpu="
+                             << (src_gpu == nullptr)
+                             << " has_dst_gpu=" << (dst_gpu == nullptr);
+          return false;
+        }
+
+        return src_gpu->can_access_peer(dst_gpu);
       }
 
-      return src_gpu->can_access_peer(dst_gpu);
+      return true;
     }
 
     GPUScatterGatherChannel::GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,
@@ -1235,6 +1228,8 @@ namespace Realm {
       }
       return Memory::NO_MEMORY;
     }
+
+    bool GPUScatterGatherChannel::needs_wrapping_iterator() const { return true; }
 
     uint64_t GPUScatterGatherChannel::supports_path(
         ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
@@ -1360,6 +1355,8 @@ namespace Realm {
                                     redop_id, total_bytes, src_frags, dst_frags, kind_ret,
                                     bw_ret, lat_ret);
     }
+
+    bool GPUScatterGatherRemoteChannel::needs_wrapping_iterator() const { return true; }
 
     ////////////////////////////////////////////////////////////////////////
     //

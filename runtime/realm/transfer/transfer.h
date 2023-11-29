@@ -54,7 +54,6 @@ namespace Realm {
     virtual bool done(void) = 0;
     virtual size_t get_base_offset(void) const;
     virtual size_t get_address_size(void) const;
-    virtual bool can_access_memory(void) const = 0;
 
     // flag bits to control iterators
     enum {
@@ -178,6 +177,7 @@ namespace Realm {
       int gather_control_input;
       int scatter_control_input;
       XferDesRedopInfo redop;
+      Channel* channel;
 
       enum IOType {
 	IO_INST,
@@ -339,7 +339,7 @@ namespace Realm {
 						       RegionInstance inst,
 						       const std::vector<FieldID>& fields,
 						       const std::vector<size_t>& fld_offsets,
-						       const std::vector<size_t>& fld_sizes) const = 0;
+						       const std::vector<size_t>& fld_sizes, Channel* channel = nullptr) const = 0;
 
     virtual void print(std::ostream& os) const = 0;
   };

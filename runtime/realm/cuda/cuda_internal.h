@@ -1082,6 +1082,7 @@ namespace Realm {
       //  default (can be re-enabled with -cuda:mtdma 1)
       static const bool is_ordered = true;
 
+      virtual bool needs_wrapping_iterator() const;
       virtual Memory suggest_ib_memories(Memory memory) const;
 
       virtual RemoteChannelInfo *construct_remote_info() const;
@@ -1140,6 +1141,7 @@ namespace Realm {
                     size_t total_bytes, const std::vector<size_t> *src_frags,
                     const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
                     unsigned *bw_ret = 0, unsigned *lat_ret = 0);
+      virtual bool needs_wrapping_iterator() const;
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
