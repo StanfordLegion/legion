@@ -1,4 +1,6 @@
+use regex::Regex;
 use std::collections::BTreeMap;
+use std::fs::read_to_string;
 use std::fs::File;
 use std::io;
 use std::io::Read;
@@ -91,7 +93,7 @@ pub enum Record {
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     MaxDimDesc { max_dim: MaxDim },
-    MachineDesc { node_id: NodeID, num_nodes: u32, hostname: String, host_id: u64, process_id: u32 },
+    MachineDesc { node_id: NodeID, num_nodes: u32, version: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
     ProcDesc { proc_id: ProcID, kind: ProcKind, cuda_device_uuid: Uuid },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
@@ -381,6 +383,7 @@ fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, nodeid) = le_u32(input)?;
     let (input, num_nodes) = le_u32(input)?;
+    let (input, version) = le_u32(input)?;
     let (input, hostname) = parse_string(input)?;
     let (input, host_id) = le_u64(input)?;
     let (input, process_id) = le_u32(input)?;
@@ -390,6 +393,7 @@ fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
         Record::MachineDesc {
             node_id,
             num_nodes,
+            version,
             hostname,
             host_id,
             process_id,
@@ -1027,6 +1031,38 @@ fn filter_record<'a>(
     }
 }
 
+fn check_version(version: u32) {
+    let legion_prof_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(legion_tool_dir) = legion_prof_dir.parent() {
+        if let Some(legion_dir) = legion_tool_dir.parent() {
+            let legion_prof_h_path = legion_dir
+                .join("runtime")
+                .join("legion")
+                .join("legion_profiling.h");
+            if legion_prof_h_path.exists() {
+                for line in read_to_string(legion_prof_h_path.display().to_string())
+                    .unwrap()
+                    .lines()
+                {
+                    let re = Regex::new(r"#define LEGION_PROF_VERSION (?<version>[0-9]+)").unwrap();
+                    if let Some(caps) = re.captures(line) {
+                        let legion_version = caps["version"].parse::<u32>().unwrap();
+                        assert_eq!(
+                            version, legion_version,
+                            "Can not match the version number of legion_prof:{} with the log:{}",
+                            version, legion_version
+                        );
+                        return;
+                    }
+                }
+                println!("Warning: can not find the version number in legion_profiling.h, so legion_prof can not verify the version, the current version of the log is:{}", version);
+                return;
+            }
+        }
+    }
+    println!("Warning: can not find the legion_profiling.h, so legion_prof can not verify the version, the current version of the log is:{}", version);
+}
+
 fn parse_record<'a>(
     input: &'a [u8],
     parsers: &BTreeMap<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>,
@@ -1110,13 +1146,22 @@ fn parse<'a>(
     let mut input = input;
     let mut max_dim = -1;
     let mut node_id: Option<NodeID> = None;
+    let mut version;
     let mut records = Vec::new();
     while let Ok((input_, record)) = parse_record(input, &parsers, max_dim) {
         if let Record::MaxDimDesc { max_dim: d } = &record {
             max_dim = *d;
         }
-        if let Record::MachineDesc { node_id: d, .. } = &record {
+        if let Record::MachineDesc {
+            node_id: d,
+            num_nodes: _nn,
+            version: v,
+			..
+        } = &record
+        {
             node_id = Some(*d);
+            version = *v;
+            check_version(version);
         }
         input = input_;
         if !filter_input || filter_record(&record, visible_nodes, node_id) {

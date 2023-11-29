@@ -332,6 +332,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
                         if prof_event == "MachineDesc":
                             # parse node id
                             node_id, version = callback(**kwargs)
+                            assert version is not None
                             self.check_version(version)
                             matched = True
                         else:
@@ -523,6 +524,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                 if callback_name == "MachineDesc":
                     # parse node id
                     node_id, version = self.callbacks[_id](**kwargs)
+                    assert version is not None
                     self.check_version(version)
                     matches += 1
                 else:

@@ -26,6 +26,7 @@ url = { version = "2", optional = true }
 slice-group-by = "0.3" # because &[]::group_by is unstable
 log = "0.4"
 env_logger = "0.10"
+regex = "1.10.2"
 
 [profile.dev]
 opt-level = 2
