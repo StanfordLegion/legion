@@ -233,6 +233,15 @@ else()
   set(CXX_BUILD_WARNING_FLAGS "")
 endif()
 
+if ((MSVC) AND (MSVC_VERSION GREATER_EQUAL 1914))
+  check_cxx_compiler_flag("/Zc:__cplusplus" COMPILER_SUPPORTS_ZC_CPLUSPLUS)
+  if(COMPILER_SUPPORTS_ZC_CPLUSPLUS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
+  else()
+    message(FATAL_ERROR "compiler (which appears to be msvc) did not accept /Zc:__cplusplus flag")
+  endif()
+endif()
+
 include(CheckFunctionExists)
 
 #------------------------------------------------------------------------------#
