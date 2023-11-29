@@ -4,10 +4,7 @@
 
 using namespace Realm;
 
-class TrasferUtilsTestsWithParams
-  : public ::testing::TestWithParam<std::tuple<int, int>> {};
-
-TEST_P(TrasferUtilsTestsWithParams, EmptyDomainAndBounds)
+TEST(TransferUtilsTest, EmptyDomainAndBounds)
 {
   Rect<1> subrect, domain = Rect<1>(Point<1>(1), Point<1>(0));
   Point<1> next_start(0);
@@ -19,7 +16,7 @@ TEST_P(TrasferUtilsTestsWithParams, EmptyDomainAndBounds)
   EXPECT_EQ(next_start, Point<1>(0));
 }
 
-TEST_P(TrasferUtilsTestsWithParams, EmptyDomain)
+TEST(TransferUtilsTest, EmptyDomain)
 {
   Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
   Rect<1> subrect, domain = Rect<1>(Point<1>(1), Point<1>(0));
@@ -32,7 +29,7 @@ TEST_P(TrasferUtilsTestsWithParams, EmptyDomain)
   EXPECT_EQ(next_start, Point<1>(0));
 }
 
-TEST_P(TrasferUtilsTestsWithParams, BoundsContainFullSubrect)
+TEST(TransferUtilsTest, BoundsContainFullSubrect)
 {
   Rect<1> subrect, domain = Rect<1>(Point<1>(0), Point<1>(10));
   Point<1> next_start(0);
@@ -44,7 +41,7 @@ TEST_P(TrasferUtilsTestsWithParams, BoundsContainFullSubrect)
   EXPECT_EQ(next_start, Point<1>(0));
 }
 
-TEST_P(TrasferUtilsTestsWithParams, StartNotFullSpanDimension)
+TEST(TransferUtilsTest, StartNotFullSpanDimension)
 {
   Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
   Rect<2> subrect, domain = Rect<2>(Point<2>(0, 0), Point<2>(8, 8));
@@ -64,7 +61,7 @@ TEST_P(TrasferUtilsTestsWithParams, StartNotFullSpanDimension)
   EXPECT_EQ(next_start, Point<2>(0, 0));
 }
 
-TEST_P(TrasferUtilsTestsWithParams, HigherDomainBounds)
+TEST(TransferUtilsTest, HigherDomainBounds)
 {
   Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
   Rect<2> subrect, domain = Rect<2>(Point<2>(1, 1), Point<2>(11, 11));
@@ -79,10 +76,3 @@ TEST_P(TrasferUtilsTestsWithParams, HigherDomainBounds)
     EXPECT_EQ(next_start, Point<2>(11, next_y));
   }
 }
-
-// TODO(apryakhin@):
-// 1. base and edge cases with dim_order
-
-INSTANTIATE_TEST_CASE_P(TrasferUtilsTest, TrasferUtilsTestsWithParams,
-                        ::testing::Values(std::make_tuple(8, 1024),
-                                          std::make_tuple(8, 2048)));
