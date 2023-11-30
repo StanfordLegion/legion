@@ -16,14 +16,7 @@
 #ifndef REALM_TRANSFER_UTILS_H
 #define REALM_TRANSFER_UTILS_H
 
-#include "realm/event.h"
-#include "realm/memory.h"
-#include "realm/indexspace.h"
-#include "realm/atomics.h"
-#include "realm/network.h"
-#include "realm/operation.h"
-#include "realm/transfer/channel.h"
-#include "realm/profiling.h"
+#include "realm/point.h"
 
 namespace Realm {
   // finds the largest subrectangle of 'domain' that starts with 'start',
