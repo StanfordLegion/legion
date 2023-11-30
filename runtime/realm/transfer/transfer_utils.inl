@@ -14,11 +14,6 @@
  */
 
 #include "realm/transfer/transfer_utils.h"
-#include "realm/transfer/channel.h"
-
-#include "realm/transfer/lowlevel_dma.h"
-#include "realm/transfer/ib_memory.h"
-#include "realm/inst_layout.h"
 
 namespace Realm {
 
