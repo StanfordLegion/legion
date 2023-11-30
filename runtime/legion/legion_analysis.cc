@@ -17274,6 +17274,7 @@ namespace Legion {
         rez.serialize(did);
         pack_state(rez, logical_owner_space, did, set_expr, set_expr,
           true/*covers*/, all_ones, true/*pack guards*/, true/*pack invalids*/);
+        pack_global_ref();
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, false/*record*/);
@@ -22946,32 +22947,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent EquivalenceSet::make_owner(AddressSpaceID new_owner, RtEvent pre)
+    void EquivalenceSet::make_owner(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-      if (new_owner != local_space)
-      {
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(pre);
-          rez.serialize(done);
-        }
-        runtime->send_equivalence_set_make_owner(new_owner, rez);
-        return done;
-      }
       if (pre.exists() && !pre.has_triggered())
       {
         const DeferMakeOwnerArgs args(this);
-        return runtime->issue_runtime_meta_task(args, 
+        runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_DEFERRED_PRIORITY, pre);
       }
-      // If we make it here then we can finally mark ourselves the owner
-      AutoLock eq(eq_lock);
-      logical_owner_space = local_space;
-      return RtEvent::NO_RT_EVENT;
+      else
+      {
+        // If we make it here then we can finally mark ourselves the owner
+        AutoLock eq(eq_lock);
+        logical_owner_space = local_space;
+        unpack_global_ref();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22979,35 +22970,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferMakeOwnerArgs *dargs = (const DeferMakeOwnerArgs*)args;
-      dargs->set->make_owner(dargs->set->local_space, RtEvent::NO_RT_EVENT);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_make_owner(Deserializer &derez,
-                                                      Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      RtUserEvent done;
-      derez.deserialize(done);
-
-      if ((ready.exists() && !ready.has_triggered()) ||
-          (precondition.exists() && !precondition.has_triggered()))
-      {
-        const DeferMakeOwnerArgs args(set);
-        Runtime::trigger_event(done,
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-              Runtime::merge_events(ready, precondition)));
-      }
-      else
-        Runtime::trigger_event(done, 
-            set->make_owner(set->local_space, precondition));
+      dargs->set->make_owner();
     }
 
     //--------------------------------------------------------------------------
@@ -23047,10 +23010,9 @@ namespace Legion {
       set->unpack_state_and_apply(derez, source, false/*forward*/,ready_events);
       // Check to see if we're ready or we need to defer this
       if (!ready_events.empty())
-        set->make_owner(runtime->address_space, 
-            Runtime::merge_events(ready_events));
+        set->make_owner(Runtime::merge_events(ready_events));
       else
-        set->make_owner(runtime->address_space);
+        set->make_owner();
     }
 
     //--------------------------------------------------------------------------

@@ -3988,8 +3988,7 @@ namespace Legion {
                       const bool record_invalidate,
                       std::vector<RtEvent> &applied_events, 
                       const bool invalidate_overlap = false);
-      RtEvent make_owner(AddressSpaceID owner, 
-                         RtEvent precondition = RtEvent::NO_RT_EVENT);
+      void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
       void update_tracing_valid_views(LogicalView *view,
                                       IndexSpaceExpression *expr,
                                       const RegionUsage &usage,
@@ -4278,7 +4277,6 @@ namespace Legion {
       static void handle_migration(Deserializer &derez, 
                                    Runtime *runtime, AddressSpaceID source);
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
-      static void handle_make_owner(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_trackers(Deserializer &derez, Runtime *rt);
       static void handle_replication_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);

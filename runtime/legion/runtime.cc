@@ -12979,11 +12979,6 @@ namespace Legion {
               runtime->handle_equivalence_set_owner_update(derez);
               break;
             }
-          case SEND_EQUIVALENCE_SET_MAKE_OWNER:
-            {
-              runtime->handle_equivalence_set_make_owner(derez);
-              break;
-            }
           case SEND_EQUIVALENCE_SET_CLONE_REQUEST:
             {
               runtime->handle_equivalence_set_clone_request(derez,
@@ -23298,15 +23293,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_make_owner(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_EQUIVALENCE_SET_MAKE_OWNER,
-                                      rez, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_clone_request(AddressSpaceID target,
                                                      Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25668,13 +25654,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_owner_update(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_make_owner(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_make_owner(derez, this);
     }
 
     //--------------------------------------------------------------------------
