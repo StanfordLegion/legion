@@ -207,6 +207,8 @@ cache: &global_cache
   UCX_BRANCH: "v1.14.1"
   # mpi_interop example requires MPI to build correctly
   USE_MPI: "1"
+.ucx_dynamic: &ucx_dynamic
+  EXTRA_CMAKE_ARGS: "-DLegion_UCX_DYNAMIC_LOAD=ON"
 .cmake: &cmake
   USE_CMAKE: "1"
 .kokkos: &kokkos
@@ -864,10 +866,10 @@ gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
  variables:
    <<: [*gcc9, *terra12, *release, *cxx11_normal, *ucx, *legion, *libdw]
-gcc9_cxx11_debug_ucx_cmake_legion:
+gcc9_cxx11_debug_ucx_dynamic_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *ucx_dynamic, *cmake, *legion, *ctest, *short, *libdw]
 gcc9_cxx11_debug_ucx_regent:
  <<: [*linux_compute, *image_2004, *tests]
  variables:

@@ -24,12 +24,6 @@
 #include "realm/ucx/ucp_module.h"
 #include "realm/ucx/ucp_internal.h"
 
-#include <ucp/api/ucp_version.h>
-#define REALM_UCP_API_VERSION_MIN UCP_VERSION(1, 14)
-#if UCP_API_VERSION < REALM_UCP_API_VERSION_MIN
-#error The UCX network module requires UCX 1.14.0 or above
-#endif
-
 #ifdef REALM_UCX_MODULE_DYNAMIC
 REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::UCPModule);
 #endif
