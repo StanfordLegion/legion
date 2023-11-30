@@ -190,6 +190,7 @@ endif()
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h
+    realm/ucx/ucp_dyn_load.h
     realm/ucx/ucp_module.h
     realm/ucx/ucp_module.cc
     realm/ucx/ucp_internal.h
@@ -500,7 +501,10 @@ if(REALM_USE_MPI)
 endif()
 
 if(REALM_USE_UCX)
-  target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  target_include_directories(RealmRuntime PRIVATE ${UCX_INCLUDE_DIRS})
+  if(NOT REALM_UCX_DYNAMIC_LOAD)
+    target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  endif()
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)

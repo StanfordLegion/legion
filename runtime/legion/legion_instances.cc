@@ -2218,7 +2218,7 @@ namespace Legion {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(gc_state == PENDING_COLLECTED_GC_STATE);
+      assert(gc_state != COLLECTED_GC_STATE);
 #endif
       sent_valid_references += sent;
       received_valid_references += received;

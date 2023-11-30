@@ -207,6 +207,10 @@ namespace UCP {
       std::vector<UCPWorker*> rx_workers;
     };
 
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    bool resolve_ucp_api_fnptrs();
+#endif
+
 #ifdef REALM_USE_CUDA
   bool init_ucp_contexts(const std::unordered_set<Realm::Cuda::GPU*> &gpus);
 #else
@@ -258,6 +262,9 @@ namespace UCP {
     using WorkersMap = std::unordered_map<const UCPContext*, Workers>;
     using AttachMap  = std::unordered_map<const UCPContext*, std::vector<ucp_mem_h>>;
 
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    void                                    *libucp{nullptr};
+#endif
     bool                                    initialized_boot{false};
     bool                                    initialized_ucp{false};
     Config                                  config;
