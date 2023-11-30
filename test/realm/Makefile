@@ -143,9 +143,6 @@ build : $(TESTS)
 clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
 
-# scatter uses C++11 lambdas
-scatter.o : CC_FLAGS += -std=c++11
-
 machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
 $(TESTS) : % : %.o librealm.a $(SLIB_REALM_CUHOOK)

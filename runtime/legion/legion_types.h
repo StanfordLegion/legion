@@ -2335,7 +2335,7 @@ namespace Legion {
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 
-          const Realm::ReductionOpUntyped *> ReductionOpTable;
+                   Realm::ReductionOpUntyped *> ReductionOpTable;
   typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
   typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, 
                                   size_t&, const void*);

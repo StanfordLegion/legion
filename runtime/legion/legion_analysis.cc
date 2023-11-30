@@ -1288,7 +1288,6 @@ namespace Legion {
               std::vector<ApEvent> rhs_events(num_rhs);
               for (unsigned idx = 0; idx < num_rhs; idx++)
               {
-                ApEvent event;
                 derez.deserialize(rhs_events[idx]);
               }
               tpl->record_merge_events(lhs, rhs_events, tlid);
@@ -9474,7 +9473,6 @@ namespace Legion {
                           applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())     
         analysis->perform_remote(traversal_done, applied_events);
       // Now we can trigger our applied event
