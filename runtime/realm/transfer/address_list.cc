@@ -23,8 +23,6 @@
 #include "realm/transfer/address_list.h"
 #include "realm/utils.h"
 
-#include <algorithm>
-
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
