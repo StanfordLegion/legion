@@ -25453,6 +25453,7 @@ namespace Legion {
                 rez.serialize(this);
                 rez.serialize(local_space);
                 mapping->pack(rez);
+                rez.serialize(ready);
                 rez.serialize<size_t>(to_notify.size());
                 for (LegionMap<AddressSpaceID,
                                FieldMaskSet<EqKDTree> >::const_iterator nit =
@@ -25628,6 +25629,7 @@ namespace Legion {
                   rez.serialize(this);
                   rez.serialize(local_space);
                   mapping.pack(rez);
+                  rez.serialize(RtEvent::NO_RT_EVENT);
                   rez.serialize<size_t>(to_notify.size());
                   for (LegionMap<AddressSpaceID,
                                  FieldMaskSet<EqKDTree> >::const_iterator nit =
@@ -26453,6 +26455,8 @@ namespace Legion {
       size_t num_spaces;
       derez.deserialize(num_spaces);
       CollectiveMapping mapping(derez, num_spaces);
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
       size_t num_notifications;
       derez.deserialize(num_notifications);
       LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
@@ -26499,6 +26503,7 @@ namespace Legion {
           rez.serialize(owner);
           rez.serialize(owner_space);
           mapping.pack(rez);
+          rez.serialize(ready_event);
           rez.serialize<size_t>(to_notify.size());
           for (LegionMap<AddressSpaceID,
                          FieldMaskSet<EqKDTree> >::const_iterator nit =
@@ -26533,7 +26538,7 @@ namespace Legion {
               local_finder->second.begin(); it !=
               local_finder->second.end(); it++)
           it->first->record_equivalence_set(set, it->second,
-              RtEvent::NO_RT_EVENT, target_mapping, targets);
+              ready_event, target_mapping, targets);
       }
       // Check to see if a we have a local target
       if (target_mapping.contains(runtime->address_space))
