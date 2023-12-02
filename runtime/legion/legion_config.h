@@ -1416,11 +1416,19 @@ typedef enum legion_error_t {
   
 }  legion_error_t;
 
+#ifdef __cplusplus
+#include <cstdint>
+#endif
+
 // enum and namepsaces don't really get along well
 // We would like to make these associations explicit
 // but the python cffi parser is stupid as hell
-typedef enum legion_privilege_mode_t {
-  LEGION_NO_ACCESS       = 0x00000000, 
+typedef enum legion_privilege_mode_t
+#ifdef __cplusplus
+: std::uint32_t
+#endif
+{
+  LEGION_NO_ACCESS       = 0x00000000,
   LEGION_READ_PRIV       = 0x00000001,
   LEGION_READ_ONLY       = 0x00000001, // READ_PRIV,
   LEGION_WRITE_PRIV      = 0x00000002,
@@ -1442,6 +1450,10 @@ typedef enum legion_privilege_mode_t {
   LEGION_DEPRECATED_ENUM(WRITE_ONLY)
   LEGION_DEPRECATED_ENUM(WRITE_DISCARD)
 } legion_privilege_mode_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned), "");
+#endif
 
 typedef enum legion_allocate_mode_t {
   LEGION_NO_MEMORY       = 0x00000000,

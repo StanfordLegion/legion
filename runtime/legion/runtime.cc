@@ -95,15 +95,15 @@ namespace Legion {
     thread_local LgTaskID implicit_task_caller = LG_SCHEDULER_ID;
 #endif
 
-    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
-    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
-    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
-    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
-    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
-    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
-    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
-    const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
-    const PredUserEvent PredUserEvent::NO_PRED_USER_EVENT = PredUserEvent();
+    const LgEvent LgEvent::NO_LG_EVENT = {};
+    const ApEvent ApEvent::NO_AP_EVENT = {};
+    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = {};
+    const ApBarrier ApBarrier::NO_AP_BARRIER = {};
+    const RtEvent RtEvent::NO_RT_EVENT = {};
+    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = {};
+    const RtBarrier RtBarrier::NO_RT_BARRIER = {};
+    const PredEvent PredEvent::NO_PRED_EVENT = {};
+    const PredUserEvent PredUserEvent::NO_PRED_USER_EVENT = {};
 
     //--------------------------------------------------------------------------
     void LgEvent::begin_context_wait(Context ctx) const
@@ -17310,7 +17310,12 @@ namespace Legion {
         while (!redop_table.empty())
         {
           ReductionOpTable::iterator it = redop_table.begin();
-          delete it->second;
+          // Free ReductionOp *'s with free, not delete!
+          static_assert(
+            std::is_trivially_destructible<typename std::decay<decltype(*(it->second))>::type>::value,
+            "ReducionOp must be trivially destructible"
+          );
+          free(it->second);
           redop_table.erase(it);
         }
       }

@@ -6142,6 +6142,9 @@ namespace Legion {
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
+      possible_src_indirect_out_of_range = false;
+      possible_dst_indirect_out_of_range = false;
+      possible_dst_indirect_aliasing = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8456,7 +8459,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool commit_now = false;
-      RtEvent commit_pre;
       {
         AutoLock o_lock(op_lock);
         points_committed++;
@@ -17610,7 +17612,6 @@ namespace Legion {
       assert(is_index_space);
 #endif
       bool commit_now = false;
-      RtEvent commit_pre;
       {
         AutoLock o_lock(op_lock);
         points_committed++;

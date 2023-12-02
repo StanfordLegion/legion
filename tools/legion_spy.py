@@ -9562,12 +9562,12 @@ class Task(object):
         for op in self.operations:
             if op.inlined:
                 continue
-            if not op.fully_logged:
-                print(('Warning: skipping event graph printing of %s because it '+
-                            'was not fully logged...') % str(op))
-                if op.state.assert_on_warning:
-                    assert False
-                continue
+            #if not op.fully_logged:
+            #    print(('Warning: skipping event graph printing of %s because it '+
+            #                'was not fully logged...') % str(op))
+            #    if op.state.assert_on_warning:
+            #        assert False
+            #    continue
             op.print_event_graph(printer, elevate, all_nodes, False)
         # Find our local nodes
         local_nodes = list()
