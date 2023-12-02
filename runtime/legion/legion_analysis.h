@@ -3674,7 +3674,8 @@ namespace Legion {
           AddressSpaceID source, unsigned expected_responses,
           std::vector<RtEvent> &ready_events,
           const CollectiveMapping &target_mapping,
-          const std::vector<EqSetTracker*> &targets);
+          const std::vector<EqSetTracker*> &targets,
+          const AddressSpaceID creation_target_space);
       void record_output_subscriptions(AddressSpaceID source,
           FieldMaskSet<EqKDTree> &new_subscriptions);
     public:
@@ -3848,8 +3849,7 @@ namespace Legion {
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
       public:
-        DeferApplyStateArgs(EquivalenceSet *set,
-                            const bool foward_to_owner,
+        DeferApplyStateArgs(EquivalenceSet *set, bool forward,
                             std::vector<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
                             FieldMaskSet<IndexSpaceExpression> &init_updates,
@@ -3981,10 +3981,9 @@ namespace Legion {
       void initialize_collective_references(unsigned local_valid_refs);
       void remove_read_only_guard(CopyFillGuard *guard);
       void remove_reduction_fill_guard(CopyFillGuard *guard);
-      void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
+      void clone_from(EquivalenceSet *src,
                       const FieldMask &clone_mask,
                       IndexSpaceExpression *clone_expr,
-                      const bool forward_to_owner,
                       const bool record_invalidate,
                       std::vector<RtEvent> &applied_events, 
                       const bool invalidate_overlap = false);
@@ -4197,21 +4196,20 @@ namespace Legion {
             const FieldMask &mask, const bool pack_guards, 
             const bool pack_invalidates);
       void unpack_state_and_apply(Deserializer &derez, 
-          const AddressSpaceID source, const bool forward_to_owner,
-          std::vector<RtEvent> &ready_events);
+          const AddressSpaceID source, std::vector<RtEvent> &ready_events,
+          const bool forward_to_owner = true);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &mask, bool record_invalidation);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           IndexSpaceExpression *clone_expr,
                           std::vector<RtEvent> &applied_events,
                           const bool invalidate_overlap,
-                          const bool forward_to_owner,
                           const bool record_invalidate);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
-                    const bool invalidate_overlap, const bool forward_to_owner,
+                    const bool invalidate_overlap,
                     const bool record_invalidate);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask,

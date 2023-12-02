@@ -3475,6 +3475,8 @@ namespace Legion {
         LegionList<FieldSet<std::pair<AddressSpaceID,EqSetTracker*> > >
           fields;
         compute_field_sets(FieldMask(), pit->second.trackers, fields);
+        const AddressSpaceID region_owner_space =
+            RegionNode::get_owner_space(pit->first, this->runtime);
         for (LegionList<FieldSet<std::pair<AddressSpaceID,EqSetTracker*> > >::
               const_iterator fit = fields.begin(); fit != fields.end(); fit++)
         {
@@ -3489,9 +3491,30 @@ namespace Legion {
             targets.push_back(it->second);
             target_spaces.push_back(it->first);
           }
-          RtEvent precondition = context->compute_equivalence_sets(
-              parent_req_index, targets, target_spaces, expr, 
-              fit->set_mask, root_space); 
+          // Be a bit careful, there is an important heuristic here
+          // This heuristic decides which of the targets will be the one
+          // responsible for creating any new equivalence sets if there
+          // are any to be created. We do this by determining which of
+          // the targets is closest to the owner node of the logical
+          // region. This hopefully will spread out creations across
+          // the targets in a resonable way without overly relying on
+          // making these equivalence sets on smaller nodes
+          RtEvent precondition;
+          if (!std::binary_search(target_spaces.begin(),
+                target_spaces.end(), region_owner_space))
+          {
+            const CollectiveMapping mapping(target_spaces,
+                this->runtime->legion_collective_radix);
+            const AddressSpaceID creation_origin =
+              mapping.find_nearest(region_owner_space);
+            precondition = context->compute_equivalence_sets(
+                parent_req_index, targets, target_spaces,
+                creation_origin, expr, fit->set_mask, root_space);
+          }
+          else
+            precondition = context->compute_equivalence_sets(
+                parent_req_index, targets, target_spaces,
+                region_owner_space, expr, fit->set_mask, root_space);
           if (precondition.exists())
             preconditions.push_back(precondition);
         }

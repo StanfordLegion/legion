@@ -3713,6 +3713,7 @@ namespace Legion {
     RtEvent InnerContext::compute_equivalence_sets(unsigned req_index,
                              const std::vector<EqSetTracker*> &targets,
                              const std::vector<AddressSpaceID> &target_spaces,
+                             AddressSpaceID creation_target_space, 
                              IndexSpaceExpression *expr, const FieldMask &mask,
                              IndexSpace root_space)
     //--------------------------------------------------------------------------
@@ -3720,6 +3721,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(targets.size() == target_spaces.size());
       assert(std::is_sorted(target_spaces.begin(), target_spaces.end()));
+      assert(std::binary_search(target_spaces.begin(), target_spaces.end(),
+                                creation_target_space));
 #endif
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
@@ -3743,15 +3746,17 @@ namespace Legion {
 #endif
       const CollectiveMapping target_mapping(target_spaces, 
                           runtime->legion_collective_radix); 
-      return report_equivalence_sets(target_mapping, targets, mask,
-          new_target_references, eq_sets, new_subscriptions, to_create,
-          creation_rects, creation_srcs, 1/*expected responses*/, pending_sets);
+      return report_equivalence_sets(target_mapping, targets, 
+          creation_target_space, mask, new_target_references, eq_sets, 
+          new_subscriptions, to_create, creation_rects, creation_srcs,
+          1/*expected responses*/, pending_sets);
     }
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::report_equivalence_sets(
           const CollectiveMapping &target_mapping, 
-          const std::vector<EqSetTracker*> &targets, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &targets,
+          const AddressSpaceID creation_target_space, const FieldMask &mask,
           std::vector<unsigned> &new_target_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           FieldMaskSet<EqKDTree> &new_subscriptions,
@@ -3775,6 +3780,21 @@ namespace Legion {
         target_mapping.get_children(origin_space, local_space, children);
       else
         children.push_back(origin_space);
+      AddressSpaceID creation_child = origin_space;
+      if (!to_create.empty() && !children.empty())
+      {
+        std::sort(children.begin(), children.end());
+        creation_child = creation_target_space;
+        while (!std::binary_search(children.begin(), 
+                    children.end(), creation_child))
+        {
+#ifdef DEBUG_LEGION
+          assert(creation_child != origin_space);
+#endif
+          creation_child =
+            target_mapping.get_parent(origin_space, creation_child);
+        }
+      }
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
@@ -3792,6 +3812,7 @@ namespace Legion {
             rez.serialize(targets[idx]);
             rez.serialize(new_target_references[idx]);
           }
+          rez.serialize(creation_target_space);
           rez.serialize(mask);
           rez.serialize<size_t>(eq_sets.size());
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -3807,34 +3828,43 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
-          // We only need to send the creation sets to the origin space
-          rez.serialize(to_create.size());
-          for (FieldMaskSet<EqKDTree>::const_iterator it =
-                to_create.begin(); it != to_create.end(); it++)
+          // We only need to send the creation sets along the path to 
+          // creation_target_space
+          if ((*it) == creation_child)
           {
-#ifdef DEBUG_LEGION
-            assert(creation_rects.find(it->first) != creation_rects.end());
-#endif
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-            rez.serialize(creation_rects[it->first]);
-          }
-          rez.serialize<size_t>(creation_srcs.size());
-          for (std::map<EquivalenceSet*,
-                        LegionMap<Domain,FieldMask> >::const_iterator sit =
-                creation_srcs.begin(); sit != creation_srcs.end(); sit++)
-          {
-            // No need to pack a reference since we know that that 
-            // EqKDTree is still holding references to the creation_srcs
-            // until we're done making the new equivalence sets
-            rez.serialize(sit->first->did);
-            rez.serialize<size_t>(sit->second.size());
-            for (LegionMap<Domain,FieldMask>::const_iterator it =
-                  sit->second.begin(); it != sit->second.end(); it++)
+            rez.serialize<size_t>(to_create.size());
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  to_create.begin(); it != to_create.end(); it++)
             {
+#ifdef DEBUG_LEGION
+              assert(creation_rects.find(it->first) != creation_rects.end());
+#endif
               rez.serialize(it->first);
               rez.serialize(it->second);
+              rez.serialize(creation_rects[it->first]);
             }
+            rez.serialize<size_t>(creation_srcs.size());
+            for (std::map<EquivalenceSet*,
+                          LegionMap<Domain,FieldMask> >::const_iterator sit =
+                  creation_srcs.begin(); sit != creation_srcs.end(); sit++)
+            {
+              // No need to pack a reference since we know that that 
+              // EqKDTree is still holding references to the creation_srcs
+              // until we're done making the new equivalence sets
+              rez.serialize(sit->first->did);
+              rez.serialize<size_t>(sit->second.size());
+              for (LegionMap<Domain,FieldMask>::const_iterator it =
+                    sit->second.begin(); it != sit->second.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+            }
+          }
+          else
+          {
+            rez.serialize<size_t>(0);
+            rez.serialize<size_t>(0);
           }
           rez.serialize(expected_responses);
           rez.serialize(ready_event);
@@ -3852,7 +3882,8 @@ namespace Legion {
         targets[target_index]->record_equivalence_sets(this,
             mask, eq_sets, to_create, creation_rects, creation_srcs,
             new_subscriptions, new_target_references[target_index], local_space,
-            expected_responses, ready_events, target_mapping, targets);
+            expected_responses, ready_events, target_mapping, targets, 
+            creation_target_space);
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
@@ -3898,6 +3929,8 @@ namespace Legion {
         derez.deserialize(targets[idx]);
         derez.deserialize(new_target_references[idx]);
       }
+      AddressSpaceID creation_target_space;
+      derez.deserialize(creation_target_space);
       FieldMask mask;
       derez.deserialize(mask);
       size_t num_sets;
@@ -3971,6 +4004,22 @@ namespace Legion {
       derez.deserialize(expected_responses);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+
+      AddressSpaceID creation_child = origin_space;
+      if (!to_create.empty() && !children.empty())
+      {
+        std::sort(children.begin(), children.end());
+        creation_child = creation_target_space;
+        while (!std::binary_search(children.begin(), 
+                    children.end(), creation_child))
+        {
+#ifdef DEBUG_LEGION
+          assert(creation_child != origin_space);
+#endif
+          creation_child =
+            target_mapping.get_parent(origin_space, creation_child);
+        }
+      }
       
       if (!ready_events.empty())
       {
@@ -3999,6 +4048,7 @@ namespace Legion {
             rez.serialize(targets[idx]);
             rez.serialize(new_target_references[idx]);
           }
+          rez.serialize(creation_target_space);
           rez.serialize(mask);
           rez.serialize<size_t>(eq_sets.size());
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -4017,33 +4067,43 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
-          rez.serialize(to_create.size());
-          for (FieldMaskSet<EqKDTree>::const_iterator it =
-                to_create.begin(); it != to_create.end(); it++)
+          // We only need to send the creation sets along the path to 
+          // creation_target_space
+          if ((*it) == creation_child)
           {
-#ifdef DEBUG_LEGION
-            assert(creation_rects.find(it->first) != creation_rects.end());
-#endif
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-            rez.serialize(creation_rects[it->first]);
-          }
-          rez.serialize<size_t>(creation_srcs.size());
-          for (std::map<EquivalenceSet*,
-                        LegionMap<Domain,FieldMask> >::const_iterator sit =
-                creation_srcs.begin(); sit != creation_srcs.end(); sit++)
-          {
-            // No need to pack a reference since we know that that 
-            // EqKDTree is still holding references to the creation_srcs
-            // until we're done making the new equivalence sets
-            rez.serialize(sit->first->did);
-            rez.serialize<size_t>(sit->second.size());
-            for (LegionMap<Domain,FieldMask>::const_iterator it =
-                  sit->second.begin(); it != sit->second.end(); it++)
+            rez.serialize<size_t>(to_create.size());
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  to_create.begin(); it != to_create.end(); it++)
             {
+#ifdef DEBUG_LEGION
+              assert(creation_rects.find(it->first) != creation_rects.end());
+#endif
               rez.serialize(it->first);
               rez.serialize(it->second);
+              rez.serialize(creation_rects[it->first]);
             }
+            rez.serialize<size_t>(creation_srcs.size());
+            for (std::map<EquivalenceSet*,
+                          LegionMap<Domain,FieldMask> >::const_iterator sit =
+                  creation_srcs.begin(); sit != creation_srcs.end(); sit++)
+            {
+              // No need to pack a reference since we know that that 
+              // EqKDTree is still holding references to the creation_srcs
+              // until we're done making the new equivalence sets
+              rez.serialize(sit->first->did);
+              rez.serialize<size_t>(sit->second.size());
+              for (LegionMap<Domain,FieldMask>::const_iterator it =
+                    sit->second.begin(); it != sit->second.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+            }
+          }
+          else
+          {
+            rez.serialize<size_t>(0);
+            rez.serialize<size_t>(0);
           }
           rez.serialize(expected_responses);
           rez.serialize(child_event);
@@ -4062,7 +4122,8 @@ namespace Legion {
       targets[target_index]->record_equivalence_sets(context,
           mask, eq_sets, to_create, creation_rects, creation_srcs, 
           new_subscriptions, new_target_references[target_index], source_space,
-          expected_responses, done_events, target_mapping, targets);
+          expected_responses, done_events, target_mapping, targets,
+          creation_target_space);
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else
@@ -11682,7 +11743,7 @@ namespace Legion {
       std::vector<AddressSpaceID> target_spaces(1, source);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(req_index,
-                          targets, target_spaces, expr, mask, root_space);
+          targets, target_spaces, source, expr, mask, root_space);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -13061,6 +13122,7 @@ namespace Legion {
     RtEvent TopLevelContext::compute_equivalence_sets(unsigned req_index,
                        const std::vector<EqSetTracker*> &targets,
                        const std::vector<AddressSpaceID> &target_spaces,
+                       AddressSpaceID creation_target_space,
                        IndexSpaceExpression *expr, const FieldMask &mask,
                        IndexSpace root_space)
     //--------------------------------------------------------------------------
@@ -22636,6 +22698,7 @@ namespace Legion {
     RtEvent ReplicateContext::compute_equivalence_sets(unsigned req_index,
                              const std::vector<EqSetTracker*> &targets,
                              const std::vector<AddressSpaceID> &target_spaces,
+                             AddressSpaceID creation_target_space,
                              IndexSpaceExpression *expr, const FieldMask &mask,
                              IndexSpace root_space)
     //--------------------------------------------------------------------------
@@ -22643,6 +22706,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(targets.size() == target_spaces.size());
       assert(std::is_sorted(target_spaces.begin(), target_spaces.end()));
+      assert(std::binary_search(target_spaces.begin(), target_spaces.end(),
+                                creation_target_space));
 #endif
       // Find the equivalence set tree for this region requirement
       LocalLock *tree_lock = NULL;
@@ -22679,6 +22744,7 @@ namespace Legion {
           rez.serialize(targets[idx]);
           rez.serialize(target_spaces[idx]);
         }
+        rez.serialize(creation_target_space);
         rez.serialize(req_index);
         rez.serialize(root_space);
         rez.serialize(mask);
@@ -22696,10 +22762,10 @@ namespace Legion {
       }
       const CollectiveMapping target_mapping(target_spaces,
                           runtime->legion_collective_radix);
-      return report_equivalence_sets(target_mapping, targets, mask, 
-          new_target_references, eq_sets, new_subscriptions, to_create,
-          creation_rects, creation_srcs, remote_shard_rects.size() + 1,
-          pending_sets);
+      return report_equivalence_sets(target_mapping, targets,
+          creation_target_space, mask, new_target_references, eq_sets,
+          new_subscriptions, to_create, creation_rects, creation_srcs,
+          remote_shard_rects.size() + 1, pending_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -22936,6 +23002,8 @@ namespace Legion {
         derez.deserialize(targets[idx]);
         derez.deserialize(target_spaces[idx]);
       }
+      AddressSpaceID creation_target_space;
+      derez.deserialize(creation_target_space);
       unsigned req_index;
       derez.deserialize(req_index);
       IndexSpace root_space;
@@ -22977,10 +23045,10 @@ namespace Legion {
       // Now we can send the responses
       const CollectiveMapping target_mapping(target_spaces,
                           runtime->legion_collective_radix);
-      RtEvent ready = report_equivalence_sets(target_mapping, targets, mask,
-                          new_target_references, eq_sets, new_subscriptions,
-                          to_create, creation_rects, creation_srcs,
-                          expected_responses, pending_sets);
+      RtEvent ready = report_equivalence_sets(target_mapping, targets,
+          creation_target_space, mask, new_target_references, eq_sets,
+          new_subscriptions, to_create, creation_rects, creation_srcs,
+          expected_responses, pending_sets);
       Runtime::trigger_event(ready_event, ready);
     }
 
@@ -23897,6 +23965,7 @@ namespace Legion {
     RtEvent RemoteContext::compute_equivalence_sets(unsigned req_index,
                        const std::vector<EqSetTracker*> &targets,
                        const std::vector<AddressSpaceID> &target_spaces,
+                       AddressSpaceID creation_target_space,
                        IndexSpaceExpression *expr, const FieldMask &mask,
                        IndexSpace root_space)
     //--------------------------------------------------------------------------
@@ -23905,6 +23974,7 @@ namespace Legion {
       assert(!top_level_context);
       assert(targets.size() == 1);
       assert(targets.size() == target_spaces.size());
+      assert(creation_target_space == runtime->address_space);
       // should always be local
       assert(target_spaces.front() == runtime->address_space); 
 #endif

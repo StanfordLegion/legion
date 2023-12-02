@@ -1182,6 +1182,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(unsigned req_index,
                       const std::vector<EqSetTracker*> &targets,
                       const std::vector<AddressSpaceID> &target_spaces,
+                      AddressSpaceID creation_target_space,
                       IndexSpaceExpression *expr, const FieldMask &mask,
                       IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
@@ -1195,7 +1196,8 @@ namespace Legion {
           IndexSpace root_space, LocalLock *&tree_lock);
       void finalize_output_eqkd_tree(unsigned req_index, IndexSpace root_space);
       RtEvent report_equivalence_sets(const CollectiveMapping &target_mapping,
-          const std::vector<EqSetTracker*> &targets, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &targets,
+          const AddressSpaceID creation_target_space, const FieldMask &mask,
           std::vector<unsigned> &new_target_references,
           FieldMaskSet<EquivalenceSet> &eq_sets,
           FieldMaskSet<EqKDTree> &new_subscriptions,
@@ -2151,6 +2153,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(unsigned req_index,
                       const std::vector<EqSetTracker*> &targets,
                       const std::vector<AddressSpaceID> &target_spaces,
+                      AddressSpaceID creation_target_space,
                       IndexSpaceExpression *expr, const FieldMask &mask,
                       IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
@@ -3062,6 +3065,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(unsigned req_index,
                       const std::vector<EqSetTracker*> &targets,
                       const std::vector<AddressSpaceID> &target_spaces,
+                      AddressSpaceID creation_target_space,
                       IndexSpaceExpression *expr, const FieldMask &mask,
                       IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
@@ -3523,6 +3527,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(unsigned req_index,
                       const std::vector<EqSetTracker*> &targets,
                       const std::vector<AddressSpaceID> &target_spaces,
+                      AddressSpaceID creation_target_space,
                       IndexSpaceExpression *expr, const FieldMask &mask,
                       IndexSpace root_space = IndexSpace::NO_SPACE);
       virtual RtEvent record_output_equivalence_set(EqSetTracker *source,
