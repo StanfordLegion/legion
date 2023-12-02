@@ -16177,7 +16177,7 @@ namespace Legion {
         {
           ExprViewMaskSets::iterator finder =
             released_instances.find(ait->first);
-          if (finder != released_instances.end())
+          if (finder == released_instances.end())
           {
             ait->first->add_nested_expression_reference(did);
             released_instances[ait->first].swap(ait->second);
