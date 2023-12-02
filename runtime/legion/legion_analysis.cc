@@ -25828,29 +25828,35 @@ namespace Legion {
             sit++;
             continue;
           }
-          IndexSpaceExpression *expression = sit->get_expression();
-          if (expression == NULL)
+          // Sometimes the source can become the target when we find a 
+          // congruent equivalence set to use as the target, so we skip
+          // the cloning of the equivalence set data in that case
+          if (eit->first != target)
           {
-            IndexSpaceExpression *intersection = 
-              runtime->forest->intersect_index_spaces(
-                  eit->first->set_expr, target->set_expr);
-            if (intersection->get_volume() == target->set_expr->get_volume())
-              intersection = target->set_expr;
-            else if (intersection->get_volume() == 
-                eit->first->set_expr->get_volume())
-              intersection = eit->first->set_expr;
-            expression = intersection->create_from_rectangles(sit->elements);
-            sit->set_expression(expression);
+            IndexSpaceExpression *expression = sit->get_expression();
+            if (expression == NULL)
+            {
+              IndexSpaceExpression *intersection = 
+                runtime->forest->intersect_index_spaces(
+                    eit->first->set_expr, target->set_expr);
+              if (intersection->get_volume() == target->set_expr->get_volume())
+                intersection = target->set_expr;
+              else if (intersection->get_volume() == 
+                  eit->first->set_expr->get_volume())
+                intersection = eit->first->set_expr;
+              expression = intersection->create_from_rectangles(sit->elements);
+              sit->set_expression(expression);
+            }
+            // We only record the partial invalidation if we're cloning between
+            // two equivalence sets in the same context. Note that because of
+            // control replication you can't just check that both sets are from
+            // the same equivalence set, but what you can do is check to see if
+            // they are at the same depth in the task tree
+            const bool record_invalidate = 
+             (target->context->get_depth() == eit->first->context->get_depth());
+            target->clone_from(eit->first, overlap, expression,
+                record_invalidate, ready_events, true/*invalidate overlap*/);
           }
-          // We only record the partial invalidation if we're cloning between
-          // two equivalence sets in the same context. Note that because of
-          // control replication you can't just check that both sets are from
-          // the same equivalence set, but what you can do is check to see if
-          // they are at the same depth in the task tree
-          const bool record_invalidate = 
-            (target->context->get_depth() == eit->first->context->get_depth());
-          target->clone_from(eit->first, overlap, expression, record_invalidate,
-              ready_events, true/*invalidate overlap*/);
           sit->set_mask -= overlap;
           if (!sit->set_mask)
           {

@@ -3781,7 +3781,8 @@ namespace Legion {
       else
         children.push_back(origin_space);
       AddressSpaceID creation_child = origin_space;
-      if (!to_create.empty() && !children.empty())
+      if (!to_create.empty() && !children.empty() && 
+          (creation_target_space != origin_space))
       {
         std::sort(children.begin(), children.end());
         creation_child = creation_target_space;
@@ -4006,7 +4007,8 @@ namespace Legion {
       derez.deserialize(done_event);
 
       AddressSpaceID creation_child = origin_space;
-      if (!to_create.empty() && !children.empty())
+      if (!to_create.empty() && !children.empty() &&
+          (creation_target_space != runtime->address_space))
       {
         std::sort(children.begin(), children.end());
         creation_child = creation_target_space;
