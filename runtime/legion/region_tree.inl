@@ -7954,9 +7954,6 @@ namespace Legion {
         FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(previous_sets == NULL);
-#endif
       // No need for the lock here since this should be done exclusively
       // while nothing else is modifying the state of this tree
       if (current_sets != NULL)
