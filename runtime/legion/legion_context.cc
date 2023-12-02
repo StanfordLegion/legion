@@ -3795,8 +3795,8 @@ namespace Legion {
             target_mapping.get_parent(origin_space, creation_child);
         }
       }
-      for (std::vector<AddressSpaceID>::const_iterator it =
-            children.begin(); it != children.end(); it++)
+      for (std::vector<AddressSpaceID>::const_iterator cit =
+            children.begin(); cit != children.end(); cit++)
       {
         // Send a message back to the child node with the results
         const RtUserEvent ready_event = Runtime::create_rt_user_event();
@@ -3830,7 +3830,7 @@ namespace Legion {
           }
           // We only need to send the creation sets along the path to 
           // creation_target_space
-          if ((*it) == creation_child)
+          if ((*cit) == creation_child)
           {
             rez.serialize<size_t>(to_create.size());
             for (FieldMaskSet<EqKDTree>::const_iterator it =
@@ -3869,7 +3869,7 @@ namespace Legion {
           rez.serialize(expected_responses);
           rez.serialize(ready_event);
         }
-        runtime->send_compute_equivalence_sets_response(*it, rez);
+        runtime->send_compute_equivalence_sets_response(*cit, rez);
         ready_events.push_back(ready_event);
       }
       if (origin_space == local_space)
@@ -4031,8 +4031,8 @@ namespace Legion {
       }
       else if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait(); 
-      for (std::vector<AddressSpaceID>::const_iterator it =
-            children.begin(); it != children.end(); it++)
+      for (std::vector<AddressSpaceID>::const_iterator cit =
+            children.begin(); cit != children.end(); cit++)
       {
         // Send a message back to the child node with the results
         const RtUserEvent child_event = Runtime::create_rt_user_event();
@@ -4069,7 +4069,7 @@ namespace Legion {
           }
           // We only need to send the creation sets along the path to 
           // creation_target_space
-          if ((*it) == creation_child)
+          if ((*cit) == creation_child)
           {
             rez.serialize<size_t>(to_create.size());
             for (FieldMaskSet<EqKDTree>::const_iterator it =
@@ -4108,7 +4108,7 @@ namespace Legion {
           rez.serialize(expected_responses);
           rez.serialize(child_event);
         }
-        runtime->send_compute_equivalence_sets_response(*it, rez);
+        runtime->send_compute_equivalence_sets_response(*cit, rez);
         done_events.push_back(child_event);
       }
       // Find the local target
