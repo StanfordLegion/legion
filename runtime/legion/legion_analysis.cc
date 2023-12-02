@@ -15906,7 +15906,7 @@ namespace Legion {
         {
           ExprViewMaskSets::iterator finder =
             restricted_instances.find(ait->first);
-          if (finder != restricted_instances.end())
+          if (finder == restricted_instances.end())
           {
             ait->first->add_nested_expression_reference(did);
             restricted_instances[ait->first].swap(ait->second);
@@ -15940,9 +15940,9 @@ namespace Legion {
             delete (*it);
         }
         // Rebuild the restricted fields
+        restricted_fields.clear();
         if (!restricted_instances.empty())
         {
-          restricted_fields.clear();
           for (ExprViewMaskSets::const_iterator rit =
                 restricted_instances.begin(); rit != 
                 restricted_instances.end(); rit++)
