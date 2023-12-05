@@ -15,7 +15,6 @@
 #include "realm/cuda/cuda_module.h"
 #include "realm/id.h"
 
-
 using namespace Realm;
 using namespace Realm::Cuda;
 
@@ -90,48 +89,50 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
 }
 
 namespace TestConfig {
-  size_t field_size = 8;
-  size_t block_cols = 4;
-  size_t block_rows = 4;
+  size_t field_size = 48;
+  size_t block_cols = 8;
+  size_t block_rows = 8;
   bool verbose = false;
   bool verify = true;
   size_t buffer_size = 8192 << 6; // should be bigger than any cache in system
-  size_t narrow_dim = 0;        // should one dimension be a fixed (narrow) size?
-  unsigned dim_mask = 3;        // i.e. all the dimensions
+  size_t narrow_dim = 0;          // should one dimension be a fixed (narrow) size?
+  unsigned dim_mask = 3;          // i.e. all the dimensions
   bool all_mems = true;
   size_t pad_width = 32;
   size_t max_perms = 10;
   unsigned random_seed = 12345; // used to sample permutations if needed
   bool wait_after = false;      // wait after each copy?
   bool do_unit_test = false;
-};                              // namespace TestConfig
+}; // namespace TestConfig
 
 template <int N, typename T, typename DT>
-void dump_and_verify(RegionInstance inst, FieldID fid,
-                     const IndexSpace<N, T> &is, size_t row_size,
-                     std::vector<DT> test_data, bool verbose = false,
-                     bool verify = true) {
-  if (verify || verbose) {
+void dump_and_verify(RegionInstance inst, FieldID fid, const IndexSpace<N, T> &is,
+                     size_t row_size, std::vector<DT> test_data, bool verbose = false,
+                     bool verify = true)
+{
+  if(verify || verbose) {
     GenericAccessor<DT, N, T> acc(inst, fid);
     size_t i = 0;
-    for (IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
-      for (PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
+    for(IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
+      for(PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
         DT v = acc[it2.p];
-        if (verify) {
-          if (v != test_data[i]) {
-            std::cout << "Mismatch at " << it2.p << ": " << v
-                      << " != " << test_data[i] << std::endl;
+        if(verify) {
+          if(v != test_data[i]) {
+            std::cout << "Mismatch at " << it2.p << ": " << v << " != " << test_data[i]
+                      << std::endl;
             assert(0);
           }
           assert(v == test_data[i]);
         }
-        if (verbose) {
-          if ((i) % row_size == 0) std::cout << std::endl;
+        if(verbose) {
+          if((i) % row_size == 0)
+            std::cout << std::endl;
           std::cout << it2.p << ": " << v << " ";
         }
         i++;
       }
-      if (verbose) std::cout << "\n";
+      if(verbose)
+        std::cout << "\n";
     }
   }
 }
@@ -140,12 +141,15 @@ template <typename T, int N>
 struct Data {
   T data[N];
   Data() {}
-  Data(T _val) {
-    for (int i = 0; i < N; i++) data[i] = _val + i;
+  Data(T _val)
+  {
+    for(int i = 0; i < N; i++)
+      data[i] = _val + i;
   }
-  operator T() const {
+  operator T() const
+  {
     T value = T(0);
-    for (int i = 0; i < N; i++) {
+    for(int i = 0; i < N; i++) {
       value += data[i];
     }
     return value;
@@ -159,7 +163,7 @@ template <typename T, int N>
 std::ostream &operator<<(std::ostream &os, const Data<T, N> &data)
 {
   double value = T(0);
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     value += data.data[i];
   }
   os << value;
@@ -171,7 +175,9 @@ struct Pad {
   T val;
   char padding[BYTES - sizeof(T)];
   Pad() {}
-  Pad(T _val) : val(_val) {}
+  Pad(T _val)
+    : val(_val)
+  {}
   operator T() const { return val; }
 };
 
@@ -212,14 +218,13 @@ void init_index_space(RegionInstance inst, RegionInstance proxy_inst,
 }
 
 template <int N, typename T, typename FT>
-void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
-                   size_t narrow_size, Processor prof_proc,
-                   const std::set<std::string> &src_perms,
+void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_size,
+                   Processor prof_proc, const std::set<std::string> &src_perms,
                    const std::set<std::string> &dst_perms,
                    std::vector<Rect<N, T>> domain = {},
                    std::vector<Rect<N, T>> src_bounds = {},
-                   std::vector<Rect<N, T>> dst_bounds = {},
-                   int pad = 0) {
+                   std::vector<Rect<N, T>> dst_bounds = {}, int pad = 0)
+{
   std::vector<LayoutPermutation<N>> perms;
   LayoutPermutation<N> scratch;
   memset(&scratch, 0, sizeof(scratch));
@@ -237,12 +242,12 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     perms.resize(TestConfig::max_perms);
   }
 
-  if (domain.empty()) {
+  if(domain.empty()) {
     domain.resize(1);
-    for (int i = 0; i < N; i++) {
+    for(int i = 0; i < N; i++) {
       domain.back().lo[i] = 0;
-      if ((N > 1) && (narrow_size > 0)) {
-        if (i == 0)
+      if((N > 1) && (narrow_size > 0)) {
+        if(i == 0)
           domain.back().hi[i] = narrow_size - 1;
         else {
           domain.back().hi[i] = (1 << (log2_size / std::max(1, N - 1))) - 1;
@@ -253,9 +258,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
   }
   IndexSpace<N> is(domain);
 
-  if (src_bounds.empty()) {
+  if(src_bounds.empty()) {
     src_bounds.resize(1);
-    for (int i = 0; i < N; i++) {
+    for(int i = 0; i < N; i++) {
       src_bounds.back().lo[i] = 0;
       src_bounds.back().hi[i] =
           domain.back().hi[i] +
@@ -267,9 +272,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
 
   IndexSpace<N> src_is(src_bounds);
 
-  if (dst_bounds.empty()) {
+  if(dst_bounds.empty()) {
     dst_bounds.resize(1);
-    for (int i = 0; i < N; i++) {
+    for(int i = 0; i < N; i++) {
       dst_bounds.back().lo[i] = 0;
       dst_bounds.back().hi[i] =
           dst_bounds.back().hi[i] +
@@ -292,8 +297,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
   Event wait_for = Event::NO_EVENT;
   std::vector<Event> done_events;
   for(unsigned i = 0; i < perms.size(); i++) {
-    if (!src_perms.empty() &&
-        src_perms.find(perms[i].name) == src_perms.end()) {
+    if(!src_perms.empty() && src_perms.find(perms[i].name) == src_perms.end()) {
       continue;
     }
     RegionInstance src_inst;
@@ -305,25 +309,22 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
 
       int index = 0;
       auto src_lambda = [&](Point<N, T> p) -> FT {
-        test_data.push_back(index+N);
+        test_data.push_back(index + N);
         return index += N;
       };
-      init_index_space<N, T, FT>(src_inst, src_inst, is, 0,
-                                 src_lambda, false);
+      init_index_space<N, T, FT>(src_inst, src_inst, is, 0, src_lambda, false);
     }
 
-    for (unsigned j = 0; j < perms.size(); j++) {
-      if (!dst_perms.empty() &&
-          dst_perms.find(perms[j].name) == dst_perms.end()) {
+    for(unsigned j = 0; j < perms.size(); j++) {
+      if(!dst_perms.empty() && dst_perms.find(perms[j].name) == dst_perms.end()) {
         continue;
       }
       RegionInstance dst_inst;
       {
-        InstanceLayoutGeneric *ilg =
-            InstanceLayoutGeneric::choose_instance_layout<N, T>(
-                dst_is, dst_bounds, ilc, perms[j].dim_order);
-        wait_for = RegionInstance::create_instance(
-            dst_inst, dst_mem, ilg, ProfilingRequestSet(), wait_for);
+        InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
+            dst_is, dst_bounds, ilc, perms[j].dim_order);
+        wait_for = RegionInstance::create_instance(dst_inst, dst_mem, ilg,
+                                                   ProfilingRequestSet(), wait_for);
       }
 
       wait_for.wait();
@@ -378,8 +379,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     double bw = 1.0 * is.volume() * field_sizes[0] / (*it)->nanoseconds;
 
     log_app.print() << "Test passed, src=" << (*it)->src_perm->name
-                    << " dst=" << (*it)->dst_perm->name
-                    << " field_size=" << sizeof(FT)
+                    << " dst=" << (*it)->dst_perm->name << " field_size=" << sizeof(FT)
                     << " time=" << (1e-9 * (*it)->nanoseconds) << " bw=" << bw;
     delete *it;
   }
@@ -393,51 +393,62 @@ void do_single_dim_field_size(Memory src_mem, Memory dst_mem, int log2_size,
                               std::vector<Rect<N, T>> domain = {},
                               std::vector<Rect<N, T>> src_bounds = {},
                               std::vector<Rect<N, T>> dst_bounds = {},
-                              size_t field_size = 8, int pad = 0) {
-  if (field_size == 4) {
-    do_single_dim<N, T, int>(src_mem, dst_mem, log2_size,
-                             TestConfig::narrow_dim, prof_proc, src_perms,
-                             dst_perms, domain, src_bounds, dst_bounds, pad);
-  } else if (field_size == 8) {
-    do_single_dim<N, T, double>(src_mem, dst_mem, log2_size,
-                                TestConfig::narrow_dim, prof_proc, src_perms,
-                                dst_perms, domain, src_bounds, dst_bounds, pad);
-  } else if (field_size == 16) {
+                              size_t field_size = 8, int pad = 0)
+{
+  if(field_size == 4) {
+    do_single_dim<N, T, int>(src_mem, dst_mem, log2_size, TestConfig::narrow_dim,
+                             prof_proc, src_perms, dst_perms, domain, src_bounds,
+                             dst_bounds, pad);
+  } else if(field_size == 8) {
+    do_single_dim<N, T, double>(src_mem, dst_mem, log2_size, TestConfig::narrow_dim,
+                                prof_proc, src_perms, dst_perms, domain, src_bounds,
+                                dst_bounds, pad);
+  } else if(field_size == 16) {
     typedef Data<double, 2> FieldStruct16;
-    do_single_dim<N, T, FieldStruct16>(
-        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
-        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
-  } else if (field_size == 24) {
+    do_single_dim<N, T, FieldStruct16>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 24) {
     typedef Data<double, 3> FieldStruct24;
-    do_single_dim<N, T, FieldStruct24>(
-        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
-        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
-  }
-  if (field_size == 32) {
+    do_single_dim<N, T, FieldStruct24>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 32) {
     typedef Data<double, 4> FieldStruct32;
-    do_single_dim<N, T, FieldStruct32>(
-        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
-        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
-  }
-  if (field_size == 40) {
+    do_single_dim<N, T, FieldStruct32>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 40) {
     typedef Data<char, 40> FieldStruct40;
-    do_single_dim<N, T, FieldStruct40>(
-        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
-        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
+    do_single_dim<N, T, FieldStruct40>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 48) {
+    typedef Data<char, 48> FieldStruct48;
+    do_single_dim<N, T, FieldStruct48>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 64) {
+    typedef Data<char, 64> FieldStruct64;
+    do_single_dim<N, T, FieldStruct64>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
   }
 }
 
 std::set<Processor::Kind> supported_proc_kinds;
 
-void top_level_task(const void *args, size_t arglen, const void *userdata,
-                    size_t userlen, Processor p) {
+void top_level_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
+                    Processor p)
+{
   log_app.print() << "Copy/transpose test";
 
   size_t log2_buffer_size = 0;
   {
     size_t v = TestConfig::buffer_size / sizeof(int);
-    if (TestConfig::narrow_dim > 0) v /= TestConfig::narrow_dim;
-    while (v > 1) {
+    if(TestConfig::narrow_dim > 0)
+      v /= TestConfig::narrow_dim;
+    while(v > 1) {
       v >>= 1;
       log2_buffer_size++;
     }
@@ -450,26 +461,26 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
   src_mems.assign(mq.begin(), mq.end());
   dst_mems = src_mems;
 
-  for (std::vector<Memory>::const_iterator src_it = src_mems.begin();
-       src_it != src_mems.end(); ++src_it) {
-    if (NodeID(ID(*src_it).memory_owner_node()) != Network::my_node_id)
+  for(std::vector<Memory>::const_iterator src_it = src_mems.begin();
+      src_it != src_mems.end(); ++src_it) {
+    if(NodeID(ID(*src_it).memory_owner_node()) != Network::my_node_id)
       continue;
-    for (std::vector<Memory>::const_iterator dst_it = dst_mems.begin();
-         dst_it != dst_mems.end(); ++dst_it) {
+    for(std::vector<Memory>::const_iterator dst_it = dst_mems.begin();
+        dst_it != dst_mems.end(); ++dst_it) {
       log_app.print() << "srcmem=" << *src_it << " dstmem=" << *dst_it;
 
-      if (NodeID(ID(*dst_it).memory_owner_node()) != Network::my_node_id)
+      if(NodeID(ID(*dst_it).memory_owner_node()) != Network::my_node_id)
         continue;
-      if (TestConfig::dim_mask == 1) {
+      if(TestConfig::dim_mask == 1) {
         // TODO(apryakhin@): Add support/tests for dim=1
         assert(0);
-        do_single_dim_field_size<1, int>(*src_it, *dst_it, log2_buffer_size, 0,
-                                         p, {}, {});
-      } else if (TestConfig::dim_mask == 2) {
+        do_single_dim_field_size<1, int>(*src_it, *dst_it, log2_buffer_size, 0, p, {},
+                                         {});
+      } else if(TestConfig::dim_mask == 2) {
         do_single_dim_field_size<2, int>(*src_it, *dst_it, log2_buffer_size,
                                          TestConfig::narrow_dim, p, {"XY"}, {"YX"});
-      } else if (TestConfig::dim_mask == 3) {
-        if (!TestConfig::do_unit_test) {
+      } else if(TestConfig::dim_mask == 3) {
+        if(!TestConfig::do_unit_test) {
           // TODO(apryakhin@): This is an HTR hard-coded use case.
           // Consider finding a more generica alternative.
           std::vector<Rect<3>> domain;
@@ -495,21 +506,22 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
         } else {
           const size_t block_cols = TestConfig::block_cols;
           const size_t block_rows = TestConfig::block_rows;
-          for (int pad_x = -1; pad_x <= 1; pad_x++) {
-            for (int pad_y = -1; pad_y <= 1; pad_y++) {
-              do_single_dim_field_size<3, int>(
-                  *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p,
-                  {}, {},
-                  {Rect<3>(Point<3>(0, 0, 0),
-                           Point<3>((2 * block_cols) + pad_x,
-                                    (2 * block_rows) + pad_y, 2 * block_rows))},
-                  {Rect<3>(Point<3>(0, 0, 0),
-                           Point<3>((2 * block_cols) + pad_x,
-                                    (2 * block_rows) + pad_y, 2 * block_rows))},
-                  {Rect<3>(Point<3>(0, 0, 0),
-                           Point<3>((2 * block_cols) + pad_x,
-                                    (2 * block_rows) + pad_y, 2 * block_rows))},
-                  TestConfig::field_size);
+          for(int pad_x = -1; pad_x <= -1; pad_x++) {   // disabled
+            for(int pad_y = -1; pad_y <= -1; pad_y++) { // disabled
+              for(size_t field_size = 8; field_size <= 64; field_size += 8) {
+                do_single_dim_field_size<3, int>(
+                    *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {}, {},
+                    {Rect<3>(Point<3>(0, 0, 0),
+                             Point<3>((2 * block_cols) + pad_x, (2 * block_rows) + pad_y,
+                                      2 * block_rows))},
+                    {Rect<3>(Point<3>(0, 0, 0),
+                             Point<3>((2 * block_cols) + pad_x, (2 * block_rows) + pad_y,
+                                      2 * block_rows))},
+                    {Rect<3>(Point<3>(0, 0, 0),
+                             Point<3>((2 * block_cols) + pad_x, (2 * block_rows) + pad_y,
+                                      2 * block_rows))},
+                    field_size);
+              }
             }
           }
         }
