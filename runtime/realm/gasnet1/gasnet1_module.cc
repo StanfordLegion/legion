@@ -622,12 +622,13 @@ namespace Realm {
   {
     std::vector<gasnet_nodeinfo_t> node_info_table(gasnet_nodes());
     gasnet_getNodeInfo(node_info_table.data(), node_info_table.size());
-    gex_Rank_t my_supernode = node_info_table[0].supernode;
+    gex_Rank_t my_host = node_info_table[Network::my_node_id].host;
+    int rank_id = 0;
     for(gasnet_nodeinfo_t &node_info : node_info_table) {
-      if((Realm::NodeID(node_info.host) != Network::my_node_id) &&
-         (node_info.supernode == my_supernode)) {
-        shared_peers.add(node_info.host);
+      if((rank_id != Network::my_node_id) && (node_info.host == my_host)) {
+        shared_peers.add(rank_id);
       }
+      rank_id++;
     }
     if(shared_peers.empty()) {
       // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
