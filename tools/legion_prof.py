@@ -2130,11 +2130,12 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     ) -> None:
         self.copy_inst_infos.append(copy_inst_info)
 
-    def add_channel(self, state: "State") -> None:
+    def add_channel(self, state: "State") -> List[CopyInstInfo]:
         # sanity check
         assert self.chan is None
         assert self.copy_kind is None
         isindrect = False
+        new_copy_inst_infos = []
         for copy_inst_info in self.copy_inst_infos:
             # this is the copy inst info for points of a indirect copy (meta copy)
             if copy_inst_info.indirect:
@@ -2155,13 +2156,20 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         if isindrect == False:
             # sanity check
             assert len(self.copy_inst_infos) >= 1
+            # check if all CopyInstInfo have the same src and dst
+            # othewise, we will need to break the Copy into pieces
             chan_src = self.copy_inst_infos[0].src
             chan_dst = self.copy_inst_infos[0].dst
-            for copy_inst_info in self.copy_inst_infos:
-                assert (copy_inst_info.src == chan_src) and (copy_inst_info.dst == chan_dst)
             self.copy_kind = CopyKind.Copy
             channel = state.find_or_create_copy_channel(chan_src, chan_dst)
             channel.add_copy(self)
+            for idx, copy_inst_info in enumerate(self.copy_inst_infos):
+                if (copy_inst_info.src != chan_src) or (copy_inst_info.dst != chan_dst):
+                    # move the current to the end CopyInstInfo to the new CopyInstInfo,
+                    # it is possible that we need to split the new Copy again in the next add_channel call
+                    new_copy_inst_infos = self.copy_inst_infos[idx:]
+                    self.copy_inst_infos = self.copy_inst_infos[0:idx]
+                    break
         else:
             # sanity check
             assert len(self.copy_inst_infos) >= 2
@@ -2181,6 +2189,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                 channel.add_copy(self)
             else:
                 assert 0, "unimplemented"
+        return new_copy_inst_infos
 
     @typecheck
     def get_color(self) -> str:
@@ -2405,6 +2414,10 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
     def __repr__(self) -> str:
         assert self.part_op in dep_part_kinds
         return dep_part_kinds[self.part_op]
+
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        assert 0
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=type(None), level=int,
@@ -4398,9 +4411,30 @@ class State(object):
     #   add the channel info into Copy and then add copy into Channel
     @typecheck
     def add_copy_to_channel(self) -> None:
+        global prof_uid_ctr
+        print("current prof_uid from allocate:", prof_uid_ctr)
+        largest_prof_uid = 0
         for copy in self.copy_map.values():
             if len(copy.copy_inst_infos) > 0:
-                copy.add_channel(self)
+                new_copy_inst_infos = copy.add_channel(self)
+                cur_copy = copy
+                if copy.prof_uid > largest_prof_uid:
+                    largest_prof_uid = copy.prof_uid
+                #print("copy prof_uid:", copy.prof_uid)
+                while len(new_copy_inst_infos) > 0:
+                    new_copy = Copy(cur_copy.initiation_op, cur_copy.size, 
+                                    cur_copy.create, cur_copy.ready, 
+                                    cur_copy.start, cur_copy.stop, 
+                                    cur_copy.fevent, cur_copy.collective)
+                    self.prof_uid_map[new_copy.prof_uid] = copy
+                    for copy_inst_info in new_copy_inst_infos:
+                        new_copy.add_copy_inst_info(copy_inst_info)
+                    new_copy_inst_infos = new_copy.add_channel(self)
+                    print("cur prof_uid:", cur_copy.prof_uid, ", new prof_uid", new_copy.prof_uid)
+                    cur_copy = new_copy
+        # disable the copy_map because we may create new copies
+        self.copy_map.clear()
+        print("largest prof_uid of all existing copies:", largest_prof_uid)
  
     # called after all fills are parsed
     #   add the channel info into Fill and then add fill into Channel
@@ -4409,6 +4443,9 @@ class State(object):
         for fill in self.fill_map.values():
             if len(fill.fill_inst_infos) > 0:
                 fill.add_channel(self)
+        # even though we do not create new fills, let's still disable
+        # the fill_map to make it consist with copy_map
+        self.fill_map.clear()
 
     @typecheck
     def trim_time_ranges(self, start: int, stop: int) -> None:
@@ -5237,11 +5274,10 @@ class State(object):
             if len(operation.operation_inst_infos) > 0:
                 operation.link_instance(self.instances)
 
-        for copy in self.copy_map.values():
-            copy.link_instance(self.instances)
-
-        for fill in self.fill_map.values():
-            fill.link_instance(self.instances)
+        for chan in self.channels.values():
+            if chan.channel_kind == ChanKind.Copy or chan.channel_kind == ChanKind.Fill or chan.channel_kind == ChanKind.Gather or chan.channel_kind == ChanKind.Scatter:
+                for copy in chan.copies:
+                    copy.link_instance(self.instances)
 
     @typecheck
     def filter_output(self) -> None:
@@ -5664,6 +5700,11 @@ def build_state() -> Optional[State]:
             # data
             assert isinstance(deserializer, serializer.LegionProfASCIIDeserializer)
             deserializer.search_for_spy_data(file_name)
+        # once all logs are parsed, let's figure out the channel for fill
+        state.add_fill_to_channel()
+
+        # once all logs are parsed, let's figure out the channel for copy
+        state.add_copy_to_channel()
 
     if not has_matches:
         print('No matches found! Exiting...')
@@ -5679,11 +5720,11 @@ def build_state() -> Optional[State]:
         print("Warning: This run only involved %d nodes, but only %d log files were used. If --verbose is enabled, subsequent warnings may not indicate a true error." % (state.num_nodes, len(state.visible_nodes)))
         all_logs = False
 
-    # once all logs are parsed, let's figure out the channel for fill
-    state.add_fill_to_channel()
+    # # once all logs are parsed, let's figure out the channel for fill
+    # state.add_fill_to_channel()
 
-    # once all logs are parsed, let's figure out the channel for copy
-    state.add_copy_to_channel()
+    # # once all logs are parsed, let's figure out the channel for copy
+    # state.add_copy_to_channel()
 
     # See if we need to trim out any boxes before we build the profile
     if (start_trim > 0) or (stop_trim > 0):
