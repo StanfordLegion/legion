@@ -3403,8 +3403,6 @@ namespace Legion {
                                                     Serializer &rez);
       void send_equivalence_set_replication_response(AddressSpaceID target,
                                                      Serializer &rez);
-      void send_equivalence_set_replication_invalidation(AddressSpaceID target,
-                                                         Serializer &rez);
       void send_equivalence_set_migration(AddressSpaceID target, 
                                           Serializer &rez);
       void send_equivalence_set_owner_update(AddressSpaceID target,
@@ -3757,10 +3755,8 @@ namespace Legion {
       void handle_equivalence_set_request(Deserializer &derez);
       void handle_equivalence_set_response(Deserializer &derez);
       void handle_equivalence_set_invalidate_trackers(Deserializer &derez);
-      void handle_equivalence_set_replication_request(Deserializer &derez,
-                                                      AddressSpaceID source);
+      void handle_equivalence_set_replication_request(Deserializer &derez);
       void handle_equivalence_set_replication_response(Deserializer &derez);
-      void handle_equivalence_set_replication_invalidation(Deserializer &derez);
       void handle_equivalence_set_migration(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_equivalence_set_owner_update(Deserializer &derez);
@@ -6145,8 +6141,6 @@ namespace Legion {
         case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
           break;
         case SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE:
-          break;
-        case SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION:
           break;
         case SEND_EQUIVALENCE_SET_MIGRATION:
           return MIGRATION_VIRTUAL_CHANNEL;

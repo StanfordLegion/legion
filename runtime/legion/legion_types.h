@@ -935,7 +935,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_RESPONSE,
       SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
       SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
-      SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
       SEND_EQUIVALENCE_SET_CLONE_REQUEST,
@@ -1254,7 +1253,6 @@ namespace Legion {
         "Send Equivalence Set Response",                              \
         "Send Equivalence Set Replication Request",                   \
         "Send Equivalence Set Replication Response",                  \
-        "Send Equivalence Set Replication Invalidation",              \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
         "Send Equivalence Set Clone Request",                         \

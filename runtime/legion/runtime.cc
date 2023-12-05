@@ -12954,18 +12954,12 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
             {
-              runtime->handle_equivalence_set_replication_request(derez,
-                                                  remote_address_space);
+              runtime->handle_equivalence_set_replication_request(derez);
               break;
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE:
             {
               runtime->handle_equivalence_set_replication_response(derez);
-              break;
-            }
-          case SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION:
-            {
-              runtime->handle_equivalence_set_replication_invalidation(derez);
               break;
             }
           case SEND_EQUIVALENCE_SET_MIGRATION:
@@ -23269,16 +23263,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_replication_invalidation(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-          SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION,
-                                      rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_migration(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25624,10 +25608,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_replication_request(
-                                     Deserializer &derez, AddressSpaceID source)
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_replication_request(derez, this, source);
+      EquivalenceSet::handle_replication_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -25636,14 +25620,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_replication_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_replication_invalidation(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_replication_invalidation(derez, this);
     }
 
     //--------------------------------------------------------------------------

@@ -3818,15 +3818,10 @@ namespace Legion {
       public:
         ReplicatedOwnerState(bool valid);
       public:
-        inline bool is_valid(void) const { return valid; }
-        inline bool is_subscribed(void) const { return subscribed; }
+        inline bool is_valid(void) const { return !ready.exists(); }
       public:
         std::vector<AddressSpaceID> children;
         RtUserEvent ready;
-        bool valid;
-        // We might not be subscribed to the logical owner space if this
-        // replicated owner state was created as part of mapping
-        bool subscribed;
       };
     public:
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
@@ -3886,7 +3881,8 @@ namespace Legion {
                      RegionTreeID tid,
                      InnerContext *context,
                      bool register_now, 
-                     CollectiveMapping *mapping = NULL);
+                     CollectiveMapping *mapping = NULL,
+                     bool replicate_logical_owner = false);
       EquivalenceSet(const EquivalenceSet &rhs) = delete;
       virtual ~EquivalenceSet(void);
     public:
@@ -4183,12 +4179,11 @@ namespace Legion {
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
-                               std::set<RtEvent> &applied_events, bool covers);
+                               std::set<RtEvent> &applied_events);
       void update_owner(const AddressSpaceID new_logical_owner); 
       bool replicate_logical_owner_space(AddressSpaceID source, 
                              const CollectiveMapping *mapping, bool need_lock);
       void process_replication_response(AddressSpaceID owner);
-      void process_replication_invalidation(std::vector<RtEvent> &applied);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
             DistributedID target_did, IndexSpaceExpression *target_expr,
@@ -4276,11 +4271,8 @@ namespace Legion {
                                    Runtime *runtime, AddressSpaceID source);
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_trackers(Deserializer &derez, Runtime *rt);
-      static void handle_replication_request(Deserializer &derez, Runtime *rt,
-                                             AddressSpaceID source);
+      static void handle_replication_request(Deserializer &derez, Runtime *rt);
       static void handle_replication_response(Deserializer &derez, Runtime *rt);
-      static void handle_replication_invalidation(Deserializer &derez,
-                                                  Runtime *rt);
       static void handle_clone_request(Deserializer &derez, Runtime *runtime, 
                                        AddressSpaceID source);
       static void handle_clone_response(Deserializer &derez, Runtime *runtime);

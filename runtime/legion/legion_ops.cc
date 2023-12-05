@@ -3475,8 +3475,19 @@ namespace Legion {
         LegionList<FieldSet<std::pair<AddressSpaceID,EqSetTracker*> > >
           fields;
         compute_field_sets(FieldMask(), pit->second.trackers, fields);
+        // Be a bit careful, there is an important heuristic here
+        // This heuristic decides which of the targets will be the one
+        // responsible for creating any new equivalence sets if there
+        // are any to be created. We do this by determining which of
+        // the targets is closest to the owner node of the logical
+        // region. This hopefully will spread out creations across
+        // the targets in a resonable way without overly relying on
+        // making these equivalence sets on smaller nodes
+        // Use the index space to determine the owner since the region 
+        // version of this only gives you the owner for the region tree
         const AddressSpaceID region_owner_space =
-            RegionNode::get_owner_space(pit->first, this->runtime);
+            IndexSpaceNode::get_owner_space(pit->first.get_index_space(), 
+                                            this->runtime);
         for (LegionList<FieldSet<std::pair<AddressSpaceID,EqSetTracker*> > >::
               const_iterator fit = fields.begin(); fit != fields.end(); fit++)
         {
@@ -3491,14 +3502,6 @@ namespace Legion {
             targets.push_back(it->second);
             target_spaces.push_back(it->first);
           }
-          // Be a bit careful, there is an important heuristic here
-          // This heuristic decides which of the targets will be the one
-          // responsible for creating any new equivalence sets if there
-          // are any to be created. We do this by determining which of
-          // the targets is closest to the owner node of the logical
-          // region. This hopefully will spread out creations across
-          // the targets in a resonable way without overly relying on
-          // making these equivalence sets on smaller nodes
           RtEvent precondition;
           if (!std::binary_search(target_spaces.begin(),
                 target_spaces.end(), region_owner_space))
