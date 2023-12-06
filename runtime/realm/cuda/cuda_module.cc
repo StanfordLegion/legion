@@ -2132,7 +2132,7 @@ namespace Realm {
       assert(copy_info.extents[0] <= CUDA_MAX_FIELD_BYTES);
       size_t chunks = copy_info.extents[0] / elem_size;
       while(copy_info.tile_size * (copy_info.tile_size + 1) * copy_info.extents[0] <
-            func_info.occ_num_threads) {
+            static_cast<size_t>(func_info.occ_num_threads)) {
         copy_info.tile_size += chunks;
       }
       size_t shared_mem_bytes =
