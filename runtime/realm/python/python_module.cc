@@ -1100,7 +1100,8 @@ namespace Realm {
       //  disabled
       PythonModule *m = new PythonModule;
 
-      PythonModuleConfig *config = dynamic_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
+      PythonModuleConfig *config =
+          checked_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());

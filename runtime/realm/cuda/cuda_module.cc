@@ -4345,7 +4345,8 @@ namespace Realm {
     {
       CudaModule *m = new CudaModule(runtime);
 
-      CudaModuleConfig *config = dynamic_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
+      CudaModuleConfig *config =
+          checked_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
