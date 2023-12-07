@@ -220,7 +220,8 @@ namespace Realm {
       openmp_api_force_linkage();
 #endif
 
-      OpenMPModuleConfig *config = dynamic_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
+      OpenMPModuleConfig *config =
+          checked_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());

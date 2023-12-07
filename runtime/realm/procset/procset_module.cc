@@ -132,7 +132,8 @@ namespace Realm {
       // create a module to fill in with stuff 
       ProcSetModule *m = new ProcSetModule;
 
-      ProcSetModuleConfig *config = dynamic_cast<ProcSetModuleConfig *>(runtime->get_module_config("procset"));
+      ProcSetModuleConfig *config =
+          checked_cast<ProcSetModuleConfig *>(runtime->get_module_config("procset"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
