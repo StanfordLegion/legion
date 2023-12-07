@@ -4677,12 +4677,18 @@ function codegen.expr_region(cx, node)
       [pr_actions]
     end
 
-    cx:add_cleanup_item(quote c.legion_physical_region_destroy([pr]) end)
+    cx:add_cleanup_item(
+      quote
+        if [pr].impl ~= nil then
+          c.legion_physical_region_destroy([pr])
+          [pr].impl = nil
+        end
+      end)
   else -- make sure all regions are unmapped in inner tasks
     actions = quote
       [actions];
       c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
-      var [pr] -- FIXME: Need to define physical region for detach to work
+      var [pr] = [c.legion_physical_region_t]{ impl = nil } -- FIXME: Need to define physical region for detach to work
     end
   end
 
@@ -7245,6 +7251,12 @@ function codegen.expr_attach_hdf5(cx, node)
 
   local new_pr = terralib.newsymbol(c.legion_physical_region_t, "new_pr")
 
+  local old_prs = data.set(
+    absolute_field_paths:map(
+      function(field_path)
+        return cx:region(region_type):physical_region(field_path)
+      end))
+
   local actions = quote
     [region.actions]
     [filename.actions]
@@ -7258,13 +7270,21 @@ function codegen.expr_attach_hdf5(cx, node)
       [filename.value], [region.value].impl, [parent], [fm], [mode.value])
     [fm_teardown]
 
-    [absolute_field_paths:map(
-       function(field_path)
+    -- FIXME: Doing this in two stages because I'm not 100% sure the
+    -- deduplication above is fully precise.
+    [old_prs:map_keys(
+       function(pr)
          return quote
-           -- FIXME: This is redundant (since the same physical region
-           -- will generally show up more than once. At any rate, it
-           -- would be preferable not to have to do this at all.
-           [cx:region(region_type):physical_region(field_path)] = [new_pr]
+           if [pr].impl ~= nil then
+             c.legion_physical_region_destroy([pr])
+             [pr].impl = nil
+           end
+         end
+       end)]
+    [old_prs:map_keys(
+       function(pr)
+         return quote
+           [pr] = [new_pr]
          end
        end)]
   end
@@ -7315,8 +7335,10 @@ function codegen.expr_detach_hdf5(cx, node)
     [pr_list:map(
        function(pr)
          return quote
+           std.assert([pr].impl ~= nil, "double free of physical region in detach")
            c.legion_runtime_detach_hdf5([cx.runtime], [cx.context], [pr])
            c.legion_physical_region_destroy([pr])
+           [pr].impl = nil
          end
        end)]
   end
