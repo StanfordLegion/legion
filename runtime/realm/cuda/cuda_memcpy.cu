@@ -64,21 +64,17 @@ static __device__ inline size_t coords_to_index(Offset_t *coords, Offset_t *stri
 }
 
 template <typename T, typename Offset_t = size_t>
-static __device__ inline void
-memcpy_kernel_transpose(Realm::Cuda::MemcpyTransposeInfo<Offset_t> info, T *tile)
-{
+static __device__ inline void memcpy_kernel_transpose(
+    Realm::Cuda::MemcpyTransposeInfo<Offset_t> info, T* tile) {
   __restrict__ T *out_base = reinterpret_cast<T *>(info.dst);
   __restrict__ T *in_base = reinterpret_cast<T *>(info.src);
-
   const Offset_t tile_size = info.tile_size;
-  const Offset_t contig_bytes = info.extents[0];
-  const Offset_t chunks = contig_bytes / sizeof(T);
-
-  const Offset_t tidx = (threadIdx.x) % tile_size;
-  const Offset_t tidy = ((threadIdx.x) / tile_size) % tile_size;
-
+  const Offset_t tidx = threadIdx.x % tile_size;
+  const Offset_t tidy = (threadIdx.x / tile_size) % tile_size;
   const Offset_t grid_dimx = ((info.extents[2] + tile_size - 1) / tile_size);
   const Offset_t grid_dimy = ((info.extents[1] + tile_size - 1) / tile_size);
+  const Offset_t contig_bytes = info.extents[0];
+  const Offset_t chunks = contig_bytes / sizeof(T);
 
   const Offset_t src_stride_x = info.src_strides[1] / contig_bytes;
   const Offset_t src_stride_y = info.src_strides[0] / contig_bytes;
@@ -97,7 +93,6 @@ memcpy_kernel_transpose(Realm::Cuda::MemcpyTransposeInfo<Offset_t> info, T *tile
 
     for(Offset_t block_offset = 0; block_offset < chunks * tile_size;
         block_offset += tile_size) {
-
       if(x_base + block_offset < info.extents[2] * chunks && y_base < info.extents[1]) {
         Offset_t in_tile_idx = tidx + (tile_size + 1) * tidy * chunks;
 
@@ -105,7 +100,6 @@ memcpy_kernel_transpose(Realm::Cuda::MemcpyTransposeInfo<Offset_t> info, T *tile
         // where contig_bytes > sizeof(T)
         Offset_t x_base_idx =
             ((x_base / chunks) * (src_stride_x * chunks) + x_base % chunks);
-
         tile[in_tile_idx + block_offset] =
             in_base[x_base_idx + y_base * src_stride_y * chunks +
                     block_offset * src_stride_x];
