@@ -504,6 +504,7 @@ before_script:
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
+  GPU_ARCH: "pascal"
   USE_NVTX: "1"
 
 .p100_cuda117: &p100_cuda117
@@ -511,6 +512,7 @@ before_script:
   CUDA: "/usr/local/cuda-11.7"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
+  GPU_ARCH: "pascal"
   USE_NVTX: "1"
 
 .p100_cuda121: &p100_cuda121
@@ -518,6 +520,7 @@ before_script:
   CUDA: "/usr/local/cuda-12.1"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
+  GPU_ARCH: "pascal"
   USE_NVTX: "1"
 
 ###
