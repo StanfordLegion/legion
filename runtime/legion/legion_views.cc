@@ -8383,7 +8383,8 @@ namespace Legion {
             PhysicalManager *manager = local_views[idx]->get_manager();
             if (manager->instance != it->inst)
               continue;
-            to_send.insert(local_views[idx]->did);
+            if (to_send.insert(local_views[idx]->did).second)
+              local_views[idx]->pack_global_ref();
             found = true;
             break;
           }
@@ -8396,7 +8397,8 @@ namespace Legion {
             {
               if (rit->first->instance != it->inst)
                 continue;
-              to_send.insert(rit->second->did);
+              if (to_send.insert(rit->second->did).second)
+                rit->second->pack_global_ref();
               found = true;
               break;
             }
@@ -8468,6 +8470,9 @@ namespace Legion {
           else if (view_ready.exists() && !view_ready.has_triggered())
             view_ready.wait();
           view->record_remote_instances(views);
+          for (std::vector<IndividualView*>::const_iterator it =
+                views.begin(); it != views.end(); it++)
+            (*it)->unpack_global_ref();
         }
         else
         {
