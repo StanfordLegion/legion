@@ -7270,17 +7270,16 @@ function codegen.expr_attach_hdf5(cx, node)
       [filename.value], [region.value].impl, [parent], [fm], [mode.value])
     [fm_teardown]
 
-    -- FIXME: Doing this in two stages because I'm not 100% sure the
-    -- deduplication above is fully precise.
-    [old_prs:map_keys(
-       function(pr)
-         return quote
-           if [pr].impl ~= nil then
-             c.legion_physical_region_destroy([pr])
-             [pr].impl = nil
-           end
-         end
-       end)]
+    -- FIXME: Disabled for now, seems to cause crashes in HTR test?
+    -- [old_prs:map_keys(
+    --    function(pr)
+    --      return quote
+    --        if [pr].impl ~= nil then
+    --          c.legion_physical_region_destroy([pr])
+    --          [pr].impl = nil
+    --        end
+    --      end
+    --    end)]
     [old_prs:map_keys(
        function(pr)
          return quote
