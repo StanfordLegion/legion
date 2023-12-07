@@ -4776,6 +4776,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!allow_refinement);
 #endif
+      // If this is a projection with the identity projection on a region
+      // then we don't want to consider this like a projection and instead
+      // want to treat it like we're using this region directly
+      if (summary->projection->projection_id == 0)
+        return update_arrival(usage);
       switch (refinement_state)
       {
         case UNREFINED_STATE:
