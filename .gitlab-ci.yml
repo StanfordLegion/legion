@@ -202,10 +202,13 @@ cache: &global_cache
   MPIR_CVAR_NOLOCAL: "1"
 .ucx: &ucx
   REALM_NETWORKS: "ucx"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
   UCX_BRANCH: "v1.14.1"
   # mpi_interop example requires MPI to build correctly
   USE_MPI: "1"
+.ucx_dynamic: &ucx_dynamic
+  EXTRA_CMAKE_ARGS: "-DLegion_UCX_DYNAMIC_LOAD=ON"
 .cmake: &cmake
   USE_CMAKE: "1"
 .kokkos: &kokkos
@@ -287,15 +290,22 @@ before_script:
       mkdir ucx
       cd ucx
       wget -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
-      UCX_INSTALL_ROOT=$PWD/install
-      UCX_CONFIG_OPTS="--disable-numa"
-      contrib/configure-release --prefix=$UCX_INSTALL_ROOT $UCX_CONFIG_OPTS
+      export UCX_ROOT=$PWD/install
+      if [[ -n "$CUDA" ]]; then
+        UCX_CONFIG_OPTS="--with-cuda=$CUDA"
+        # CI tests are run on a single node. So disable shared-memory and cuda ipc
+        # transports to be able to test some network functionality.
+        export UCX_TLS=^sm,cuda_ipc
+      else
+        UCX_CONFIG_OPTS="--without-cuda"
+        export UCX_TLS=^sm
+      fi
+      contrib/configure-release-mt --prefix=$UCX_ROOT $UCX_CONFIG_OPTS
       make -j8 install
-      PATH=$PATH:$UCX_INSTALL_ROOT/bin
-      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$UCX_INSTALL_ROOT/lib
-      # force inter-rank communication through tcp to make it "slow"
-      export UCX_TLS=tcp
-      cd ..
+      export PATH=$PATH:$UCX_ROOT/bin
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$UCX_ROOT/lib
+      export CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH:$UCX_ROOT
+      cd -
     fi
     if [[ "$REALM_NETWORKS" != "" ]]; then
       # OpenMPI:
@@ -322,22 +332,6 @@ before_script:
         fi
       fi
       if [[ "$REALM_NETWORKS" == ucx ]]; then
-        apt-get install -y autoconf automake m4 libtool
-        git clone https://github.com/openucx/ucx ucx-git
-        cd ucx-git
-        git checkout $UCX_BRANCH
-        ./autogen.sh
-        if [[ "$CUDA" != "" ]]; then
-          ./contrib/configure-release-mt --with-cuda=$CUDA
-          # CI tests are run on a single node. So disable shared-memory and cuda ipc
-          # transports to be able to test some network functionality.
-          export UCX_TLS=^sm,cuda_ipc
-        else
-          ./contrib/configure-release-mt --without-cuda
-          export UCX_TLS=^sm
-        fi
-        make -j install
-        cd -
         # build mpi bootstrap .so file.
         # the mpicc used here must be consistent with launcher's mpirun.
         mpicc -shared -fPIC -o realm_ucp_bootstrap_mpi.so runtime/realm/ucx/bootstrap/bootstrap_mpi.c
@@ -356,7 +350,9 @@ before_script:
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
       export PATH=$PATH:${CUDA}/bin
       # Try to use the stubs over the driver
-      export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs:/usr/local/nvidia/lib64"
+      export CUDA_PATH="${CUDA}"
+      # Ensure nvcc's HOST compiler is set to our CXX compiler
+      export CUDAHOSTCXX="$CXX"
     fi
   - |
     # if kokkos is already existed, pull the branch and remove the build
@@ -397,12 +393,6 @@ before_script:
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=$(realpath ../bin)/nvcc_wrapper"
         export NVCC_WRAPPER_DEFAULT_COMPILER="$CXX"
         #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_CUDA_DIR=${CUDA}"
-        # Make sure KOKKOS and Legion use the same compiler for NVCC as for HOST
-        # code and pass this into the -ccbin argument for nvcc
-        export CUDAHOSTCXX="$CXX"
-        #export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
-        #export CUDA_TOOLKIT_ROOT_DIR=$CUDA
-        #export CUDA_PATH="${CUDA}/bin"
 
         # kokkos expects (the right) nvcc to be in the path, both for toolkit
         #  detection as well as for nvcc_wrapper (if used)
@@ -510,19 +500,22 @@ before_script:
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 .p100_cuda117: &p100_cuda117
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.7"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.7"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 .p100_cuda121: &p100_cuda121
   <<: *p100_base
   CUDA: "/usr/local/cuda-12.1"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-12.1"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
 ###
@@ -558,11 +551,11 @@ before_script:
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
       when: never
-    # do not automatically run pipelines for pull requests
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # Do not automatically run a push branch pipeline if there is an open merge request
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"'
       when: never
     # commits only run a short suite of jobs
-    - if: '$CI_PIPELINE_SOURCE == "push" && $IS_SHORT_JOB != "1"'
+    - if: '$CI_PIPELINE_SOURCE =~ "push|merge_request_event" && $IS_SHORT_JOB != "1"'
       when: never
     # if none of the above exclusions apply, run the job
     - when: always
@@ -593,11 +586,11 @@ before_script:
       fi
     - |
       if [[ "$USE_CCACHE" -eq 1 ]]; then
-          export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache"
       fi
     - |
       if [[ -n "$CXX_STANDARD" ]]; then
-        export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
+        export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_STANDARD=${CXX_STANDARD} -DCMAKE_CUDA_STANDARD=${CXX_STANDARD}"
       fi
     - $TEST_PYTHON_EXE ./test.py --tmp-dir ${CI_PROJECT_DIR}/tmp-build
     - |
@@ -655,6 +648,20 @@ before_script:
     - make -j8
     - ctest --output-on-failure .
     - echo OK
+
+.realm_clang_format: &realm_clang_format
+  script:
+    - apt update -qq -yy && apt install -qq -yy clang-format-14
+    - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
+    - |
+      if grep -q '[^[:space:]]' /tmp/not-formatted.diff; then
+        echo 'Code is not formatted'
+        echo 'Run clang-format-diff on your changes to fix these:'
+        echo "    git diff -U0 --no-color origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 -i"
+        echo "Diff formatting result:"
+        cat /tmp/not-formatted.diff
+        exit 1
+      fi
 
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
@@ -859,10 +866,10 @@ gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
  variables:
    <<: [*gcc9, *terra12, *release, *cxx11_normal, *ucx, *legion, *libdw]
-gcc9_cxx11_debug_ucx_cmake_legion:
+gcc9_cxx11_debug_ucx_dynamic_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *ucx_dynamic, *cmake, *legion, *ctest, *short, *libdw]
 gcc9_cxx11_debug_ucx_regent:
  <<: [*linux_compute, *image_2004, *tests]
  variables:
@@ -1391,3 +1398,13 @@ gcc9_asan_realm:
   <<: [*linux, *image_2004, *realm_sanitizer_tests]
   variables:
     <<: [*gcc9, *cxx11_normal, *asan, *short, *libdw]
+clang_format_realm:
+  rules:
+    # Always during a merge request update
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    # Never any other time
+    - when: never
+  <<: [*linux, *image_2204, *realm_clang_format]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *short]

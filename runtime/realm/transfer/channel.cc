@@ -4428,7 +4428,7 @@ namespace Realm {
 	return paths;
       }
 	  
-      uint64_t Channel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t Channel::supports_path(ChannelCopyInfo channel_copy_info,
                                       CustomSerdezID src_serdez_id,
                                       CustomSerdezID dst_serdez_id,
                                       ReductionOpID redop_id,
@@ -4439,7 +4439,9 @@ namespace Realm {
                                       unsigned *bw_ret /*= 0*/,
                                       unsigned *lat_ret /*= 0*/)
       {
-	for(std::vector<SupportedPath>::const_iterator it = paths.begin();
+        Memory src_mem = channel_copy_info.src_mem;
+        Memory dst_mem = channel_copy_info.dst_mem;
+        for(std::vector<SupportedPath>::const_iterator it = paths.begin();
 	    it != paths.end();
 	    ++it) {
 	  if(!it->serdez_allowed && ((src_serdez_id != 0) ||
@@ -5110,7 +5112,7 @@ namespace Realm {
 	return 0;
       }
 
-      uint64_t RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t RemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5127,12 +5129,27 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
       }
 
+
+
+  static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
+  {
+    RuntimeImpl *runtime = get_runtime();
+    size_t idx = 0;
+    mems.resize(runtime->remote_shared_memory_mappings.size(), Memory::NO_MEMORY);
+    for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+            runtime->remote_shared_memory_mappings.begin();
+        it != runtime->remote_shared_memory_mappings.end(); ++it) {
+      Memory m;
+      m.id = it->first;
+      mems[idx++] = m;
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -5152,13 +5169,21 @@ namespace Realm {
         // all local cpu memories are valid sources and dests
         std::vector<Memory> local_cpu_mems;
         enumerate_local_cpu_memories(local_cpu_mems);
+        std::vector<Memory> remote_shared_mems;
+        enumerate_remote_shared_mems(remote_shared_mems);
 
         add_path(local_cpu_mems, local_cpu_mems,
                  bw, latency, frag_overhead, XFER_MEM_CPY)
           .set_max_dim(3)
           .allow_serdez();
 
-	xdq.add_to_manager(bgwork);
+        if (remote_shared_mems.size() > 0) {
+          add_path(local_cpu_mems, remote_shared_mems, bw, latency, frag_overhead,
+                   XFER_MEM_CPY)
+              .set_max_dim(3);
+        }
+
+        xdq.add_to_manager(bgwork);
       }
 
       MemcpyChannel::~MemcpyChannel()
@@ -5192,7 +5217,7 @@ namespace Realm {
       }
 
 
-      uint64_t MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
+      uint64_t MemcpyChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,
                                             CustomSerdezID dst_serdez_id,
                                             ReductionOpID redop_id,
@@ -5209,7 +5234,7 @@ namespace Realm {
 	  return 0;
 
 	// fall through to normal checks
-	return Channel::supports_path(src_mem, dst_mem,
+	return Channel::supports_path(channel_copy_info,
 				      src_serdez_id, dst_serdez_id, redop_id,
                                       total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
@@ -5716,10 +5741,18 @@ namespace Realm {
     // all local cpu memories are valid dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(Memory::NO_MEMORY, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_FILL)
       .set_max_dim(3);
+
+    if (remote_shared_mems.size() > 0) {
+      add_path(Memory::NO_MEMORY, remote_shared_mems,
+             bw, latency, frag_overhead, XFER_MEM_FILL)
+      .set_max_dim(3);
+    }
 
     xdq.add_to_manager(bgwork);
   }
@@ -5771,16 +5804,25 @@ namespace Realm {
     // all local cpu memories are valid sources and dests
     std::vector<Memory> local_cpu_mems;
     MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
     add_path(local_cpu_mems, local_cpu_mems,
              bw, latency, frag_overhead, XFER_MEM_CPY)
       .set_max_dim(3)
       .allow_redops();
 
+    if (remote_shared_mems.size() > 0) {
+      add_path(local_cpu_mems, remote_shared_mems,
+              bw, latency, frag_overhead, XFER_MEM_CPY)
+        .set_max_dim(3)
+        .allow_redops();
+    }
+
     xdq.add_to_manager(bgwork);
   }
 
-  uint64_t MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+  uint64_t MemreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                            CustomSerdezID src_serdez_id,
                                            CustomSerdezID dst_serdez_id,
                                            ReductionOpID redop_id,
@@ -5796,7 +5838,7 @@ namespace Realm {
       return 0;
 
     // otherwise consult the normal supports_path logic
-    return Channel::supports_path(src_mem, dst_mem,
+    return Channel::supports_path(channel_copy_info,
                                   src_serdez_id, dst_serdez_id, redop_id,
                                   total_bytes, src_frags, dst_frags,
                                   kind_ret, bw_ret, lat_ret);

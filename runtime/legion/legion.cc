@@ -314,7 +314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -387,7 +387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -474,7 +474,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate::Predicate(Predicate &&p)
+    Predicate::Predicate(Predicate &&p) noexcept
     //--------------------------------------------------------------------------
     {
       const_value = p.const_value;
@@ -520,7 +520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate& Predicate::operator=(Predicate &&rhs)
+    Predicate& Predicate::operator=(Predicate &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2333,7 +2333,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Future &&rhs)
+    Future::Future(Future &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2370,7 +2370,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future& Future::operator=(Future &&rhs)
+    Future& Future::operator=(Future &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2429,9 +2429,13 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      Processor proc = Internal::implicit_context->get_executing_processor();
-      return impl->get_buffer(proc, memory, extent_in_bytes, check_size,
-                              silence_warnings, warning_string);
+      if (Internal::implicit_context == NULL)
+        return impl->get_buffer(Processor::NO_PROC, memory, extent_in_bytes, 
+                                check_size, silence_warnings, warning_string);
+      else
+        return impl->get_buffer(
+            Internal::implicit_context->get_executing_processor(), memory,
+            extent_in_bytes, check_size, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2487,13 +2491,14 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Creating Legion Future objects from a buffer is only permitted "
             "to be performed inside of Legion tasks.")
-      return Internal::implicit_context->from_value(value, value_size, 
-                                                    owned, NULL/*provenance*/);
+      return Internal::implicit_context->from_value(value, value_size,
+          owned, NULL/*provenance*/, false/*shard local*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Future Future::from_untyped_pointer(
-             const void *value, size_t value_size, bool owned, const char *prov)
+             const void *value, size_t value_size, bool owned, 
+             const char *prov, bool shard_local)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
@@ -2502,14 +2507,14 @@ namespace Legion {
             "to be performed inside of Legion tasks.")
       Internal::AutoProvenance provenance(prov);
       return Internal::implicit_context->from_value(value, value_size,
-                                                    owned, provenance);
+                                        owned, provenance, shard_local);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Future Future::from_value(const void *buffer, size_t size,
         bool owned, const Realm::ExternalInstanceResource &resource,
         void (*freefunc)(const Realm::ExternalInstanceResource&),
-        const char *prov)
+        const char *prov, bool shard_local)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
@@ -2518,7 +2523,7 @@ namespace Legion {
             "to be performed inside of Legion tasks.")
       Internal::AutoProvenance provenance(prov);
       return Internal::implicit_context->from_value(buffer, size, owned,
-                                        resource, freefunc, provenance);
+                            resource, freefunc, provenance, shard_local);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2542,7 +2547,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(FutureMap &&map)
+    FutureMap::FutureMap(FutureMap &&map) noexcept
       : impl(map.impl)
     //--------------------------------------------------------------------------
     {
@@ -2579,7 +2584,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    FutureMap& FutureMap::operator=(FutureMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2649,7 +2654,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2693,7 +2698,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3189,7 +3194,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources::ExternalResources(ExternalResources &&rhs)
+    ExternalResources::ExternalResources(ExternalResources &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3218,7 +3223,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources& ExternalResources::operator=(ExternalResources &&rhs)
+    ExternalResources& ExternalResources::operator=(
+                                               ExternalResources &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3284,7 +3290,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator::PieceIterator(PieceIterator &&rhs)
+    PieceIterator::PieceIterator(PieceIterator &&rhs) noexcept
       : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
     //--------------------------------------------------------------------------
     {
@@ -3314,7 +3320,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3519,7 +3525,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3560,7 +3566,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -7668,17 +7674,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool default_mapper)
+                                  bool default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background, default_mapper);
+      return Internal::Runtime::start(argc, argv, background, 
+                                      default_mapper, filter);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, 
+                                        bool filter, bool parse)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv, filter);
+      Internal::Runtime::initialize(argc, argv, parse, filter);
     }
 
     //--------------------------------------------------------------------------
@@ -7731,10 +7739,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finish_implicit_task(Context ctx)
+    void Runtime::finish_implicit_task(Context ctx, Realm::Event effects)
     //--------------------------------------------------------------------------
     {
-      runtime->finish_implicit_task(ctx);
+      runtime->finish_implicit_task(ctx, Internal::ApEvent(effects));
     } 
 
     //--------------------------------------------------------------------------
@@ -8069,7 +8077,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
-          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize);
+          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8078,7 +8087,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST,
-          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0);
+          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8090,7 +8100,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(ptr, size, owned, Realm::RegionInstance::NO_INST,
-          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize);
+          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8195,4 +8206,3 @@ namespace Legion {
 }; // namespace Legion
 
 // EOF
-

@@ -14,6 +14,10 @@
 
 import "regent"
 
+-- FIXME (Elliott): debugging https://github.com/StanfordLegion/legion/issues/1514
+io.stdout:setvbuf("no")
+io.stderr:setvbuf("no")
+
 -- Make sure this all happens in a temporary directory in case we're
 -- running concurrently.
 local tmp_dir
@@ -21,8 +25,10 @@ do
   -- use os.tmpname to get a hopefully-unique directory to work in
   local tmpfile = os.tmpname()
   tmp_dir = tmpfile .. ".d/"
+  print("Creating temporary directory " .. tmp_dir)
   assert(os.execute("mkdir " .. tmp_dir) == 0)
-  os.remove(tmpfile)  -- remove this now that we have our directory
+  -- Hack: keep the tmpfile to be absolutely sure we won't collide
+  -- os.remove(tmpfile)
 end
 
 -- Compile separate tasks.
@@ -75,6 +81,10 @@ local executable_args = terralib.newlist()
 for _, arg in ipairs(args) do
   executable_args:insert(arg)
 end
+-- FIXME (Elliott): debugging https://github.com/StanfordLegion/legion/issues/1514
+executable_args:insert("-lg:registration")
+executable_args:insert("-level")
+executable_args:insert("runtime=3")
 
 local ffi = require("ffi")
 local cmd

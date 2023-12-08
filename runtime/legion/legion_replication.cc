@@ -667,7 +667,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         owner_shard = sharding_function->find_owner(index_point, shard_domain);
       }
       else
@@ -781,7 +781,7 @@ namespace Legion {
       // See if we're going to be a local point or not
       Domain shard_domain = index_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
       if (!elide_future_return)
       {
         ShardID owner = sharding_function->find_owner(index_point,shard_domain);
@@ -945,7 +945,7 @@ namespace Legion {
         if (local_space.exists())
         {
           Domain local_domain;
-          runtime->forest->find_launch_space_domain(local_space, local_domain);
+          runtime->forest->find_domain(local_space, local_domain);
           enumerate_futures(local_domain);
         }
       }
@@ -1144,7 +1144,7 @@ namespace Legion {
         if ((redop == 0) && !elide_future_return)
         {
           Domain shard_domain;
-          node->get_launch_space_domain(shard_domain);
+          node->get_domain(shard_domain);
           enumerate_futures(shard_domain);
         }
         // If we still need to slice the task then we can run it 
@@ -1369,7 +1369,8 @@ namespace Legion {
             collective_done = reduction_collective->get_done_event();
           else
             collective_done = 
-              broadcast_collective->async_broadcast(reduction_instance);
+              broadcast_collective->async_broadcast(reduction_instance,
+                  ApEvent::NO_AP_EVENT, reduction_collective->get_done_event());
         }
         else
           collective_done = all_reduce_collective->async_reduce(
@@ -1638,9 +1639,9 @@ namespace Legion {
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -1677,9 +1678,9 @@ namespace Legion {
       // going to be coming from a remote shard
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -2949,6 +2950,8 @@ namespace Legion {
           else
             trigger_execution(); // can do the completion now
         }
+        else if (view_ready.exists() && !view_ready.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, view_ready);
         else
           trigger_execution();
       }
@@ -3363,7 +3366,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         owner_shard = sharding_function->find_owner(index_point, shard_domain);
       }
       else
@@ -4019,9 +4022,9 @@ namespace Legion {
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space,launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -4058,9 +4061,9 @@ namespace Legion {
       // going to be coming from a remote shard
       Domain launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+        runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_launch_space_domain(launch_domain);
+        launch_space->get_domain(launch_domain);
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -4572,7 +4575,7 @@ namespace Legion {
 #endif
       if (future_map.impl != NULL)
       {
-        if (needs_all_futures)
+        if (!needs_all_futures)
         {
           IndexPartNode *partition = runtime->forest->get_node(pid);
           const Domain future_map_domain = future_map.impl->get_domain();
@@ -4824,7 +4827,7 @@ namespace Legion {
                                                    privilege_path, analysis);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
-      parent_ctx->update_current_implicit(this);
+      parent_ctx->update_current_implicit_creation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4884,16 +4887,10 @@ namespace Legion {
             else
               gather->contribute_instances(
                   Runtime::merge_events(NULL, preconditions));
-            if (gather->target != repl_ctx->owner_shard->shard_id)
-            {
-              ready = scatter->perform_collective_wait(false/*block*/);
-              // We're not going to have any updates to perform so 
-              // we can just return immediately
-              complete_execution(ready);
-              return;
-            }
+            if (gather->target == repl_ctx->owner_shard->shard_id)
+              ready = gather->perform_collective_wait(false/*block*/);
             else
-              ready = gather->get_done_event();
+              ready = scatter->perform_collective_wait(false/*block*/);
           }
 #ifdef DEBUG_LEGION
           assert(ready.exists());
@@ -4949,8 +4946,8 @@ namespace Legion {
       if (is_index_space)
       {
         IndexSpaceNode *node = runtime->forest->get_node(handle);
-        ApEvent domain_ready;
-        Domain domain = node->get_domain(domain_ready, false/*need tight*/);
+        Domain domain;
+        ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
         bool ready = false;
         {
           AutoLock o_lock(op_lock);
@@ -5131,8 +5128,8 @@ namespace Legion {
           DomainPoint color = 
             node->color_space->delinearize_color_to_point(*itr);
           IndexSpaceNode *child = node->get_child(*itr);
-          ApEvent ready;
-          remote_targets[color] = child->get_domain(ready, false/*need tight*/);
+          ApEvent ready = 
+            child->get_domain(remote_targets[color], false/*need tight*/);
           if (ready.exists())
             preconditions.push_back(ready);
         }
@@ -5342,7 +5339,7 @@ namespace Legion {
       // First find all the tasks that we own on this shard
       Domain shard_domain = launch_domain;
       if (sharding_space.exists())
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
       {
@@ -5617,24 +5614,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::map_replicate_tasks(void) const
+    void ReplMustEpochOp::map_replicate_tasks(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(dependence_exchange != NULL);
       assert(single_tasks.size() == mapping_dependences.size());
 #endif
-      std::map<DomainPoint,RtUserEvent> mapped_events;
+      std::vector<RtEvent> local_mapped_events;
+      local_mapped_events.reserve(shard_single_tasks.size());
       for (std::set<SingleTask*>::const_iterator it = 
             shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
-        mapped_events[(*it)->index_point] = Runtime::create_rt_user_event();
+      {
+        const RtUserEvent mapped = Runtime::create_rt_user_event();
+        mapped_events[(*it)->index_point] = mapped;
+        local_mapped_events.push_back(mapped);
+      }
       // Now exchange completion events for the point tasks we own
       // and end up with a set of the completion event for each task
       // First compute the set of mapped events for the points that we own
       dependence_exchange->exchange_must_epoch_dependences(mapped_events);
 
       MustEpochMapArgs args(const_cast<ReplMustEpochOp*>(this));
-      std::set<RtEvent> local_mapped_events;
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
       for (unsigned idx = 0; idx < single_tasks.size(); idx++)
@@ -5667,16 +5668,12 @@ namespace Legion {
         if (!preconditions.empty())
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
-          done = runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
+          runtime->issue_runtime_meta_task(args, 
+                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
         }
         else
-          done = runtime->issue_runtime_meta_task(args, 
+          runtime->issue_runtime_meta_task(args, 
                       LG_THROUGHPUT_DEFERRED_PRIORITY);
-        local_mapped_events.insert(done);
-        // We can trigger our completion event once the task is done
-        RtUserEvent mapped = mapped_events[single_tasks[idx]->index_point];
-        Runtime::trigger_event(mapped, done);
       }
       // Now we have to wait for all our mapping operations to be done
       if (!local_mapped_events.empty())
@@ -5684,6 +5681,7 @@ namespace Legion {
         RtEvent mapped_event = Runtime::merge_events(local_mapped_events);
         mapped_event.wait();
       }
+      mapped_events.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5823,7 +5821,7 @@ namespace Legion {
       if (sharding_space.exists())
       {
         Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        runtime->forest->find_domain(sharding_space, shard_domain);
         return shard_domain;
       }
       else
@@ -6242,14 +6240,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
+      future_result_size = 0;
+      serdez_redop_fns->init_fn(redop,
+                                serdez_redop_buffer,
+                                future_result_size);
+      // Only include the initial value one time for control replication
+      // to avoid double inclusion
       if (parent_ctx->get_task()->get_shard_id() == 0)
         fold_serdez(initial_value.impl);
-
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
-      {
         fold_serdez(it->second);
-      }
       // Now we need an all-to-all to get the values from other shards
       const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
         serdez_redop_collective->exchange_buffers(serdez_redop_buffer,
@@ -6356,7 +6357,8 @@ namespace Legion {
           collective_done = reduction_collective->get_done_event();
         else
           collective_done = 
-            broadcast_collective->async_broadcast(targets.front());
+            broadcast_collective->async_broadcast(targets.front(),
+                ApEvent::NO_AP_EVENT, reduction_collective->get_done_event());
       }
       else
         collective_done = all_reduce_collective->async_reduce(targets.front(),
@@ -7463,15 +7465,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::record_unordered_kind(
-          std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments)
+             std::map<std::pair<LogicalRegion,FieldID>,Operation*> &detachments)
     //--------------------------------------------------------------------------
     {
-      const RegionRequirement &req = region.impl->get_requirement();
 #ifdef DEBUG_LEGION
-      assert(!req.privilege_fields.empty());
+      assert(!requirement.privilege_fields.empty());
 #endif
-      const std::pair<LogicalRegion,FieldID> key(req.region,
-          *(req.privilege_fields.begin()));
+      const std::pair<LogicalRegion,FieldID> key(requirement.region,
+          *(requirement.privilege_fields.begin()));
 #ifdef DEBUG_LEGION
       assert(detachments.find(key) == detachments.end());
 #endif
@@ -7794,6 +7795,35 @@ namespace Legion {
     {
       participants = new ShardParticipantsExchange(ctx, COLLECTIVE_LOC_103);
       participants->exchange(points.size() > 0);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::record_unordered_kind(
+     std::map<std::pair<LogicalRegion,FieldID>,Operation*> &region_detachments,
+     std::map<std::pair<LogicalPartition,FieldID>,Operation*> &part_detachments)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!requirement.privilege_fields.empty());
+#endif
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+      {
+        const std::pair<LogicalPartition,FieldID> key(requirement.partition,
+            *(requirement.privilege_fields.begin()));
+#ifdef DEBUG_LEGION
+        assert(part_detachments.find(key) == part_detachments.end());
+#endif
+        part_detachments[key] = this;
+      }
+      else
+      {
+        const std::pair<LogicalRegion,FieldID> key(requirement.region,
+            *(requirement.privilege_fields.begin()));
+#ifdef DEBUG_LEGION
+        assert(region_detachments.find(key) == region_detachments.end());
+#endif
+        region_detachments[key] = this;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10335,13 +10365,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_post_execution(FutureInstance *inst, 
-                                    void *metadata, size_t metasize, bool local)
+    void ShardManager::handle_post_execution(FutureInstance *inst,
+        ApEvent effects, void *metadata, size_t metasize, bool local)
     //--------------------------------------------------------------------------
     {
       bool notify = false;
       {
         AutoLock m_lock(manager_lock);
+        if (effects.exists())
+          execution_effects.push_back(effects);
         if (local)
         {
           local_execution_complete++;
@@ -10381,6 +10413,8 @@ namespace Legion {
       {
         FutureInstance *result = local_future_result;
         local_future_result = NULL;
+        if (!execution_effects.empty())
+          effects = Runtime::merge_events(NULL, execution_effects);
         if (original_task == NULL)
         {
           Serializer rez;
@@ -10392,14 +10426,16 @@ namespace Legion {
           rez.serialize(metasize);
           if (metasize > 0)
             rez.serialize(metadata, metasize);
+          rez.serialize(effects);
           runtime->send_replicate_post_execution(owner_space, rez);
           if (result != NULL)
             delete result;
         }
         else
         {
-          original_task->handle_future(result, metadata, metasize,
-              NULL/*functor*/, Processor::NO_PROC, false/*own functor*/);
+          original_task->handle_post_execution(result, effects, metadata, 
+              metasize, NULL/*functor*/, Processor::NO_PROC, 
+              false/*own functor*/);
           // we no longer own this, it got passed through
           metadata = NULL;
         }
@@ -10468,7 +10504,6 @@ namespace Legion {
           RtEvent applied_event;
           if (!applied_events.empty())
             applied_event = Runtime::merge_events(applied_events);
-          original_task->complete_execution(applied_event);
           original_task->trigger_children_complete(all_shard_effects);
           return applied_event;
         }
@@ -10514,7 +10549,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::send_collective_message(ShardID target, Serializer &rez)
+    void ShardManager::send_collective_message(MessageKind message,
+                                               ShardID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10531,7 +10567,7 @@ namespace Legion {
         handle_collective_message(derez);
       }
       else
-        runtime->send_control_replicate_collective_message(target_space, rez);
+        runtime->send_message(message, target_space, rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11337,7 +11373,10 @@ namespace Legion {
         memcpy(metadata, derez.get_current_pointer(), metasize);
         derez.advance_pointer(metasize);
       }
-      manager->handle_post_execution(instance,metadata,metasize,false/*local*/);
+      ApEvent effects;
+      derez.deserialize(effects);
+      manager->handle_post_execution(instance, effects, metadata, 
+                                     metasize, false/*local*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11726,6 +11765,7 @@ namespace Legion {
     void BroadcastCollective::send_messages(void) const
     //--------------------------------------------------------------------------
     {
+      const MessageKind message = get_message_kind();
       const int local_index = convert_to_index(local_shard, origin);
       for (int idx = 1; idx <= shard_collective_radix; idx++)
       {
@@ -11740,7 +11780,7 @@ namespace Legion {
           rez.serialize(collective_index);
           pack_collective(rez);
         }
-        manager->send_collective_message(target, rez);
+        manager->send_collective_message(message, target, rez);
       }
     }
 
@@ -11878,7 +11918,8 @@ namespace Legion {
         AutoLock c_lock(collective_lock,1,false/*exclusive*/);
         pack_collective(rez);
       }
-      manager->send_collective_message(next, rez);
+      const MessageKind message = get_message_kind();
+      manager->send_collective_message(message, next, rez);
     } 
 
     //--------------------------------------------------------------------------
@@ -12135,6 +12176,7 @@ namespace Legion {
     void AllGatherCollective<INORDER>::send_remainder_stage(void)
     //--------------------------------------------------------------------------
     {
+      const MessageKind message = get_message_kind();
       if (participating)
       {
         // Send back to the shards that are not participating
@@ -12144,7 +12186,7 @@ namespace Legion {
 #endif
         Serializer rez;
         construct_message(target, -1/*stage*/, rez);
-        manager->send_collective_message(target, rez);
+        manager->send_collective_message(message, target, rez);
       }
       else
       {
@@ -12152,7 +12194,7 @@ namespace Legion {
         ShardID target = local_shard % shard_collective_participating_shards;
         Serializer rez;
         construct_message(target, -1/*stage*/, rez);
-        manager->send_collective_message(target, rez);
+        manager->send_collective_message(message, target, rez);
       }
     }
 
@@ -12167,6 +12209,7 @@ namespace Legion {
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
       bool sent_previous_stage = false;
+      const MessageKind message = get_message_kind();
       for (int stage = start_stage; stage < shard_collective_stages; stage++)
       {
         {
@@ -12235,7 +12278,7 @@ namespace Legion {
 #endif
             Serializer rez;
             construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
+            manager->send_collective_message(message, target, rez);
           }
         }
         else
@@ -12249,7 +12292,7 @@ namespace Legion {
 #endif
             Serializer rez;
             construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
+            manager->send_collective_message(message, target, rez);
           }
         }
         sent_previous_stage = true;
@@ -12732,7 +12775,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FutureBroadcastCollective::async_broadcast(FutureInstance *inst,
-                                                       ApEvent precondition)
+                                             ApEvent precondition, RtEvent post)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12741,6 +12784,9 @@ namespace Legion {
       instance = inst;
       if (is_origin())
       {
+#ifdef DEBUG_LEGION
+        assert(!post.exists());
+#endif
         Runtime::trigger_event(NULL, finished, precondition);
         perform_collective_async();
         return RtEvent::NO_RT_EVENT;
@@ -12750,6 +12796,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!precondition.exists());
 #endif
+        postcondition = post;
         return perform_collective_wait(false/*block*/);
       }
     }
@@ -14986,7 +15033,8 @@ namespace Legion {
       pack_counts(rez, field_space_counts);
       pack_field_counts(rez, field_counts);
       pack_counts(rez, logical_region_counts);
-      pack_field_counts(rez, detach_counts);
+      pack_field_counts(rez, region_detach_counts);
+      pack_field_counts(rez, partition_detach_counts);
     }
 
     //--------------------------------------------------------------------------
@@ -15006,26 +15054,27 @@ namespace Legion {
         field_space_counts.clear();
         field_counts.clear();
         logical_region_counts.clear();
-        detach_counts.clear();
+        region_detach_counts.clear();
+        partition_detach_counts.clear();
       }
       unpack_counts(stage, derez, index_space_counts);
       unpack_counts(stage, derez, index_partition_counts);
       unpack_counts(stage, derez, field_space_counts);
       unpack_field_counts(stage, derez, field_counts);
       unpack_counts(stage, derez, logical_region_counts);
-      unpack_field_counts(stage, derez, detach_counts);
+      unpack_field_counts(stage, derez, region_detach_counts);
+      unpack_field_counts(stage, derez, partition_detach_counts);
     }
 
     //--------------------------------------------------------------------------
-    bool UnorderedExchange::exchange_unordered_ops(
-                                    const std::list<Operation*> &unordered_ops,
-                                          std::vector<Operation*> &ready_ops)
+    void UnorderedExchange::start_unordered_exchange(
+                                   const std::vector<Operation*> &unordered_ops)
     //--------------------------------------------------------------------------
     {
       // Sort our operations
       if (!unordered_ops.empty())
       {
-        for (std::list<Operation*>::const_iterator it = 
+        for (std::vector<Operation*>::const_iterator it = 
               unordered_ops.begin(); it != unordered_ops.end(); it++)
         {
           switch ((*it)->get_operation_kind())
@@ -15045,13 +15094,22 @@ namespace Legion {
               }
             case Operation::DETACH_OP_KIND:
               {
-#ifdef DEBUG_LEGION
                 ReplDetachOp *op = dynamic_cast<ReplDetachOp*>(*it);
-                assert(op != NULL);
+                if (op == NULL)
+                {
+#ifdef DEBUG_LEGION
+                  ReplIndexDetachOp *index = 
+                    dynamic_cast<ReplIndexDetachOp*>(*it);
+                  assert(index != NULL);
 #else
-                ReplDetachOp *op = static_cast<ReplDetachOp*>(*it);
+                  ReplIndexDetachOp *index = 
+                    static_cast<ReplIndexDetachOp*>(*it);
 #endif
-                op->record_unordered_kind(detachments);
+                  index->record_unordered_kind(region_detachments,
+                                            partition_detachments);
+                }
+                else 
+                  op->record_unordered_kind(region_detachments);
                 break;
               }
             default: // Unimplemented operation kind
@@ -15064,33 +15122,36 @@ namespace Legion {
         initialize_counts(field_space_deletions, field_space_counts);
         initialize_counts(field_deletions, field_counts);
         initialize_counts(logical_region_deletions, logical_region_counts);
-        initialize_counts(detachments, detach_counts);
+        initialize_counts(region_detachments, region_detach_counts);
+        initialize_counts(partition_detachments, partition_detach_counts);
       }
       // Perform the exchange
-      perform_collective_sync();
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void UnorderedExchange::find_ready_operations(
+                                             std::vector<Operation*> &ready_ops)
+    //--------------------------------------------------------------------------
+    {
       // Now look and see which operations have keys for all shards 
       // Only need to do this if we have ops, if we didn't have ops then
       // it's impossible for anyone else to have them all too
-      if (!unordered_ops.empty())
-      {
-        const size_t total_shards = manager->total_shards;
-        find_ready_ops(total_shards, index_space_counts,
-                       index_space_deletions, ready_ops);
-        find_ready_ops(total_shards, index_partition_counts,
-                       index_partition_deletions, ready_ops);
-        find_ready_ops(total_shards, field_space_counts,
-                       field_space_deletions, ready_ops);
-        find_ready_ops(total_shards, field_counts,
-                       field_deletions, ready_ops);
-        find_ready_ops(total_shards, logical_region_counts,
-                       logical_region_deletions, ready_ops);
-        find_ready_ops(total_shards, detach_counts,
-                       detachments, ready_ops);
-      }
-      // Return true if anybody anywhere had a non-zero count
-      return (!index_space_counts.empty() || !index_partition_counts.empty() ||
-          !field_space_counts.empty() || !field_counts.empty() || 
-          !logical_region_counts.empty() || !detach_counts.empty());
+      const size_t total_shards = manager->total_shards;
+      find_ready_ops(total_shards, index_space_counts,
+                     index_space_deletions, ready_ops);
+      find_ready_ops(total_shards, index_partition_counts,
+                     index_partition_deletions, ready_ops);
+      find_ready_ops(total_shards, field_space_counts,
+                     field_space_deletions, ready_ops);
+      find_ready_ops(total_shards, field_counts,
+                     field_deletions, ready_ops);
+      find_ready_ops(total_shards, logical_region_counts,
+                     logical_region_deletions, ready_ops);
+      find_ready_ops(total_shards, region_detach_counts,
+                     region_detachments, ready_ops);
+      find_ready_ops(total_shards, partition_detach_counts,
+                     partition_detachments, ready_ops);
     }
 
     /////////////////////////////////////////////////////////////

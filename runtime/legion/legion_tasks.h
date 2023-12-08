@@ -480,7 +480,8 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -491,7 +492,10 @@ namespace Legion {
     public:
       // From Memoizable
       virtual ApEvent replay_mapping(void);
-      virtual void find_completion_effects(std::set<ApEvent> &effects);
+      virtual void find_completion_effects(std::set<ApEvent> &effects,
+                                           bool tracing = false);
+      virtual void find_completion_effects(std::vector<ApEvent> &effects,
+                                           bool tracing = false);
     public:
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
@@ -677,6 +681,7 @@ namespace Legion {
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
+      Future redop_initial_value;
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
       std::vector<OutputOptions> output_region_options;
@@ -780,7 +785,8 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -897,7 +903,8 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -1013,7 +1020,8 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
               const std::deque<InstanceSet> &parent_regions);
     public:
-      virtual void handle_future(FutureInstance *instance,
+      virtual void handle_post_execution(FutureInstance *instance,
+                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,

@@ -117,8 +117,12 @@ namespace Realm {
     LLVMJitModule::~LLVMJitModule(void)
     {}
 
-    /*static*/ Module *LLVMJitModule::create_module(RuntimeImpl *runtime,
-						    std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *LLVMJitModule::create_module_config(RuntimeImpl *runtime)
+    {
+      return NULL;
+    }
+
+    /*static*/ Module *LLVMJitModule::create_module(RuntimeImpl *runtime)
     {
 #ifdef REALM_ALLOW_MISSING_LLVM_LIBS
       if(LLVMJitInternal::detect_llvm_libraries()) {

@@ -73,6 +73,13 @@
   #endif
 #endif
 
+// REALM_NOEXCEPT - indicates that the declaration does not throw exceptions
+#if REALM_CXX_STANDARD >= 11
+  #define REALM_NOEXCEPT noexcept
+#else
+  #define REALM_NOEXCEPT throw()
+#endif
+
 // REALM_ON_LINUX   - defined if Realm is being built for a Linux host
 // REALM_ON_MACOS   - defined if Realm is being built for a macOS host
 // REALM_ON_FREEBSD - defined if Realm is being built for a FreeBSD host

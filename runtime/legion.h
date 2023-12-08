@@ -488,7 +488,7 @@ namespace Legion {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
-      FieldAllocator(FieldAllocator &&allocator);
+      FieldAllocator(FieldAllocator &&allocator) noexcept;
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -496,9 +496,10 @@ namespace Legion {
       FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
-      FieldAllocator& operator=(FieldAllocator &&allocator);
+      FieldAllocator& operator=(FieldAllocator &&allocator) noexcept;
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
+      inline bool exists(void) const { return (impl != NULL); }
     public:
       ///@{
       /**
@@ -630,6 +631,8 @@ namespace Legion {
         : args(const_cast<void*>(arg)), arglen(argsize) { }
       UntypedBuffer(const UntypedBuffer &rhs)
         : args(rhs.args), arglen(rhs.arglen) { }
+      UntypedBuffer(UntypedBuffer &&rhs) noexcept
+        : args(rhs.args), arglen(rhs.arglen) { }
     public:
       inline size_t get_size(void) const { return arglen; }
       inline void*  get_ptr(void) const { return args; }
@@ -639,6 +642,8 @@ namespace Legion {
       inline bool operator<(const UntypedBuffer &arg) const
         { return (args < arg.args) && (arglen < arg.arglen); }
       inline UntypedBuffer& operator=(const UntypedBuffer &rhs)
+        { args = rhs.args; arglen = rhs.arglen; return *this; }
+      inline UntypedBuffer& operator=(UntypedBuffer &&rhs) noexcept
         { args = rhs.args; arglen = rhs.arglen; return *this; }
     private:
       void *args;
@@ -663,16 +668,17 @@ namespace Legion {
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
-      ArgumentMap(ArgumentMap &&rhs);
+      ArgumentMap(ArgumentMap &&rhs) noexcept;
       ~ArgumentMap(void);
     public:
       ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
-      ArgumentMap& operator=(ArgumentMap &&rhs);
+      ArgumentMap& operator=(ArgumentMap &&rhs) noexcept;
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
       inline bool operator<(const ArgumentMap &rhs) const
         { return (impl < rhs.impl); }
+      inline bool exists(void) const { return (impl != NULL); }
     public:
       /**
        * Check to see if a point has an argument set
@@ -757,7 +763,7 @@ namespace Legion {
     public:
       Predicate(void);
       Predicate(const Predicate &p);
-      Predicate(Predicate &&p);
+      Predicate(Predicate &&p) noexcept;
       explicit Predicate(bool value);
       ~Predicate(void);
     protected:
@@ -767,10 +773,11 @@ namespace Legion {
       explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
-      Predicate& operator=(Predicate &&p);
+      Predicate& operator=(Predicate &&p) noexcept;
       inline bool operator==(const Predicate &p) const;
       inline bool operator<(const Predicate &p) const;
       inline bool operator!=(const Predicate &p) const;
+      inline bool exists(void) const { return (impl != NULL); }
     private:
       bool const_value;
     };
@@ -1283,7 +1290,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
-      Future(Future &&f);
+      Future(Future &&f) noexcept;
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -1292,12 +1299,13 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       explicit Future(Internal::FutureImpl *impl);
     public:
-      bool operator==(const Future &f) const
+      inline bool exists(void) const { return (impl != NULL); }
+      inline bool operator==(const Future &f) const
         { return impl == f.impl; }
-      bool operator<(const Future &f) const
+      inline bool operator<(const Future &f) const
         { return impl < f.impl; }
       Future& operator=(const Future &f);
-      Future& operator=(Future &&f);
+      Future& operator=(Future &&f) noexcept;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1451,11 +1459,11 @@ namespace Legion {
           const void *buffer, size_t bytes, bool take_ownership = false);
       static Future from_untyped_pointer(
           const void *buffer, size_t bytes, bool take_ownership = false,
-          const char *provenance = NULL);
+          const char *provenance = NULL, bool shard_local = false);
       static Future from_value(const void *buffer, size_t bytes, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL,
-          const char *provenance = NULL);
+          const char *provenance = NULL, bool shard_local = false);
     private:
       // This should only be available for accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
@@ -1484,7 +1492,7 @@ namespace Legion {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
-      FutureMap(FutureMap &&map);
+      FutureMap(FutureMap &&map) noexcept;
       ~FutureMap(void);
     private:
       Internal::FutureMapImpl *impl;
@@ -1493,6 +1501,7 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       explicit FutureMap(Internal::FutureMapImpl *impl);
     public:
+      inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const FutureMap &f) const
         { return impl == f.impl; }
       inline bool operator<(const FutureMap &f) const
@@ -1500,7 +1509,7 @@ namespace Legion {
       inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
-      FutureMap& operator=(FutureMap &&f);
+      FutureMap& operator=(FutureMap &&f) noexcept;
     public:
       /**
        * Block until we can return the result for the
@@ -1843,6 +1852,9 @@ namespace Legion {
       bool                               elide_future_return;
     public:
       bool                               silence_warnings;
+    public:
+      // Initial value for reduction
+      Future                             initial_value;
     };
 
     /**
@@ -2585,7 +2597,7 @@ namespace Legion {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
-      PhysicalRegion(PhysicalRegion &&rhs);
+      PhysicalRegion(PhysicalRegion &&rhs) noexcept;
       ~PhysicalRegion(void);
     private:
       Internal::PhysicalRegionImpl *impl;
@@ -2594,7 +2606,8 @@ namespace Legion {
       explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
-      PhysicalRegion& operator=(PhysicalRegion &&rhs);
+      PhysicalRegion& operator=(PhysicalRegion &&rhs) noexcept;
+      inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const PhysicalRegion &reg) const
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
@@ -2758,7 +2771,7 @@ namespace Legion {
     public:
       ExternalResources(void);
       ExternalResources(const ExternalResources &rhs);
-      ExternalResources(ExternalResources &&rhs);
+      ExternalResources(ExternalResources &&rhs) noexcept;
       ~ExternalResources(void);
     private:
       Internal::ExternalResourcesImpl *impl;
@@ -2767,7 +2780,8 @@ namespace Legion {
       explicit ExternalResources(Internal::ExternalResourcesImpl *impl);
     public:
       ExternalResources& operator=(const ExternalResources &rhs);
-      ExternalResources& operator=(ExternalResources &&rhs);
+      ExternalResources& operator=(ExternalResources &&rhs) noexcept;
+      inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const ExternalResources &reg) const
         { return (impl == reg.impl); }
       inline bool operator<(const ExternalResources &reg) const
@@ -3612,7 +3626,7 @@ namespace Legion {
     public:
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
-      PieceIterator(PieceIterator &&rhs);
+      PieceIterator(PieceIterator &&rhs) noexcept;
       PieceIterator(const PhysicalRegion &region, FieldID fid,
                     bool privilege_only = true,
                     bool silence_warnings = false,
@@ -3620,7 +3634,7 @@ namespace Legion {
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
-      PieceIterator& operator=(PieceIterator &&rhs);
+      PieceIterator& operator=(PieceIterator &&rhs) noexcept;
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -3655,14 +3669,14 @@ namespace Legion {
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
-      PieceIteratorT(PieceIteratorT &&rhs);
+      PieceIteratorT(PieceIteratorT &&rhs) noexcept;
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
                      bool privilege_only,
                      bool silence_warnings = false,
                      const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
-      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs);
+      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs) noexcept;
     public:
       inline bool step(void);
       inline const Rect<DIM,COORD_T>& operator*(void) const;
@@ -9563,10 +9577,11 @@ namespace Legion {
        * @param background whether to execute the runtime in the background
        * @param supply_default_mapper whether the runtime should initialize
        *              the default mapper for use by the application
+       * @param filter filter legion and realm command line arguments
        * @return only if running in background, otherwise never
        */
       static int start(int argc, char **argv, bool background = false,
-                       bool supply_default_mapper = true);
+                       bool supply_default_mapper = true, bool filter = false);
 
       /**
        * This 'initialize' method is an optional method that provides
@@ -9579,9 +9594,12 @@ namespace Legion {
        * be passed into the 'start' method or undefined behavior will occur.
        * @param argc pointer to an integer in which to store the argument count 
        * @param argv pointer to array of strings for storing command line args
-       * @param filter remove any runtime command line arguments
+       * @param filter remove any legion and realm command line arguments
+       * @param parse parse any runtime command line arguments during this call
+       *              (if set to false parsing happens during start method)
        */
-      static void initialize(int *argc, char ***argv, bool filter = false);
+      static void initialize(int *argc, char ***argv, 
+                             bool filter = false, bool parse = true);
 
       /**
        * Blocking call to wait for the runtime to shutdown when
@@ -9670,12 +9688,16 @@ namespace Legion {
 
       /**
        * This is the final method for marking the end of an 
-       * implicit top-level task. Note that it executes asychronously
-       * and it is still the responsibility of the user to wait for 
-       * the runtime to shutdown when all of it's effects are done.
+       * implicit top-level task. If there are any asynchronous effects
+       * that were launched during the implicit top-level task (such as
+       * a CUDA kernel launch) then users are required to capture all 
+       * those effects as a Realm event to tell Legion when all those
+       * effects are completed. Finishing an implicit top-level task
+       * still requires waiting explicitly for the runtime to shutdown.
        * The Context object is no longer valid after this call.
        */
-      void finish_implicit_task(Context ctx); 
+      void finish_implicit_task(Context ctx,
+                                Realm::Event effects = Realm::Event::NO_EVENT);
 
       /**
        * Return the maximum number of dimensions that Legion was
@@ -10506,4 +10528,3 @@ namespace Legion {
 #endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 // EOF
-

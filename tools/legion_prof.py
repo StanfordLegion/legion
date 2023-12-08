@@ -2105,25 +2105,24 @@ class CopyInstInfo(object):
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'collective', 'copy_kind', 'copy_inst_infos']
     
     @typecheck
     def __init__(self, initiation_op: Operation, size: int, 
                  create: int, ready: int, 
                  start: int, stop: int, 
-                 request_type: int,
-                 fevent: int
+                 fevent: int, collective: int,
     ) -> None:
         ChanOperation.__init__(self)
         TimeRange.__init__(self, None, None, None, None)
         HasInitiationDependencies.__init__(self, initiation_op)
         self.size = size
-        self.request_type = request_type
         self.create = create
         self.ready = ready
         self.start = start
         self.stop = stop
         self.fevent = fevent
+        self.collective = collective
         self.copy_kind: Optional[CopyKind] = None
         self.copy_inst_infos: List[CopyInstInfo] = list()
 
@@ -3440,7 +3439,7 @@ class LFSR(object):
 
 class State(object):
     __slots__ = [
-        'max_dim', 'num_nodes', 'processors', 'memories', 'mem_proc_affinity', 'channels',
+        'max_dim', 'num_nodes', 'zero_time', 'processors', 'memories', 'mem_proc_affinity', 'channels',
         'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
         'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
@@ -3451,6 +3450,7 @@ class State(object):
     def __init__(self) -> None:
         self.max_dim = 3
         self.num_nodes = 0
+        self.zero_time = 0
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
@@ -3487,6 +3487,7 @@ class State(object):
             "OpDesc": self.log_op_desc,
             "MaxDimDesc": self.log_max_dim,
             "MachineDesc": self.log_machine_desc,
+            "ZeroTime": self.log_zero_time,
             "ProcDesc": self.log_proc_desc,
             "MemDesc": self.log_mem_desc,
             "TaskKind": self.log_kind,
@@ -3546,6 +3547,11 @@ class State(object):
             assert self.num_nodes == num_nodes
         self.current_node_id = node_id
         return node_id
+
+    # ZeroTime
+    @typecheck
+    def log_zero_time(self, zero_time: int) -> None:
+        self.zero_time = zero_time
 
     # IndexSpacePointDesc
     @typecheck
@@ -3736,11 +3742,10 @@ class State(object):
     def log_copy_info(self, op_id: int, size: int,
                       create: int, ready: int, 
                       start: int, stop: int,
-                      request_type: int,
-                      fevent: int
+                      fevent: int, collective: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        copy = self.create_copy(op, size, create, ready, start, stop, request_type, fevent)
+        copy = self.create_copy(op, size, create, ready, start, stop, fevent, collective)
         if stop > self.last_time:
             self.last_time = stop
 
@@ -4155,12 +4160,11 @@ class State(object):
     def create_copy(self, op: Operation, size: int,
                     create: int, ready: int, 
                     start: int, stop: int,
-                    request_type: int,
-                    fevent: int
+                    fevent: int, collective: int
     ) -> Copy:
         key = fevent
         if key not in self.copy_map:
-            copy = Copy(op, size, create, ready, start, stop, request_type, fevent)
+            copy = Copy(op, size, create, ready, start, stop, fevent, collective)
             self.add_copy_map(fevent,copy)
             # update prof_uid map
             self.prof_uid_map[copy.prof_uid] = copy

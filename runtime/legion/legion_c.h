@@ -2661,6 +2661,19 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see Legion::Future::from_untyped_pointer()
+   */
+  legion_future_t
+  legion_future_from_untyped_pointer_detailed(legion_runtime_t runtime,
+                                              const void *buffer,
+                                              size_t size,
+                                              bool take_ownership,
+                                              const char *provenance,
+                                              bool shard_local);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see Legion::Future::Future()
    */
   legion_future_t
@@ -3488,6 +3501,13 @@ extern "C" {
   void
   legion_index_launcher_set_concurrent(legion_index_launcher_t launcher,
                                        bool concurrent);
+
+  /**
+   * @see Legion::IndexTaskLauncher::initial_value
+   */
+  void
+  legion_index_launcher_set_initial_value(legion_index_launcher_t launcher,
+                                          legion_future_t initial_value);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations

@@ -41,10 +41,7 @@ namespace Legion {
       if (privilege_node != NULL)
       {
         Realm::IndexSpace<DIM,T> privilege_space;
-        const ApEvent ready = 
-          privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
+        privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
         for (unsigned idx = 0; idx < num_pieces; idx++)
         {
           const Rect<DIM,T> &rect = rects[idx];
@@ -484,10 +481,22 @@ namespace Legion {
         // then we might have valid points in multiple pieces and its 
         // undefined which pieces Realm might copy to
         if (constraints.padding_constraint.delta.get_dim() > 0)
-          REPORT_LEGION_FATAL(LEGION_FATAL_COMPACT_SPARSE_PADDING,
-              "Legion does not currently support additional padding "
-              "on compact sparse instances. Please open a github "
-              "issue to request support.")
+        {
+          for (int dim = 0; dim < 
+                constraints.padding_constraint.delta.get_dim(); dim++)
+          {
+#ifdef DEBUG_LEGION
+            assert(constraints.padding_constraint.delta.lo()[dim] >= 0);
+            assert(constraints.padding_constraint.delta.hi()[dim] >= 0);
+#endif
+            if ((constraints.padding_constraint.delta.lo()[dim] > 0) ||
+                (constraints.padding_constraint.delta.hi()[dim] > 0))
+              REPORT_LEGION_FATAL(LEGION_FATAL_COMPACT_SPARSE_PADDING,
+                  "Legion does not currently support additional padding "
+                  "on compact sparse instances. Please open a github "
+                  "issue to request support.")
+          }
+        }
         *num_pieces = piece_bounds.size();
         *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
         *piece_list = malloc(*piece_list_size);
@@ -778,7 +787,8 @@ namespace Legion {
     template<int DIM, typename T>
     inline bool IndexSpaceExpression::meets_layout_expression_internal(
                           IndexSpaceExpression *space_expr, bool tight_bounds,
-                          const Rect<DIM,T> *piece_list, size_t piece_list_size)
+                          const Rect<DIM,T> *piece_list, size_t piece_list_size,
+                          const Domain *padding_delta)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -795,6 +805,23 @@ namespace Legion {
         // Check to see if we contain the space expression
         if (!local.bounds.contains(other.bounds))
           return false;
+        if ((padding_delta != NULL) && (padding_delta->get_dim() > 0))
+        {
+#ifdef DEBUG_LEGION
+          assert(padding_delta->get_dim() == DIM);
+#endif
+          // We need to check that the dimensions are exactly matching for
+          // any which have a non-trival padding
+          for (int dim = 0; dim < DIM; dim++)
+          {
+            if ((padding_delta->lo()[dim] > 0) && 
+                (local.bounds.lo[dim] != other.bounds.lo[dim]))
+              return false;
+            if ((padding_delta->hi()[dim] > 0) &&
+                (local.bounds.hi[dim] != other.bounds.hi[dim]))
+              return false;
+          }
+        }
         // If tight, check to see if they are equivalent
         if (tight_bounds)
           return local.bounds == other.bounds;
@@ -802,6 +829,9 @@ namespace Legion {
       }
       else
       {
+        // Padding is not supported for sparse layouts
+        if ((padding_delta != NULL) && (padding_delta->get_dim() > 0))
+          return false;
 #ifdef DEBUG_LEGION
         assert(piece_list_size > 0);
 #endif
@@ -1080,14 +1110,21 @@ namespace Legion {
       return get_realm_index_space(*space, need_tight_result);
     }
 
+    template<int DIM, typename T>
+    bool IndexSpaceOperationT<DIM,T>::is_sparse()
+    {
+      return !realm_index_space.dense();
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceOperationT<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    ApEvent IndexSpaceOperationT<DIM,T>::get_domain(Domain &domain, bool tight)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result;
-      ready = get_realm_index_space(result, tight);
-      return DomainT<DIM,T>(result);
+      ApEvent ready = get_realm_index_space(result, tight);
+      domain = result;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -1152,9 +1189,7 @@ namespace Legion {
       if (has_volume.load())
         return volume;
       Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      get_realm_index_space(temp, true/*tight*/);
       volume = temp.volume();
       has_volume.store(true);
       return volume;
@@ -1365,9 +1400,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
-      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
-      if (space_ready.exists())
-        space_ready.wait();
+      get_realm_index_space(local_is, true/*tight*/);
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                               compact, piece_list, piece_list_size, num_pieces);
     }
@@ -1394,7 +1427,8 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceOperationT<DIM,T>::meets_layout_expression(
                             IndexSpaceExpression *space_expr, bool tight_bounds,
-                            const void *piece_list, size_t piece_list_size)
+                            const void *piece_list, size_t piece_list_size,
+                            const Domain *padding_delta)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1402,7 +1436,8 @@ namespace Legion {
 #endif
       return meets_layout_expression_internal<DIM,T>(space_expr, tight_bounds,
                                   static_cast<const Rect<DIM,T>*>(piece_list),
-                                  piece_list_size / sizeof(Rect<DIM,T>));
+                                  piece_list_size / sizeof(Rect<DIM,T>),
+                                  padding_delta);
     }
 
     //--------------------------------------------------------------------------
@@ -1464,11 +1499,11 @@ namespace Legion {
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
       // See if both the events needed for the tighten call are done
-      if (!this->realm_index_space_ready.has_triggered() || 
+      if (this->realm_index_space_ready.exists() || 
           !valid_event.has_triggered())
       {
         IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-        if (!this->realm_index_space_ready.has_triggered())
+        if (this->realm_index_space_ready.exists())
         {
           if (!valid_event.has_triggered())
             this->tight_index_space_ready = 
@@ -1614,11 +1649,11 @@ namespace Legion {
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
       // See if both the events needed for the tighten call are done
-      if (!this->realm_index_space_ready.has_triggered() || 
+      if (this->realm_index_space_ready.exists() ||
           !valid_event.has_triggered())
       {
         IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-        if (!this->realm_index_space_ready.has_triggered())
+        if (this->realm_index_space_ready.exists())
         {
           if (!valid_event.has_triggered())
             this->tight_index_space_ready = 
@@ -1774,11 +1809,11 @@ namespace Legion {
         // going to want this eventually
         const RtEvent valid_event(this->realm_index_space.make_valid());
         // See if both the events needed for the tighten call are done
-        if (!this->realm_index_space_ready.has_triggered() || 
+        if (this->realm_index_space_ready.exists() ||
             !valid_event.has_triggered())
         {
           IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
-          if (!this->realm_index_space_ready.has_triggered())
+          if (this->realm_index_space_ready.exists())
           {
             if (!valid_event.has_triggered())
               this->tight_index_space_ready = 
@@ -2126,6 +2161,12 @@ namespace Legion {
         delete linear;
     }
 
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::is_sparse()
+    {
+      return !realm_index_space.dense();
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::get_realm_index_space(
@@ -2341,12 +2382,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceNodeT<DIM,T>::get_domain(ApEvent &ready, bool need_tight)
+    ApEvent IndexSpaceNodeT<DIM,T>::get_domain(Domain &domain, bool need_tight)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result;
-      ready = get_realm_index_space(result, need_tight);
-      return DomainT<DIM,T>(result);
+      ApEvent ready = get_realm_index_space(result, need_tight);
+      domain = result;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -3906,7 +3948,7 @@ namespace Legion {
 #endif
           Realm::IndexSpace<DIM,T> result = finder->domain;
           if (child->set_realm_index_space(result, instances_ready,
-                false/*initialization*/, true/*broadcast*/, source_space))
+                false/*initialization*/, false/*broadcast*/, source_space))
             delete child;
         }
         return ApEvent::NO_AP_EVENT;
@@ -3985,12 +4027,12 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child =
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(subspaces[index++], result,
-              false/*initialization*/, true/*broadcast*/, source_space))
+              false/*initialization*/, (results == NULL), source_space))
           delete child;
       }
       if (results != NULL)
       {
-        // Save the results to be shared if necessary
+        // Save the results to be broadcast if necessary
         for (unsigned idx = 0; idx < subspaces.size(); idx++)
           results->at(idx).domain = subspaces[idx];
       }
@@ -4294,7 +4336,7 @@ namespace Legion {
 #endif
           Realm::IndexSpace<DIM1,T1> result = finder->domain;
           if (child->set_realm_index_space(result, instances_ready,
-                false/*initialization*/, true/*broadcast*/, source_space))
+                false/*initialization*/, false/*broadcast*/, source_space))
             delete child;
         }
         return ApEvent::NO_AP_EVENT;
@@ -4395,12 +4437,12 @@ namespace Legion {
         IndexSpaceNodeT<DIM1,T1> *child =
             static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(subspaces[index++], result,
-              false/*initialization*/, true/*broadcast*/, source_space))
+              false/*initialization*/, (results == NULL), source_space))
           delete child;
       }
       if (results != NULL)
       {
-        // Save the results to be shared if necessary
+        // Save the results to be broadcast if necessary
         for (unsigned idx = 0; idx < subspaces.size(); idx++)
           results->at(idx).domain = subspaces[idx];
       }
@@ -4466,7 +4508,7 @@ namespace Legion {
 #endif
           Realm::IndexSpace<DIM1,T1> result = finder->domain;
           if (child->set_realm_index_space(result, instances_ready,
-                false/*initialization*/, true/*broadcast*/, source_space))
+                false/*initialization*/, false/*broadcast*/, source_space))
             delete child;
         }
         return ApEvent::NO_AP_EVENT;
@@ -4568,12 +4610,12 @@ namespace Legion {
         IndexSpaceNodeT<DIM1,T1> *child =
             static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(subspaces[index++], result,
-              false/*initialization*/, true/*broadcast*/, source_space))
+              false/*initialization*/, (results == NULL), source_space))
           delete child;
       }
       if (results != NULL)
       {
-        // Save the results to be shared if necessary
+        // Save the results to be broadcast if necessary
         for (unsigned idx = 0; idx < subspaces.size(); idx++)
           results->at(idx).domain = subspaces[idx];
       }
@@ -4882,9 +4924,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
-      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
-      if (space_ready.exists())
-        space_ready.wait();
+      get_realm_index_space(local_is, true/*tight*/);
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                               compact, piece_list, piece_list_size, num_pieces);
     }
@@ -4911,7 +4951,8 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::meets_layout_expression(
                             IndexSpaceExpression *space_expr, bool tight_bounds,
-                            const void *piece_list, size_t piece_list_size)
+                            const void *piece_list, size_t piece_list_size,
+                            const Domain *padding_delta)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4919,7 +4960,8 @@ namespace Legion {
 #endif
       return meets_layout_expression_internal<DIM,T>(space_expr, tight_bounds,
                                   static_cast<const Rect<DIM,T>*>(piece_list),
-                                  piece_list_size / sizeof(Rect<DIM,T>));
+                                  piece_list_size / sizeof(Rect<DIM,T>),
+                                  padding_delta);
     }
 
     //--------------------------------------------------------------------------
@@ -4940,16 +4982,6 @@ namespace Legion {
       return get_sparsity_map_kd_tree_internal<DIM,T>();
     }
     
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)
-    //--------------------------------------------------------------------------
-    {
-      DomainT<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      launch_domain = local_space;
-    }
-
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::validate_slicing(
@@ -5023,7 +5055,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
       if (shard_space != handle)
-        context->find_launch_space_domain(shard_space, sharding_domain);
+        context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
       std::vector<Realm::Point<DIM,T> > index_points; 
@@ -5078,7 +5110,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       Domain sharding_domain;
       if (shard_space.exists() && shard_space != handle)
-        context->find_launch_space_domain(shard_space, sharding_domain);
+        context->find_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
       if (!func->functor->is_invertible())
@@ -7045,10 +7077,7 @@ namespace Legion {
           {
             IndexSpaceNode *child = get_child(*itr);
             DomainT<DIM,T> space;
-            const ApEvent space_ready = 
-              child->get_expr_index_space(&space, type_tag, true/*tight*/);
-            if (space_ready.exists() && !space_ready.has_triggered())
-              space_ready.wait();
+            child->get_expr_index_space(&space, type_tag, true/*tight*/);
             if (space.empty())
               continue;
             for (RectInDomainIterator<DIM,T> it(space); it(); it++)
@@ -7133,10 +7162,7 @@ namespace Legion {
         }
       }
       DomainT<DIM,T> space;
-      const ApEvent space_ready =
-        expr->get_expr_index_space(&space, handle.get_type_tag(),true/*tight*/);
-      if (space_ready.exists() && !space_ready.has_triggered())
-        space_ready.wait();
+      expr->get_expr_index_space(&space, handle.get_type_tag(), true/*tight*/);
       // If we have a remote kd tree then we need to query that to see if 
       // we have any remote colors to include
       std::set<LegionColor> color_set;

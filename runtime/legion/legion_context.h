@@ -95,11 +95,11 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual Future from_value(const void *value, size_t value_size,
-                                bool owned, Provenance *provenance);
+          bool owned, Provenance *provenance, bool shard_local);
       virtual Future from_value(const void *value, size_t size, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&),
-          Provenance *provenance);
+          Provenance *provenance, bool shard_local);
       virtual Future consensus_match(const void *input, void *output,
           size_t num_elements, size_t element_size, Provenance *provenance);
     public:
@@ -437,7 +437,8 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false) = 0;
+                                             bool internal = false,
+                                             bool check_space = true) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -449,7 +450,8 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false) = 0;
+                                             bool implicit = false,
+                                             bool check_space = true) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
@@ -467,7 +469,8 @@ namespace Legion {
                                              Provenance *provenance) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance) = 0;
+                                   Provenance *provenance,
+                                   bool internal = false) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
@@ -487,7 +490,7 @@ namespace Legion {
       virtual Future detach_resources(ExternalResources resources,
                                     const bool flush, const bool unordered,
                                     Provenance *provenance) = 0;
-      virtual void progress_unordered_operations(void) = 0;
+      virtual void progress_unordered_operations(bool end_task = false) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
@@ -551,15 +554,15 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
-      virtual void post_end_task(FutureInstance *instance,
+                      const void *metadataptr, size_t metadatasize, 
+                      ApEvent effects);
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
       bool is_task_local_instance(PhysicalInstance instance);
-      ApEvent escape_task_local_instance(PhysicalInstance instance);
-      FutureInstance* copy_to_future_inst(const void *value, size_t size,
-                                          RtEvent &done);
+      LgEvent escape_task_local_instance(PhysicalInstance instance);
+      FutureInstance* copy_to_future_inst(const void *value, size_t size);
       FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
       void begin_misspeculation(void);
       void end_misspeculation(FutureInstance *instance,
@@ -688,7 +691,10 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
-      void release_task_local_instances(void);
+    public:
+      void increment_inlined(void);
+      void decrement_inlined(void);
+      void wait_for_inlined(void);
     protected:
       Future predicate_task_false(const TaskLauncher &launcher,
                                   Provenance *provenance);
@@ -735,6 +741,11 @@ namespace Legion {
     protected:
       Processor                             executing_processor;
       size_t                                total_tunable_count;
+    public:
+      // Support for inlining
+      mutable LocalLock                           inline_lock;
+      unsigned                                    inlined_tasks;
+      RtUserEvent                                 inlining_done;
     protected:
       class OverheadProfiler : 
         public Mapping::ProfilingMeasurements::RuntimeOverhead {
@@ -767,7 +778,7 @@ namespace Legion {
     protected:
       // Map of task local instances including their unique events
       // from the profilters perspective
-      std::map<PhysicalInstance,ApEvent> task_local_instances;
+      std::map<PhysicalInstance,LgEvent> task_local_instances;
     protected:
       bool task_executed;
       bool has_inline_accessor;
@@ -951,9 +962,9 @@ namespace Legion {
       };
       struct PostTaskArgs {
       public:
-        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w,
+        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w, ApEvent e,
             FutureInstance *i, void *m, size_t s, FutureFunctor *f, bool o)
-          : context(ctx), index(x), wait_on(w), instance(i), 
+          : context(ctx), index(x), effects(e), wait_on(w), instance(i), 
             metadata(m), metasize(s), functor(f), own_functor(o) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
@@ -961,6 +972,7 @@ namespace Legion {
       public:
         TaskContext *context;
         size_t index;
+        ApEvent effects;
         RtEvent wait_on;
         FutureInstance *instance;
         void *metadata;
@@ -1452,7 +1464,8 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -1464,7 +1477,8 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
@@ -1482,7 +1496,8 @@ namespace Legion {
                                              Provenance *provenance);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   bool internal = false);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -1509,7 +1524,7 @@ namespace Legion {
       virtual Future detach_resources(ExternalResources resources,
                                       const bool flush, const bool unordered,
                                       Provenance *provenance);
-      virtual void progress_unordered_operations(void);
+      virtual void progress_unordered_operations(bool end_task = false);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
@@ -1535,8 +1550,9 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       void register_new_internal_operation(InternalOp *op);
       // Must be called while holding the dependence lock
-      virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
-                                        const bool progress);
+      virtual void insert_unordered_ops(AutoLock &d_lock);
+      void issue_unordered_operations(AutoLock &d_lock, 
+                std::vector<Operation*> &ready_operations);
       size_t register_new_close_operation(CloseOp *op);
       size_t register_new_summary_operation(TraceSummaryOp *op);
     public:
@@ -1548,6 +1564,7 @@ namespace Legion {
                                            bool outermost = true);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                                  ApEvent effects,
                                   FutureInstance *instance,
                                   FutureFunctor *callback_functor,
                                   bool own_callback_functor,
@@ -1617,7 +1634,7 @@ namespace Legion {
           std::set<ApEvent> &preconditions, bool mapping, bool execution);
       void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      void update_current_implicit(Operation *op);
+      void update_current_implicit_creation(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
@@ -1703,8 +1720,9 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
-      virtual void post_end_task(FutureInstance *instance,
+                      const void *metadataptr, size_t metadatasize,
+                      ApEvent effects);
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
@@ -1839,7 +1857,6 @@ namespace Legion {
       // this data structure requires the inline lock because
       // unordered detach operations can touch it without synchronizing
       // with the executing task
-      mutable LocalLock inline_lock;
       LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC> inline_regions;
     protected:
       mutable LocalLock                     child_op_lock;
@@ -1854,7 +1871,7 @@ namespace Legion {
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted
       // into the stream of operations from the task
-      std::list<Operation*> unordered_ops;
+      std::vector<Operation*> unordered_ops;
 #ifdef LEGION_SPY
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
@@ -1866,13 +1883,10 @@ namespace Legion {
     protected: // Queues for fusing together small meta-tasks
       mutable LocalLock                               prepipeline_lock;
       std::deque<std::pair<Operation*,GenerationID> > prepipeline_queue;
-      unsigned                                        outstanding_prepipeline;
     protected:
       mutable LocalLock                               dependence_lock;
       std::deque<Operation*>                          dependence_queue;
       RtEvent                                         dependence_precondition;
-      // Only one of these ever to keep things in order
-      bool                                            outstanding_dependence;
     protected: 
       mutable LocalLock                               ready_lock;
       std::list<QueueEntry<Operation*> >              ready_queue;
@@ -1957,10 +1971,11 @@ namespace Legion {
       // any operations which might need downstream information about 
       // partitions or subspaces. Note that this means that all dependent
       // partitioning operations are guaranteed to map in order currently
-      // We've not extended this to include creation operations as well
-      // for similar reasons, so now this is a general operation class
-      Operation *last_implicit;
-      GenerationID last_implicit_gen;
+      // We've now extended this to include creation operations and pending
+      // partition operations as well for similar reasons, so now this 
+      // is a general operation class
+      Operation *last_implicit_creation;
+      GenerationID last_implicit_creation_gen;
     protected:
       // For managing changing task priorities
       ApEvent realm_done_event;
@@ -2254,7 +2269,6 @@ namespace Legion {
         REPLICATE_DESTROY_LOGICAL_REGION,
         REPLICATE_ADVISE_ANALYSIS_SUBTREE,
         REPLICATE_CREATE_FIELD_ALLOCATOR,
-        REPLICATE_DESTROY_FIELD_ALLOCATOR,
         REPLICATE_EXECUTE_TASK,
         REPLICATE_EXECUTE_INDEX_SPACE,
         REPLICATE_REDUCE_FUTURE_MAP,
@@ -2433,11 +2447,11 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual Future from_value(const void *value, size_t value_size,
-                                bool owned, Provenance *provenance);
+          bool owned, Provenance *provenance, bool shard_local);
       virtual Future from_value(const void *buffer, size_t size, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&),
-          Provenance *provenance);
+          Provenance *provenance, bool shard_local);
       virtual Future consensus_match(const void *input, void *output,
           size_t num_elements, size_t element_size, Provenance *provenance); 
     public:
@@ -2756,8 +2770,10 @@ namespace Legion {
       virtual void destroy_field_allocator(FieldSpaceNode *node,
                                            bool from_application = true);
     public:
-      virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
-                                        const bool progress);
+      void initialize_unordered_collective(void);
+      void finalize_unordered_collective(AutoLock &d_lock);
+      virtual void insert_unordered_ops(AutoLock &d_lock);
+      virtual void progress_unordered_operations(bool end_task = false);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -2777,17 +2793,20 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(IndexSpace space,
                     const std::map<DomainPoint,Future> &futures,
                                              Provenance *provenance,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool check_space = true);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   bool internal = false);
       // Unmapping region is the same as for an inner context
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
@@ -2822,8 +2841,9 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_future,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
-      virtual void post_end_task(FutureInstance *instance,
+                      const void *metadataptr, size_t metadatasize,
+                      ApEvent effects);
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
@@ -3253,6 +3273,7 @@ namespace Legion {
       static const unsigned MAX_UNORDERED_OPS_EPOCH = 32768;
       unsigned unordered_ops_counter;
       unsigned unordered_ops_epoch;
+      UnorderedExchange *unordered_collective;
     };
 
     /**
@@ -3719,7 +3740,8 @@ namespace Legion {
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -3731,7 +3753,8 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool check_space = true);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
@@ -3749,7 +3772,8 @@ namespace Legion {
                                              Provenance *provenance);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   bool internal = false);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -3768,7 +3792,7 @@ namespace Legion {
       virtual Future detach_resources(ExternalResources resources,
                                       const bool flush, const bool unordered,
                                       Provenance *provenance);
-      virtual void progress_unordered_operations(void);
+      virtual void progress_unordered_operations(bool end_task = false);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
@@ -3823,8 +3847,9 @@ namespace Legion {
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                      const void *metadataptr, size_t metadatasize);
-      virtual void post_end_task(FutureInstance *instance,
+                      const void *metadataptr, size_t metadatasize,
+                      ApEvent effects);
+      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);

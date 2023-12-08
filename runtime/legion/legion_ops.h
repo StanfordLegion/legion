@@ -572,11 +572,15 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       // Allow the parent context to sample any outstanding effects 
-      virtual void find_completion_effects(std::set<ApEvent> &effects);
+      virtual void find_completion_effects(std::set<ApEvent> &effects,
+                                           bool tracing = false);
+      virtual void find_completion_effects(std::vector<ApEvent> &effects,
+                                           bool tracing = false);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
           std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy);
+      void finalize_completion(void);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -593,7 +597,9 @@ namespace Legion {
       void resolve_speculation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
-      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      // You should probably never set first_invocation yourself
+      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT,
+                              bool first_invocation = true);
       // Indicate that we are committing this operation
       void commit_operation(bool do_deactivate,
                             RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -746,8 +752,10 @@ namespace Legion {
       // For each of our regions, a map of operations to the regions
       // which we can verify for each operation
       std::map<Operation*,std::set<unsigned> > verify_regions;
+#ifdef DEBUG_LEGION
       // Whether this operation is active or not
       bool activated;
+#endif
       // Whether this operation has executed its prepipeline stage yet
       bool prepipelined;
       // Whether this operation has mapped, once it has mapped then
@@ -1805,7 +1813,6 @@ namespace Legion {
       static const AllocationType alloc_type = CREATION_OP_ALLOC;
     public:
       enum CreationKind {
-        FENCE_CREATION,
         INDEX_SPACE_CREATION,
         FIELD_ALLOCATION,
         FUTURE_MAP_CREATION,
@@ -1817,21 +1824,17 @@ namespace Legion {
     public:
       CreationOp& operator=(const CreationOp &rhs);
     public:
-      void initialize_fence(InnerContext *ctx, RtEvent precondition,
-                            Provenance *provenance);
       void initialize_index_space(InnerContext *ctx, IndexSpaceNode *node, 
                             const Future &future, Provenance *provenance,
                             bool owner = true, 
                             const CollectiveMapping *mapping = NULL);
       void initialize_field(InnerContext *ctx, FieldSpaceNode *node,
                             FieldID fid, const Future &field_size,
-                            RtEvent precondition, Provenance *provenance,
-                            bool owner = true);
+                            Provenance *provenance, bool owner = true);
       void initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                              const std::vector<FieldID> &fids,
                              const std::vector<Future> &field_sizes,
-                             RtEvent precondition, Provenance *provenance,
-                             bool owner = true);
+                             Provenance *provenance, bool owner = true);
       void initialize_map(InnerContext *ctx, Provenance *provenance,
                           const std::map<DomainPoint,Future> &futures);
     public:
@@ -1849,7 +1852,6 @@ namespace Legion {
       FieldSpaceNode *field_space_node;
       std::vector<Future> futures;
       std::vector<FieldID> fields;
-      RtEvent mapping_precondition;
       const CollectiveMapping *mapping;
       bool owner;
     };
@@ -2886,9 +2888,9 @@ namespace Legion {
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
                                       std::set<ApEvent> &tasks_complete);
       // Make this virtual so we can override it for control replication
-      void map_tasks(void) const;
-      void map_single_task(SingleTask *task);
+      void map_tasks(void);
     public:
+      void record_mapped_event(const DomainPoint &point, RtEvent mapped);
       static void handle_map_task(const void *args);
     protected:
       void distribute_tasks(void);
@@ -2932,6 +2934,7 @@ namespace Legion {
         unsigned/*op idx*/,unsigned/*req idx*/> > > internal_dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
+      std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
     protected:
@@ -4310,7 +4313,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_execution(void);
+      virtual void trigger_complete(void);
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);
@@ -4325,7 +4328,6 @@ namespace Legion {
                           FutureImpl *future);
       void subscribe_to_future(std::vector<RtEvent> &ready_events,
                                FutureImpl *future);
-      Future pick_initial_value(Future initial_value);
     protected:
       FutureMap future_map;
       ReductionOpID redop_id;

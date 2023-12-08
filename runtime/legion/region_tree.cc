@@ -26,6 +26,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 // templates in legion/region_tree.inl are instantiated by region_tree_tmpl.cc
 
@@ -41,7 +42,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
-      domain = is->get_domain(domain_ready, true/*tight*/);
+      domain_ready = is->get_domain(domain, false/*tight*/);
 #ifdef LEGION_SPY
       index_space = req.region.get_index_space();
 #endif
@@ -50,7 +51,7 @@ namespace Legion {
       fs->get_field_indexes(req.instance_fields, field_indexes);
       instances.resize(field_indexes.size());
       Runtime *runtime = forest->runtime;
-      if ((runtime->num_profiling_nodes > 0) || runtime->legion_spy_enabled)
+      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
         instance_events.resize(field_indexes.size());
       // For each of the fields in the region requirement
       // (importantly in the order they will be copied)
@@ -1084,12 +1085,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::find_launch_space_domain(IndexSpace handle,
-                                                    Domain &launch_domain)
+    void RegionTreeForest::find_domain(IndexSpace handle, Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      node->get_launch_space_domain(launch_domain);
+      node->get_domain(launch_domain);
     }
 
     //--------------------------------------------------------------------------
@@ -2001,6 +2001,22 @@ namespace Legion {
                                        const bool check_initialized)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // These are some basic sanity checks that each field is represented
+      // by exactly one instance and that the total number of fields 
+      // represented matches the number of privilege fields.
+      // There has been at least one case where this invariant was violated
+      // for attach operations and there were more fields represented in
+      // instances than there were privileges, see the attach_2d example.
+      FieldMask check_mask;
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const FieldMask &mask = targets[idx].get_valid_fields();
+        assert(check_mask * mask);
+        check_mask |= mask;
+      }
+      assert(check_mask.pop_count() == req.privilege_fields.size());
+#endif
       UpdateAnalysis *analysis = NULL;
       const RtEvent registration_precondition = physical_perform_updates(req,
          version_info, op, index, precondition, term_event, targets, src,
@@ -2885,7 +2901,7 @@ namespace Legion {
 #endif
       RegionNode *attach_node = get_node(req.region);
       return attach_node->column_source->create_external_instance(
-                                field_set, attach_node, attach_op);
+          req.privilege_fields, field_set, attach_node, attach_op);
     }
 
     //--------------------------------------------------------------------------
@@ -5739,7 +5755,7 @@ namespace Legion {
       if (exprs.size() == 1)
         return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
-      // Do a quick pass to see if any of them are empty in which case we 
+      // Do a quick pass to see if any of them are empty in which case we
       // know that the result of the whole intersection is empty
       for (unsigned idx = 0; idx < expressions.size(); idx++)
       {
@@ -7931,6 +7947,24 @@ namespace Legion {
       if (is_owner())
       {
         AutoLock n_lock(node_lock);
+        // First check that we haven't recorded any children that don't have
+        // any generated colors as it is illegal to generate colors if the
+        // user has determined that they are specifying all the colors
+        if (remote_colors.find(INVALID_COLOR) == remote_colors.end())
+        {
+          if (!color_map.empty() || !remote_colors.empty() || 
+              (next_uncollected_color > 0))
+            REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+                "Illegal request for Legion to generated a color for index "
+                "space %d after a child was already registered with an "
+                "explicit color. Colors of partitions must either be "
+                "completely specified by the user or completely generated "
+                "by the runtime. Mixing of allocation modes is not allowed.",
+                handle.id)
+          // If we made it here then there are no other children registered
+          // so we record an empty entry to mark that we're generating colors
+          remote_colors[INVALID_COLOR] = IndexPartition::NO_PART;
+        }
         // If the user made a suggestion see if it was right
         if (suggestion != INVALID_COLOR)
         {
@@ -8098,6 +8132,16 @@ namespace Legion {
       assert((color_map.find(child->color) == color_map.end()) ||
              (color_map[child->color] == NULL));
 #endif
+      if (is_owner() && 
+          (remote_colors.find(INVALID_COLOR) != remote_colors.end()) &&
+          (color_map.find(child->color) == color_map.end()))
+        REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+              "Illegal request for Legion to generated a color for index "
+              "space %d after a child was already registered with an "
+              "explicit color. Colors of partitions must either be "
+              "completely specified by the user or completely generated "
+              "by the runtime. Mixing of allocation modes is not allowed.",
+              handle.id)
       color_map[child->color] = child;
       if (!remote_colors.empty())
         remote_colors.erase(child->color);
@@ -8196,6 +8240,15 @@ namespace Legion {
       // should only happen on the owner node
       assert(get_owner_space() == context->runtime->address_space);
 #endif
+      if ((remote_colors.find(INVALID_COLOR) != remote_colors.end()) &&
+          (color_map.find(part_color) == color_map.end()))
+        REPORT_LEGION_ERROR(ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES,
+              "Illegal request for Legion to generated a color for index "
+              "space %d after a child was already registered with an "
+              "explicit color. Colors of partitions must either be "
+              "completely specified by the user or completely generated "
+              "by the runtime. Mixing of allocation modes is not allowed.",
+              handle.id)
       remote_colors[part_color] = pid;
     }
 
@@ -8504,7 +8557,7 @@ namespace Legion {
 #endif
         }
         // See if we're going to be sending the whole tree or not
-        bool recurse = true;
+        bool recurse = false;
         if (target->parent == NULL)
         {
           if (target->check_valid_and_increment(REGION_TREE_REF))
@@ -8514,10 +8567,7 @@ namespace Legion {
             target->remove_base_valid_ref(REGION_TREE_REF);
           }
           else
-          {
             target->pack_global_ref();
-            recurse = false;
-          }
         }
         else
         {
@@ -8526,6 +8576,7 @@ namespace Legion {
           if (target->parent->check_valid_and_increment(REGION_TREE_REF))
           {
             valid = true;
+            recurse = true;
             target->parent->pack_valid_ref();
             target->parent->remove_base_valid_ref(REGION_TREE_REF);
           }
@@ -8541,7 +8592,6 @@ namespace Legion {
             }
             else
               target->pack_global_ref();
-            recurse = false;
           }
         }
         target->send_node(source, recurse, valid);
@@ -8552,6 +8602,7 @@ namespace Legion {
           rez.serialize(to_trigger);
           rez.serialize(handle);
           rez.serialize(valid);
+          rez.serialize(recurse);
         }
         forest->runtime->send_index_space_return(source, rez);
       }
@@ -8573,12 +8624,14 @@ namespace Legion {
       IndexSpaceNode *node = context->get_node(handle);
       bool valid;
       derez.deserialize(valid);
+      bool recurse;
+      derez.deserialize(recurse);
       if (valid)
       {
-        if (node->parent == NULL)
-          node->unpack_valid_ref();
-        else
+        if (recurse)
           node->parent->unpack_valid_ref();
+        else
+          node->unpack_valid_ref();
       }
       else
         node->unpack_global_ref();
@@ -9131,7 +9184,7 @@ namespace Legion {
         remaining_global_disjoint_complete_notifications = 0;
       // Add a reference to be removed only after both the disjointness 
       // and the completeness is set
-      add_base_gc_ref(REGION_TREE_REF);
+      add_base_valid_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -10226,7 +10279,7 @@ namespace Legion {
         RemoteDisjointnessFunctor functor(rez, context->runtime);
         map_over_remote_instances(functor);
       }
-      return remove_base_gc_ref(REGION_TREE_REF);
+      return remove_base_valid_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -14323,6 +14376,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef FieldSpaceNode::create_external_instance(
+                                         const std::set<FieldID> &priv_fields,
                                          const std::vector<FieldID> &field_set,
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
@@ -14336,10 +14390,12 @@ namespace Legion {
       FieldMask external_mask;
       compute_field_layout(field_set, field_sizes, 
                            mask_index_map, serdez, external_mask);
+      FieldMask privilege_mask = (priv_fields.size() == field_set.size()) ?
+        external_mask : get_field_mask(priv_fields);
       // Now make the instance, this should always succeed
       PhysicalManager *manager = attach_op->create_manager(node, field_set,
           field_sizes, mask_index_map, serdez, external_mask);
-      return InstanceRef(manager, external_mask); 
+      return InstanceRef(manager, privilege_mask); 
     }
 
     //--------------------------------------------------------------------------
@@ -14475,6 +14531,10 @@ namespace Legion {
                               PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND,
                                          NULL/*redop*/,
                                          collective_mapping);
+      // Remove the reference that was returned to us from either finding
+      // or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -14514,7 +14574,10 @@ namespace Legion {
             candidates.begin(); it != candidates.end(); it++)
       {
         if ((*it)->match_layout(constraints, num_dims))
+        {
+          (*it)->add_reference();
           return (*it);
+        }
       }
       return NULL;
     }
@@ -14540,6 +14603,7 @@ namespace Legion {
           continue;
         if ((*it)->allocated_fields != mask)
           continue;
+        (*it)->add_reference();
         return (*it);
       }
       assert(false);
@@ -14560,6 +14624,7 @@ namespace Legion {
       // Make the new field description and then register it
       LayoutDescription *result = new LayoutDescription(this, layout_mask, 
         total_dims, constraints, mask_index_map, fids, field_sizes, serdez);
+      result->add_reference();
       return register_layout_description(result);
     }
 
@@ -14581,13 +14646,16 @@ namespace Legion {
           {
             // Delete the layout we are trying to register
             // and return the matching one
-            delete layout;
+            if (layout->remove_reference())
+              delete layout;
+            (*it)->add_reference();
             return (*it);
           }
         }
       }
       // Otherwise we successfully registered it
       descs.push_back(layout);
+      // Add the reference here for our local data structure
       layout->add_reference();
       return layout;
     }
@@ -19857,40 +19925,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::pack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = this;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->pack_global_ref();
-      }
-      if (row_source->parent != NULL)
-        row_source->parent->pack_valid_ref();
-      else
-        row_source->pack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::unpack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = this;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->unpack_global_ref();
-      }
-      if (row_source->parent != NULL)
-        row_source->parent->unpack_valid_ref();
-      else
-        row_source->unpack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionNode::is_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -21320,34 +21354,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::pack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = parent;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->pack_global_ref();
-      }
-      row_source->pack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::unpack_global_reference(bool need_root)
-    //--------------------------------------------------------------------------
-    {
-      if (need_root)
-      {
-        RegionNode *root = parent;
-        while (root->parent != NULL)
-          root = root->parent->parent;
-        root->unpack_global_ref();
-      }
-      row_source->unpack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
     bool PartitionNode::is_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -22008,6 +22014,27 @@ namespace Legion {
       logger->up();
     }
 #endif 
+
+    /* static */
+    IndexSpaceOperation *
+    InstanceExpressionCreator::create_with_domain(TypeTag tag,
+                                                 const Domain &dom)
+    {
+      InstanceExpressionCreator creator(tag, dom);
+      creator.create_operation();
+
+      IndexSpaceOperation *out = creator.result;
+      out->add_base_expression_reference(LIVE_EXPR_REF);
+      ImplicitReferenceTracker::record_live_expression(out);
+
+      return out;
+    }
+
+    /* static */
+    RegionTreeForest *InstanceExpressionCreator::forest()
+    {
+      return implicit_runtime->forest;
+    }
 
   }; // namespace Internal 
 }; // namespace Legion

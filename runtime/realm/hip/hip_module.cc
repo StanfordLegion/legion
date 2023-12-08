@@ -57,7 +57,8 @@ namespace Realm {
     Logger log_cudart("cudart");
     Logger log_hipipc("hipipc");
 
-    Logger log_stream("hipstream");  
+    Logger log_stream("hipstream");
+    hipError_t hip_init_code = hipErrorUnknown;
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1040,21 +1041,6 @@ namespace Realm {
       if(!pinned_sysmems.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
-
-        // TODO: move into the dma channels themselves
-        for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
-            it != pinned_sysmems.end();
-            ++it) {
-          // don't create affinities for IB memories right now
-          if(!ID(*it).is_memory()) continue;
-
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = *it;
-          mma.bandwidth = 20; // "medium"
-          mma.latency = 200;  // "bad"
-          r->add_mem_mem_affinity(mma);
-        }
       } else {
         log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
@@ -1062,29 +1048,6 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !hipipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
-
-        // TODO: move into the dma channels themselves
-        for(std::set<Memory>::const_iterator it = peer_fbs.begin();
-            it != peer_fbs.end();
-            ++it) {
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = *it;
-          mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-          mma.latency = 400;  // ~twice the latency as zcmem
-          r->add_mem_mem_affinity(mma);
-        }
-
-        for(std::vector<HipIpcMapping>::const_iterator it = hipipc_mappings.begin();
-            it != hipipc_mappings.end();
-            ++it) {
-          Machine::MemoryMemoryAffinity mma;
-          mma.m1 = fbmem->me;
-          mma.m2 = it->mem;
-          mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-          mma.latency = 400;  // ~twice the latency as zcmem
-          r->add_mem_mem_affinity(mma);
-        }     
       }
     }
 
@@ -1109,7 +1072,7 @@ namespace Realm {
 
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
-      if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
+      if(stream->get_gpu()->module->config->cfg_fences_use_callbacks) {
         CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
       } else {
         stream->add_fence(this);
@@ -1139,7 +1102,7 @@ namespace Realm {
 
     void GPUWorkStart::enqueue_on_stream(GPUStream *stream)
     {
-      if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
+      if(stream->get_gpu()->module->config->cfg_fences_use_callbacks) {
         CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
       } else {
         stream->add_start_event(this);
@@ -1549,21 +1512,21 @@ namespace Realm {
       // if this is our first task, we might need to decide whether
       //  full context synchronization is required for a task to be
       //  "complete"
-      if(gpu_proc->gpu->module->cfg_task_context_sync < 0) {
+      if(gpu_proc->gpu->module->config->cfg_task_context_sync < 0) {
 #ifdef REALM_USE_HIP_HIJACK
         // normally hijack code will catch all the work and put it on the
         //  right stream, but if we haven't seen it used, there may be a
         //  static copy of the cuda runtime that's in use and foiling the
         //  hijack
         if(cudart_hijack_active) {
-          gpu_proc->gpu->module->cfg_task_context_sync = 0;
+          gpu_proc->gpu->module->config->cfg_task_context_sync = 0;
           if (!already_issued_hijack_enabled_warning) {
             already_issued_hijack_enabled_warning = true;
             log_gpu.warning() << "HIP hijack is active"
                   << " - device synchronizations not required after every GPU task!";
           }
         } else {
-          if(!(gpu_proc->gpu->module->cfg_suppress_hijack_warning ||
+          if(!(gpu_proc->gpu->module->config->cfg_suppress_hijack_warning ||
                already_issued_hijack_warning)) {
             already_issued_hijack_warning = true;
             log_gpu.warning() << "HIP hijack code not active"
@@ -1573,12 +1536,12 @@ namespace Realm {
         }
 #else
         // without hijack or legacy sync requested, ctxsync is needed
-        gpu_proc->gpu->module->cfg_task_context_sync = 1;
+        gpu_proc->gpu->module->config->cfg_task_context_sync = 1;
 #endif
       }
 
       if((ThreadLocal::context_sync_required > 0) ||
-	       ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->cfg_task_context_sync))
+	       ((ThreadLocal::context_sync_required < 0) && gpu_proc->gpu->module->config->cfg_task_context_sync))
         gpu_proc->ctxsync.add_fence(fence);
       else
 	      fence->enqueue_on_stream(s);
@@ -1656,7 +1619,7 @@ namespace Realm {
       : LocalTaskProcessor(_me, Processor::TOC_PROC)
       , gpu(_gpu)
       , block_on_synchronize(false)
-      , ctxsync(_gpu, _gpu->device_id, crs, _gpu->module->cfg_max_ctxsync_threads)
+      , ctxsync(_gpu, _gpu->device_id, crs, _gpu->module->config->cfg_max_ctxsync_threads)
     {
       Realm::CoreReservationParameters params;
       params.set_num_cores(1);
@@ -2016,7 +1979,7 @@ namespace Realm {
     GPUStream *GPU::get_next_d2d_stream()
     {
       unsigned d2d_stream_index = (next_d2d_stream.fetch_add(1) %
-                                   module->cfg_d2d_streams);
+                                   module->config->cfg_d2d_streams);
       return device_to_device_streams[d2d_stream_index];
     }
 
@@ -3170,10 +3133,10 @@ namespace Realm {
       host_to_device_stream = new GPUStream(this, worker);
       device_to_host_stream = new GPUStream(this, worker);
       
-      device_to_device_streams.resize(module->cfg_d2d_streams, 0);
-      for(unsigned i = 0; i < module->cfg_d2d_streams; i++)
+      device_to_device_streams.resize(module->config->cfg_d2d_streams, 0);
+      for(unsigned i = 0; i < module->config->cfg_d2d_streams; i++)
         device_to_device_streams[i] = new GPUStream(this, worker,
-                                                    module->cfg_d2d_stream_priority);
+                                                    module->config->cfg_d2d_stream_priority);
 
       // only create p2p streams for devices we can talk to
       peer_to_peer_streams.resize(module->gpu_info.size(), 0);
@@ -3183,8 +3146,8 @@ namespace Realm {
         if(info->peers.count((*it)->device) != 0)
           peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
 
-      task_streams.resize(module->cfg_task_streams);
-      for(unsigned i = 0; i < module->cfg_task_streams; i++)
+      task_streams.resize(module->config->cfg_task_streams);
+      for(unsigned i = 0; i < module->config->cfg_task_streams; i++)
         task_streams[i] = new GPUStream(this, worker);
 
       pop_context();
@@ -3580,6 +3543,119 @@ namespace Realm {
       if(gpu)
         gpu->pop_context();
     }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class HipModuleConfig
+
+    HipModuleConfig::HipModuleConfig(void)
+      : ModuleConfig("hip")
+    {
+      config_map.insert({"gpu", &cfg_num_gpus});
+      config_map.insert({"zcmem", &cfg_zc_mem_size});
+      config_map.insert({"fbmem", &cfg_fb_mem_size});
+      config_map.insert({"ib_fbmem", &cfg_fb_ib_size});
+      config_map.insert({"ib_zcmem", &cfg_zc_ib_size});
+      config_map.insert({"use_dynamic_fb", &cfg_use_dynamic_fb});
+      config_map.insert({"dynfb_max_size", &cfg_dynfb_max_size});
+      config_map.insert({"task_streams", &cfg_task_streams});
+      config_map.insert({"d2d_streams", &cfg_d2d_streams});
+      res_fbmem_sizes.push_back(0);
+    }
+
+    bool HipModuleConfig::discover_resource(void)
+    {
+      hip_init_code = hipGetDeviceCount(&res_num_gpus);
+      if (res_num_gpus == 0) {
+        // continue on so that we recognize things like -ll:gpu, but there
+        //  are no devices to be found
+        log_gpu.info() << "hipInit reports no devices found";
+      } else {
+        res_fbmem_sizes.resize(res_num_gpus);
+        for(int i = 0; i < res_num_gpus; i++) {
+          hipDeviceProp_t dev_prop;
+          CHECK_HIP( hipGetDeviceProperties(&dev_prop, i) );
+          res_fbmem_sizes[i] = dev_prop.totalGlobalMem;
+          if (i > 0) {
+            // currently, we assume all gpus are identical
+            assert(res_fbmem_sizes[i] == res_fbmem_sizes[i-1]);
+          }
+        }
+        resource_discovered = true;
+      }
+      return resource_discovered;
+    }
+
+    bool HipModuleConfig::get_resource(const std::string name, int &value) const
+    {
+      if (!resource_discovered) {
+        log_gpu.error("Module %s can not detect the int resource: %s", module_name.c_str(), name.c_str());
+        return false;
+      }
+      if (name == "gpu") {
+        value = res_num_gpus;
+        return true;
+      } else {
+        log_gpu.error("Module %s does not have the int resource: %s", module_name.c_str(), name.c_str());
+        return false;
+      }
+    }
+
+    bool HipModuleConfig::get_resource(const std::string name, size_t &value) const
+    {
+      if (!resource_discovered) {
+        log_gpu.error("Module %s can not detect the size_t resource: %s", module_name.c_str(), name.c_str());
+        return false;
+      }
+      if (name == "fbmem") {
+        value = res_fbmem_sizes[0];
+        return true;
+      } else {
+        log_gpu.error("Module %s does not have the size_t resource: %s", module_name.c_str(), name.c_str());
+        return false;
+      }
+    }
+
+    void HipModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // first order of business - read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_int_units("-ll:fsize", cfg_fb_mem_size, 'm')
+        .add_option_int_units("-ll:zsize", cfg_zc_mem_size, 'm')
+        .add_option_int_units("-ll:ib_fsize", cfg_fb_ib_size, 'm')
+        .add_option_int_units("-ll:ib_zsize", cfg_zc_ib_size, 'm')
+        .add_option_int("-hip:dynfb", cfg_use_dynamic_fb)
+        .add_option_int_units("-hip:dynfb_max", cfg_dynfb_max_size, 'm')
+        .add_option_int("-ll:gpu", cfg_num_gpus)
+        .add_option_string("-ll:gpu_ids", cfg_gpu_idxs)
+        .add_option_int("-ll:streams", cfg_task_streams)
+        .add_option_int("-ll:d2d_streams", cfg_d2d_streams)
+        .add_option_int("-ll:d2d_priority", cfg_d2d_stream_priority)
+        .add_option_int("-ll:gpuworkthread", cfg_use_worker_threads)
+        .add_option_int("-ll:gpuworker", cfg_use_shared_worker)
+        .add_option_int("-ll:pin", cfg_pin_sysmem)
+        .add_option_bool("-hip:callbacks", cfg_fences_use_callbacks)
+        .add_option_bool("-hip:nohijack", cfg_suppress_hijack_warning)	
+        .add_option_int("-hip:skipgpus", cfg_skip_gpu_count)
+        .add_option_bool("-hip:skipbusy", cfg_skip_busy_gpus)
+        .add_option_int_units("-hip:minavailmem", cfg_min_avail_mem, 'm')
+        .add_option_int("-hip:contextsync", cfg_task_context_sync)
+        .add_option_int("-hip:maxctxsync", cfg_max_ctxsync_threads)
+        .add_option_int("-hip:mtdma", cfg_multithread_dma)
+        .add_option_int_units("-hip:hostreg", cfg_hostreg_limit, 'm')
+        .add_option_int("-hip:ipc", cfg_use_hip_ipc);
+#ifdef REALM_USE_HIP_HIJACK
+        cp.add_option_int("-hip:nongpusync", cudart_hijack_nongpu_sync);
+#endif
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+      	log_gpu.error() << "error reading HIP command line parameters";
+      	exit(1);
+      }
+    }
  
 
     ////////////////////////////////////////////////////////////////////////
@@ -3592,29 +3668,7 @@ namespace Realm {
 
     HipModule::HipModule(RuntimeImpl *_runtime)
       : Module("hip")
-      , cfg_zc_mem_size(64 << 20)
-      , cfg_zc_ib_size(256 << 20)
-      , cfg_fb_mem_size(256 << 20)
-      , cfg_fb_ib_size(128 << 20)
-      , cfg_use_dynamic_fb(true)
-      , cfg_dynfb_max_size(~size_t(0))
-      , cfg_num_gpus(0)
-      , cfg_task_streams(12)
-      , cfg_d2d_streams(4)
-      , cfg_use_worker_threads(false)
-      , cfg_use_shared_worker(true)
-      , cfg_pin_sysmem(true)
-      , cfg_fences_use_callbacks(false)
-      , cfg_suppress_hijack_warning(false)
-      , cfg_skip_gpu_count(0)
-      , cfg_skip_busy_gpus(false)
-      , cfg_min_avail_mem(0)
-      , cfg_task_context_sync(-1)
-      , cfg_max_ctxsync_threads(4)
-      , cfg_multithread_dma(false)
-      , cfg_hostreg_limit(1 << 30)
-      , cfg_d2d_stream_priority(-1)
-      , cfg_use_hip_ipc(false)
+      , config(nullptr)
       , runtime(_runtime)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
@@ -3630,67 +3684,55 @@ namespace Realm {
       
     HipModule::~HipModule(void)
     {
+      assert(config != nullptr);
+      config = nullptr;
       delete_container_contents(gpu_info);
       assert(hip_module_singleton == this);
       hip_module_singleton = 0;
       delete rh_listener;
     }
 
-    /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime,
-                                                std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *HipModule::create_module_config(RuntimeImpl *runtime)
+    {
+      HipModuleConfig *config = new HipModuleConfig();
+      if (config->discover_resource() == false) {
+        log_gpu.error("We are not able to discover the HIP resources.");
+      }
+      return config;
+    }
+
+    /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime)
     {
       HipModule *m = new HipModule(runtime);
-      
-      // first order of business - read command line parameters
-      {
-        CommandLineParser cp;
+      HipModuleConfig *config = dynamic_cast<HipModuleConfig *>(runtime->get_module_config("hip"));
+      assert(config != nullptr);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == nullptr);
+      m->config = config;
 
-      	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
-      	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
-          .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
-      	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
-          .add_option_int("-hip:dynfb", m->cfg_use_dynamic_fb)
-          .add_option_int_units("-hip:dynfb_max", m->cfg_dynfb_max_size, 'm')
-      	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
-          .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
-          .add_option_int("-ll:streams", m->cfg_task_streams)
-          .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
-          .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
-          .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
-      	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
-      	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
-      	  .add_option_bool("-hip:callbacks", m->cfg_fences_use_callbacks)
-      	  .add_option_bool("-hip:nohijack", m->cfg_suppress_hijack_warning)	
-      	  .add_option_int("-hip:skipgpus", m->cfg_skip_gpu_count)
-      	  .add_option_bool("-hip:skipbusy", m->cfg_skip_busy_gpus)
-      	  .add_option_int_units("-hip:minavailmem", m->cfg_min_avail_mem, 'm')
-          .add_option_int("-hip:contextsync", m->cfg_task_context_sync)
-          .add_option_int("-hip:maxctxsync", m->cfg_max_ctxsync_threads)
-          .add_option_int("-hip:mtdma", m->cfg_multithread_dma)
-          .add_option_int_units("-hip:hostreg", m->cfg_hostreg_limit, 'm')
-          .add_option_int("-hip:ipc", m->cfg_use_hip_ipc);
-#ifdef REALM_USE_HIP_HIJACK
-        cp.add_option_int("-hip:nongpusync", cudart_hijack_nongpu_sync);
-#endif	
-        
-        bool ok = cp.parse_command_line(cmdline);
-      	if(!ok) {
-      	  log_gpu.error() << "error reading HIP command line parameters";
-      	  exit(1);
-      	}
-      }
+      // if we know gpus have been requested, correct loading of libraries
+      //  and driver initialization are required
+      bool init_required = ((m->config->cfg_num_gpus > 0) || !m->config->cfg_gpu_idxs.empty());
 
       // before we do anything, make sure there's a HIP driver and GPUs to talk to
       std::vector<GPUInfo *> infos;
       {
-        int num_devices;
-      	CHECK_HIP( hipGetDeviceCount(&num_devices) );
-      	if(num_devices == 0) {
-          // continue on so that we recognize things like -ll:gpu, but there
-          //  are no devices to be found
-          log_gpu.info() << "hipInit reports no devices found";
-      	} else {
-      	  for(int i = 0; i < num_devices; i++) {
+        if(hip_init_code != hipSuccess) {
+          // failure to initialize the driver is a fatal error if we know gpus
+          //  have been requested
+          if(init_required) {
+            log_gpu.fatal() << "gpus requested, but hipInit returned " << hip_init_code;
+            abort();
+          } else if(hip_init_code == hipErrorNoDevice) {
+            log_gpu.info() << "hipInit reports no devices found";
+          } else if(hip_init_code != hipSuccess) {
+            log_gpu.warning() << "hip returned " << hip_init_code << " - module not loaded";
+            delete m;
+            return 0;
+          }
+        } else {
+      	  for(int i = 0; i < config->res_num_gpus; i++) {
       	    GPUInfo *info = new GPUInfo;
 
       	    info->index = i;
@@ -3820,10 +3862,10 @@ namespace Realm {
       Module::initialize(runtime);
 
       // if we are using a shared worker, create that next
-      if(cfg_use_shared_worker) {
+      if(config->cfg_use_shared_worker) {
 	      shared_worker = new GPUWorker;
 
-	      if(cfg_use_worker_threads)
+	      if(config->cfg_use_worker_threads)
 	        shared_worker->start_background_thread(runtime->core_reservation_set(),
 						                                     1 << 20); // hardcoded worker stack size
         else
@@ -3832,8 +3874,8 @@ namespace Realm {
 
       // decode specific device id list if given
       std::vector<unsigned> fixed_indices;
-      if(!cfg_gpu_idxs.empty()) {
-        const char *p = cfg_gpu_idxs.c_str();
+      if(!config->cfg_gpu_idxs.empty()) {
+        const char *p = config->cfg_gpu_idxs.c_str();
         while(true) {
           if(!isdigit(*p)) {
             log_gpu.fatal() << "invalid number in hip device list: '" << p << "'";
@@ -3857,24 +3899,24 @@ namespace Realm {
           }
         }
         // if num_gpus was specified, they should match
-        if(cfg_num_gpus > 0) {
-          if(cfg_num_gpus != fixed_indices.size()) {
+        if(config->cfg_num_gpus > 0) {
+          if(config->cfg_num_gpus != static_cast<int>(fixed_indices.size())) {
             log_gpu.fatal() << "mismatch between '-ll:gpu' and '-ll:gpu_ids'";
             abort();
           }
         } else
-          cfg_num_gpus = fixed_indices.size();
+          config->cfg_num_gpus = fixed_indices.size();
         // also disable skip count and skip busy options
-        cfg_skip_gpu_count = 0;
-        cfg_skip_busy_gpus = false;
+        config->cfg_skip_gpu_count = 0;
+        config->cfg_skip_busy_gpus = false;
       }
 
       // just use the GPUs in order right now
-      gpus.resize(cfg_num_gpus);
+      gpus.resize(config->cfg_num_gpus);
       unsigned gpu_count = 0;
       // try to get cfg_num_gpus, working through the list in order
-      for(size_t i = cfg_skip_gpu_count;
-          (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
+      for(size_t i = config->cfg_skip_gpu_count;
+          (i < gpu_info.size()) && (static_cast<int>(gpu_count) < config->cfg_num_gpus);
           i++) {
         int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
 
@@ -3898,7 +3940,7 @@ namespace Realm {
         // a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
       	if((res == hipErrorInvalidDevice) ||
       	   (res == hipErrorOutOfMemory)) {
-      	  if(cfg_skip_busy_gpus) {
+      	  if(config->cfg_skip_busy_gpus) {
       	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " appears to be busy (res=" << res << ") - skipping";
       	    continue;
       	  } else {
@@ -3909,11 +3951,11 @@ namespace Realm {
       	// any other error is a (unknown) problem
       	CHECK_HIP(res);
 
-      	if(cfg_min_avail_mem > 0) {
+      	if(config->cfg_min_avail_mem > 0) {
       	  size_t total_mem, avail_mem;
       	  CHECK_HIP( hipMemGetInfo(&avail_mem, &total_mem) );
-      	  if(avail_mem < cfg_min_avail_mem) {
-      	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
+      	  if(avail_mem < config->cfg_min_avail_mem) {
+      	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " does not have enough available memory (" << avail_mem << " < " << config->cfg_min_avail_mem << ") - skipping";
       	    //CHECK_HIP( hipDevicePrimaryCtxRelease(gpu_info[i]->device) );
       	    continue;
       	  }
@@ -3921,12 +3963,12 @@ namespace Realm {
         
         // either create a worker for this GPU or use the shared one
         GPUWorker *worker;
-        if(cfg_use_shared_worker) {
+        if(config->cfg_use_shared_worker) {
           worker = shared_worker;
         } else {
           worker = new GPUWorker;
 
-          if(cfg_use_worker_threads)
+          if(config->cfg_use_worker_threads)
             worker->start_background_thread(runtime->core_reservation_set(),
                     1 << 20); // hardcoded worker stack size
                 else
@@ -3935,15 +3977,15 @@ namespace Realm {
 
         GPU *g = new GPU(this, gpu_info[idx], worker, idx);
 
-        if(!cfg_use_shared_worker)
+        if(!config->cfg_use_shared_worker)
           dedicated_workers[g] = worker;
 
         gpus[gpu_count++] = g;
       }
       
       // did we actually get the requested number of GPUs?
-      if(gpu_count < cfg_num_gpus) {
-	      log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
+      if(static_cast<int>(gpu_count) < config->cfg_num_gpus) {
+	      log_gpu.fatal() << config->cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
 	      assert(false);
       }
 
@@ -3959,32 +4001,32 @@ namespace Realm {
       Module::create_memories(runtime);
 
       // each GPU needs its FB memory
-      if(cfg_fb_mem_size > 0)
+      if(config->cfg_fb_mem_size > 0)
         for(std::vector<GPU *>::iterator it = gpus.begin();
             it != gpus.end();
             it++)
-          (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
+          (*it)->create_fb_memory(runtime, config->cfg_fb_mem_size, config->cfg_fb_ib_size);
 
-      if(cfg_use_dynamic_fb)
+      if(config->cfg_use_dynamic_fb)
         for(std::vector<GPU *>::iterator it = gpus.begin();
             it != gpus.end();
             it++)
-          (*it)->create_dynamic_fb_memory(runtime, cfg_dynfb_max_size);
+          (*it)->create_dynamic_fb_memory(runtime, config->cfg_dynfb_max_size);
 
       // a single ZC memory for everybody
-      if((cfg_zc_mem_size > 0) && !gpus.empty()) {
+      if((config->cfg_zc_mem_size > 0) && !gpus.empty()) {
         char *zcmem_gpu_base;
         // borrow GPU 0's context for the allocation call
         {
           AutoGPUContext agc(gpus[0]);
 
           hipError_t ret = hipHostMalloc(&zcmem_cpu_base, 
-                cfg_zc_mem_size,
+                config->cfg_zc_mem_size,
                 hipHostMallocPortable | hipHostMallocMapped);
           if(ret != hipSuccess) {
             if(ret == hipErrorMemoryAllocation) {
               log_gpu.fatal() << "insufficient device-mappable host memory: "
-                  << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
+                  << config->cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
             } else {
               const char *errstring = "error message not available";
       #if HIP_VERBOSE_ERROR_MSG == 1
@@ -4005,7 +4047,7 @@ namespace Realm {
 
         Memory m = runtime->next_local_memory_id();
         zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-                                cfg_zc_mem_size,
+                                config->cfg_zc_mem_size,
                                 MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
         runtime->add_memory(zcmem);
 
@@ -4026,12 +4068,12 @@ namespace Realm {
       }
 
       // allocate intermediate buffers in ZC memory for DMA engine
-      if ((cfg_zc_ib_size > 0) && !gpus.empty()) {
+      if ((config->cfg_zc_ib_size > 0) && !gpus.empty()) {
         char *zcib_gpu_base;
         {
           AutoGPUContext agc(gpus[0]);
           CHECK_HIP( hipHostMalloc(&zcib_cpu_base,
-                                   cfg_zc_ib_size,
+                                   config->cfg_zc_ib_size,
                                    hipHostMallocPortable | hipHostMallocMapped) );
           CHECK_HIP( hipHostGetDevicePointer((void **)&zcib_gpu_base,
                                               zcib_cpu_base, 0) );
@@ -4041,7 +4083,7 @@ namespace Realm {
         }
         Memory m = runtime->next_local_ib_memory_id();
         IBMemory* ib_mem;
-        ib_mem = new IBMemory(m, cfg_zc_ib_size,
+        ib_mem = new IBMemory(m, config->cfg_zc_ib_size,
 			      MemoryImpl::MKIND_ZEROCOPY, Memory::Z_COPY_MEM,
 			      zcib_cpu_base, 0);
         runtime->add_ib_memory(ib_mem);
@@ -4083,7 +4125,7 @@ namespace Realm {
     {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with HIP
-      if(cfg_pin_sysmem && !gpus.empty()) {
+      if(config->cfg_pin_sysmem && !gpus.empty()) {
         const std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
         // <NEW_DMA> also add intermediate buffers into local_mems
         const std::vector<IBMemory *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
@@ -4101,11 +4143,11 @@ namespace Realm {
           
           // skip any memory that's over the max size limit for host
           //  registration
-          if((cfg_hostreg_limit > 0) &&
-              ((*it)->size > cfg_hostreg_limit)) {
+          if((config->cfg_hostreg_limit > 0) &&
+              ((*it)->size > config->cfg_hostreg_limit)) {
             log_gpu.info() << "memory " << (*it)->me
                             << " is larger than hostreg limit ("
-                            << (*it)->size << " > " << cfg_hostreg_limit
+                            << (*it)->size << " > " << config->cfg_hostreg_limit
                             << ") - skipping registration";
             continue;
           }
@@ -4150,7 +4192,7 @@ namespace Realm {
       }
 
       // ask any ipc-able nodes to share handles with us
-      if(cfg_use_hip_ipc) {
+      if(config->cfg_use_hip_ipc) {
         NodeSet ipc_peers = Network::all_peers;
 
 #ifdef REALM_ON_LINUX
@@ -4196,7 +4238,7 @@ namespace Realm {
     //  nodes, this must be done in the pre-detach cleanup
     void HipModule::pre_detach_cleanup(void)
     {
-      if(cfg_use_hip_ipc) {
+      if(config->cfg_use_hip_ipc) {
         // release all of our ipc mappings, notify our peers
         NodeSet ipc_peers;
 
@@ -4240,7 +4282,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	      shared_worker->shutdown_work_item();
 #endif
-      	if(cfg_use_worker_threads)
+      	if(config->cfg_use_worker_threads)
       	  shared_worker->shutdown_background_thread();
 
         delete shared_worker;
@@ -4254,7 +4296,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
         worker->shutdown_work_item();
 #endif
-        if(cfg_use_worker_threads)
+        if(config->cfg_use_worker_threads)
           worker->shutdown_background_thread();
 
         delete worker;
@@ -4487,7 +4529,7 @@ namespace Realm {
 
       // only export if we've got ipc enabled locally
       bool do_export = false;
-      if(hip_module_singleton->cfg_use_hip_ipc) {
+      if(hip_module_singleton->config->cfg_use_hip_ipc) {
 #ifdef REALM_ON_LINUX
         // host id has to match as well
         long hostid = gethostid();

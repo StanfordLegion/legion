@@ -75,6 +75,7 @@ legion_cxx_tests = [
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
     ['examples/tiling/tiling', []],
+    ['examples/machine_config/machine_config', []],
     ['examples/future_map_transforms/future_map_transforms', []],
     ['examples/collective_writes/collective_writes', ['-ll:cpu', '4']],
     ['examples/concurrent_tasks/concurrent', ['-ll:cpu', '4']],
@@ -94,6 +95,10 @@ legion_cxx_tests = [
     ['test/output_requirements/output_requirements', ['-empty', '-index', '-replicate']],
     ['test/disjoint_complete/disjoint_complete', []],
     ['test/reduce_future/reduce_future', ['-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:0', '-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
+    ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
 
     # Tutorial/realm
     ['tutorial/realm/hello_world/realm_hello_world', []],
@@ -504,7 +509,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
     # NOTE: the legion-ci branch currently requires g++ (not clang) to build and
     #  is REALLY slow unless you set DEBUG=0
-    cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:mario.direnzo/Prometeo.git', htr_dir])
+    cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
         ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
@@ -867,7 +872,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append(root_dir)
 
     cmd(cmdline, env=env, cwd=build_dir)
-    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=env)
+    verbose_env=env.copy()
+    verbose_env['VERBOSE'] = '1'
+    cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=verbose_env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
 
@@ -1093,7 +1100,7 @@ def run_tests(test_modules=None,
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
     if use_cmake == False:
         if cxx_standard != '':
-            if 'CXX_STANDARD' in os.environ:                
+            if 'CXX_STANDARD' in os.environ:
                 os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
             else:
                 os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']

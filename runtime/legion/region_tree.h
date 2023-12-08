@@ -426,7 +426,7 @@ namespace Legion {
       size_t get_domain_volume(LogicalRegion handle);
     public:
       // Index space operation methods
-      void find_launch_space_domain(IndexSpace handle, Domain &launch_domain);
+      void find_domain(IndexSpace handle, Domain &launch_domain);
       void validate_slicing(IndexSpace input_space,
                             const std::vector<IndexSpace> &slice_spaces,
                             MultiTask *task, MapperManager *mapper);
@@ -1299,7 +1299,11 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0; 
+      virtual bool is_sparse() = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1377,7 +1381,8 @@ namespace Legion {
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size) = 0;
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
-         bool tight_bounds, const void *piece_list, size_t piece_list_size) = 0;
+         bool tight_bounds, const void *piece_list, size_t piece_list_size,
+         const Domain *padding_delta) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions) = 0;
@@ -1453,7 +1458,8 @@ namespace Legion {
       template<int DIM, typename T>
       inline bool meets_layout_expression_internal(
                          IndexSpaceExpression *space_expr, bool tight_bounds,
-                         const Rect<DIM,T> *piece_list, size_t piece_list_size);
+                         const Rect<DIM,T> *piece_list, size_t piece_list_size,
+                         const Domain *padding_delta);
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
@@ -1560,7 +1566,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1614,7 +1623,11 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      virtual bool is_sparse();
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
@@ -1668,7 +1681,8 @@ namespace Legion {
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
-         bool tight_bounds, const void *piece_list, size_t piece_list_size);
+         bool tight_bounds, const void *piece_list, size_t piece_list_size,
+         const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
@@ -1826,6 +1840,34 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
+    };
+
+    class InstanceExpressionCreator
+    {
+    public:
+      InstanceExpressionCreator(TypeTag t, const Domain &dom)
+        :type_tag(t), dom(dom) { }
+
+      virtual void create_operation()
+      {
+        NT_TemplateHelper::demux<InstanceExpressionCreator>(type_tag, this);
+      }
+
+      static RegionTreeForest *forest();
+
+      template<typename N, typename T>
+      static inline void demux(InstanceExpressionCreator *creator)
+      {
+        Rect<N::N, T> rect = creator->dom;
+        creator->result = new InstanceExpression<N::N, T>(&rect, 1,forest());
+      }
+
+      static IndexSpaceOperation *create_with_domain(TypeTag tag,
+                                                     const Domain &dom);
+    public:
+      const TypeTag type_tag;
+      const Domain dom;
+      IndexSpaceOperation *result;
     };
 
     /**
@@ -2097,7 +2139,10 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       
       virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
       virtual bool set_bounds(const void *bounds, bool is_domain, 
@@ -2255,7 +2300,6 @@ namespace Legion {
                                    const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event) = 0;
     public:
-      virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper) = 0;
       virtual void log_launch_space(UniqueID op_id) = 0;
@@ -2322,7 +2366,11 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      virtual bool is_sparse();
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight);
       virtual bool set_domain(const Domain &domain, bool broadcast = false);
       virtual bool set_bounds(const void *bounds, bool is_domain, 
                               bool inititializing, ApEvent is_ready);
@@ -2548,13 +2596,13 @@ namespace Legion {
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
-         bool tight_bounds, const void *piece_list, size_t piece_list_size);
+         bool tight_bounds, const void *piece_list, size_t piece_list_size,
+         const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
-      virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper);
       virtual void log_launch_space(UniqueID op_id);
@@ -3585,7 +3633,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceRef create_external_instance(
+      InstanceRef create_external_instance(const std::set<FieldID> &priv_fields,
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
       PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 
@@ -3906,8 +3954,6 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
-      virtual void pack_global_reference(bool need_root) = 0;
-      virtual void unpack_global_reference(bool need_root) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -4059,8 +4105,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual void pack_global_reference(bool need_root);
-      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual size_t get_num_children(void) const;
@@ -4216,8 +4260,6 @@ namespace Legion {
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual void pack_global_reference(bool need_root);
-      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual size_t get_num_children(void) const;

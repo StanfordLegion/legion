@@ -14,10 +14,19 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-# Replace CMake's FindCUDA with a newer upstream version that supports
-# generator expressions
-if(CMAKE_VERSION VERSION_LESS "3.6")
-  include(${CMAKE_CURRENT_LIST_DIR}/newcmake/FindCUDA.cmake)
-else()
-  include(${CMAKE_ROOT}/Modules/FindCUDA.cmake)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+project(RealmTest_perf_realm_memcpy)
+
+# Only search if were building stand-alone and not as part of Legion
+if(NOT Legion_SOURCE_DIR)
+  find_package(Legion REQUIRED)
+endif()
+
+set(CPU_SOURCES memcpy.cc)
+add_executable(memcpy ${CPU_SOURCES})
+
+target_link_libraries(memcpy Legion::Realm)
+target_compile_options(memcpy PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME memcpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:memcpy> ${Legion_TEST_ARGS})
 endif()

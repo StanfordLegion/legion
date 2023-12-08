@@ -3160,6 +3160,20 @@ legion_future_from_untyped_pointer(legion_runtime_t runtime_,
 }
 
 legion_future_t
+legion_future_from_untyped_pointer_detailed(legion_runtime_t runtime_,
+                                            const void *buffer,
+                                            size_t size,
+                                            bool take_ownership,
+                                            const char *provenance,
+                                            bool shard_local)
+{
+  Future *result = new Future(
+    Future::from_untyped_pointer(buffer, size, 
+      take_ownership, provenance, shard_local));
+  return CObjectWrapper::wrap(result);
+}
+
+legion_future_t
 legion_future_copy(legion_future_t handle_)
 {
   Future *handle = CObjectWrapper::unwrap(handle_);
@@ -4364,6 +4378,14 @@ legion_index_launcher_set_concurrent(legion_index_launcher_t launcher_,
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->concurrent = concurrent;
+}
+
+void
+legion_index_launcher_set_initial_value(legion_index_launcher_t launcher,
+                                        legion_future_t initial_value)
+{
+  CObjectWrapper::unwrap(launcher)->initial_value =
+    *CObjectWrapper::unwrap(initial_value);
 }
 
 // -----------------------------------------------------------------------

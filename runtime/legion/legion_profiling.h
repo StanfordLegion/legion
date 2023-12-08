@@ -127,6 +127,11 @@ namespace Legion {
         unsigned node_id;
 	unsigned num_nodes;
       };
+      struct ZeroTime {
+      public:
+        long long zero_time;
+      };
+
     };
 
     class LegionProfInstance {
@@ -306,7 +311,6 @@ namespace Legion {
         UniqueID op_id;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
-        unsigned request_type;
         LgEvent fevent;
         CollectiveKind collective;
 #ifdef LEGION_PROF_PROVENANCE

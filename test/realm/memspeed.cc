@@ -280,28 +280,31 @@ void top_level_task(const void *args, size_t arglen,
       d.fill(sdf, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
 
       Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine).has_affinity_to(m);
-      for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
-	Processor p = *it2;
+      for (Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
+        Processor p = *it2;
 
-	SpeedTestArgs cargs;
-	cargs.mem = m;
-	cargs.inst = inst;
-	cargs.elements = elements;
-	cargs.reps = 8;
-	bool ok = machine.has_affinity(p, m, &cargs.affinity);
-	assert(ok);
+        SpeedTestArgs cargs;
+        cargs.mem = m;
+        cargs.inst = inst;
+        cargs.elements = elements;
+        cargs.reps = 8;
+        bool ok = machine.has_affinity(p, m, &cargs.affinity);
+        assert(ok);
 
-	log_app.info() << "  Affinity: " << p << "->" << m << " BW: " << cargs.affinity.bandwidth
-		       << " Latency: " << cargs.affinity.latency;
+        log_app.info() << "  Affinity: " << p << "->" << m
+                       << " BW: " << cargs.affinity.bandwidth
+                       << " Latency: " << cargs.affinity.latency;
 
-	if(supported_proc_kinds.count(p.kind()) == 0) {
-	  log_app.info() << "processor " << p << " is of unsupported kind " << p.kind() << " - skipping";
-	  continue;
-	}
+        if (supported_proc_kinds.count(p.kind()) == 0) {
+          log_app.info() << "processor " << p << " is of unsupported kind "
+                         << p.kind() << " - skipping";
+          continue;
+        }
 
-	Event e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs));
+        Event e = cargs.inst.fetch_metadata(p);
+        e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs), e);
 
-	e.wait();
+        e.wait();
       }
 
       inst.destroy();

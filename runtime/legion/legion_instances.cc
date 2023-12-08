@@ -1137,6 +1137,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalManager::get_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::compute_copy_offsets(const FieldMask &copy_mask,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
@@ -1514,7 +1523,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::meets_regions(
-      const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
+      const std::vector<LogicalRegion> &regions, bool tight_region_bounds,
+      const Domain *padding_delta) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1533,16 +1543,16 @@ namespace Legion {
       }
       IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
         *(region_exprs.begin()) : context->union_index_spaces(region_exprs);
-      return meets_expression(space_expr, tight_region_bounds);
+      return meets_expression(space_expr, tight_region_bounds, padding_delta);
     }
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::meets_expression(IndexSpaceExpression *space_expr,
-                                           bool tight_bounds) const
+                           bool tight_bounds, const Domain *padding_delta) const
     //--------------------------------------------------------------------------
     {
       return instance_domain->meets_layout_expression(space_expr, tight_bounds,
-                                                  piece_list, piece_list_size);
+                                    piece_list, piece_list_size, padding_delta);
     }
 
     //--------------------------------------------------------------------------
@@ -2207,7 +2217,7 @@ namespace Legion {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(gc_state == PENDING_COLLECTED_GC_STATE);
+      assert(gc_state != COLLECTED_GC_STATE);
 #endif
       sent_valid_references += sent;
       received_valid_references += received;
@@ -3205,6 +3215,9 @@ namespace Legion {
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime();
+      // Remove the reference we got back on the layout description
+      if (layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------
@@ -3360,8 +3373,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (use_event.exists() && !use_event.has_triggered())
-        use_event.wait();
+      if (use_event.exists() && !use_event.has_triggered_faultignorant())
+        use_event.wait_faultignorant();
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       return uintptr_t(inst_ptr);
     }
@@ -3955,6 +3968,9 @@ namespace Legion {
       }
       // manager takes ownership of the piece list
       piece_list = NULL;
+      // Remove the reference we got back from finding or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -4251,6 +4267,33 @@ namespace Legion {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
                         "Illegal request to create instance of type %d", 
                         constraints.specialized_constraint.get_kind())
+      }
+#ifdef DEBUG_LEGION
+      assert((constraints.padding_constraint.delta.get_dim() == 0) ||
+             (constraints.padding_constraint.delta.get_dim() == (int)num_dims));
+#endif
+      // If we don't have a padding constraint then record that we 
+      // don't have any padding on this instance
+      if (constraints.padding_constraint.delta.get_dim() == 0)
+      {
+        DomainPoint empty;
+        empty.dim = num_dims;
+        for (unsigned dim = 0; dim < num_dims; dim++)
+          empty[dim] = 0; // no padding
+        constraints.padding_constraint.delta = Domain(empty, empty);
+      }
+      else
+      {
+        DomainPoint lo = constraints.padding_constraint.delta.lo();
+        DomainPoint hi = constraints.padding_constraint.delta.hi();
+        for (unsigned dim = 0; dim < num_dims; dim++)
+        {
+          if (lo[dim] < 0)
+            lo[dim] = 0;
+          if (hi[dim] < 0)
+            hi[dim] = 0;
+        }
+        constraints.padding_constraint.delta = Domain(lo, hi);
       }
     }
 

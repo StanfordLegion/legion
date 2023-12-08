@@ -68,7 +68,7 @@ local function dlopen_library(library_name)
   -- LuaJIT and LLVM will both get unloaded before we're ready)
   local ok = dlfcn.dlopen(library_name, bit.bor(dlfcn.RTLD_LAZY, dlfcn.RTLD_GLOBAL))
   if ffi.cast("intptr_t", ok) == 0LL then
-    assert(false, "dlopen failed: " .. tostring(dlfcn.dlerror()))
+    assert(false, "dlopen failed while opening '" .. tostring(library_name) .. "': " .. tostring(dlfcn.dlerror()))
   end
 end
 

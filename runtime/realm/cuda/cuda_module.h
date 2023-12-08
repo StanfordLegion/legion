@@ -28,6 +28,7 @@
 //  a typedef (e.g. cudaStream_t) but we can forward declare the underlying
 //  struct that those types are pointers to
 struct CUstream_st; // cudaStream_t == CUstream == CUstream_st *
+struct CUevent_st;
 
 namespace Realm {
 
@@ -89,6 +90,49 @@ namespace Realm {
     class GPUZCMemory;
     class GPUReplHeapListener;
 
+    class CudaModuleConfig : public ModuleConfig {
+      friend class CudaModule;
+    protected:
+      CudaModuleConfig(void);
+
+      bool discover_resource(void);
+    public:  
+      virtual bool get_resource(const std::string name, int &value) const;
+      virtual bool get_resource(const std::string name, size_t &value) const;
+      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+
+    public:
+      // configurations
+      size_t cfg_zc_mem_size = 64 << 20, cfg_zc_ib_size = 256 << 20;
+      size_t cfg_fb_mem_size = 256 << 20, cfg_fb_ib_size = 128 << 20;
+      size_t cfg_uvm_mem_size = 0;
+      bool cfg_use_dynamic_fb = true;
+      size_t cfg_dynfb_max_size = ~size_t(0);
+      int cfg_num_gpus = 0;
+      std::string cfg_gpu_idxs;
+      unsigned cfg_task_streams = 12, cfg_d2d_streams = 4;
+      bool cfg_use_worker_threads = false, cfg_use_shared_worker = true, cfg_pin_sysmem = true;
+      bool cfg_fences_use_callbacks = false;
+      bool cfg_suppress_hijack_warning = false;
+      unsigned cfg_skip_gpu_count = 0;
+      bool cfg_skip_busy_gpus = false;
+      size_t cfg_min_avail_mem = 0;
+      int cfg_task_legacy_sync = 0; // 0 = no, 1 = yes
+      int cfg_task_context_sync = -1; // 0 = no, 1 = yes, -1 = default (based on hijack)
+      int cfg_max_ctxsync_threads = 4;
+      bool cfg_lmem_resize_to_max = false;
+      bool cfg_multithread_dma = false;
+      size_t cfg_hostreg_limit = 1 << 30;
+      int cfg_d2d_stream_priority = -1;
+      bool cfg_use_cuda_ipc = true;
+
+      // resources
+      bool resource_discovered = false;
+      int res_num_gpus = 0;
+      std::vector<size_t> res_fbmem_sizes;
+    };
+
+
     // our interface to the rest of the runtime
     class REALM_PUBLIC_API CudaModule : public Module {
     protected:
@@ -97,7 +141,9 @@ namespace Realm {
     public:
       virtual ~CudaModule(void);
 
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete
@@ -131,30 +177,22 @@ namespace Realm {
       CUstream_st *get_task_cuda_stream();
       void set_task_ctxsync_required(bool is_required);
 
-    public:
-      size_t cfg_zc_mem_size, cfg_zc_ib_size;
-      size_t cfg_fb_mem_size, cfg_fb_ib_size;
-      size_t cfg_uvm_mem_size;
-      bool cfg_use_dynamic_fb;
-      size_t cfg_dynfb_max_size;
-      unsigned cfg_num_gpus;
-      std::string cfg_gpu_idxs;
-      unsigned cfg_task_streams, cfg_d2d_streams;
-      bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
-      bool cfg_fences_use_callbacks;
-      bool cfg_suppress_hijack_warning;
-      unsigned cfg_skip_gpu_count;
-      bool cfg_skip_busy_gpus;
-      size_t cfg_min_avail_mem;
-      int cfg_task_legacy_sync; // 0 = no, 1 = yes
-      int cfg_task_context_sync; // 0 = no, 1 = yes, -1 = default (based on hijack)
-      int cfg_max_ctxsync_threads;
-      bool cfg_lmem_resize_to_max;
-      bool cfg_multithread_dma;
-      size_t cfg_hostreg_limit;
-      int cfg_d2d_stream_priority;
-      bool cfg_use_cuda_ipc;
+      /// @brief Returns a Realm::Event that will be triggered after the given
+      /// \p cuda_event has completed
+      /// @param cuda_event The cuda event that has been recorded on some stream
+      /// @return A Realm::Event that is triggered some time after the given
+      /// \p cuda_event
+      Event make_realm_event(CUevent_st *cuda_event);
+      /// @brief Returns a Realm::Event that will be triggered after the given
+      /// \p cuda_stream has completed it's currently queued work
+      /// @param cuda_stream The cuda stream who's currently queued work must complete
+      /// before the Realm::Event triggers
+      /// @return A Realm::Event that is triggered some time after the given
+      /// \p cuda_stream completes
+      Event make_realm_event(CUstream_st *cuda_stream);
 
+    public:
+      CudaModuleConfig *config;
       RuntimeImpl *runtime;
 
       // "global" variables live here too

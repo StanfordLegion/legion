@@ -545,6 +545,7 @@ namespace Legion {
       FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool eager, 
                      bool external, bool own_allocation = true,
+                     LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      Processor free_proc = Processor::NO_PROC,
                      RtEvent use_event = RtEvent::NO_RT_EVENT,
@@ -555,6 +556,7 @@ namespace Legion {
                      void (*freefunc)(
                        const Realm::ExternalInstanceResource&) = NULL,
                      Processor free_proc = Processor::NO_PROC,
+                     LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      RtEvent use_event = RtEvent::NO_RT_EVENT,
                      ApUserEvent remote_read = ApUserEvent::NO_AP_USER_EVENT);
@@ -590,7 +592,6 @@ namespace Legion {
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
-      static ApEvent init_ready(ApEvent r, Runtime *rt, PhysicalInstance inst);
       static bool check_meta_visible(Runtime *runtime, Memory memory,
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
@@ -618,6 +619,8 @@ namespace Legion {
       PhysicalInstance instance;
       // Event for when it is safe to use the instance
       RtEvent use_event;
+      // Unique event to identiy the instance for profiling
+      LgEvent unique_event;
       // Events for operations reading from this instance
       std::vector<ApEvent> read_events;
       // If we don't own our instance then we have an event to trigger
@@ -1886,8 +1889,7 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      template<MessageKind M>
-      inline void send_message(Serializer &rez, bool flush, 
+      inline void send_message(MessageKind message, Serializer &rez, bool flush,
                         bool response = false, bool shutdown = false,
                         RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
@@ -2133,7 +2135,6 @@ namespace Legion {
       ApEvent dispatch_task(Processor target, SingleTask *task, 
           TaskContext *ctx, ApEvent precondition,
           int priority, Realm::ProfilingRequestSet &requests);
-      void dispatch_inline(Processor current, TaskContext *ctx);
     public:
       bool can_use(Processor::Kind kind, bool warn) const;
     public:
@@ -2513,6 +2514,7 @@ namespace Legion {
             no_physical_tracing(false),
             no_trace_optimization(false),
             no_fence_elision(false),
+            no_transitive_reduction(false),
             replay_on_cpus(false),
             verify_partitions(false),
             runtime_warnings(false),
@@ -2569,6 +2571,7 @@ namespace Legion {
         bool no_physical_tracing;
         bool no_trace_optimization;
         bool no_fence_elision;
+        bool no_transitive_reduction;
         bool replay_on_cpus;
         bool verify_partitions;
         bool runtime_warnings;
@@ -2706,6 +2709,7 @@ namespace Legion {
       const bool no_physical_tracing;
       const bool no_trace_optimization;
       const bool no_fence_elision;
+      const bool no_transitive_reduction;
       const bool replay_on_cpus;
       const bool verify_partitions;
       const bool runtime_warnings;
@@ -2732,8 +2736,6 @@ namespace Legion {
       const bool check_privileges;
       const bool dump_free_ranges;
     public:
-      const unsigned num_profiling_nodes;
-    public:
       const int legion_collective_radix;
       MPIRankTable *const mpi_rank_table;
     public:
@@ -2742,7 +2744,7 @@ namespace Legion {
       void register_static_projections(void);
       void register_static_sharding_functors(void);
       void initialize_legion_prof(const LegionConfiguration &config);
-      void log_machine(void) const;
+      void log_local_machine(void) const;
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
@@ -2758,7 +2760,7 @@ namespace Legion {
           size_t size, bool withargs, bool global, bool preregistered,
           bool deduplicate, size_t dedup_tag);
       void broadcast_startup_barrier(RtBarrier startup_barrier);
-      void finalize_runtime(void);
+      void finalize_runtime(std::vector<RtEvent> &shutdown_events);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
                                  const UntypedBuffer &arg, MapperID map_id);
@@ -3093,6 +3095,8 @@ namespace Legion {
                                     const void *message, size_t message_size, 
                                     unsigned message_kind, int radix,int index);
     public:
+      void send_message(MessageKind message, AddressSpaceID space,
+          Serializer &rez, bool flush = true, bool response = false);
       void send_startup_barrier(AddressSpaceID target, Serializer &rez);
       void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
@@ -3466,8 +3470,6 @@ namespace Legion {
                                            Serializer &rez);
       void send_replicate_trigger_commit(AddressSpaceID target,
                                          Serializer &rez);
-      void send_control_replicate_collective_message(AddressSpaceID target,
-                                                     Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
       void send_library_trace_request(AddressSpaceID target, Serializer &rez);
@@ -3804,7 +3806,6 @@ namespace Legion {
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);
-      void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_replicate_launch(Deserializer &derez,AddressSpaceID source);
@@ -3812,7 +3813,6 @@ namespace Legion {
       void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
-      void handle_control_replicate_collective_message(Deserializer &derez);
       void handle_control_replicate_disjoint_complete_request(
                                                            Deserializer &derez);
       void handle_control_replicate_disjoint_complete_response(
@@ -4022,7 +4022,6 @@ namespace Legion {
       void confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
                                     bool phase_one);
       void prepare_runtime_shutdown(void);
-      void finalize_runtime_shutdown(int exit_code);
     public:
       bool has_outstanding_tasks(void);
 #ifdef DEBUG_LEGION
@@ -4690,11 +4689,13 @@ namespace Legion {
                                                  RtEvent *wait_for = NULL);
     public:
       // Static methods for start-up and callback phases
-      static int start(int argc, char **argv, bool background, bool def_mapper);
+      static int start(int argc, char **argv, bool background, 
+                       bool def_mapper, bool filter);
       static void register_builtin_reduction_operators(void);
       static const LegionConfiguration& initialize(int *argc, char ***argv, 
-                                                   bool filter);
-      static LegionConfiguration parse_arguments(int argc, char **argv);
+                                                   bool parse, bool filter);
+      static unsigned initialize_outstanding_top_level_tasks(
+          AddressSpaceID local_space, size_t total_spaces, unsigned radix);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_interoperability(bool separate_runtimes);
       static Processor configure_runtime(int argc, char **argv,
@@ -4723,7 +4724,7 @@ namespace Legion {
                                   int shard_id, const DomainPoint &point);
       void unbind_implicit_task_from_external_thread(Context ctx);
       void bind_implicit_task_to_external_thread(Context ctx);
-      void finish_implicit_task(Context ctx);
+      void finish_implicit_task(Context ctx, ApEvent effects);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
@@ -4823,6 +4824,7 @@ namespace Legion {
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool legion_main_set;
       static bool runtime_initialized;
+      static bool runtime_cmdline_parsed;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
@@ -6193,8 +6195,6 @@ namespace Legion {
           return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
         case SEND_CONSTRAINT_RELEASE:
           return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
-        case SEND_TOP_LEVEL_TASK_REQUEST:
-          return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_TOP_LEVEL_TASK_COMPLETE:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_MPI_RANK_EXCHANGE:
@@ -6208,8 +6208,6 @@ namespace Legion {
         case SEND_REPLICATE_TRIGGER_COMPLETE:
           break;
         case SEND_REPLICATE_TRIGGER_COMMIT:
-          break;
-        case SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE:
           break;
         case SEND_LIBRARY_MAPPER_REQUEST:
           break;
@@ -6264,6 +6262,48 @@ namespace Legion {
         case SEND_CONCURRENT_RESERVATION_CREATION:
           break;
         case SEND_CONCURRENT_EXECUTION_ANALYSIS:
+          break;
+        case SEND_CONTROL_REPLICATION_FUTURE_ALLREDUCE:
+        case SEND_CONTROL_REPLICATION_FUTURE_BROADCAST:
+        case SEND_CONTROL_REPLICATION_FUTURE_REDUCTION:
+        case SEND_CONTROL_REPLICATION_VALUE_ALLREDUCE:
+        case SEND_CONTROL_REPLICATION_VALUE_BROADCAST:
+        case SEND_CONTROL_REPLICATION_VALUE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_BUFFER_BROADCAST:
+        case SEND_CONTROL_REPLICATION_SHARD_SYNC_TREE:
+        case SEND_CONTROL_REPLICATION_SHARD_EVENT_TREE:
+        case SEND_CONTROL_REPLICATION_SINGLE_TASK_TREE:
+        case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_PARTITION:
+        case SEND_CONTROL_REPLICATION_SHARDING_GATHER_COLLECTIVE:
+        case SEND_CONTROL_REPLICATION_INDIRECT_COPY_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_FIELD_DESCRIPTOR_GATHER:
+        case SEND_CONTROL_REPLICATION_DEPPART_RESULT_SCATTER:
+        case SEND_CONTROL_REPLICATION_BUFFER_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_FUTURE_NAME_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_BROADCAST:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_MAPPING_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_DEPENDENCE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_MUST_EPOCH_COMPLETION_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_MAPPING:
+        case SEND_CONTROL_REPLICATION_CHECK_COLLECTIVE_SOURCES:
+        case SEND_CONTROL_REPLICATION_TEMPLATE_INDEX_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_UNORDERED_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_CONSENSUS_MATCH:
+        case SEND_CONTROL_REPLICATION_VERIFY_CONTROL_REPLICATION_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_OUTPUT_SIZE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_INDEX_ATTACH_LAUNCH_SPACE:
+        case SEND_CONTROL_REPLICATION_INDEX_ATTACH_UPPER_BOUND:
+        case SEND_CONTROL_REPLICATION_INDEX_ATTACH_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR:
+        case SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW:
+        case SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS:
+        case SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION:
+        case SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
+        case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
           break;
         case SEND_SHUTDOWN_NOTIFICATION:
           return THROUGHPUT_VIRTUAL_CHANNEL;

@@ -19,6 +19,7 @@
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
 #include "realm/threads.h"
 #include "realm/runtime_impl.h"
 #include "realm/utils.h"
@@ -88,48 +89,73 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class NumaModuleConfig
+
+    NumaModuleConfig::NumaModuleConfig(void)
+      : ModuleConfig("numa")
+    {
+      config_map.insert({"numamem", &cfg_numa_mem_size});
+      config_map.insert({"numa_nocpumem", &cfg_numa_nocpu_mem_size});
+      config_map.insert({"numacpus", &cfg_num_numa_cpus});
+      config_map.insert({"pin_memory", &cfg_pin_memory});
+    }
+
+    void NumaModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
+    {
+      // first order of business - read command line parameters
+      CommandLineParser cp;
+
+      cp.add_option_int_units("-ll:nsize", cfg_numa_mem_size, 'm')
+        .add_option_int_units("-ll:ncsize", cfg_numa_nocpu_mem_size, 'm')
+        .add_option_int("-ll:ncpu", cfg_num_numa_cpus)
+        .add_option_bool("-numa:pin", cfg_pin_memory);
+
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+        log_numa.fatal() << "error reading NUMA command line parameters";
+        assert(false);
+      }
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class NumaModule
 
     NumaModule::NumaModule(void)
       : Module("numa")
-      , cfg_numa_mem_size(0)
-      , cfg_numa_nocpu_mem_size(-1)
-      , cfg_num_numa_cpus(0)
-      , cfg_pin_memory(false)
-      , cfg_stack_size(2 << 20)
+      , config(nullptr)
     {
     }
       
     NumaModule::~NumaModule(void)
-    {}
+    {
+      assert(config != nullptr);
+      config = nullptr;
+    }
 
-    /*static*/ Module *NumaModule::create_module(RuntimeImpl *runtime,
-						 std::vector<std::string>& cmdline)
+    /*static*/ ModuleConfig *NumaModule::create_module_config(RuntimeImpl *runtime)
+    {
+      NumaModuleConfig *config = new NumaModuleConfig();
+      return config;
+    }
+
+    /*static*/ Module *NumaModule::create_module(RuntimeImpl *runtime)
     {
       // create a module to fill in with stuff - we'll delete it if numa is
       //  disabled
       NumaModule *m = new NumaModule;
 
-      // first order of business - read command line parameters
-      {
-	CommandLineParser cp;
-
-	cp.add_option_int_units("-ll:nsize", m->cfg_numa_mem_size, 'm')
-	  .add_option_int_units("-ll:ncsize", m->cfg_numa_nocpu_mem_size, 'm')
-	  .add_option_int("-ll:ncpu", m->cfg_num_numa_cpus)
-	  .add_option_bool("-numa:pin", m->cfg_pin_memory);
-	
-	bool ok = cp.parse_command_line(cmdline);
-	if(!ok) {
-	  log_numa.fatal() << "error reading NUMA command line parameters";
-	  assert(false);
-	}
-      }
+      NumaModuleConfig *config = dynamic_cast<NumaModuleConfig *>(runtime->get_module_config("numa"));
+      assert(config != nullptr);
+      assert(config->finish_configured);
+      assert(m->name == config->get_name());
+      assert(m->config == nullptr);
+      m->config = config;
 
       // if neither NUMA memory nor cpus was requested, there's no point
-      if((m->cfg_numa_mem_size == 0) &&
-	 (m->cfg_numa_nocpu_mem_size <= 0) &&
-	 (m->cfg_num_numa_cpus == 0)) {
+      if((m->config->cfg_numa_mem_size == 0) &&
+	 (m->config->cfg_numa_nocpu_mem_size <= 0) &&
+	 (m->config->cfg_num_numa_cpus == 0)) {
 	log_numa.debug() << "no NUMA memory or cpus requested";
 	delete m;
 	return 0;
@@ -159,11 +185,11 @@ namespace Realm {
 	const NumaNodeMemInfo& mi = it->second;
 	log_numa.info() << "NUMA memory node " << mi.node_id << ": " << (mi.bytes_available >> 20) << " MB";
 
-	size_t mem_size = m->cfg_numa_mem_size;
-	if(m->cfg_numa_nocpu_mem_size >= 0) {
+	size_t mem_size = m->config->cfg_numa_mem_size;
+	if(m->config->cfg_numa_nocpu_mem_size >= 0) {
 	  // use this value instead if there are no cpus in this domain
 	  if(cpuinfo.count(mi.node_id) == 0)
-	    mem_size = m->cfg_numa_nocpu_mem_size;
+	    mem_size = m->config->cfg_numa_nocpu_mem_size;
 	}
 
 	// skip domain silently if no memory is requested
@@ -183,12 +209,12 @@ namespace Realm {
 	  ++it) {
 	const NumaNodeCpuInfo& ci = it->second;
 	log_numa.info() << "NUMA cpu node " << ci.node_id << ": " << ci.cores_available << " cores";
-	if(ci.cores_available >= m->cfg_num_numa_cpus) {
-	  m->numa_cpu_counts[ci.node_id] = m->cfg_num_numa_cpus;
+	if(ci.cores_available >= m->config->cfg_num_numa_cpus) {
+	  m->numa_cpu_counts[ci.node_id] = m->config->cfg_num_numa_cpus;
 	} else {
 	  // TODO: fatal error?
 	  log_numa.warning() << "insufficient cores in NUMA node " << ci.node_id << " - core assignment will fail";
-	  m->numa_cpu_counts[ci.node_id] = m->cfg_num_numa_cpus;
+	  m->numa_cpu_counts[ci.node_id] = m->config->cfg_num_numa_cpus;
 	}
       }
 
@@ -209,7 +235,7 @@ namespace Realm {
 	assert(mem_size > 0);
 	void *base = numasysif_alloc_mem(it->first,
 					 mem_size,
-					 cfg_pin_memory);
+					 config->cfg_pin_memory);
 	if(!base) {
 	  log_numa.fatal() << "allocation of " << mem_size << " bytes in NUMA node " << it->first << " failed!";
 	  assert(false);
@@ -258,7 +284,7 @@ namespace Realm {
 	  Processor p = runtime->next_local_processor_id();
 	  ProcessorImpl *pi = new LocalNumaProcessor(p, it->first,
 						     runtime->core_reservation_set(),
-						     cfg_stack_size,
+						     config->cfg_stack_size,
 						     Config::force_kernel_threads);
 	  runtime->add_processor(pi);
 

@@ -153,9 +153,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Domain::NO_DOMAIN;
-      Internal::ApEvent ready;
-      Domain domain = impl->instance_domain->get_domain(ready, true);
-      ready.wait_faultignorant();
+      Domain domain;
+      impl->instance_domain->get_domain(domain);
       return domain;
     }
 
@@ -1220,6 +1219,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_partition_color_space(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::get_index_partition_color_space_name(
+                                      MapperContext ctx, IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_partition_color_space_name(ctx, p);
     }
 
     //--------------------------------------------------------------------------

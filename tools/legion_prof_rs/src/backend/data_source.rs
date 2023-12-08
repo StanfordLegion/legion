@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use legion_prof_viewer::{
     data::{
-        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, FieldID, FieldSchema, Item,
-        ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData,
-        SummaryTile, SummaryTileData, TileID, TileSet, UtilPoint,
+        Color32, DataSource, DataSourceDescription, DataSourceInfo, EntryID, EntryInfo, Field,
+        FieldID, FieldSchema, Item, ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile,
+        SlotMetaTileData, SlotTile, SlotTileData, SummaryTile, SummaryTileData, TileID, TileSet,
+        UtilPoint,
     },
     timestamp as ts,
 };
@@ -252,6 +253,8 @@ impl StateDataSource {
             for kind in &mem_kinds {
                 let group = MemGroup(*node, *kind);
 
+                let Some(mems) = mem_groups.get(&group) else { continue; };
+
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
 
@@ -277,11 +280,9 @@ impl StateDataSource {
                 };
                 let color: Color32 = color.into();
 
-                let mems = mem_groups.get(&group);
-
                 let mut mem_slots = Vec::new();
                 if node.is_some() {
-                    for (mem_index, mem) in mems.iter().copied().flatten().enumerate() {
+                    for (mem_index, mem) in mems.iter().enumerate() {
                         let mem_id = kind_id.child(mem_index as u64);
                         entry_map.insert(mem_id.clone(), EntryKind::Mem(*mem));
                         mem_entries.insert(*mem, mem_id);
@@ -300,30 +301,30 @@ impl StateDataSource {
                     }
                 }
 
-                if mems.is_some() {
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::MemKind(group));
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::MemKind(group));
 
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: kind_name.to_lowercase(),
-                        long_name: format!("{} {}", node_long_name, kind_name),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: mem_slots,
-                    });
-                }
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: kind_name.to_lowercase(),
+                    long_name: format!("{} {}", node_long_name, kind_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: mem_slots,
+                });
             }
 
             // Channels
-            {
+            loop {
+                let Some(chans) = chan_groups.get(node) else {
+                    break;
+                };
+
                 let kind_id = node_id.child(kind_index);
 
                 let color: Color32 = Color::ORANGERED.into();
 
-                let chans = chan_groups.get(node);
-
                 let mut chan_slots = Vec::new();
                 if node.is_some() {
-                    for (chan_index, chan) in chans.iter().copied().flatten().enumerate() {
+                    for (chan_index, chan) in chans.iter().enumerate() {
                         let chan_id = kind_id.child(chan_index as u64);
                         entry_map.insert(chan_id, EntryKind::Chan(*chan));
 
@@ -339,7 +340,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", src_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    src_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -357,7 +363,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", dst_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    dst_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -368,8 +379,8 @@ impl StateDataSource {
                                 format!("{}-{}", src_short.unwrap(), dst_short.unwrap())
                             }
                             ChanKind::Fill => format!("f {}", dst_short.unwrap()),
-                            ChanKind::Gather => format!("g {}", dst_short.unwrap()),
-                            ChanKind::Scatter => format!("s {}", src_short.unwrap()),
+                            ChanKind::Gather => format!("g {}", src_short.unwrap()),
+                            ChanKind::Scatter => format!("s {}", dst_short.unwrap()),
                             ChanKind::DepPart => "dp".to_owned(),
                         };
 
@@ -378,9 +389,9 @@ impl StateDataSource {
                                 format!("{} to {}", src_name.unwrap(), dst_name.unwrap())
                             }
                             ChanKind::Fill => format!("Fill {}", dst_name.unwrap()),
-                            ChanKind::Gather => format!("Gather to {}", dst_name.unwrap()),
+                            ChanKind::Gather => format!("Gather to {}", src_name.unwrap()),
                             ChanKind::Scatter => {
-                                format!("Scatter from {}", src_name.unwrap())
+                                format!("Scatter from {}", dst_name.unwrap())
                             }
                             ChanKind::DepPart => "Dependent Partitioning".to_owned(),
                         };
@@ -394,17 +405,17 @@ impl StateDataSource {
                     }
                 }
 
-                if chans.is_some() {
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::ChanKind(*node));
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::ChanKind(*node));
 
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: "chan".to_owned(),
-                        long_name: format!("{} Channel", node_long_name),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: chan_slots,
-                    });
-                }
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: "chan".to_owned(),
+                    long_name: format!("{} Channel", node_long_name),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: chan_slots,
+                });
+
+                break;
             }
             node_slots.push(EntryInfo::Panel {
                 short_name: node_short_name,
@@ -1234,6 +1245,12 @@ impl StateDataSource {
 }
 
 impl DataSource for StateDataSource {
+    fn fetch_description(&self) -> DataSourceDescription {
+        DataSourceDescription {
+            source_locator: self.state.source_locator.clone(),
+        }
+    }
+
     fn fetch_info(&self) -> DataSourceInfo {
         DataSourceInfo {
             entry_info: self.info.clone(),
