@@ -4425,7 +4425,7 @@ class State(object):
                     new_copy = Copy(cur_copy.initiation_op, cur_copy.size, 
                                     cur_copy.create, cur_copy.ready, 
                                     cur_copy.start, cur_copy.stop, 
-                                    cur_copy.fevent, cur_copy.collective)
+                                    cur_copy.fevent)
                     self.prof_uid_map[new_copy.prof_uid] = copy
                     for copy_inst_info in new_copy_inst_infos:
                         new_copy.add_copy_inst_info(copy_inst_info)

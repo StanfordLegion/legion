@@ -2638,7 +2638,6 @@ impl State {
                         cur_copy.op_id,
                         cur_copy.size,
                         cur_copy.fevent,
-                        cur_copy.collective,
                     );
                     for copy_inst_info in new_copy_inst_infos.into_iter() {
                         new_copy.add_copy_inst_info(copy_inst_info);
