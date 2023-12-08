@@ -3704,7 +3704,8 @@ namespace Realm {
     /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime)
     {
       HipModule *m = new HipModule(runtime);
-      HipModuleConfig *config = dynamic_cast<HipModuleConfig *>(runtime->get_module_config("hip"));
+      HipModuleConfig *config =
+          checked_cast<HipModuleConfig *>(runtime->get_module_config("hip"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());

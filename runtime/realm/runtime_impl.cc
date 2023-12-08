@@ -987,7 +987,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   {
     CoreModule *m = new CoreModule;
 
-    CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
+    CoreModuleConfig *config =
+        checked_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
     assert(config != nullptr);
     assert(config->finish_configured);
     assert(m->name == config->get_name());
@@ -1701,7 +1702,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       // load the CoreModuleConfig
-      CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(get_module_config("core"));
+      CoreModuleConfig *config =
+          checked_cast<CoreModuleConfig *>(get_module_config("core"));
       assert(config != nullptr);
 
       core_map = CoreMap::discover_core_map(config->hyperthread_sharing);

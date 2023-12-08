@@ -139,6 +139,8 @@ cache: &global_cache
 
 .openmp: &openmp
   USE_OPENMP: "1"
+.openmp_system: &openmp_system
+  USE_OPENMP_SYSTEM_RUNTIME: "1"
 .python3: &python3
   USE_PYTHON: "1"
   # FIXME: It would be nice to find a better way to do this,
@@ -749,6 +751,10 @@ gcc9_cxx11_debug_openmp_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *regent, *libdw]
+gcc9_cxx11_debug_openmp_system_regent:
+  <<: [*linux_compute, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *openmp_system, *regent, *libdw, *short]
 #   * Python
 gcc9_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]

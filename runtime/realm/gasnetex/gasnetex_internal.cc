@@ -3423,15 +3423,19 @@ namespace Realm {
   {
     gex_RankInfo_t *neighbor_array = nullptr;
     gex_Rank_t neighbor_array_size = 0;
-
     gex_System_QueryNbrhdInfo(&neighbor_array, &neighbor_array_size, nullptr);
+    // if PSHM module is disabled, gex_System_QueryNbrhdInfo returns size one
+    // then fall back to use gex_System_QueryHostInfo
+    if(neighbor_array_size == 1) {
+      gex_System_QueryHostInfo(&neighbor_array, &neighbor_array_size, nullptr);
+    }
     for(gex_Rank_t r = 0; r < neighbor_array_size; r++) {
       if(static_cast<NodeID>(neighbor_array[r].gex_jobrank) != Network::my_node_id) {
         shared_peers.add(neighbor_array[r].gex_jobrank);
       }
     }
     if(Network::shared_peers.empty()) {
-      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // if gasnet can't return any shared peers,
       // then just assume all_peers are shareable
       shared_peers = Network::all_peers;
     }
