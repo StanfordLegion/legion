@@ -629,7 +629,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
 	IndirectCopyProfResult result;
         UserEvent profile_done_event = UserEvent::create_user_event();
         result.profile_done_event = profile_done_event;
-        result.src_insts[0] = it->inst;indirect.insts[0];
+        result.src_insts[0] = it->inst;
         result.src_insts_size = 1;
         result.dst_insts[0] = indirect.insts[0];
         result.dst_insts_size = 1;
