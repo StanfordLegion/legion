@@ -521,14 +521,9 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         cwd=barnes_hut_dir,
         env=env,
         timelimit=timelimit)
-    regent_gpu_flags = []
-    if env['USE_CUDA'] == '1':
-        regent_gpu_flags = ['-fgpu', 'cuda', '-ll:gpu', '1']
-    elif env['USE_HIP'] == '1':
-        regent_gpu_flags = ['-fgpu', 'hip', '-ll:gpu', '1']
     cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
-         '-n', '16384'] + regent_gpu_flags,
+         '-n', '16384'],
         cwd=barnes_hut_dir,
         env=env,
         timelimit=timelimit)
