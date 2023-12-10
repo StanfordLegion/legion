@@ -2088,22 +2088,29 @@ namespace Legion {
                      const bool restricted = true,
                      const bool mapped = true);
     public:
+      inline void initialize_constraints(bool column_major, bool soa,
+                             const std::vector<FieldID> &fields,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalFileResource instead")
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
                               LegionFileMode mode);
+      LEGION_DEPRECATED("Use Realm::ExternalHDF5Resource instead")
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_aos(void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_soa(void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
-                             const std::map<FieldID,size_t> *alignments = NULL);
+                             const std::map<FieldID,size_t> *alignments = NULL); 
     public:
       ExternalResource                              resource;
       LogicalRegion                                 handle;
@@ -2117,14 +2124,21 @@ namespace Legion {
       std::string                                   provenance;
     public:
       // Data for files
+      LEGION_DEPRECATED("file_name is deprecated, use external_resource")
       const char                                    *file_name;
+      LEGION_DEPRECATED("mode is deprecated, use external_resource")
       LegionFileMode                                mode;
+      LEGION_DEPRECATED("file_fields is deprecated, use external_resource")
       std::vector<FieldID>                          file_fields; // normal files
+      // This member must still be populated if you're attaching to an HDF5 file
       std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
     public:
       // Data for external instances
       LayoutConstraintSet                           constraints;
       std::set<FieldID>                             privilege_fields;
+    public:
+      // This will be cloned each time you perform an attach with this launcher
+      const Realm::ExternalInstanceResource*        external_resource;
     public:
       // Optional footprint of the instance in memory in bytes
       size_t                                        footprint;
@@ -2146,21 +2160,30 @@ namespace Legion {
                           LogicalRegion parent,
                           const bool restricted = true);
     public:
+      inline void initialize_constraints(bool column_major, bool soa,
+                             const std::vector<FieldID> &fields,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      inline void add_external_resource(LogicalRegion handle,
+                              const Realm::ExternalInstanceResource *resource);
+      LEGION_DEPRECATED("Use Realm::ExternalFileResource instead")
       inline void attach_file(LogicalRegion handle,
                               const char *file_name,
                               const std::vector<FieldID> &fields,
                               LegionFileMode mode);
+      LEGION_DEPRECATED("Use Realm::ExternalHDF5Resource instead")
       inline void attach_hdf5(LogicalRegion handle,
                               const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_aos(LogicalRegion handle, 
                              void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_soa(LogicalRegion handle,
                              void *base, bool column_major,
                              const std::vector<FieldID> &fields,
@@ -2181,18 +2204,29 @@ namespace Legion {
       std::string                                   provenance;
     public:
       // Data for files
+      LEGION_DEPRECATED("mode is deprecated, use external_resources")
       LegionFileMode                                mode;
+      LEGION_DEPRECATED("file_names is deprecated, use external_resources")
       std::vector<const char*>                      file_names;
+      LEGION_DEPRECATED("file_fields is deprecated, use external_resources")
       std::vector<FieldID>                          file_fields; // normal files
+      // This data structure must still be filled in for using HDF5 files
       std::map<FieldID,
         std::vector</*file name*/const char*> >     field_files; // hdf5 files
     public:
       // Data for external instances
       LayoutConstraintSet                           constraints;
+      LEGION_DEPRECATED("pointers is deprecated, use external_resources")
       std::vector<PointerConstraint>                pointers; 
+    public:
       std::set<FieldID>                             privilege_fields;
+      // This is the vector external resource objects that are going to 
+      // attached to the vector of logical region handles
+      // These will be cloned each time you perform an attach with this launcher
+      std::vector<const Realm::ExternalInstanceResource*> external_resources;
     public:
       // Optional footprint of the instance in memory in bytes
+      // You only need to fill this in when using depcreated fields
       std::vector<size_t>                           footprint;
     public:
       // Inform the runtime about any static dependences

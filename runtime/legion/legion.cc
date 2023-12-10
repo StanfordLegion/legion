@@ -1825,6 +1825,19 @@ namespace Legion {
     {
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
     /////////////////////////////////////////////////////////////
     // AttachLauncher
     /////////////////////////////////////////////////////////////
@@ -1835,8 +1848,8 @@ namespace Legion {
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
       : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
-        static_dependences(NULL)
+        file_name(NULL), mode(LEGION_FILE_READ_ONLY), external_resource(NULL),
+        footprint(0), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1854,6 +1867,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     /////////////////////////////////////////////////////////////
     // PredicateLauncher
