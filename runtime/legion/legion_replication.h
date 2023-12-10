@@ -1570,6 +1570,7 @@ namespace Legion {
     public:
       TimeoutMatchExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
       TimeoutMatchExchange(const TimeoutMatchExchange &rhs) = delete;
+      virtual ~TimeoutMatchExchange(void);
     public:
       TimeoutMatchExchange& operator=(const TimeoutMatchExchange &rhs) = delete;
     public:
@@ -1579,9 +1580,10 @@ namespace Legion {
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void match_timeouts(const std::vector<LogicalUser*> &timeouts,
-                          std::vector<LogicalUser*> &to_delete);
+      void perform_exchange(std::vector<LogicalUser*> &timeouts);
+      void complete_exchange(std::vector<LogicalUser*> &to_delete);
     protected:
+      std::vector<LogicalUser*> timeout_users;
       // Pair represents <context index,region requirement index> for each user
       std::vector<std::pair<size_t,unsigned> > all_timeouts;
     };

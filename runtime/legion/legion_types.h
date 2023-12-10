@@ -2150,6 +2150,7 @@ namespace Legion {
     class UnorderedExchange;
     class ShardRendezvous;
     class ProjectionTreeExchange;
+    class TimeoutMatchExchange;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly

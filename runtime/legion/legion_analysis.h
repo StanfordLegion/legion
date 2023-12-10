@@ -1740,7 +1740,10 @@ namespace Legion {
                                          const ProjectionInfo &proj_info,
                                          RegionTreeNode *previous_child,
                                          LogicalRegion privilege_root,
-                                         LogicalAnalysis &logical_analysis);
+                                         LogicalAnalysis &logical_analysis,
+                                         std::vector<LogicalUser*> &timeous);
+      void filter_timeout_users(std::vector<LogicalUser*> &timeout_users,
+                                LogicalAnalysis &logical_analysis);
       void promote_next_child(RegionTreeNode *child, FieldMask mask);
 #if 0
       void initialize_unrefined_fields(const FieldMask &mask, 
@@ -1775,6 +1778,7 @@ namespace Legion {
       typedef FieldMaskSet<LogicalUser,UNTRACKED_ALLOC,true/*determinisitic*/>
         OrderedFieldMaskUsers;
       OrderedFieldMaskUsers curr_epoch_users, prev_epoch_users; 
+      TimeoutMatchExchange *timeout_exchange;
     public:
       // Refinement trackers manage the state of refinements for different
       // fields on this particular node of the region tree if we're along

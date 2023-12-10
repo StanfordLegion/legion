@@ -17121,6 +17121,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TimeoutMatchExchange::~TimeoutMatchExchange(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<LogicalUser*>::const_iterator it =
+            timeout_users.begin(); it != timeout_users.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
     void TimeoutMatchExchange::pack_collective_stage(ShardID target,
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
@@ -17154,9 +17164,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TimeoutMatchExchange::match_timeouts(
-                                      const std::vector<LogicalUser*> &timeouts,
-                                      std::vector<LogicalUser*> &to_delete)
+    void TimeoutMatchExchange::perform_exchange(
+                                            std::vector<LogicalUser*> &timeouts)
     //--------------------------------------------------------------------------
     {
       all_timeouts.reserve(timeouts.size());
@@ -17164,15 +17173,29 @@ namespace Legion {
             timeouts.begin(); it != timeouts.end(); it++)
         all_timeouts.emplace_back(std::make_pair((*it)->ctx_index, (*it)->idx));
       std::sort(all_timeouts.begin(), all_timeouts.end());
-      perform_collective_sync();
+      timeout_users.swap(timeouts);
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void TimeoutMatchExchange::complete_exchange(
+                                           std::vector<LogicalUser*> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
       if (!all_timeouts.empty())
       {
-        for (std::vector<LogicalUser*>::const_iterator it =
-              timeouts.begin(); it != timeouts.end(); it++)
+        for (std::vector<LogicalUser*>::iterator it =
+              timeout_users.begin(); it != timeout_users.end(); /*nothing*/)
         {
           const std::pair<size_t,unsigned> key((*it)->ctx_index, (*it)->idx);
           if (std::binary_search(all_timeouts.begin(), all_timeouts.end(), key))
+          {
             to_delete.push_back(*it);
+            it = timeout_users.erase(it);
+          }
+          else
+            it++;
         }
       }
     }

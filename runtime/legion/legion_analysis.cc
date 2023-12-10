@@ -6636,7 +6636,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalState::LogicalState(RegionTreeNode *node, ContextID c)
-      : owner(node)
+      : owner(node), timeout_exchange(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6655,6 +6655,7 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
+      assert(timeout_exchange == NULL);
       assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
       assert(interfering_shards.empty());
@@ -6769,6 +6770,12 @@ namespace Legion {
           if (it->first->remove_reference())
             delete it->first;
         prev_epoch_users.clear();
+      }
+      if (timeout_exchange != NULL)
+      {
+        timeout_exchange->perform_collective_wait();
+        delete timeout_exchange;
+        timeout_exchange = NULL;
       }
       if (!refinement_trackers.empty())
       {
@@ -7804,7 +7811,8 @@ namespace Legion {
     void LogicalState::record_refinement_dependences(ContextID ctx,
         const LogicalUser &refinement_user, const FieldMask &refinement_mask,
         const ProjectionInfo &no_proj_info, RegionTreeNode *previous_child,
-        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis)
+        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis,
+        std::vector<LogicalUser*> &timeout_users)
     //--------------------------------------------------------------------------
     {
       FieldMask dummy_open_below;
@@ -7813,11 +7821,11 @@ namespace Legion {
       owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
                        refinement_user, curr_epoch_users, 
                        refinement_mask, dummy_open_below, false/*arrived*/,
-                       no_proj_info, *this, logical_analysis);
+                       no_proj_info, *this, logical_analysis, timeout_users);
       owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
                         refinement_user, prev_epoch_users,
                         refinement_mask, dummy_open_below, false/*arrived*/,
-                        no_proj_info, *this, logical_analysis);
+                        no_proj_info, *this, logical_analysis, timeout_users);
       // If we have a previous child and all the children are independent
       // then we know we don't need to traverse anything else
       if ((previous_child == NULL) || !owner->are_all_children_disjoint())
@@ -7847,6 +7855,52 @@ namespace Legion {
                 privilege_root, logical_analysis);
           }
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::filter_timeout_users(std::vector<LogicalUser*> &timeouts,
+                                            LogicalAnalysis &logical_analysis)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!timeouts.empty());
+#endif
+      // First go through and filter the timeout users on this shard
+      for (std::vector<LogicalUser*>::iterator it =
+            timeouts.begin(); it != timeouts.end(); /*nothing*/)
+      {
+        if ((*it)->op->is_operation_committed((*it)->gen))
+          it++;
+        else // Not committed yet so don't prune it
+          it = timeouts.erase(it);
+      }
+      std::vector<LogicalUser*> to_delete;
+      // Need to exchange with the context in case we are control
+      // replicated and need to make sure all the shards agree on
+      // the timeout since we need to keep the users the same
+      logical_analysis.context->match_timeouts(timeouts, to_delete,
+                                               timeout_exchange);
+      for (std::vector<LogicalUser*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        // One reference from when we were added in the 
+        // perform dependence checks function
+        unsigned references_to_remove = 1;
+        OrderedFieldMaskUsers::iterator finder = curr_epoch_users.find(*it);
+        if (finder != curr_epoch_users.end())
+        {
+          curr_epoch_users.erase(finder);
+          references_to_remove++;
+        }
+        finder = prev_epoch_users.find(*it);
+        if (finder != prev_epoch_users.end())
+        {
+          prev_epoch_users.erase(finder);
+          references_to_remove++;
+        }
+        if ((*it)->remove_reference(references_to_remove))
+          delete (*it);
       }
     }
 

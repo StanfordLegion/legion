@@ -11592,12 +11592,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::match_timeouts(const std::vector<LogicalUser*> &timeouts,
-                                      std::vector<LogicalUser*> &to_delete)
+    void InnerContext::match_timeouts(std::vector<LogicalUser*> &timeouts,
+                                      std::vector<LogicalUser*> &to_delete,
+                                      TimeoutMatchExchange *&exchange)
     //--------------------------------------------------------------------------
     {
-      // Everything can be deleted here since there is no match
-      to_delete.insert(to_delete.end(), timeouts.begin(), timeouts.end());
+#ifdef DEBUG_LEGION
+      assert(exchange == NULL);
+      assert(to_delete.empty());
+#endif
+      to_delete.swap(timeouts);
     }
 
 #if 0
@@ -20979,13 +20983,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::match_timeouts(
-                                      const std::vector<LogicalUser*> &timeouts, 
-                                      std::vector<LogicalUser*> &to_delete)
+    void ReplicateContext::match_timeouts(std::vector<LogicalUser*> &timeouts, 
+                                          std::vector<LogicalUser*> &to_delete,
+                                          TimeoutMatchExchange *&exchange)
     //--------------------------------------------------------------------------
     {
-      TimeoutMatchExchange exchange(this, COLLECTIVE_LOC_79);
-      exchange.match_timeouts(timeouts, to_delete);
+      if (exchange != NULL)
+      {
+        exchange->complete_exchange(to_delete);
+        delete exchange;
+      }
+      exchange = new TimeoutMatchExchange(this, COLLECTIVE_LOC_79);
+      exchange->perform_exchange(timeouts);
     }
 
     //--------------------------------------------------------------------------

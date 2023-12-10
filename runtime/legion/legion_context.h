@@ -1772,8 +1772,9 @@ namespace Legion {
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
-      virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
-                                  std::vector<LogicalUser*> &to_delete);
+      virtual void match_timeouts(std::vector<LogicalUser*> &timeouts,
+                                  std::vector<LogicalUser*> &to_delete,
+                                  TimeoutMatchExchange *&exchange);
     public:
       void record_fill_view_creation(FillView *view);
       void record_fill_view_creation(DistributedID future_did, FillView *view);
@@ -2961,8 +2962,9 @@ namespace Legion {
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
-      virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
-                                  std::vector<LogicalUser*> &to_delete);
+      virtual void match_timeouts(std::vector<LogicalUser*> &timeouts,
+                                  std::vector<LogicalUser*> &to_delete,
+                                  TimeoutMatchExchange *&exchange);
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l);

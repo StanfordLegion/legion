@@ -4595,7 +4595,8 @@ namespace Legion {
           const LogicalUser &user, OrderedFieldMaskUsers &users,
           const FieldMask &check_mask, const FieldMask &open_below,
           const bool arrived, const ProjectionInfo &proj_info,
-          LogicalState &state, LogicalAnalysis &logical_analysis);
+          LogicalState &state, LogicalAnalysis &logical_analysis,
+          std::vector<LogicalUser*> &timeout_users);
       static void perform_closing_checks(LogicalAnalysis &analysis,
           OrderedFieldMaskUsers &users, const LogicalUser &user,
           const FieldMask &check_mask, LogicalRegion root_privilege,
