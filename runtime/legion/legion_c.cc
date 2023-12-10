@@ -22,6 +22,9 @@
 #ifdef REALM_USE_PYTHON
 #include "realm/python/python_source.h"
 #endif
+#ifdef LEGION_USE_HDF5
+#include "realm/hdf5/hdf5_access.h"
+#endif
 
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older

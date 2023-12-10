@@ -24,7 +24,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 #ifdef LEGION_USE_HDF5
-#include "realm/hdf5_access.h"
+#include "realm/hdf5/hdf5_access.h"
 #endif
 
 namespace Legion {
