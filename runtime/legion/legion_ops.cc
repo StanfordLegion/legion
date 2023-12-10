@@ -17993,7 +17993,7 @@ namespace Legion {
         {
           std::map<FieldID,const char*>::const_iterator finder =
             launcher.field_files.find(*it);
-          if (finder == launcher.field_fields.end())
+          if (finder == launcher.field_files.end())
             REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
                 "Unable to find field file name for field %d of "
                 "HDF5 file attach in parent task %s (UID %lld). "
@@ -19241,7 +19241,7 @@ namespace Legion {
         {
           std::map<FieldID,std::vector<const char*> >::const_iterator
             finder = launcher.field_files.find(*it);
-          if ((finder == launcher.field_fields.end()) ||
+          if ((finder == launcher.field_files.end()) ||
               (index >= finder->second.size()))
             REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
                 "Unable to find field file name for field %d of "

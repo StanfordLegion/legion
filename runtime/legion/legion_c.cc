@@ -5807,7 +5807,7 @@ legion_index_attach_launcher_attach_hdf5(legion_index_attach_launcher_t handle_,
   LogicalRegion region = CObjectWrapper::unwrap(region_);
   handle->add_external_resource(region,
       new Realm::ExternalHDF5Resource(std::string(filename), 
-        (mode == LEGION_FILE_READ_ONLY));
+        (mode == LEGION_FILE_READ_ONLY)));
 #else
   // Legion must be built with HDF5 support for this to work
   assert(false);
