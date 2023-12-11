@@ -24,8 +24,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
   FILES_MATCHING PATTERN "*.inl"
 )
 
-set(REALM_ENABLE_UNIT_TESTS ON)
-
 # Realm runtime
 list(APPEND REALM_SRC
   realm/realm_c.h
