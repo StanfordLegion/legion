@@ -90,7 +90,7 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
 }
 
 namespace TestConfig {
-  size_t field_size = 8;
+  size_t field_size = 48;
   size_t block_cols = 4;
   size_t block_rows = 4;
   bool verbose = false;
@@ -418,12 +418,21 @@ void do_single_dim_field_size(Memory src_mem, Memory dst_mem, int log2_size,
     do_single_dim<N, T, FieldStruct32>(
         src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
         src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
-  }
-  if (field_size == 40) {
+  } else if(field_size == 40) {
     typedef Data<char, 40> FieldStruct40;
-    do_single_dim<N, T, FieldStruct40>(
-        src_mem, dst_mem, log2_size, TestConfig::narrow_dim, prof_proc,
-        src_perms, dst_perms, domain, src_bounds, dst_bounds, pad);
+    do_single_dim<N, T, FieldStruct40>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 48) {
+    typedef Data<char, 48> FieldStruct48;
+    do_single_dim<N, T, FieldStruct48>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
+  } else if(field_size == 64) {
+    typedef Data<char, 64> FieldStruct64;
+    do_single_dim<N, T, FieldStruct64>(src_mem, dst_mem, log2_size,
+                                       TestConfig::narrow_dim, prof_proc, src_perms,
+                                       dst_perms, domain, src_bounds, dst_bounds, pad);
   }
 }
 
@@ -497,19 +506,20 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
           const size_t block_rows = TestConfig::block_rows;
           for (int pad_x = -1; pad_x <= 1; pad_x++) {
             for (int pad_y = -1; pad_y <= 1; pad_y++) {
-              do_single_dim_field_size<3, int>(
-                  *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p,
-                  {}, {},
-                  {Rect<3>(Point<3>(0, 0, 0),
-                           Point<3>((2 * block_cols) + pad_x,
-                                    (2 * block_rows) + pad_y, 2 * block_rows))},
-                  {Rect<3>(Point<3>(0, 0, 0),
-                           Point<3>((2 * block_cols) + pad_x,
-                                    (2 * block_rows) + pad_y, 2 * block_rows))},
-                  {Rect<3>(Point<3>(0, 0, 0),
-                           Point<3>((2 * block_cols) + pad_x,
-                                    (2 * block_rows) + pad_y, 2 * block_rows))},
-                  TestConfig::field_size);
+              for(size_t field_size = 8; field_size <= 64; field_size += 8) {
+                do_single_dim_field_size<3, int>(
+                    *src_it, *dst_it, log2_buffer_size, TestConfig::narrow_dim, p, {}, {},
+                    {Rect<3>(Point<3>(0, 0, 0),
+                             Point<3>((2 * block_cols) + pad_x, (2 * block_rows) + pad_y,
+                                      2 * block_rows))},
+                    {Rect<3>(Point<3>(0, 0, 0),
+                             Point<3>((2 * block_cols) + pad_x, (2 * block_rows) + pad_y,
+                                      2 * block_rows))},
+                    {Rect<3>(Point<3>(0, 0, 0),
+                             Point<3>((2 * block_cols) + pad_x, (2 * block_rows) + pad_y,
+                                      2 * block_rows))},
+                    field_size);
+              }
             }
           }
         }
