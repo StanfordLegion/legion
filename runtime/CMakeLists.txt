@@ -24,6 +24,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
   FILES_MATCHING PATTERN "*.inl"
 )
 
+set(REALM_ENABLE_UNIT_TESTS ON)
+
 # Realm runtime
 list(APPEND REALM_SRC
   realm/realm_c.h
@@ -774,6 +776,38 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+if (REALM_ENABLE_UNIT_TESTS)
+  add_library(RealmRuntimeStatic STATIC ${REALM_SRC})
+  add_library(Legion::RealmRuntimeStatic ALIAS RealmRuntimeStatic)
+  target_compile_options(RealmRuntimeStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+  if(UNIX AND NOT APPLE)
+    target_link_libraries(RealmRuntimeStatic PRIVATE rt)
+  endif()
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    set_target_properties(RealmRuntimeStatic PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(RealmRuntimeStatic PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  endif()
+  set_target_properties(RealmRuntimeStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
+  target_include_directories(RealmRuntimeStatic
+    INTERFACE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+      $<INSTALL_INTERFACE:include>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+    # Include paths for generated header files.
+    INTERFACE
+      $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+    PRIVATE
+      ${PROJECT_BINARY_DIR}/runtime
+    )
+
+  install(TARGETS RealmRuntimeStatic EXPORT LegionTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  )
+endif()
 
 # Mapper objects
 list(APPEND MAPPER_SRC
