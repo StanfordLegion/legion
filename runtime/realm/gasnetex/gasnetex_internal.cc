@@ -3478,6 +3478,42 @@ namespace Realm {
     }
   }
 
+  void GASNetEXInternal::allgatherv(const char *val_in, size_t bytes,
+                                    std::vector<char> &vals_out,
+                                    std::vector<size_t> &lengths)
+  {
+    size_t total = 0;
+    std::vector<gex_Event_t> events(prim_size);
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    lengths.resize(Network::max_node_id + 1);
+
+    // Have everyone send each other their sizes
+    for(gex_Rank_t rank = 0; rank < prim_size; rank++) {
+      events[rank] =
+          gex_Coll_BroadcastNB(prim_tm, rank, &lengths[rank], &bytes, sizeof(bytes), 0);
+    }
+    // Wait for all these to complete, as we'll need their results
+    gex_Event_WaitAll(events.data(), events.size(), 0);
+
+    // Set up the receive buffer and describe the final buffer layout
+    for(size_t idx = 0; idx < sizes.size(); idx++) {
+      sizes[idx] = static_cast<int>(lengths[idx]);
+      total += lengths[idx];
+    }
+    vals_out.resize(total);
+
+    // Now perform the emulated all_gatherv by having each rank in turn broadcast their
+    // data, each of which gets placed in a specific offset within the buffer
+    char *buffer = vals_out.data();
+    for(gex_Rank_t rank = 0; rank < prim_size; rank++) {
+      events[rank] = gex_Coll_BroadcastNB(prim_tm, rank, buffer, val_in, sizes[rank], 0);
+      buffer += sizes[rank];
+    }
+
+    gex_Event_WaitAll(events.data(), events.size(), 0);
+  }
+
   size_t GASNetEXInternal::sample_messages_received_count()
   {
     return total_packets_received.load();
