@@ -2087,6 +2087,9 @@ namespace Legion {
                      LogicalRegion handle, LogicalRegion parent,
                      const bool restricted = true,
                      const bool mapped = true);
+      // Declared here to avoid superfluous compiler warnings
+      // Can be remove after deprecated members are removed
+      ~AttachLauncher(void);
     public:
       inline void initialize_constraints(bool column_major, bool soa,
                              const std::vector<FieldID> &fields,
@@ -2113,8 +2116,15 @@ namespace Legion {
                              const std::map<FieldID,size_t> *alignments = NULL); 
     public:
       ExternalResource                              resource;
-      LogicalRegion                                 handle;
       LogicalRegion                                 parent;
+      LogicalRegion                                 handle;
+      std::set<FieldID>                             privilege_fields;
+    public:
+      // This will be cloned each time you perform an attach with this launcher
+      const Realm::ExternalInstanceResource*        external_resource;
+    public:
+      LayoutConstraintSet                           constraints;
+    public:
       // Whether this instance will be restricted when attached
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
@@ -2131,14 +2141,7 @@ namespace Legion {
       LEGION_DEPRECATED("file_fields is deprecated, use external_resource")
       std::vector<FieldID>                          file_fields; // normal files
       // This member must still be populated if you're attaching to an HDF5 file
-      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
-    public:
-      // Data for external instances
-      LayoutConstraintSet                           constraints;
-      std::set<FieldID>                             privilege_fields;
-    public:
-      // This will be cloned each time you perform an attach with this launcher
-      const Realm::ExternalInstanceResource*        external_resource;
+      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files 
     public:
       // Optional footprint of the instance in memory in bytes
       size_t                                        footprint;
@@ -2159,6 +2162,9 @@ namespace Legion {
       IndexAttachLauncher(ExternalResource resource, 
                           LogicalRegion parent,
                           const bool restricted = true);
+      // Declared here to avoid superfluous compiler warnings
+      // Can be remove after deprecated members are removed
+      ~IndexAttachLauncher(void);
     public:
       inline void initialize_constraints(bool column_major, bool soa,
                              const std::vector<FieldID> &fields,
@@ -2191,8 +2197,16 @@ namespace Legion {
                              const std::map<FieldID,size_t> *alignments = NULL);
     public:
       ExternalResource                              resource;
-      std::vector<LogicalRegion>                    handles;
       LogicalRegion                                 parent;
+      std::set<FieldID>                             privilege_fields;
+      std::vector<LogicalRegion>                    handles;
+      // This is the vector external resource objects that are going to 
+      // attached to the vector of logical region handles
+      // These will be cloned each time you perform an attach with this launcher
+      std::vector<const Realm::ExternalInstanceResource*> external_resources;
+    public:
+      LayoutConstraintSet                           constraints;
+    public:
       // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
       // Whether the runtime should check for duplicate resources across the 
@@ -2215,15 +2229,8 @@ namespace Legion {
         std::vector</*file name*/const char*> >     field_files; // hdf5 files
     public:
       // Data for external instances
-      LayoutConstraintSet                           constraints;
       LEGION_DEPRECATED("pointers is deprecated, use external_resources")
-      std::vector<PointerConstraint>                pointers; 
-    public:
-      std::set<FieldID>                             privilege_fields;
-      // This is the vector external resource objects that are going to 
-      // attached to the vector of logical region handles
-      // These will be cloned each time you perform an attach with this launcher
-      std::vector<const Realm::ExternalInstanceResource*> external_resources;
+      std::vector<PointerConstraint>                pointers;  
     public:
       // Optional footprint of the instance in memory in bytes
       // You only need to fill this in when using depcreated fields
