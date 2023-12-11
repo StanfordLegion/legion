@@ -128,6 +128,8 @@ namespace Realm {
       void add_subscription(Machine::MachineUpdateSubscriber *subscriber);
       void remove_subscription(Machine::MachineUpdateSubscriber *subscriber);
 
+      void update_kind_maps(void);
+
       void enumerate_mem_mem_affinities(void);
 
       mutable Mutex mutex;
@@ -367,25 +369,16 @@ namespace Realm {
     extern void cleanup_query_caches();
   // active messages
 
-  enum NodeAnnounceTag {
-    NODE_ANNOUNCE_INVALID = 0,
-    NODE_ANNOUNCE_PROC, // PROC id kind
-    NODE_ANNOUNCE_MEM,  // MEM id size
-    NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
-    NODE_ANNOUNCE_PMA,  // PMA proc_id mem_id bw latency
-    NODE_ANNOUNCE_DMA_CHANNEL,
-  };
+    enum NodeAnnounceTag
+    {
+      NODE_ANNOUNCE_INVALID = 0,
+      NODE_ANNOUNCE_PROC,   // PROC id kind
+      NODE_ANNOUNCE_MEM,    // MEM id size
+      NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
+      NODE_ANNOUNCE_PMA,    // PMA proc_id mem_id bw latency
+      NODE_ANNOUNCE_DMA_CHANNEL,
+    };
 
-  struct NodeAnnounceMessage {
-    int num_fragments;
-
-    static void handle_message(NodeID sender, const NodeAnnounceMessage &msg,
-			       const void *data, size_t datalen);
-
-    static void await_all_announcements(void);
-  };
-
-	
 }; // namespace Realm
 
 //include "machine_impl.inl"

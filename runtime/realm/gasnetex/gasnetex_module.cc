@@ -620,6 +620,13 @@ namespace Realm {
     internal->gather(root, val_in, vals_out, bytes);
   }
 
+  void GASNetEXModule::allgatherv(const char *val_in, size_t bytes,
+                                  std::vector<char> &vals_out,
+                                  std::vector<size_t> &lengths)
+  {
+    internal->allgatherv(val_in, bytes, vals_out, lengths);
+  }
+
   size_t GASNetEXModule::sample_messages_received_count(void)
   {
     return internal->sample_messages_received_count();
