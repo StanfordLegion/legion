@@ -1022,7 +1022,7 @@ namespace Realm {
           // TODO(apryakhin): we can't do partial gather/scatter
           // transfers yet as we don't have a way to record the state
           // after we copied part of data to an intermediate buffer.
-          ///assert(iter_bytes > 0 && iter_bytes <= max_bytes);
+          /// assert(iter_bytes > 0 && iter_bytes <= max_bytes);
           log_gpudma.info() << "gpu gather bytes_per_chunk="
                             << address_info.bytes_per_chunk
                             << " num_lines=" << address_info.num_lines
@@ -1106,28 +1106,24 @@ namespace Realm {
       if(channel_copy_info.src_mem.kind() != Memory::GPU_FB_MEM ||
          channel_copy_info.dst_mem.kind() != Memory::GPU_FB_MEM ||
          channel_copy_info.ind_mem.kind() != Memory::GPU_FB_MEM) {
-        //log_gpudma.debug() << "gpu scatter/gather is not supported on none device memory";
+        // log_gpudma.debug() << "gpu scatter/gather is not supported on none device
+        // memory";
         return false;
       }
 
-      // TODO(apryakhin): fix this for mpirun -n 2 -cuda:ipc=1 -scatter 1
-      if(channel_copy_info.is_scatter) {
-        GPU *src_gpu =
-            mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.src_mem));
-        GPU *dst_gpu =
-            mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.dst_mem));
+      GPU *src_gpu =
+          mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.src_mem));
+      GPU *dst_gpu =
+          mem_to_gpu(get_runtime()->get_memory_impl(channel_copy_info.dst_mem));
 
-        if(src_gpu == nullptr || dst_gpu == nullptr) {
-          log_gpudma.debug() << "could not access get src/dst gpus has_src_gpu="
-                             << (src_gpu == nullptr)
-                             << " has_dst_gpu=" << (dst_gpu == nullptr);
-          return false;
-        }
-
-        return src_gpu->can_access_peer(dst_gpu);
+      if(src_gpu == nullptr || dst_gpu == nullptr) {
+        log_gpudma.debug() << "could not access get src/dst gpus has_src_gpu="
+                           << (src_gpu == nullptr)
+                           << " has_dst_gpu=" << (dst_gpu == nullptr);
+        return false;
       }
 
-      return true;
+      return src_gpu->can_access_peer(dst_gpu);
     }
 
     GPUScatterGatherChannel::GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,

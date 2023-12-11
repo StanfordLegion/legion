@@ -2154,7 +2154,7 @@ namespace Realm {
                                           GPUStream *stream)
     {
       size_t log_field_size = std::min(static_cast<size_t>(ctz(field_size)),
-                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+                                       CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
 
       assert((1ULL << log_field_size) <= field_size);
       assert(dim <= CUDA_MAX_DIM);

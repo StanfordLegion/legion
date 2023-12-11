@@ -105,9 +105,10 @@ namespace Realm {
 
     virtual bool get_addresses(AddressList &addrlist,
                                const InstanceLayoutPieceBase *&nonaffine);
+
   protected:
-    virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
-			       size_t& offset, size_t& fsize) = 0;
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize) = 0;
 
     bool have_rect, is_done;
     Rect<N,T> cur_rect;
@@ -563,7 +564,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  uintptr_t TransferIteratorBase<N, T>::get_base_offset(void) const {
+  uintptr_t TransferIteratorBase<N, T>::get_base_offset(void) const
+  {
     return inst_impl->metadata.inst_offset;
   }
 
@@ -948,27 +950,25 @@ namespace Realm {
   //
 
   template <int N, typename T>
-  class WrappingTransferIteratorIndirect : public TransferIteratorBase<N,T> {
+  class WrappingTransferIteratorIndirect : public TransferIteratorBase<N, T> {
   protected:
     WrappingTransferIteratorIndirect(void); // used by deserializer
   public:
-    WrappingTransferIteratorIndirect(
-			     const IndexSpace<N,T> &_is,
-			     RegionInstance inst,
-			     const std::vector<FieldID>& _fields,
-			     const std::vector<size_t>& _fld_offsets,
-			     const std::vector<size_t>& _fld_sizes);
+    WrappingTransferIteratorIndirect(const IndexSpace<N, T> &_is, RegionInstance inst,
+                                     const std::vector<FieldID> &_fields,
+                                     const std::vector<size_t> &_fld_offsets,
+                                     const std::vector<size_t> &_fld_sizes);
 
     template <typename S>
-    static TransferIterator *deserialize_new(S& deserializer);
-      
+    static TransferIterator *deserialize_new(S &deserializer);
+
     virtual ~WrappingTransferIteratorIndirect(void);
 
     virtual Event request_metadata(void);
 
     // specify the xd port used for indirect address flow control, if any
     virtual void set_indirect_input_port(XferDes *xd, int port_idx,
-					 TransferIterator *inner_iter);
+                                         TransferIterator *inner_iter);
 
     virtual bool get_addresses(AddressList &addrlist,
                                const InstanceLayoutPieceBase *&nonaffine);
@@ -979,14 +979,16 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, TransferIterator::AddressInfo &info,
                         unsigned flags, bool tentative = false);
 
-    static Serialization::PolymorphicSerdezSubclass<TransferIterator, WrappingTransferIteratorIndirect<N,T> > serdez_subclass;
+    static Serialization::PolymorphicSerdezSubclass<
+        TransferIterator, WrappingTransferIteratorIndirect<N, T>>
+        serdez_subclass;
 
     template <typename S>
-    bool serialize(S& serializer) const;
+    bool serialize(S &serializer) const;
 
   protected:
-    virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
-			       size_t& offset, size_t& fsize);
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize);
 
     IndexSpace<N, T> domain;
     std::vector<FieldID> fields;
@@ -996,7 +998,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  WrappingTransferIteratorIndirect<N,T>::WrappingTransferIteratorIndirect(void)
+  WrappingTransferIteratorIndirect<N, T>::WrappingTransferIteratorIndirect(void)
   {}
 
   template <int N, typename T>
@@ -1021,9 +1023,9 @@ namespace Realm {
   template <typename S>
   bool WrappingTransferIteratorIndirect<N, T>::serialize(S &serializer) const
   {
-    return ((serializer << this->inst_impl->me) &&
-            (serializer << fields) && (serializer << fld_offsets) &&
-            (serializer << fld_sizes) && serializer << domain);
+    return ((serializer << this->inst_impl->me) && (serializer << fields) &&
+            (serializer << fld_offsets) && (serializer << fld_sizes) &&
+            serializer << domain);
   }
 
   template <int N, typename T>
@@ -1036,9 +1038,9 @@ namespace Realm {
     std::vector<size_t> fld_offsets, fld_sizes;
     IndexSpace<N, T> domain;
 
-    if(!((deserializer >> inst) &&
-         (deserializer >> fields) && (deserializer >> fld_offsets) &&
-         (deserializer >> fld_sizes) && (deserializer >> domain)))
+    if(!((deserializer >> inst) && (deserializer >> fields) &&
+         (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
+         (deserializer >> domain)))
       return 0;
 
     return new WrappingTransferIteratorIndirect<N, T>(domain, inst, fields, fld_offsets,
@@ -1046,9 +1048,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  WrappingTransferIteratorIndirect<N,T>::~WrappingTransferIteratorIndirect(void)
-  {
-  }
+  WrappingTransferIteratorIndirect<N, T>::~WrappingTransferIteratorIndirect(void)
+  {}
 
   template <int N, typename T>
   Event WrappingTransferIteratorIndirect<N, T>::request_metadata(void)
@@ -1057,20 +1058,19 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void WrappingTransferIteratorIndirect<N,T>::set_indirect_input_port(XferDes *xd,
-							      int port_idx,
-							      TransferIterator *inner_iter)
+  void WrappingTransferIteratorIndirect<N, T>::set_indirect_input_port(
+      XferDes *xd, int port_idx, TransferIterator *inner_iter)
   {}
-  
+
   template <int N, typename T>
-  void WrappingTransferIteratorIndirect<N,T>::reset(void)
+  void WrappingTransferIteratorIndirect<N, T>::reset(void)
   {
-    TransferIteratorBase<N,T>::reset();
+    TransferIteratorBase<N, T>::reset();
     piece_idx = 0;
   }
 
   template <int N, typename T>
-  size_t WrappingTransferIteratorIndirect<N,T>::get_address_size(void) const
+  size_t WrappingTransferIteratorIndirect<N, T>::get_address_size(void) const
   {
     return sizeof(Point<N, T>);
   }
@@ -1161,10 +1161,9 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool WrappingTransferIteratorIndirect<N,T>::get_next_rect(Rect<N,T>& r,
-						    FieldID& fid,
-						    size_t& offset,
-						    size_t& fsize)
+  bool WrappingTransferIteratorIndirect<N, T>::get_next_rect(Rect<N, T> &r, FieldID &fid,
+                                                             size_t &offset,
+                                                             size_t &fsize)
   {
     assert(fields.size() == 1);
     fid = fields[0];
@@ -4133,7 +4132,7 @@ namespace Realm {
   {
     if(channel && channel->needs_wrapping_iterator()) {
       Matrix<N2, N, T> transform;
-      for (int i = 0; i < N2; i++)
+      for(int i = 0; i < N2; i++)
         for(int j = 0; j < N; j++)
           transform[i][j] = i == j;
       return new WrappingTransferIteratorIndirect<N2, T2>(
