@@ -4,6 +4,12 @@ attempt is made to keep this list accurate for the master branch.
 Version 23.12.0 (December ??, 2023)
   * Regent
     - Support for HIP multi-GPU per runtime
+  * Realm
+    - Replace the point-to-point communication with a more scalable allgatherv from network modules for machine model announcements.
+    - Support shared memory communication for system memory.
+    - Provide the sanity check for GPU tasks to detect any leak of CUDA streams.
+    - Support for GPU transposes in CUDA-DMA
+    - Bug fixes for CUDA-DMA
 
 Version 23.09.0 (September 28, 2023)
   * Regent
@@ -95,8 +101,8 @@ Version 22.12.0 (December 30, 2022)
        -ll:networks (gasnetex/gasnet1/mpi/none) to pick which one to use
        during runtime
     - Separate CUDA runtime from Realm by removing all references to CUDA
-       runtime and relying only on driver API, which fixes an issue when 
-       mixing static and dynamic cudart across an application and improves 
+       runtime and relying only on driver API, which fixes an issue when
+       mixing static and dynamic cudart across an application and improves
        Realm’s compatibility across driver versions
   * Tools
     - Legion Prof support visualization of Channel of indirect copy, and
@@ -292,7 +298,7 @@ Version 21.03.0 (March 30, 2021)
       sub-trees should be used for performing the analysis. Disjoint and
       complete partitions are especially helpful in aiding the runtime.
     - There is a new implementation of the index space math inside of the
-      runtime that now soundly and precisely detect congruences between 
+      runtime that now soundly and precisely detect congruences between
       index space math operations. This fixes a long-running class of bugs
       that would cause memory explosions in the physical analysis.
     - In the control replication branch users can now map future values into
@@ -444,11 +450,11 @@ Version 20.03.0 (March 31, 2020)
     - Reduction in memory usage of Realm internal data structures
   * Tools
     - There is a now a generic launcher script for running Python code
-        with Legion that will execute an aribtrary Python program in the 
+        with Legion that will execute an aribtrary Python program in the
         top-level task of a Legion program. This script mirrors the interface
-        to CPython as closely as possible. 
+        to CPython as closely as possible.
     - Legion Spy now supports verification and rendering of indirection copies
-    - Legion Prof supports Instance layout constraints related to dimension 
+    - Legion Prof supports Instance layout constraints related to dimension
         ordering and field alignnment
     - Legion Prof contains a menu option for viewing ready state of operations
 
@@ -499,7 +505,7 @@ Version 19.12.0 (December 31, 2019)
         programs will get faster; programs that create many partitions
         frequently on the fly may get slower. The later case will be fixed
         in an upcoming release.
-    - Added support for indirect copy operations such as gather and 
+    - Added support for indirect copy operations such as gather and
         scatter onto existing copy launchers
   * Realm
     - `Event::subscribe` allows polling via `Event::has_triggered` to
@@ -590,7 +596,7 @@ Version 19.04.0 (April 30, 2019)
         (or -DLegion_MAX_DIM in CMake) to build with any number of
         dimensions up to 9.
     - Change VariantID to 32 bits to match AUTO_GENERATE_ID
-    - Improved mapper interfaces for instance allocation and 
+    - Improved mapper interfaces for instance allocation and
       failed instance allocation due to layout constraint conflicts
   * Regent
     - Support for index fills
@@ -794,8 +800,8 @@ Version 17.02.0 (February 14, 2017)
   * Legion Prof
     - Added a stats view of processors grouped by node and processor type
     - Added ability to collapse/expand each processor/channel/memory in
-        a timeline. To collapse/expand a row, click the name. To 
-        collapse/expand the children of a row, click on the triangle 
+        a timeline. To collapse/expand a row, click the name. To
+        collapse/expand the children of a row, click on the triangle
         next to the name.
     - Grouped the processor timelines to be child elements under the stats
         views
