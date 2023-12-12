@@ -4069,7 +4069,8 @@ namespace Legion {
             const bool record_valid = !std::binary_search(
                 untracked_valid_regions.begin(),
                 untracked_valid_regions.end(), 0);
-            const bool check_collective = std::binary_search(
+            const bool check_collective = 
+              IS_COLLECTIVE(regions.front()) || std::binary_search(
                 check_collective_regions.begin(),
                 check_collective_regions.end(), 0);
             region_preconditions.back() =
@@ -4108,7 +4109,8 @@ namespace Legion {
             const bool record_valid = !std::binary_search(
                 untracked_valid_regions.begin(),
                 untracked_valid_regions.end(), idx);
-            const bool check_collective = std::binary_search(
+            const bool check_collective = 
+              IS_COLLECTIVE(logical_regions[idx]) || std::binary_search(
                 check_collective_regions.begin(),
                 check_collective_regions.end(), idx);
             // apply the results of the mapping to the tree
