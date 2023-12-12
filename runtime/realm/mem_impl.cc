@@ -1414,8 +1414,8 @@ namespace Realm {
 
   void *LocalCPUMemory::get_direct_ptr(off_t offset, size_t size)
   {
-//    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
-    return (base + offset);
+    //    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
+    return base ? base + offset : reinterpret_cast<void *>(offset);
   }
 
   
