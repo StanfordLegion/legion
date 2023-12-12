@@ -995,10 +995,10 @@ impl ChanID {
             channel_kind: ChanKind::Gather,
         }
     }
-    fn new_scatter(dst: MemID) -> Self {
+    fn new_scatter(src: MemID) -> Self {
         ChanID {
-            src: None,
-            dst: Some(dst),
+            src: Some(src),
+            dst: None,
             channel_kind: ChanKind::Scatter,
         }
     }
