@@ -798,7 +798,6 @@ target_include_directories(RealmRuntimeStatic
   PRIVATE
     ${PROJECT_BINARY_DIR}/runtime
   )
-install(TARGETS RealmRuntimeStatic EXPORT LegionTargets)
 
 # Mapper objects
 list(APPEND MAPPER_SRC
