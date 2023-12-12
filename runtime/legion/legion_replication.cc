@@ -1253,6 +1253,8 @@ namespace Legion {
                                                      projection_info,
                                                      privilege_paths[idx],
                                                      logical_analysis);
+        if (IS_COLLECTIVE(req))
+          create_collective_view_rendezvous(req.parent.get_tree_id(), idx);
       }
       // Generate any collective view rendezvous that we will need
       for (std::vector<unsigned>::const_iterator it =
