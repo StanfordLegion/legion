@@ -266,6 +266,8 @@ namespace Realm {
 #endif
   }
 
+  // TODO: add the implementation
+  /*static*/ long long Clock::get_calibration_error(void) { return 0; }
 
   ////////////////////////////////////////////////////////////////////////
   //

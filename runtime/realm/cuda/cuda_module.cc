@@ -5229,6 +5229,23 @@ namespace Realm {
       return realm_event;
     }
 
+    bool CudaModule::get_cuda_device_info(Processor p, CudaDeviceInfo *info) const
+    {
+      for(const GPU *gpu : gpus) {
+        if((gpu->proc->me) == p) {
+          memcpy(&(info->name), &(gpu->info->name),
+                 sizeof(char) * CudaDeviceInfo::MAX_NAME_LENGTH);
+          assert(sizeof(CUuuid) == sizeof(uint8_t) * CudaDeviceInfo::UUID_SIZE);
+          memcpy(&(info->uuid), &(gpu->info->uuid), sizeof(CUuuid));
+          info->driver_version = 1000 * gpu->info->major + gpu->info->minor;
+          info->compute_capability = 10 * gpu->info->major + gpu->info->minor;
+          return true;
+        }
+      }
+      // can not find the Processor p, so return false
+      return false;
+    }
+
 #ifdef REALM_USE_CUDART_HIJACK
     ////////////////////////////////////////////////////////////////////////
     //

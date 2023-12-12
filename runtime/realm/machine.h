@@ -77,10 +77,10 @@ namespace Realm {
       //  processor run - note that the uniqueness of any/all of the provided
       //  information depends on the underlying OS and any container runtimes
       struct ProcessInfo {
-	static const size_t MAX_HOSTNAME_LENGTH = 64;
-	char hostname[MAX_HOSTNAME_LENGTH];  // always null-terminated
-	uint64_t hostid;  // gethostid on posix, ??? on windows
-	uint32_t processid;
+        static const size_t MAX_HOSTNAME_LENGTH = 256;
+        char hostname[MAX_HOSTNAME_LENGTH]; // always null-terminated
+        uint64_t hostid; // gethostid on posix, hash of hostname on windows
+        uint32_t processid;
       };
 
       // populates the `info` struct with information about the processor `p`'s

@@ -88,12 +88,12 @@ namespace Realm {
     //  processor ID
     struct CudaDeviceInfo {
       static const size_t UUID_SIZE = 16; // bytes
-      static const size_t MAX_NAME_LENGTH = 64;
+      static const size_t MAX_NAME_LENGTH = 256;
 
       uint8_t uuid[UUID_SIZE];
-      char name[MAX_NAME_LENGTH];  // always null-terminated
-      int driver_version; // (1000 * major + 10 * minor), just like CUDA
-      int compute_capability; // (10 * major + minor)
+      char name[MAX_NAME_LENGTH]; // always null-terminated
+      int driver_version;         // (1000 * major + 10 * minor), just like CUDA
+      int compute_capability;     // (10 * major + minor)
     };
 
     // fill in `info` according to CUDA-capable device associated with processor
@@ -207,6 +207,8 @@ namespace Realm {
       /// @return A Realm::Event that is triggered some time after the given
       /// \p cuda_stream completes
       Event make_realm_event(CUstream_st *cuda_stream);
+
+      bool get_cuda_device_info(Processor p, CudaDeviceInfo *info) const;
 
     public:
       CudaModuleConfig *config;

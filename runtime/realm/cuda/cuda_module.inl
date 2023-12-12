@@ -54,6 +54,19 @@ namespace Realm {
 	mod->set_task_ctxsync_required(is_required);
     }
 
+    // fill in `info` according to CUDA-capable device associated with processor
+    //  `p` if available and returns true, or returns false if processor is unknown,
+    //  not associated with a CUDA-capable device, or information is unavailable
+    inline bool get_cuda_device_info(Processor p, CudaDeviceInfo *info)
+    {
+      CudaModule *mod = Runtime::get_runtime().get_module<CudaModule>("cuda");
+      if(mod) {
+        return mod->get_cuda_device_info(p, info);
+      } else {
+	return false;
+      }
+    }
+
   }; // namespace Cuda
 
 }; // namespace Realm
