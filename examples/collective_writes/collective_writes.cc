@@ -109,7 +109,7 @@ void top_level_task(const Task *task,
   // Followed by a collective reading task
   {
     IndexTaskLauncher read_launcher(READER_TASK_ID, launch_space,
-                              TaskArgument(NULL, 0), arg_map);
+        TaskArgument(&subregions, sizeof(subregions)), arg_map);
     read_launcher.add_region_requirement(
         RegionRequirement(columns_lp, MOD_PID, LEGION_READ_ONLY,
           LEGION_COLLECTIVE_EXCLUSIVE, lr));
@@ -123,8 +123,6 @@ void top_level_task(const Task *task,
   runtime->destroy_logical_region(ctx, lr);
 }
 
-#define MAGIC_NUMBER 0x1ee7c0de
-
 void writer_task(const Task *task,
                  const std::vector<PhysicalRegion> &regions,
                  Context ctx, Runtime *runtime)
@@ -136,8 +134,10 @@ void writer_task(const Task *task,
   const FieldAccessor<LEGION_WRITE_ONLY,unsigned,2> acc(regions[0], FID_X);
   Rect<2> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
+  const unsigned color = runtime->get_index_space_color(ctx,
+                  task->regions[0].region.get_index_space());
   for (PointInRectIterator<2> pir(rect); pir(); pir++)
-    acc[*pir] = MAGIC_NUMBER;
+    acc[*pir] = color;
 }
 
 void reader_task(const Task *task,
@@ -147,12 +147,23 @@ void reader_task(const Task *task,
   assert(regions.size() == 1); 
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
+  assert(task->arglen == sizeof(unsigned));
+  const unsigned expected_colors = *(const unsigned*)task->args;
 
   const FieldAccessor<LEGION_READ_ONLY,unsigned,2> acc(regions[0], FID_X);
   Rect<2> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
+  std::vector<unsigned> colors;
   for (PointInRectIterator<2> pir(rect); pir(); pir++)
-    assert(acc[*pir] == MAGIC_NUMBER);
+  {
+    const unsigned color = acc[*pir];
+    if (std::binary_search(colors.begin(), colors.end(), color))
+      continue;
+    colors.push_back(color);
+    std::sort(colors.begin(), colors.end());
+  }
+  // Since this cuts across all the rows we should have seen all the colors
+  assert(expected_colors == colors.size());
 }
 
 class DivFunctor : public ProjectionFunctor {
