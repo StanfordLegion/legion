@@ -5,9 +5,10 @@ Version 23.12.0 (December ??, 2023)
   * Regent
     - Support for HIP multi-GPU per runtime
   * Realm
-    - Replace the point-to-point communication with a more scalable allgatherv from network modules for machine model announcements.
-    - Support shared memory communication for system memory.
-    - Provide the sanity check for GPU tasks to detect any leak of CUDA streams.
+    - Improve scalability of startup by replacing point-to-point
+       communication with allgatherv for machine model announcements
+    - Support shared memory communication for system memory
+    - Provide sanity check for GPU tasks to detect any leak of CUDA streams
     - Support for GPU transposes in CUDA-DMA
     - Bug fixes for CUDA-DMA
 
