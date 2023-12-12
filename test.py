@@ -489,7 +489,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
     # NOTE: the legion-ci branch currently requires g++ (not clang) to build and
     #  is REALLY slow unless you set DEBUG=0
-    cmd(['git', 'clone', '-b', 'legion-ci-fix-output-fix-build', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
+    cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
         ('LD_LIBRARY_PATH', '%s:%s' % (env.get('LD_LIBRARY_PATH', ''), os.path.join(root_dir, 'bindings', 'regent'))),
