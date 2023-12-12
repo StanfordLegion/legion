@@ -355,7 +355,7 @@ if(Legion_USE_Python)
   # to BUILD_RPATH, otherwise build/lib/librealm.so's dlopen will not find it.
   # We're assuming that libpython.so will be found in the same dir as librealm.so
   # after installation, so no need to update INSTALL_RPATH.
-  get_filename_component(PYTHON_LIB_DIR "${PYTHON_LIBRARIES}" DIRECTORY)
+  get_filename_component(PYTHON_LIB_DIR "${Python3_LIBRARIES}" DIRECTORY)
   set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "${PYTHON_LIB_DIR}")
 endif ()
 
