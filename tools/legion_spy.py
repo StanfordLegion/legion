@@ -63,14 +63,13 @@ READ_WRITE    = 0x00000007
 WRITE_ONLY    = 0x10000002
 WRITE_DISCARD = 0x10000007
 REDUCE        = 0x00000004
-COLLECTIVE    = 0x20000000
 DISCARD_MASK  = 0x10000000
-COLLECTIVE_MASK = 0x40000000
 
 EXCLUSIVE = 0
 ATOMIC = 1
 SIMULTANEOUS = 2
 RELAXED = 3
+COLLECTIVE_MASK = 0x10000000
 
 NO_OP_KIND = 0
 SINGLE_TASK_KIND = 1
@@ -6124,7 +6123,7 @@ class Requirement(object):
         return bool(self.priv & DISCARD_MASK)
 
     def is_collective(self):
-        return bool(self.priv & COLLECTIVE_MASK)
+        return bool(self.coher & COLLECTIVE_MASK)
 
     def is_exclusive(self):
         return (self.coher & RELAXED) == EXCLUSIVE
@@ -6157,9 +6156,10 @@ class Requirement(object):
             return "NO-ACCESS"
         elif bool(self.priv & WRITE_PRIV):
             if bool(self.priv & READ_PRIV):
-                return "READ-WRITE"
-            elif bool(self.priv & DISCARD_MASK):
-                return "WRITE-DISCARD"
+                if bool(self.priv & DISCARD_MASK):
+                    return "WRITE-DISCARD"
+                else:
+                    return "READ-WRITE"
             else:
                 return "WRITE-ONLY"
         elif bool(self.priv & READ_PRIV):
@@ -6169,15 +6169,19 @@ class Requirement(object):
             return "REDUCE with Reduction Op "+str(self.redop)
 
     def get_coherence(self):
-        if self.coher == EXCLUSIVE:
-            return "EXCLUSIVE"
-        elif self.coher == ATOMIC:
-            return "ATOMIC"
-        elif self.coher == SIMULTANEOUS:
-            return "SIMULTANEOUS"
+        if self.coher & COLLECTIVE_MASK:
+            prefix = "COLLECTIVE "
         else:
-            assert self.coher == RELAXED
-            return "RELAXED"
+            prefix = ""
+        if self.coher & RELAXED == EXCLUSIVE:
+            return prefix+"EXCLUSIVE"
+        elif self.coher & RELAXED == ATOMIC:
+            return prefix+"ATOMIC"
+        elif self.coher & RELAXED == SIMULTANEOUS:
+            return prefix+"SIMULTANEOUS"
+        else:
+            assert self.coher & RELAXED == RELAXED
+            return prefix+"RELAXED"
 
     def get_privilege_and_coherence(self):
         return self.get_privilege() + ' ' + self.get_coherence()
@@ -9816,7 +9820,7 @@ class PointUser(object):
         return bool(self.priv & DISCARD_MASK)
 
     def is_collective(self):
-        return bool(self.priv & COLLECTIVE_MASK)
+        return bool(self.coher & COLLECTIVE_MASK)
 
     def is_exclusive(self):
         return self.coher == EXCLUSIVE
