@@ -2078,7 +2078,18 @@ namespace Legion {
      * This can include attaching files or arrays from inter-operating
      * programs. We provide a generic attach launcher than can handle
      * all kinds of attachments. Each attach launcher should be used
-     * for attaching only one kind of resource.
+     * for attaching only one kind of resource. Resources are described
+     * using Realm::ExternalInstanceResource descriptors (interface can
+     * be found in realm/instance.h). There are many different kinds
+     * of external instance resource descriptors including:
+     * - Realm::ExternalMemoryResource for host pointers (realm/instance.h)
+     * - Realm::ExternalFileResource for POSIX files (realm/instance.h)
+     * - Realm::ExternalCudaMemoryResource for CUDA pointers (realm/cuda/cuda_access.h)
+     * - Realm::ExternalHipMemoryResource for HIP pointers (realm/hip/hip_access.h)
+     * - Realm::ExternalHDF5Resource for HDF5 files (realm/hdf5/hdf5_access.h)
+     * ...
+     * Please explore the Realm code base for all the different kinds of
+     * external resources that you can attach to logical regions.
      * @see Runtime
      */
     struct AttachLauncher {
@@ -2155,7 +2166,11 @@ namespace Legion {
      * \struct IndexAttachLauncher
      * An index attach launcher allows the application to attach
      * many external resources concurrently to different subregions
-     * of a common region tree.
+     * of a common region tree. For more information regarding what
+     * kinds of external resources can be attached please see the
+     * documentation for AttachLauncher.
+     * @see AttachLauncher
+     * @see Runtime
      */
     struct IndexAttachLauncher {
     public:
