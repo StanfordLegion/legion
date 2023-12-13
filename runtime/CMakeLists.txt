@@ -775,14 +775,14 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-add_library(RealmRuntimeStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
-add_library(Legion::RealmRuntimeStatic ALIAS RealmRuntimeStatic)
-target_compile_options(RealmRuntimeStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(UNIX AND NOT APPLE)
-  target_link_libraries(RealmRuntimeStatic PRIVATE rt)
+  target_link_libraries(RealmStatic PRIVATE rt)
 endif()
-set_target_properties(RealmRuntimeStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
-target_include_directories(RealmRuntimeStatic
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
+target_include_directories(RealmStatic
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
