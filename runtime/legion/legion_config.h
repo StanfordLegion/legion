@@ -858,24 +858,31 @@
 
 #ifdef LEGION_DISABLE_DEPRECATED_ENUMS
 #define LEGION_DEPRECATED_ENUM(x)
+#define LEGION_DEPRECATED_ENUM_REAL(x)
 #define LEGION_DEPRECATED_ENUM_FROM(x,y)
 #elif defined(LEGION_WARN_DEPRECATED_ENUMS)
 #if defined(__cplusplus) && __cplusplus >= 201402L
 // c++14 and higher has nice deprecated warnings
 #define LEGION_DEPRECATED_ENUM(x)   \
   x [[deprecated("use LEGION_" #x " instead")]] = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_REAL(x)  \
+  x [[deprecated(#x " is no longer supported")]],
 #define LEGION_DEPRECATED_ENUM_FROM(x,y) \
   x [[deprecated("use " #y " instead")]] = y,
 #else
 // C and older versions of c++
 #define LEGION_DEPRECATED_ENUM(x)   \
   x __attribute__ ((deprecated ("use LEGION_" #x " instead"))) = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_REAL(x)  \
+  x __attribute__ ((deprecated (#x " is no longer supported")))
 #define LEGION_DEPRECATED_ENUM_FROM(x,y) \
   x __attribute__ ((deprecated ("use " #y " instead"))) = y,
 #endif
 #else
 #define LEGION_DEPRECATED_ENUM(x)   \
   x = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_REAL(x)  \
+  x,
 #define LEGION_DEPRECATED_ENUM_FROM(x,y) \
   x = y,
 #endif
@@ -2008,8 +2015,8 @@ typedef enum legion_specialized_constraint_t {
   LEGION_COMPACT_REDUCTION_SPECIALIZE = 4,
   LEGION_VIRTUAL_SPECIALIZE = 5,
   // All file types must go below here, everything else above
-  LEGION_GENERIC_FILE_SPECIALIZE = 6,
-  LEGION_HDF5_FILE_SPECIALIZE = 7,
+  LEGION_GENERIC_FILE_SPECIALIZE,
+  LEGION_HDF5_FILE_SPECIALIZE,
   // for backards compatibility
   LEGION_DEPRECATED_ENUM(NO_SPECIALIZE)
   LEGION_DEPRECATED_ENUM(AFFINE_SPECIALIZE)

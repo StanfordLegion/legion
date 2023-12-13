@@ -22,6 +22,9 @@
 #ifdef REALM_USE_PYTHON
 #include "realm/python/python_source.h"
 #endif
+#ifdef LEGION_USE_HDF5
+#include "realm/hdf5/hdf5_access.h"
+#endif
 
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older
@@ -5565,7 +5568,26 @@ legion_attach_launcher_attach_hdf5(legion_attach_launcher_t handle_,
   std::map<FieldID, const char *> *field_map =
     CObjectWrapper::unwrap(field_map_);
 
-  handle->attach_hdf5(filename, *field_map, mode);
+  std::vector<FieldID> fields;
+  for (std::map<FieldID,const char*>::const_iterator it =
+        field_map->begin(); it != field_map->end(); it++)
+  {
+    fields.push_back(it->first);
+    handle->privilege_fields.insert(it->first);
+  }
+  handle->initialize_constraints(true/*column major*/, true/*soa*/, fields); 
+  handle->field_files = *field_map;
+
+  if (handle->external_resource != NULL)
+    delete const_cast<Realm::ExternalInstanceResource*>(handle->external_resource);
+#ifdef LEGION_USE_HDF5
+  handle->external_resource =
+    new Realm::ExternalHDF5Resource(std::string(filename), 
+        (mode == LEGION_FILE_READ_ONLY));
+#else
+  // Legion must be built with HDF5 support for this to work
+  assert(false);
+#endif
 }
 
 void
@@ -5590,7 +5612,7 @@ void
 legion_attach_launcher_set_provenance(legion_attach_launcher_t handle_,
                                       const char *provenance)
 {
-  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_); 
 
   handle->provenance = provenance;
 }
@@ -5599,6 +5621,10 @@ void
 legion_attach_launcher_destroy(legion_attach_launcher_t handle_)
 {
   AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  // Destroy the external resource if there is one
+  if (handle->external_resource != NULL)
+    delete const_cast<Realm::ExternalInstanceResource*>(handle->external_resource);
 
   delete handle;
 }
@@ -5625,7 +5651,13 @@ legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
   AttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   std::vector<FieldID> fields(1, fid);
-  launcher->attach_array_soa(base_ptr, column_major, fields);
+  launcher->initialize_constraints(column_major, true/*soa*/, fields);
+  launcher->privilege_fields.insert(fid);
+
+  if (launcher->external_resource != NULL)
+    delete const_cast<Realm::ExternalInstanceResource*>(launcher->external_resource);
+  launcher->external_resource =
+    new Realm::ExternalMemoryResource(base_ptr, 0/*no idea how big it is*/);
 }
 
 legion_future_t
@@ -5730,8 +5762,16 @@ legion_index_attach_launcher_attach_file(legion_index_attach_launcher_t handle_,
   std::vector<FieldID> fields(num_fields);
   for (unsigned idx = 0; idx < num_fields; idx++)
     fields[idx] = fields_[idx];
-
-  handle->attach_file(region, filename, fields, mode);
+  if (handle->handles.empty())
+  {
+    std::vector<FieldID> fields(num_fields);
+    for (unsigned idx = 0; idx < num_fields; idx++)
+      fields[idx] = fields_[idx];
+    handle->initialize_constraints(true/*column major*/, true/*soa*/, fields);
+    handle->privilege_fields.insert(fields.begin(), fields.end());
+  }
+  handle->add_external_resource(region,
+      new Realm::ExternalFileResource(std::string(filename), mode));
 }
 
 void
@@ -5742,12 +5782,36 @@ legion_index_attach_launcher_attach_hdf5(legion_index_attach_launcher_t handle_,
                                          legion_file_mode_t mode)
 {
   IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
-  LogicalRegion region = CObjectWrapper::unwrap(region_);
-
   std::map<FieldID, const char *> *field_map =
-    CObjectWrapper::unwrap(field_map_);
+      CObjectWrapper::unwrap(field_map_);
 
-  handle->attach_hdf5(region, filename, *field_map, mode);
+  if (handle->handles.empty())
+  {
+    std::vector<FieldID> fields;
+    for (std::map<FieldID,const char*>::const_iterator it =
+          field_map->begin(); it != field_map->end(); it++)
+    {
+      fields.push_back(it->first);
+      handle->privilege_fields.insert(it->first);
+      handle->field_files[it->first].push_back(it->second);
+    }
+    handle->initialize_constraints(true/*column major*/, true/*soa*/, fields); 
+  }
+  else
+  {
+    for (std::map<FieldID,const char*>::const_iterator it =
+          field_map->begin(); it != field_map->end(); it++)
+      handle->field_files[it->first].push_back(it->second);
+  }
+#ifdef LEGION_USE_HDF5
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+  handle->add_external_resource(region,
+      new Realm::ExternalHDF5Resource(std::string(filename), 
+        (mode == LEGION_FILE_READ_ONLY)));
+#else
+  // Legion must be built with HDF5 support for this to work
+  assert(false);
+#endif
 }
 
 void
@@ -5760,13 +5824,19 @@ legion_index_attach_launcher_attach_array_soa(legion_index_attach_launcher_t han
 {
   IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion region = CObjectWrapper::unwrap(region_);
-  Memory memory = CObjectWrapper::unwrap(memory_);
 
-  std::vector<FieldID> fields(num_fields);
-  for (unsigned idx = 0; idx < num_fields; idx++)
-    fields[idx] = fields_[idx];
-
-  handle->attach_array_soa(region, base_ptr, column_major, fields, memory);
+  if (handle->handles.empty())
+  {
+    std::vector<FieldID> fields(num_fields);
+    for (unsigned idx = 0; idx < num_fields; idx++)
+    {
+      fields[idx] = fields_[idx];
+      handle->privilege_fields.insert(fields[idx]);
+    }
+    handle->initialize_constraints(column_major, true/*soa*/, fields);
+  }
+  handle->add_external_resource(region,
+      new Realm::ExternalMemoryResource(base_ptr, 0/*no idea how large*/));
 }
 
 void
@@ -5779,19 +5849,31 @@ legion_index_attach_launcher_attach_array_aos(legion_index_attach_launcher_t han
 {
   IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion region = CObjectWrapper::unwrap(region_);
-  Memory memory = CObjectWrapper::unwrap(memory_);
 
-  std::vector<FieldID> fields(num_fields);
-  for (unsigned idx = 0; idx < num_fields; idx++)
-    fields[idx] = fields_[idx];
-
-  handle->attach_array_aos(region, base_ptr, column_major, fields, memory);
+  if (handle->handles.empty())
+  {
+    std::vector<FieldID> fields(num_fields);
+    for (unsigned idx = 0; idx < num_fields; idx++)
+    {
+      fields[idx] = fields_[idx];
+      handle->privilege_fields.insert(fields[idx]);
+    }
+    handle->initialize_constraints(column_major, false/*soa*/, fields);
+  }
+  handle->add_external_resource(region,
+      new Realm::ExternalMemoryResource(base_ptr, 0/*no idea how large*/));
 }
 
 void
 legion_index_attach_launcher_destroy(legion_index_attach_launcher_t handle_)
 {
   IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  // Remove any external resource allocations that we made
+  for (std::vector<const Realm::ExternalInstanceResource*>::const_iterator it =
+        handle->external_resources.begin(); it != 
+        handle->external_resources.end(); it++)
+    delete const_cast<Realm::ExternalInstanceResource*>(*it);
 
   delete handle;
 }
