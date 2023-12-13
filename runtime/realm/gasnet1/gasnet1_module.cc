@@ -764,6 +764,35 @@ namespace Realm {
 		       GASNET_COLL_FLAGS);
   }
 
+  void GASNet1Module::allgatherv(const char *val_in, size_t bytes,
+                                 std::vector<char> &vals_out,
+                                 std::vector<size_t> &lengths)
+  {
+    lengths.resize(Network::max_node_id + 1);
+
+    // Collect all the sizes of the buffers
+    gasnet_coll_gather_all(GASNET_TEAM_ALL, lengths.data(), &bytes, sizeof(bytes),
+                           GASNET_COLL_FLAGS);
+
+    // Set up the receive buffer and describe the final buffer layout
+    size_t total = 0;
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    for(size_t idx = 0; idx < sizes.size(); idx++) {
+      sizes[idx] = static_cast<int>(lengths[idx]);
+      total += lengths[idx];
+    }
+    vals_out.resize(total);
+
+    // Now perform the emulated all_gatherv by having each rank in turn broadcast their
+    // data, each of which gets placed in a specific offset within the buffer
+    char *buffer = vals_out.data();
+    for(int rank = 0; rank < (Network::max_node_id + 1); rank++) {
+      broadcast(rank, val_in, buffer, sizes[rank]);
+      buffer += sizes[rank];
+    }
+  }
+
   size_t GASNet1Module::sample_messages_received_count(void)
   {
     return quiescence_checker.sample_messages_received_count();

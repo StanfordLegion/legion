@@ -106,6 +106,18 @@ out:
   return status;
 }
 
+static int bootstrap_mpi_allgatherv(const void *sendbuf, void *recvbuf, int *sizes,
+                                int *offsets, struct bootstrap_handle *handle)
+{
+  int status = MPI_SUCCESS;
+  status = MPI_Allgatherv(sendbuf, sizes[handle->pg_rank], MPI_BYTE, recvbuf, sizes,
+                          offsets, MPI_BYTE, bootstrap_comm);
+  BOOTSTRAP_NE_ERROR_JMP(status, MPI_SUCCESS, BOOTSTRAP_ERROR_INTERNAL, out,
+                         "MPI_Allgatherv failed\n");
+out:
+  return status;
+}
+
 static int populate_shared_ranks(bootstrap_handle_t *handle)
 {
   int status = MPI_SUCCESS;
@@ -255,6 +267,7 @@ int realm_ucp_bootstrap_plugin_init(void *mpi_comm, bootstrap_handle_t *handle) 
   handle->allgather     = bootstrap_mpi_allgather;
   handle->alltoall      = bootstrap_mpi_alltoall;
   handle->allreduce_ull = bootstrap_mpi_allreduce_ull;
+  handle->allgatherv    = bootstrap_mpi_allgatherv;
   handle->finalize      = bootstrap_mpi_finalize;
 
   goto out;

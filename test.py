@@ -492,7 +492,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
-        ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
+        ('LD_LIBRARY_PATH', '%s:%s' % (env.get('LD_LIBRARY_PATH', ''), os.path.join(root_dir, 'bindings', 'regent'))),
         ('HTR_DIR', htr_dir),
         ('CC', 'gcc'),
         ('CXX', 'g++'),
@@ -521,10 +521,6 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         cwd=barnes_hut_dir,
         env=env,
         timelimit=timelimit)
-    # work around search path that doesn't include bindings/regent
-    for hdr in ('legion_defines.h', 'realm_defines.h'):
-        os.symlink(os.path.join(root_dir, 'bindings', 'regent', hdr),
-                   os.path.join(root_dir, 'runtime', hdr))
     cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
