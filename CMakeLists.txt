@@ -914,6 +914,13 @@ elseif(Legion_BUILD_REALM_TESTS)
   # temporary hackery to just enable the realm tests
   add_library(Legion::Realm ALIAS Realm)
   add_subdirectory(test/realm)
+elseif(Legion_BUILD_REALM_UNIT_TESTS)
+  if (BUILD_SHARED_LIBS)
+    add_library(Legion::RealmTests ALIAS RealmStatic)
+  else()
+    add_library(Legion::RealmTests ALIAS Realm)
+  endif()
+  add_subdirectory(test/realm/unit_tests)
 endif()
 
 #------------------------------------------------------------------------------#
