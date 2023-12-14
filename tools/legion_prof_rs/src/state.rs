@@ -3,6 +3,7 @@ use std::cmp::{max, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
 use num_enum::TryFromPrimitive;
@@ -15,8 +16,6 @@ use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizeP
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
 use crate::spy;
-
-use once_cell::sync::OnceCell;
 
 const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
 
@@ -153,7 +152,7 @@ pub struct Config {
 }
 
 // CONFIG can be only accessed by Config::name_of_the_member()
-static CONFIG: OnceCell<Config> = OnceCell::new();
+static CONFIG: OnceLock<Config> = OnceLock::new();
 
 impl Config {
     // this function can be only called once, and it will be called in main
