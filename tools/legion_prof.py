@@ -396,7 +396,6 @@ class PathRange(object):
         return "(" + str(self.start) + "," + str(self.stop) + ")"
 
 class Dependencies(ABC):
-    __slots__: List = []
     _abstract_slots = [
         'deps', 'path', 'visited'
     ]
@@ -424,7 +423,6 @@ class Dependencies(ABC):
         pass
 
 class HasDependencies(Dependencies):
-    __slots__: List = []
     _abstract_slots = Dependencies._abstract_slots + ['initiation_op', 'initiation']
     def __init__(self) -> None:
         Dependencies.__init__(self)
@@ -455,7 +453,6 @@ class HasDependencies(Dependencies):
             assert 0, "Type is: " + str(type(self)) + ", is not HasDependencies."
 
 class HasInitiationDependencies(Dependencies):
-    __slots__: List = []
     _abstract_slots = Dependencies._abstract_slots + ['initiation_op', 'initiation']
     
     def __init__(self, 
@@ -519,7 +516,6 @@ class HasInitiationDependencies(Dependencies):
         return self.initiation_op.get_color()
 
 class HasNoDependencies(Dependencies):
-    __slots__: List = []
     _abstract_slots = Dependencies._abstract_slots
     def __init__(self) -> None:
         Dependencies.__init__(self)
@@ -541,7 +537,6 @@ class HasNoDependencies(Dependencies):
         pass
 
 class TimeRange(ABC):
-    __slots__: List = []
     _abstract_slots = ['create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
 
     @typecheck
@@ -1168,7 +1163,6 @@ class WaitInterval(object):
         self.end = end
 
 class HasWaiters(ABC):
-    __slots__: List = []
     _abstract_slots = ['wait_intervals']
 
     def __init__(self) -> None:
