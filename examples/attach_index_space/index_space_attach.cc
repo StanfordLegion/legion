@@ -111,6 +111,10 @@ void top_level_task(const Task *task,
   std::vector<int*>  xy_ptrs;
   std::vector<int*> xyz_ptrs;
 
+  std::vector<Realm::ExternalMemoryResource>   z_exts; z_exts.reserve(num_subregions);
+  std::vector<Realm::ExternalMemoryResource>  xy_exts; xy_exts.reserve(num_subregions);
+  std::vector<Realm::ExternalMemoryResource> xyz_exts; xyz_exts.reserve(num_subregions);
+
   IndexAttachLauncher xy_launcher(LEGION_EXTERNAL_INSTANCE, input_lr, false/*restricted*/);
   IndexAttachLauncher z_launcher(LEGION_EXTERNAL_INSTANCE, output_lr, false/*restricted*/); 
   int offset = 0;
@@ -146,21 +150,28 @@ void top_level_task(const Task *task,
           xy_ptr[child_elements+j]  = 3*(offset+j); // y
           z_ptr[j]                  = 0;            // z
       }
+      if (i == 0)
       {
         std::vector<FieldID> attach_fields(2);
         attach_fields[0] = FID_X;
         attach_fields[1] = FID_Y;
-        xy_launcher.attach_array_soa(input_handle, xy_ptr, false/*column major*/,
-                                     attach_fields);
+        xy_launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+        xy_launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
       }
       xy_ptrs.push_back(xy_ptr);
+      xy_exts.emplace_back(Realm::ExternalMemoryResource(xy_ptr, 2*sizeof(int)*child_elements));
+      xy_launcher.add_external_resource(input_handle, &xy_exts.back());
+
+      if (i == 0)
       { 
         std::vector<FieldID> attach_fields(1);
         attach_fields[0] = FID_Z;
-        z_launcher.attach_array_soa(output_handle, z_ptr, false/*column major*/,
-                                    attach_fields);
+        z_launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+        z_launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
       }
       z_ptrs.push_back(z_ptr);
+      z_exts.emplace_back(Realm::ExternalMemoryResource(z_ptr, sizeof(int)*child_elements));
+      z_launcher.add_external_resource(output_handle, &z_exts.back());
     } 
     else 
     { // AOS
@@ -170,19 +181,22 @@ void top_level_task(const Task *task,
         xyz_ptr[3*j+1] = 3*(offset+j);  // y
         xyz_ptr[3*j+2] = 0;             // z
       }
-      std::vector<FieldID> layout_constraint_fields(3);
-      layout_constraint_fields[0] = FID_X;
-      layout_constraint_fields[1] = FID_Y;
-      layout_constraint_fields[2] = FID_Z;
+      if (i == 0)
       {
-        xy_launcher.attach_array_aos(input_handle, xyz_ptr, false/*column major*/,
-                                     layout_constraint_fields);
-      }
-      {
-        z_launcher.attach_array_aos(output_handle, xyz_ptr, false/*column major*/,
-                                    layout_constraint_fields);
+        std::vector<FieldID> layout_constraint_fields(3);
+        layout_constraint_fields[0] = FID_X;
+        layout_constraint_fields[1] = FID_Y;
+        layout_constraint_fields[2] = FID_Z;
+        xy_launcher.initialize_constraints(false/*column major*/, false/*soa*/, layout_constraint_fields);
+        z_launcher.initialize_constraints(false/*column major*/, false/*soa*/, layout_constraint_fields);
+        xy_launcher.privilege_fields.insert(FID_X);
+        xy_launcher.privilege_fields.insert(FID_Y);
+        z_launcher.privilege_fields.insert(FID_Z);
       }
       xyz_ptrs.push_back(xyz_ptr);
+      xyz_exts.emplace_back(Realm::ExternalMemoryResource(xyz_ptr, 3*sizeof(int)*child_elements));
+      xy_launcher.add_external_resource(input_handle, &xyz_exts.back());
+      z_launcher.add_external_resource(output_handle, &xyz_exts.back());
     }
     offset += child_elements;
   }

@@ -2286,19 +2286,11 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual size_t get_coordinate_size(bool range) const = 0;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-				   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode,
-                                   ApEvent &ready_event) = 0;
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event) = 0;
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                 const std::vector<FieldID> &field_ids,
+                                 const std::vector<size_t> &field_sizes,
+                                 const std::vector<std::string> &field_files,
+                                 const OrderingConstraint &dimension_order) = 0;
     public:
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper) = 0;
@@ -2543,19 +2535,11 @@ namespace Legion {
                                       ApEvent instances_ready);
       virtual size_t get_coordinate_size(bool range) const;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                   const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode, 
-                                   ApEvent &ready_event);
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event);
+                                   const std::vector<std::string> &field_files,
+                                   const OrderingConstraint &dimension_order);
     public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,

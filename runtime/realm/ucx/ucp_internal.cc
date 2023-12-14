@@ -1570,6 +1570,38 @@ err:
     }
   }
 
+  void UCPInternal::allgatherv(const char *val_in, size_t bytes,
+                               std::vector<char> &vals_out, std::vector<size_t> &lengths)
+  {
+    int rc = 0;
+    lengths.resize(Network::max_node_id + 1);
+    // Retrieve the sizes of the buffers
+    rc = boot_handle.allgather(&bytes, lengths.data(), sizeof(bytes), &boot_handle);
+    if(rc != 0) {
+      log_ucp.error() << "UCP all gather failed";
+    }
+    // Set up the receive buffer and describe the final buffer layout
+    size_t total = lengths[0];
+    std::vector<int> offsets(Network::max_node_id + 1);
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    offsets[0] = 0;
+    sizes[0] = lengths[0];
+    for(size_t i = 1; i < offsets.size(); i++) {
+      sizes[i] = static_cast<int>(lengths[i]);
+      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i]);
+      total += lengths[i];
+    }
+    vals_out.resize(total);
+
+    // Perform the allgatherv!
+    rc = boot_handle.allgatherv(val_in, vals_out.data(), sizes.data(), offsets.data(),
+                                &boot_handle);
+    if(rc != 0) {
+      log_ucp.error() << "UCP allgatherv failed";
+    }
+  }
+
   size_t UCPInternal::sample_messages_received_count()
   {
     return total_msg_received.load();

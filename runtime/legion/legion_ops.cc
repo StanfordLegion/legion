@@ -23,6 +23,9 @@
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
+#ifdef LEGION_USE_HDF5
+#include "realm/hdf5/hdf5_access.h"
+#endif
 
 namespace Legion {
   namespace Internal {
@@ -20398,145 +20401,142 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 1/*regions*/, 
                            provenance, launcher.static_dependences);
       resource = launcher.resource;
-      footprint = launcher.footprint;
+      layout_constraint_set = launcher.constraints;
       restricted = launcher.restricted;
-      switch (resource)
+      if (launcher.privilege_fields.empty()) 
+        REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
+                        "ATTACH OPERATION ISSUED WITH NO PRIVILEGE "
+                        "FIELDS IN TASK %s (ID %lld)! DID YOU FORGET "
+                        "TO SPECIFY THEM?!?", parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+      requirement = RegionRequirement(launcher.handle, 
+          LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      requirement.privilege_fields = launcher.privilege_fields;
+      if (launcher.resource == LEGION_EXTERNAL_HDF5_FILE)
       {
-        case LEGION_EXTERNAL_POSIX_FILE:
-          {
-            if (launcher.file_fields.empty()) 
-              REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
-                              "FILE ATTACH OPERATION ISSUED WITH NO "
-                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                              "FORGET THEM?!?", parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id())
-            file_name = strdup(launcher.file_name);
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, 
-                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
-            for (std::vector<FieldID>::const_iterator it = 
-                  launcher.file_fields.begin(); it != 
-                  launcher.file_fields.end(); it++)
-              requirement.add_field(*it);
-            file_mode = launcher.mode;       
-            break;
-          }
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-#ifndef LEGION_USE_HDF5
+#ifdef LEGION_USE_HDF5
+        const FieldConstraint &field_constraint =
+          layout_constraint_set.field_constraint;
+        hdf5_field_files.reserve(field_constraint.field_set.size());
+        for (std::vector<FieldID>::const_iterator it =
+              field_constraint.field_set.begin(); it !=
+              field_constraint.field_set.end(); it++)
+        {
+          std::map<FieldID,const char*>::const_iterator finder =
+            launcher.field_files.find(*it);
+          if (finder == launcher.field_files.end())
             REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
-                "Invalid attach HDF5 file in parent task %s (UID %lld). "
-                "Legion must be built with HDF5 support to attach regions "
-                "to HDF5 files", parent_ctx->get_task_name(),
-                parent_ctx->get_unique_id())
+                "Unable to find field file name for field %d of "
+                "HDF5 file attach in parent task %s (UID %lld). "
+                "Every field in an HDF5 attach must have a corresponding "
+                "field file specified field_files.", *it,
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          hdf5_field_files.emplace_back(std::string(finder->second));
+        }
+#else
+        REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
+                  "Invalid attach HDF5 file in parent task %s (UID %lld). "
+                  "Legion must be built with HDF5 support to attach regions "
+                  "to HDF5 files", parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id())
 #endif
-            if (launcher.field_files.empty()) 
-              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
-                            "HDF5 ATTACH OPERATION ISSUED WITH NO "
-                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                            "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id())
-            file_name = strdup(launcher.file_name);
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, 
-                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
-            for (std::map<FieldID,const char*>::const_iterator it = 
-                  launcher.field_files.begin(); it != 
-                  launcher.field_files.end(); it++)
-            {
-              requirement.add_field(it->first);
-              field_map[it->first] = strdup(it->second);
-            }
-            file_mode = launcher.mode;
-            // For HDF5 we use the dimension ordering if there is one, 
-            // otherwise we'll fill it in ourselves
-            const OrderingConstraint &input_constraint = 
-              launcher.constraints.ordering_constraint;
-            OrderingConstraint &output_constraint = 
-              layout_constraint_set.ordering_constraint;
-            const int dims = launcher.handle.index_space.get_dim();
-            if (!input_constraint.ordering.empty())
-            {
-              bool has_dimf = false;
-              for (std::vector<DimensionKind>::const_iterator it = 
-                    input_constraint.ordering.begin(); it !=
-                    input_constraint.ordering.end(); it++)
-              {
-                // dimf should always be the last dimension for HDF5
-                if (has_dimf)
-                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                      "Invalid position of the field dimension for attach "
-                      "operation %lld in task %s (UID %lld). The field "
-                      "dimension must always be the last dimension for layout "
-                      "constraints for HDF5 files.", unique_op_id,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-                else if (*it == LEGION_DIM_F)
-                  has_dimf = true;
-                else if (int(*it) > dims)
-                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                      "Invalid dimension %d for ordering constraint of HDF5 "
-                      "attach operation %lld in task %s (UID %lld). The "
-                      "index space %x only has %d dimensions and split "
-                      "dimensions are not permitted.", *it, unique_op_id,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(), 
-                      launcher.handle.index_space.get_id(), dims)
-                output_constraint.ordering.push_back(*it);
-              }
-              if (int(output_constraint.ordering.size()) != dims)
-                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                    "Ordering constraint for attach %lld in task %s (UID %lld) "
-                    "does not contain all the dimensions required for index "
-                    "space %x which has %d dimensions.", unique_op_id,
-                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                    launcher.handle.index_space.get_id(), dims)
-              if (!input_constraint.contiguous)
-                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                    "Ordering constraint for attach %lld in task %s (UID %lld) "
-                    "was not marked contiguous. All ordering constraints for "
-                    "HDF5 attach operations must be contiguous", unique_op_id,
-                    parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-              if (!has_dimf)
-                output_constraint.ordering.push_back(LEGION_DIM_F);
-            }
-            else
-            {
-              // Fill in the ordering constraints for dimensions based
-              // on the number of dimensions
-              for (int i = 0; i < dims; i++)
-                output_constraint.ordering.push_back(
-                    (DimensionKind)(LEGION_DIM_X + i)); 
-              output_constraint.ordering.push_back(LEGION_DIM_F);
-            }
-            output_constraint.contiguous = true;
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            layout_constraint_set = launcher.constraints;  
-            const std::set<FieldID> &fields = launcher.privilege_fields;
-            if (fields.empty())
-              REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_ATTACH_OPERATION,
-                            "EXTERNAL ARRAY ATTACH OPERATION ISSUED WITH NO "
-                            "PRIVILEGE FIELDS IN TASK %s (ID %lld)! DID YOU "
-                            "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id())
-            if (!layout_constraint_set.pointer_constraint.is_valid)
-              REPORT_LEGION_ERROR(ERROR_ATTACH_OPERATION_MISSING_POINTER,
-                            "EXTERNAL ARRAY ATTACH OPERATION ISSUED WITH NO "
-                            "POINTER CONSTRAINT IN TASK %s (ID %lld)!",
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id())
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, 
-                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
-            for (std::set<FieldID>::const_iterator it = 
-                  fields.begin(); it != fields.end(); it++)
-              requirement.add_field(*it);
-            break;
-          }
-        default:
-          assert(false); // should never get here
       }
+      if (launcher.external_resource != NULL)
+      {
+        external_resource = launcher.external_resource->clone();
+      }
+      else
+      {
+        // These are all the deprecated pathways, turn off deprecated warnings
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+        switch (launcher.resource)
+        {
+          case LEGION_EXTERNAL_POSIX_FILE:
+            {
+              if (launcher.file_fields.empty()) 
+                REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
+                                "FILE ATTACH OPERATION ISSUED WITH NO "
+                                "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                                "FORGET THEM?!?", parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id())
+              external_resource = new Realm::ExternalFileResource(
+                  std::string(launcher.file_name), launcher.mode);
+              break;
+            }
+          case LEGION_EXTERNAL_HDF5_FILE:
+            {
+#ifdef LEGION_USE_HDF5
+              external_resource = new Realm::ExternalHDF5Resource(
+                  launcher.file_name, launcher.mode);
+#endif
+              break;
+            }
+          case LEGION_EXTERNAL_INSTANCE:
+            {
+              external_resource = new Realm::ExternalMemoryResource(
+                  layout_constraint_set.pointer_constraint.ptr,
+                  launcher.footprint, false/*read only*/);
+              const Memory memory = external_resource->suggested_memory();
+              const PointerConstraint &pointer = 
+                layout_constraint_set.pointer_constraint;
+              if ((memory != pointer.memory) && pointer.memory.exists())
+              {
+                const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+                  REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+                };
+                REPORT_LEGION_WARNING(LEGION_WARNING_IMPRECISE_ATTACH_MEMORY,
+                    "WARNING: %s memory " IDFMT " in pointer constraint for "
+                    "attach operation %lld in parent task %s (UID %lld) differs "
+                    "from the Realm-suggested %s memory " IDFMT " for the "
+                    "external instance. Legion is going to use the more precise "
+                    "Realm-specified memory. Please make sure that you do not "
+                    "have any code in your application or your mapper that "
+                    "relies on the instance being in the originally specified "
+                    "memory. To silence this warning you can pass in a NO_MEMORY "
+                    "to the pointer constraint.",
+                    mem_names[pointer.memory.kind()], pointer.memory.id,
+                    unique_op_id, parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id(), mem_names[memory.kind()],
+                    memory.id);
+              }
+              if (!layout_constraint_set.pointer_constraint.is_valid)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_OPERATION_MISSING_POINTER,
+                              "EXTERNAL ARRAY ATTACH OPERATION ISSUED WITH NO "
+                              "POINTER CONSTRAINT IN TASK %s (ID %lld)!",
+                              parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id())
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
+      }
+      layout_constraint_set.specialized_constraint =
+        SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
+      layout_constraint_set.memory_constraint = 
+        MemoryConstraint(external_resource->suggested_memory().kind());
       // Pretend like the privileges for the region requirement are read-write
       // for cases where uses actually want to map it
       requirement.privilege = LEGION_READ_WRITE;
@@ -20557,8 +20557,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Operation::activate();
-      file_name = NULL;
-      footprint = 0;
+      termination_event = ApEvent::NO_AP_EVENT;
+      external_resource = NULL;
       restricted = true;
     }
 
@@ -20567,24 +20567,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Operation::deactivate(false/*free*/);
-      if (file_name != NULL)
-      {
-        free(const_cast<char*>(file_name));
-        file_name = NULL;
-      }
-      for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
-            it != field_map.end(); it++)
-      {
-        free(const_cast<char*>(it->second));
-      }
-      field_map.clear();
-      field_pointers_map.clear();
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
       external_instances.clear();
+      hdf5_field_files.clear();
       layout_constraint_set = LayoutConstraintSet();
+      if (external_resource != NULL)
+        delete external_resource;
       if (freeop)
         runtime->free_attach_op(this);
     }
@@ -20627,26 +20618,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       external_instances.resize(1);
-      switch (resource)
-      {
-        case LEGION_EXTERNAL_POSIX_FILE:
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-            external_instances[0] = 
-              runtime->forest->create_external_instance(this, requirement, 
-                                              requirement.instance_fields);
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            external_instances[0] = 
-              runtime->forest->create_external_instance(this, requirement,
-                        layout_constraint_set.field_constraint.field_set);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      external_instances[0] = 
+        runtime->forest->create_external_instance(this, requirement,
+                  layout_constraint_set.field_constraint.field_set);
     }
 
     //--------------------------------------------------------------------------
@@ -20772,7 +20746,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent ready_event;
-      LayoutConstraintSet constraints;
       PhysicalInstance result = PhysicalInstance::NO_INST;
       LgEvent unique_event;
       Realm::ProfilingRequestSet requests;
@@ -20784,93 +20757,32 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->add_inst_request(requests, this, unique_event);
       }
-      switch (resource)
-      {
-        case LEGION_EXTERNAL_POSIX_FILE:
-          {
-            std::vector<Realm::FieldID> field_ids(field_set.size());
-            unsigned idx = 0;
-            for (std::vector<FieldID>::const_iterator it = 
-                  field_set.begin(); it != field_set.end(); it++, idx++)
-            {
-	      field_ids[idx] = *it;
-            }
-            result = node->row_source->create_file_instance(file_name,
-                    requests, field_ids, sizes, file_mode, ready_event);
-            constraints.specialized_constraint = 
-              SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);           
-            constraints.field_constraint = 
-              FieldConstraint(requirement.privilege_fields, 
-                              false/*contiguous*/, false/*inorder*/);
-            constraints.memory_constraint = 
-              MemoryConstraint(result.get_location().kind());
-            // TODO: Fill in the other constraints: 
-            // OrderingConstraint, SplittingConstraints DimensionConstraints,
-            // AlignmentConstraints, OffsetConstraints
-            break;
-          }
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-            // First build the set of field paths
-            std::vector<Realm::FieldID> field_ids(field_map.size());
-            std::vector<const char*> field_files(field_map.size());
-            unsigned idx = 0;
-            for (std::map<FieldID,const char*>::const_iterator it = 
-                  field_map.begin(); it != field_map.end(); it++, idx++)
-            {
-	      field_ids[idx] = it->first;
-              field_files[idx] = it->second;
-            }
-            // Now ask the low-level runtime to create the instance
-            result = node->row_source->create_hdf5_instance(file_name, requests,
-                                      field_ids, sizes, field_files,
-                                      layout_constraint_set.ordering_constraint,
-                                      (file_mode == LEGION_FILE_READ_ONLY),
-                                      ready_event);
-            constraints.specialized_constraint = 
-              SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
-            constraints.field_constraint = 
-              FieldConstraint(requirement.privilege_fields, 
-                              false/*contiguous*/, false/*inorder*/);
-            constraints.memory_constraint = 
-              MemoryConstraint(result.get_location().kind());
-            constraints.ordering_constraint = 
-              layout_constraint_set.ordering_constraint;
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            const PointerConstraint &pointer = 
-                                      layout_constraint_set.pointer_constraint;
-#ifdef DEBUG_LEGION
-            assert(pointer.is_valid);
-#endif
-            ready_event = create_realm_instance(node->row_source, pointer,
-                                      field_set, sizes, requests, result);
-            constraints = layout_constraint_set;
-            constraints.specialized_constraint =
-              SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
-            const Memory memory = result.get_location();
-            constraints.memory_constraint = MemoryConstraint(memory.kind());
-            constraints.pointer_constraint = 
-              PointerConstraint(memory, pointer.ptr);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      // If we're doing an HDF5 instance creation we have to make a special
+      // instance layout using HDF5 pieces. It's a bit unforuntate that we
+      // have to have this special path but it is what it is
+      Realm::InstanceLayoutGeneric *ilg = hdf5_field_files.empty() ?
+        // Normal path
+        node->row_source->create_layout(layout_constraint_set, field_set, sizes,
+            false/*compact*/) :
+        // Special path for HDF5
+        node->row_source->create_hdf5_layout(field_set, sizes, hdf5_field_files,
+            layout_constraint_set.ordering_constraint);
+      const size_t footprint = ilg->bytes_used;
+      ready_event = ApEvent(PhysicalInstance::create_external_instance(
+            result, external_resource->suggested_memory(), ilg, 
+            *external_resource, requests));
       if (runtime->profiler != NULL)
       {
         runtime->profiler->record_physical_instance_region(unique_event,
                                                            requirement.region);
         runtime->profiler->record_physical_instance_layout(unique_event,
-            requirement.region.field_space, constraints);
+            requirement.region.field_space, layout_constraint_set);
       }
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make it
       // Only external instances can be non-local, file instances
       // are always "local" to the node that they are on
-      if ((resource == LEGION_EXTERNAL_INSTANCE) && 
+      if ((resource == LEGION_EXTERNAL_INSTANCE) &&
           (result.address_space() != runtime->address_space))
       {
         Serializer rez;
@@ -20883,7 +20795,7 @@ namespace Legion {
           rez.serialize(ready_event);
           rez.serialize(unique_event);
           rez.serialize(footprint);
-          constraints.serialize(rez);
+          layout_constraint_set.serialize(rez);
           rez.serialize(external_mask);
           rez.serialize<size_t>(field_set.size());
           for (unsigned idx = 0; idx < field_set.size(); idx++)
@@ -20911,7 +20823,7 @@ namespace Legion {
       }
       else // Local so we can just do this call here
         return node->column_source->create_external_manager(result, ready_event,
-            footprint, constraints, field_set, sizes, external_mask, 
+            footprint, layout_constraint_set, field_set, sizes, external_mask, 
             mask_index_map, unique_event, node, serdez,
             runtime->get_available_distributed_id());
     }
@@ -21218,115 +21130,14 @@ namespace Legion {
         requirement = 
           RegionRequirement(upper_bound->as_partition_node()->handle,
             0/*fake*/, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      if (launcher.privilege_fields.empty()) 
+        REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
+                        "INDEX ATTACH OPERATION ISSUED WITH NO PRIVILEGE "
+                        " FIELDS IN TASK %s (ID %lld)! DID YOU FORGET "
+                        "TO SPECIFY THEM?!?", parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
       requirement.privilege_fields = launcher.privilege_fields;
       launch_space = launch_bounds;
-      // Do some error checking
-      OrderingConstraint output_constraint;
-      switch (launcher.resource)
-      {
-        case LEGION_EXTERNAL_POSIX_FILE:
-          {
-            if (launcher.file_fields.empty() && !replicated) 
-              REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
-                              "FILE INDEX ATTACH OPERATION ISSUED WITH NO "
-                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                              "FORGET THEM?!?", parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id())
-            requirement.privilege_fields.insert(
-                launcher.file_fields.begin(), launcher.file_fields.end());
-            break;
-          }
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-#ifndef LEGION_USE_HDF5
-            REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
-                "Invalid index attach HDF5 file in parent task %s (UID %lld). "
-                "Legion must be built with HDF5 support to attach regions "
-                "to HDF5 files", parent_ctx->get_task_name(),
-                parent_ctx->get_unique_id())
-#endif
-            if (launcher.field_files.empty() && !replicated) 
-              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
-                            "HDF5 INDEX ATTACH OPERATION ISSUED WITH NO "
-                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                            "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id())
-            for (std::map<FieldID,std::vector<const char*> >::const_iterator
-                  it = launcher.field_files.begin();
-                  it != launcher.field_files.end(); it++)
-              requirement.privilege_fields.insert(it->first);
-            const OrderingConstraint &input_constraint = 
-              launcher.constraints.ordering_constraint;
-            const int dims = launcher.parent.index_space.get_dim();
-            if (!input_constraint.ordering.empty())
-            {
-              bool has_dimf = false;
-              for (std::vector<DimensionKind>::const_iterator it = 
-                    input_constraint.ordering.begin(); it !=
-                    input_constraint.ordering.end(); it++)
-              {
-                // dimf should always be the last dimension for HDF5
-                if (has_dimf)
-                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                      "Invalid position of the field dimension for index attach"
-                      " operation %lld in task %s (UID %lld). The field "
-                      "dimension must always be the last dimension for layout "
-                      "constraints for HDF5 files.", unique_op_id,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-                else if (*it == LEGION_DIM_F)
-                  has_dimf = true;
-                else if (int(*it) > dims)
-                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                      "Invalid dimension %d for ordering constraint of HDF5 "
-                      "index attach operation %lld in task %s (UID %lld). The "
-                      "index space %x only has %d dimensions and split "
-                      "dimensions are not permitted.", *it, unique_op_id,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(), 
-                      launcher.parent.index_space.get_id(), dims)
-                output_constraint.ordering.push_back(*it);
-              }
-              if (int(output_constraint.ordering.size()) != dims)
-                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                    "Ordering constraint for index attach %lld in task %s "
-                    "(UID %lld) does not contain all the dimensions required "
-                    "for index space %x which has %d dimensions.", unique_op_id,
-                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                    launcher.parent.index_space.get_id(), dims)
-              if (!input_constraint.contiguous)
-                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
-                    "Ordering constraint for index attach %lld in task %s "
-                    "(UID %lld) was not marked contiguous. All ordering "
-                    "constraints for HDF5 attach operations must be contiguous",
-                    unique_op_id, parent_ctx->get_task_name(), 
-                    parent_ctx->get_unique_id())
-              if (!has_dimf)
-                output_constraint.ordering.push_back(LEGION_DIM_F);
-            }
-            else
-            {
-              // Fill in the ordering constraints for dimensions based
-              // on the number of dimensions
-              for (int i = 0; i < dims; i++)
-                output_constraint.ordering.push_back(
-                    (DimensionKind)(LEGION_DIM_X + i)); 
-              output_constraint.ordering.push_back(LEGION_DIM_F);
-            }
-            output_constraint.contiguous = true;
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            if (launcher.privilege_fields.empty())
-              REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_ATTACH_OPERATION,
-                            "EXTERNAL ARRAY INDEX ATTACH OPERATION ISSUED WITH "
-                            "NO PRIVILEGE FIELDS IN TASK %s (ID %lld)! DID YOU "
-                            "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id())
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
       // Create the result and the point attach operations
       ExternalResourcesImpl *result = new ExternalResourcesImpl(ctx,
           indexes.size(), upper_bound, launch_bounds, launcher.parent,
@@ -21337,7 +21148,7 @@ namespace Legion {
         points[idx] = runtime->get_available_point_attach_op();
         const DomainPoint index_point = Point<1>(indexes[idx]);
         PhysicalRegionImpl *region = points[idx]->initialize(this, ctx,
-            launcher, output_constraint, index_point, indexes[idx]);
+            launcher, index_point, indexes[idx]);
         result->set_region(idx, region);
       }
       if (runtime->legion_spy_enabled)
@@ -21792,7 +21603,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl* PointAttachOp::initialize(IndexAttachOp *own,
                          InnerContext *ctx, const IndexAttachLauncher &launcher,
-                         const OrderingConstraint &ordering_constraint,
                          const DomainPoint &point, unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -21804,87 +21614,152 @@ namespace Legion {
       owner = own;
       index_point = point;
       context_index = own->get_ctx_index();
-      resource = launcher.resource;
-      if (index < launcher.footprint.size())
-        footprint = launcher.footprint[index];
+      layout_constraint_set = launcher.constraints;
       restricted = launcher.restricted;
-      switch (resource)
+      requirement = RegionRequirement(launcher.handles[index], 
+          LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      requirement.privilege_fields = launcher.privilege_fields;
+      
+#ifdef LEGION_USE_HDF5
+      if (launcher.resource == LEGION_EXTERNAL_HDF5_FILE)
       {
-        case LEGION_EXTERNAL_POSIX_FILE:
-          {
-            if (index >= launcher.file_names.size())
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
-                  "Insufficient 'file_names' provided by index attach launch "
-                  "in parent task %s (UID %lld). Launcher has %zd logical "
-                  "regions but only %zd POSIX file names.", 
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                  launcher.handles.size(), launcher.file_names.size())
-            file_name = strdup(launcher.file_names[index]);
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handles[index], 
-                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
-            for (std::vector<FieldID>::const_iterator it = 
-                  launcher.file_fields.begin(); it != 
-                  launcher.file_fields.end(); it++)
-              requirement.add_field(*it);
-            file_mode = launcher.mode;
-            break;
-          }
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-            if (index >= launcher.file_names.size())
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
-                  "Insufficient 'file_names' provided by index attach launch "
-                  "in parent task %s (UID %lld). Launcher has %zd logical "
-                  "regions but only %zd HDF5 file names.", 
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                  launcher.handles.size(), launcher.file_names.size())
-            file_name = strdup(launcher.file_names[index]);
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handles[index], 
-                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
-            for (std::map<FieldID,std::vector<const char*> >::const_iterator
-                  it = launcher.field_files.begin();
-                  it != launcher.field_files.end(); it++)
-            {
-              if (index >= it->second.size())
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
-                    "Insufficient 'field_files' provided by index attach launch"
-                    " for field %d in parent task %s (UID %lld). Launcher has "
-                    "%zd logical regions but only %zd field file names.",
-                    it->first, parent_ctx->get_task_name(),
-                    parent_ctx->get_unique_id(), launcher.handles.size(), 
-                    it->second.size())
-              requirement.add_field(it->first);
-              field_map[it->first] = strdup(it->second[index]);
-            }
-            file_mode = launcher.mode;
-            layout_constraint_set.ordering_constraint = ordering_constraint;
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            layout_constraint_set = launcher.constraints;  
-            if (index >= launcher.pointers.size())
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
-                  "Insufficient 'pointers' provided by index attach launch "
-                  "in parent task %s (UID %lld). Launcher has %zd logical "
-                  "regions but only %zd pointers names.", 
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                  launcher.handles.size(), launcher.pointers.size())
-            layout_constraint_set.pointer_constraint = launcher.pointers[index];
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handles[index], 
-                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
-            const std::set<FieldID> &fields = launcher.privilege_fields;
-            for (std::set<FieldID>::const_iterator it = 
-                  fields.begin(); it != fields.end(); it++)
-              requirement.add_field(*it);
-            break;
-          }
-        default:
-          assert(false); // should never get here
+        const FieldConstraint &field_constraint =
+          layout_constraint_set.field_constraint;
+        hdf5_field_files.reserve(field_constraint.field_set.size());
+        for (std::vector<FieldID>::const_iterator it =
+              field_constraint.field_set.begin(); it !=
+              field_constraint.field_set.end(); it++)
+        {
+          std::map<FieldID,std::vector<const char*> >::const_iterator
+            finder = launcher.field_files.find(*it);
+          if ((finder == launcher.field_files.end()) ||
+              (index >= finder->second.size()))
+            REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
+                "Unable to find field file name for field %d of "
+                "HDF5 file attach in parent task %s (UID %lld). "
+                "Every field in an HDF5 attach must have a corresponding "
+                "field file specified field_files.", *it,
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          hdf5_field_files.emplace_back(std::string(finder->second[index]));
+        }
       }
+#endif
+      if (!launcher.external_resources.empty())
+      {
+        if (index >= launcher.external_resources.size())
+          REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+              "Insufficient 'external_resource' provided by index attach "
+              "launch in parent task %s (UID %lld). Launcher has %zd logical "
+              "regions but only %zd external resources.", 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              launcher.handles.size(), launcher.external_resources.size())
+        external_resource = launcher.external_resources[index]->clone(); 
+      }
+      else
+      {
+        // These are all the deprecated pathways, turn off deprecated warnings
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+        switch (launcher.resource)
+        {
+          case LEGION_EXTERNAL_POSIX_FILE:
+            {
+              if (index >= launcher.file_names.size())
+                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                    "Insufficient 'file_names' provided by index attach launch "
+                    "in parent task %s (UID %lld). Launcher has %zd logical "
+                    "regions but only %zd POSIX file names.", 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                    launcher.handles.size(), launcher.file_names.size())
+              external_resource = new Realm::ExternalFileResource(
+                  std::string(launcher.file_names[index]), launcher.mode); 
+              break;
+            }
+          case LEGION_EXTERNAL_HDF5_FILE:
+            {
+              if (index >= launcher.file_names.size())
+                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                    "Insufficient 'file_names' provided by index attach launch "
+                    "in parent task %s (UID %lld). Launcher has %zd logical "
+                    "regions but only %zd HDF5 file names.", 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                    launcher.handles.size(), launcher.file_names.size())
+#ifndef LEGION_USE_HDF5
+              REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
+                  "Invalid attach HDF5 file in parent task %s (UID %lld). "
+                  "Legion must be built with HDF5 support to attach regions "
+                  "to HDF5 files", parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id())
+#else
+              external_resource = new Realm::ExternalHDF5Resource(
+                  launcher.file_names[index], launcher.mode);
+#endif
+              break;
+            }
+          case LEGION_EXTERNAL_INSTANCE:
+            {
+              if (index >= launcher.pointers.size())
+                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                    "Insufficient 'pointers' provided by index attach launch "
+                    "in parent task %s (UID %lld). Launcher has %zd logical "
+                    "regions but only %zd pointers names.", 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                    launcher.handles.size(), launcher.pointers.size())
+              const PointerConstraint &pointer = launcher.pointers[index];
+              external_resource = new Realm::ExternalMemoryResource(
+                pointer.ptr, launcher.footprint[index], false/*read only*/);
+              const Memory memory = external_resource->suggested_memory();
+              if ((memory != pointer.memory) && pointer.memory.exists())
+              {
+                const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+                  REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+                };
+                REPORT_LEGION_WARNING(LEGION_WARNING_IMPRECISE_ATTACH_MEMORY,
+                    "WARNING: %s memory " IDFMT " in pointer constraint for "
+                    "attach operation %lld in parent task %s (UID %lld) "
+                    "differs from the Realm-suggested %s memory " IDFMT " "
+                    "for the external instance. Legion is going to use the "
+                    "more precise Realm-specified memory. Please make sure "
+                    "that you do not have any code in your application or "
+                    "your mapper that relies on the instance being in the "
+                    "originally specified memory. To silence this warning "
+                    "you can pass in a NO_MEMORY to the pointer constraint.",
+                    mem_names[pointer.memory.kind()], pointer.memory.id,
+                    unique_op_id, parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id(), mem_names[memory.kind()],
+                    memory.id);
+              }
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
+      }
+      layout_constraint_set.specialized_constraint =
+        SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
+      layout_constraint_set.memory_constraint = 
+        MemoryConstraint(external_resource->suggested_memory().kind());
       // Pretend like the privileges for the region requirement are read-write
       // for cases where uses actually want to map it
       requirement.privilege = LEGION_READ_WRITE;
