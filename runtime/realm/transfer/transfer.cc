@@ -2778,13 +2778,13 @@ namespace Realm {
                                    redop_id, total_bytes, src_frags, dst_frags,
                                    best_cost, channel, kind)) {
         log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
-                         << ",n:" << src_node << ")->" << dst_mem << " (" << dst_mem.kind()
-                         << ",n:" << dst_node << ") cost=" << best_cost
+                         << ",n:" << src_node << ")->" << dst_mem << " ("
+                         << dst_mem.kind() << ",n:" << dst_node << ") cost=" << best_cost
                          << " channel=" << channel->kind;
         info.path.assign(1, src_mem);
-	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
-	  info.path.push_back(dst_mem);
-	  info.xd_channels.assign(1, channel);
+        if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+          info.path.push_back(dst_mem);
+          info.xd_channels.assign(1, channel);
         } else
           info.xd_channels.clear();
       }
