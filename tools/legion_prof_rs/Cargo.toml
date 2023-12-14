@@ -2,7 +2,7 @@
 name = "legion_prof"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.67"
+rust-version = "1.74"
 
 [features]
 default = []
