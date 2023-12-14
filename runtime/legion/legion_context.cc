@@ -18870,8 +18870,7 @@ namespace Legion {
           hasher.hash(it->first, "field_files");
           hasher.hash(it->second, strlen(it->second), "field_files");
         }
-        hash_layout_constraints(hasher, launcher.constraints, 
-                                !launcher.collective);
+        hash_layout_constraints(hasher, launcher.constraints,false/*pointers*/);
         for (std::set<FieldID>::const_iterator it = 
               launcher.privilege_fields.begin(); it !=
               launcher.privilege_fields.end(); it++)
@@ -18947,6 +18946,7 @@ namespace Legion {
         hasher.hash(launcher.restricted, "restricted");
         hasher.hash(launcher.deduplicate_across_shards,
                     "deduplicate_across_shards");
+        hash_layout_constraints(hasher, launcher.constraints,false/*pointers*/);
         // Everything else other than the privilege fields is sharded already
         // Make sure we include privilege fields from the files too
         // Effectively the direct privilege fields or privilege fields 
