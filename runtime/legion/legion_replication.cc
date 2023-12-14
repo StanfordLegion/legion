@@ -6855,9 +6855,8 @@ namespace Legion {
             break;
           case LEGION_EXTERNAL_INSTANCE:
             {
-              const PointerConstraint &pointer =
-                                      layout_constraint_set.pointer_constraint;
-              const AddressSpaceID owner_space = pointer.memory.address_space();
+              const Memory memory = external_resource->suggested_memory();
+              const AddressSpaceID owner_space = memory.address_space();
               const ShardMapping &mapping = ctx->shard_manager->get_mapping();
               for (ShardID sid = 0; sid < mapping.size(); sid++)
               {
@@ -7047,9 +7046,6 @@ namespace Legion {
                                               const FieldMask &external_mask)
     //--------------------------------------------------------------------------
     {
-      ApEvent ready_event;
-      LayoutConstraintSet constraints;
-      PhysicalInstance instance = PhysicalInstance::NO_INST;
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -7062,131 +7058,54 @@ namespace Legion {
       const bool making_instance = (collective_instances &&
          (is_first_local_shard || !deduplicate_across_shards)) ||
         ((single_broadcast != NULL) && single_broadcast->is_origin());
+      ApEvent ready_event;
       LgEvent unique_event;
-      Realm::ProfilingRequestSet requests;
-      if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
-          making_instance)
+      size_t footprint = 0;
+      PhysicalInstance instance = PhysicalInstance::NO_INST;
+      if (making_instance)
       {
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
-        if (runtime->profiler != NULL)
-          runtime->profiler->add_inst_request(requests, this, unique_event);
-      }
-      if (is_first_local_shard || 
-          (collective_instances && !deduplicate_across_shards))
-      {
-        switch (resource)
+        Realm::ProfilingRequestSet requests;
+        if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
+            making_instance)
         {
-          case LEGION_EXTERNAL_POSIX_FILE:
-            {
-              std::vector<Realm::FieldID> field_ids(field_set.size());
-              unsigned idx = 0;
-              for (std::vector<FieldID>::const_iterator it = 
-                    field_set.begin(); it != field_set.end(); it++, idx++)
-              {
-                field_ids[idx] = *it;
-              }
-              // Do the call to make the instance if we're collective
-              // or we're the origin for the single instance case
-              if (collective_instances || single_broadcast->is_origin())
-              {
-                instance = node->row_source->create_file_instance(file_name,
-                    requests, field_ids, field_sizes, file_mode, ready_event);
-                if (!collective_instances)
-                  single_broadcast->broadcast(
-                      {instance, ready_event, unique_event});
-                constraints.memory_constraint =
-                  MemoryConstraint(instance.get_location().kind());
-              }
-              constraints.specialized_constraint = 
-                SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);
-              constraints.field_constraint = 
-                FieldConstraint(requirement.privilege_fields, 
-                                false/*contiguous*/, false/*inorder*/);
-              // TODO: Fill in the other constraints: 
-              // OrderingConstraint, SplittingConstraints DimensionConstraints,
-              // AlignmentConstraints, OffsetConstraints
-              break;
-            }
-          case LEGION_EXTERNAL_HDF5_FILE:
-            {
-              // First build the set of field paths
-              std::vector<Realm::FieldID> field_ids(field_map.size());
-              std::vector<const char*> field_files(field_map.size());
-              unsigned idx = 0;
-              for (std::map<FieldID,const char*>::const_iterator it = 
-                    field_map.begin(); it != field_map.end(); it++, idx++)
-              {
-                field_ids[idx] = it->first;
-                field_files[idx] = it->second;
-              }
-              // Now ask Realm to create the instance
-              if (collective_instances || single_broadcast->is_origin())
-              {
-                instance = node->row_source->create_hdf5_instance(file_name,
-                              requests, field_ids, field_sizes, field_files,
-                              layout_constraint_set.ordering_constraint,
-                              (file_mode == LEGION_FILE_READ_ONLY),
-                              ready_event);
-                if (!collective_instances)
-                  single_broadcast->broadcast(
-                      {instance, ready_event, unique_event});
-                constraints.memory_constraint =
-                  MemoryConstraint(instance.get_location().kind());
-              }
-              constraints.specialized_constraint = 
-                SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
-              constraints.field_constraint = 
-                FieldConstraint(requirement.privilege_fields, 
-                                false/*contiguous*/, false/*inorder*/);
-              constraints.ordering_constraint = 
-                layout_constraint_set.ordering_constraint;
-              break;
-            }
-          case LEGION_EXTERNAL_INSTANCE:
-            {
-              const PointerConstraint &pointer = 
-                              layout_constraint_set.pointer_constraint;
-#ifdef DEBUG_LEGION
-              assert(pointer.is_valid);
-#endif
-              if (collective_instances || single_broadcast->is_origin())
-              {
-                ready_event = create_realm_instance(node->row_source, pointer,
-                                  field_set, field_sizes, requests, instance);
-                if (!collective_instances)
-                  single_broadcast->broadcast(
-                      {instance, ready_event, unique_event});
-                constraints.memory_constraint =
-                  MemoryConstraint(instance.get_location().kind());
-              }
-              constraints = layout_constraint_set;
-              constraints.specialized_constraint = 
-                SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
-              break;
-            }
-          default:
-            assert(false);
+          const RtUserEvent unique = Runtime::create_rt_user_event();
+          Runtime::trigger_event(unique);
+          unique_event = unique;
+          if (runtime->profiler != NULL)
+            runtime->profiler->add_inst_request(requests, this, unique_event);
+        }
+        // If we're doing an HDF5 instance creation we have to make a special
+        // instance layout using HDF5 pieces. It's a bit unforuntate that we
+        // have to have this special path but it is what it is
+        Realm::InstanceLayoutGeneric *ilg = hdf5_field_files.empty() ?
+          // Normal path
+          node->row_source->create_layout(layout_constraint_set, field_set,
+              field_sizes, false/*compact*/) :
+          // Special path for HDF5
+          node->row_source->create_hdf5_layout(field_set, field_sizes, 
+              hdf5_field_files, layout_constraint_set.ordering_constraint);
+        footprint = ilg->bytes_used;
+        ready_event = ApEvent(PhysicalInstance::create_external_instance(
+              instance, external_resource->suggested_memory(), ilg, 
+              *external_resource, requests));
+        if (single_broadcast != NULL)
+          single_broadcast->broadcast({instance, ready_event, unique_event});
+        if (runtime->profiler != NULL)
+        {
+          runtime->profiler->record_physical_instance_region(unique_event,
+                                                      requirement.region);
+          runtime->profiler->record_physical_instance_layout(unique_event,
+              requirement.region.field_space, layout_constraint_set);
         }
       }
       // Do the arrival on the attach barrier for any collective instances
-      if ((single_broadcast != NULL) && !single_broadcast->is_origin())
+      else if ((single_broadcast != NULL) && !single_broadcast->is_origin())
       {
         // If we're making a single instance get the name
         const InstanceEvents result = single_broadcast->get_value();
         instance = result.instance;
         ready_event = result.ready_event;
         unique_event = result.unique_event;
-        constraints.memory_constraint =
-          MemoryConstraint(instance.get_location().kind());
-      }
-      else if ((runtime->profiler != NULL) && making_instance)
-      {
-        runtime->profiler->record_physical_instance_region(unique_event,
-                                                           requirement.region);
-        runtime->profiler->record_physical_instance_layout(unique_event,
-            requirement.region.field_space, constraints);
       }
       ShardManager *shard_manager = repl_ctx->shard_manager;
       // Now we need to make the instance to span the shards
@@ -7198,7 +7117,7 @@ namespace Legion {
           {
             PhysicalManager *manager =
               node->column_source->create_external_manager(instance,
-                  ready_event, footprint, constraints, field_set, 
+                  ready_event, footprint, layout_constraint_set, field_set,
                   field_sizes, external_mask, mask_index_map, unique_event,
                   node, serdez, runtime->get_available_distributed_id());
             shard_manager->exchange_shard_local_op_data(context_index, 
@@ -7213,9 +7132,9 @@ namespace Legion {
         {
           // Each shard is just going to make its own physical manager
           return node->column_source->create_external_manager(instance,
-              ready_event, footprint, constraints, field_set, field_sizes,
-              external_mask, mask_index_map, unique_event, node, serdez, 
-              runtime->get_available_distributed_id());
+              ready_event, footprint, layout_constraint_set, field_set,
+              field_sizes, external_mask, mask_index_map, unique_event, node,
+              serdez, runtime->get_available_distributed_id());
         }
       }
       else
@@ -7248,7 +7167,7 @@ namespace Legion {
               rez.serialize(ready_event);
               rez.serialize(unique_event);
               rez.serialize(footprint);
-              constraints.serialize(rez);
+              layout_constraint_set.serialize(rez);
               rez.serialize(external_mask);
               rez.serialize<size_t>(field_set.size());
               for (unsigned idx = 0; idx < field_set.size(); idx++)
@@ -7275,7 +7194,8 @@ namespace Legion {
             manager_did.store(did_broadcast->get_value(false/*not origin*/));
         }
         else
-          manager_did.store(did_broadcast->get_value(!did_broadcast->is_origin()));
+          manager_did.store(did_broadcast->get_value(
+                !did_broadcast->is_origin()));
         // Making an individual instance across all shards
         // Have the first shard be the one to make it 
         if (is_first_local_shard)
@@ -7283,8 +7203,8 @@ namespace Legion {
           mapping->add_reference();
           PhysicalManager *manager =
             node->column_source->create_external_manager(instance, ready_event,
-            footprint, constraints, field_set, field_sizes, external_mask,
-            mask_index_map, unique_event, node, serdez, 
+            footprint, layout_constraint_set, field_set, field_sizes,
+            external_mask, mask_index_map, unique_event, node, serdez, 
             manager_did.load(), mapping);
           if (mapping->remove_reference())
             delete mapping;

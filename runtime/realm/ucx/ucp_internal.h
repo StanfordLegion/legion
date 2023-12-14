@@ -151,6 +151,10 @@ namespace UCP {
     void barrier();
     void broadcast(NodeID root, const void *val_in, void *val_out, size_t bytes);
     void gather(NodeID root, const void *val_in, void *vals_out, size_t bytes);
+    void allgather(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                   size_t *lengths);
+    void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                    std::vector<size_t> &lengths);
     size_t sample_messages_received_count();
     bool check_for_quiescence(size_t sampled_receive_count);
     size_t recommended_max_payload(const RemoteAddress *dest_payload_addr,

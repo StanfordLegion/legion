@@ -4720,47 +4720,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_file_instance(
-                                   const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode,
-                                   ApEvent &ready_event)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
-      // Have to wait for the index space to be ready if necessary
-      Realm::IndexSpace<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      Realm::InstanceLayoutConstraints ilc(field_ids, field_sizes, 0 /*SOA*/);
-      int dim_order[DIM];
-      for (int i = 0; i < DIM; i++)
-	dim_order[i] = i;
-      Realm::InstanceLayoutGeneric *ilg;
-      ilg = Realm::InstanceLayoutGeneric::choose_instance_layout(local_space,
-							       ilc, dim_order);
-
-      Realm::ExternalFileResource res(file_name, file_mode);
-      PhysicalInstance result;
-      ready_event = ApEvent(PhysicalInstance::create_external_instance(result, 
-          res.suggested_memory(), ilg, res, requests));
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_hdf5_instance(
-                                    const char *file_name,
-                                    const Realm::ProfilingRequestSet &requests,
-				    const std::vector<Realm::FieldID> &field_ids,
+    Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_hdf5_layout(
+				    const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    const std::vector<const char*> &field_files,
-                                    const OrderingConstraint &dimension_order,
-                                    bool read_only, ApEvent &ready_event)
+                                    const std::vector<std::string> &field_files,
+                                    const OrderingConstraint &dimension_order)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
 #ifdef DEBUG_LEGION
       assert(int(dimension_order.ordering.size()) == (DIM+1));
       assert(dimension_order.ordering.back() == LEGION_DIM_F);
@@ -4768,9 +4734,6 @@ namespace Legion {
       // Have to wait for the index space to be ready if necessary
       Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
-      // No profiling for these kinds of instances currently
-      PhysicalInstance result = PhysicalInstance::NO_INST;
-
 #ifdef LEGION_USE_HDF5
       Realm::InstanceLayout<DIM,T> *layout = new Realm::InstanceLayout<DIM,T>;
       layout->bytes_used = 0;
@@ -4789,6 +4752,7 @@ namespace Legion {
 	if(!local_space.empty()) {
 	  Realm::HDF5LayoutPiece<DIM,T> *hlp = new Realm::HDF5LayoutPiece<DIM,T>;
 	  hlp->bounds = local_space.bounds;
+          layout->bytes_used += hlp->bounds.volume() * fl.size_in_bytes;
 	  hlp->dsetname = field_files[i];
 	  for (int j = 0; j < DIM; j++)	    
 	    hlp->offset[j] = 0;
@@ -4800,14 +4764,11 @@ namespace Legion {
 	  layout->piece_lists[i].pieces.push_back(hlp);
 	}
       }
-
-      Realm::ExternalHDF5Resource res(file_name, read_only);
-      ready_event = ApEvent(PhysicalInstance::create_external_instance(result,
-		            res.suggested_memory(), layout, res, requests));
+      return layout;
 #else
       assert(false); // should never get here
+      return NULL;
 #endif
-      return result;
     }
 
     //--------------------------------------------------------------------------
