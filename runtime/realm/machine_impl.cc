@@ -1087,6 +1087,13 @@ namespace Realm {
       return found_channel;
     }
 
+    void MachineImpl::update_kind_maps(void)
+    {
+      for(std::pair<const int, Realm::MachineNodeInfo *> &node_info : nodeinfos) {
+        node_info.second->update_kind_maps();
+      }
+    }
+
     void MachineImpl::enumerate_mem_mem_affinities(void) {
       AutoLock<> al(mutex);
       // This only enumerates the local-local, local-remote, and remote-local
@@ -3053,65 +3060,5 @@ namespace Realm {
 #endif
     return chosen;
   }
-
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class NodeAnnounceMessage
-  //
-
-  static atomic<int> announcements_received(0);
-  static atomic<int> announce_fragments_expected(0);
-
-  /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
-						      const void *data, size_t datalen)
-
-  {
-    log_annc.info() << "received fragment from " << sender
-                    << ": num_fragments=" << args.num_fragments;
-    
-    if(args.num_fragments > 0) {
-      // update the remaining fragment count and then mark that we've got
-      //  this sender's contribution
-      announce_fragments_expected.fetch_add(args.num_fragments);
-      announcements_received.fetch_add_acqrel(1);
-    }
-
-    get_machine()->parse_node_announce_data(sender,
-                                            data, datalen, true);
-
-    // this fragment has been handled
-    announce_fragments_expected.fetch_sub_acqrel(1);
-  }
-
-  /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
-  {
-    // two steps:
-
-    // 1) wait until we've got the fragment-count-bearing message from every
-    //  other node
-    while(announcements_received.load() < Network::max_node_id) {
-      Thread::yield();
-      //do_some_polling();
-    }
-
-    // 2) then wait for the expected fragment count to drop to zero
-    while(announce_fragments_expected.load_acquire() > 0) {
-      Thread::yield();
-    }
-
-    log_annc.info("node %d has received all of its announcements", Network::my_node_id);
-
-    // 3) go ahead and build the by-kind maps in each node info
-    MachineImpl *impl = get_machine();
-    for(std::map<int, MachineNodeInfo *>::iterator it = impl->nodeinfos.begin();
-        it != impl->nodeinfos.end();
-        ++it)
-      it->second->update_kind_maps();
-  }
-  
-
-  ActiveMessageHandlerReg<NodeAnnounceMessage> node_announce_message;
 
 }; // namespace Realm
