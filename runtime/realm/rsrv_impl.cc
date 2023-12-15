@@ -164,11 +164,13 @@ namespace Realm {
       //printf("LOCK(" IDFMT ", %d, %d, " IDFMT ") -> ", id, mode, exclusive, wait_on.id);
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
-      if(wait_on.has_triggered()) {
+      bool poisoned = false;
+      if(wait_on.has_triggered_faultaware(poisoned)) {
 	Event e = get_runtime()->get_lock_impl(*this)->acquire(mode, exclusive,
 							       ReservationImpl::ACQUIRE_BLOCKING);
-	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e;
-	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
+        log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e
+                               << " poisoned=" << poisoned;
+        //printf("(" IDFMT "/%d)\n", e.id, e.gen);
 	return e;
       } else {
 	Event after_lock = GenEventImpl::create_genevent()->current_event();
@@ -208,11 +210,17 @@ namespace Realm {
     {
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
-      if(wait_on.has_triggered()) {
-	log_reservation.info() << "reservation release: rsrv=" << *this;
-	get_runtime()->get_lock_impl(*this)->release(TimeLimit::responsive());
+
+      bool poisoned = false;
+      if(wait_on.has_triggered_faultaware(poisoned)) {
+        if(!poisoned) {
+          log_reservation.info() << "reservation release: rsrv=" << *this;
+          get_runtime()->get_lock_impl(*this)->release(TimeLimit::responsive());
+        } else {
+          log_reservation.info() << "reservation release: rsrv=" << *this << " dropped";
+        }
       } else {
-	log_reservation.info() << "reservation release: rsrv=" << *this << " wait_on=" << wait_on;
+        log_reservation.info() << "reservation release: rsrv=" << *this << " wait_on=" << wait_on;
 	EventImpl::add_waiter(wait_on, new DeferredUnlockRequest(*this));
       }
     }
