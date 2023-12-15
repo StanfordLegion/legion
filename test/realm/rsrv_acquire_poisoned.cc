@@ -25,15 +25,6 @@ enum
   MAIN_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
 };
 
-enum
-{
-  FID_DATA = 100,
-};
-
-namespace TestConfig {
-  bool distributed_reservation = false;
-};
-
 void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
                Processor p)
 {
