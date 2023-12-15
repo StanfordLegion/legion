@@ -21619,6 +21619,7 @@ namespace Legion {
       requirement = RegionRequirement(launcher.handles[index], 
           LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.privilege_fields;
+      resource = launcher.resource;
       
 #ifdef LEGION_USE_HDF5
       if (launcher.resource == LEGION_EXTERNAL_HDF5_FILE)
