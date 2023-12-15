@@ -4,7 +4,7 @@
 
 using namespace Realm;
 
-TEST(WrappingFIFOIteratorTest, EmptySpan)
+TEST(SequenceAssemblerTest, EmptySpan)
 {
   SequenceAssembler assembler;
   EXPECT_TRUE(assembler.empty());
@@ -12,7 +12,7 @@ TEST(WrappingFIFOIteratorTest, EmptySpan)
   EXPECT_EQ(assembler.span_exists(0, 0), 0);
 }
 
-TEST(WrappingFIFOIteratorTest, SingleSpan)
+TEST(SequenceAssemblerTest, SingleSpan)
 {
   SequenceAssembler assembler;
   EXPECT_TRUE(assembler.empty());
@@ -34,7 +34,9 @@ TEST(WrappingFIFOIteratorTest, SingleSpan)
   EXPECT_EQ(assembler.span_exists(count, count * 2), 0);
 }
 
-TEST(WrappingFIFOIteratorTest, NocontigOutOfOrderSpans)
+// TODO: we need more test cases as not all branches are coverd in
+// `add_span` and `span_exists` calls.
+TEST(SequenceAssemblerTest, NocontigOutOfOrderSpans)
 {
   SequenceAssembler assembler;
 
@@ -48,12 +50,12 @@ TEST(WrappingFIFOIteratorTest, NocontigOutOfOrderSpans)
   
   EXPECT_EQ(assembler.span_exists(beg_span_a, end_span_a), end_span_a);
   EXPECT_EQ(assembler.span_exists(beg_span_b, end_span_b), end_span_b);
-  EXPECT_EQ(assembler.span_exists(0, end_span_b), end_span_a);
+  EXPECT_EQ(assembler.span_exists(4, end_span_b), end_span_a - 4);
 
   EXPECT_FALSE(assembler.empty());
 }
 
-TEST(WrappingFIFOIteratorTest, ContigSpans)
+TEST(SequenceAssemblerTest, ContigSpans)
 {
   SequenceAssembler assembler;
 
