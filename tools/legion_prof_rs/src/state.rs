@@ -12,6 +12,8 @@ use rayon::prelude::*;
 
 use serde::Serialize;
 
+use slice_group_by::GroupBy;
+
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
@@ -1724,7 +1726,7 @@ impl Variant {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct ProfUID(pub u64);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Base {
     pub prof_uid: ProfUID,
     pub level: Option<u32>,
@@ -1959,7 +1961,7 @@ impl From<spy::serialize::EventID> for EventID {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
 pub enum CopyKind {
-    Copy = 0,
+    Direct = 0,
     Gather = 1,
     Scatter = 2,
     GatherScatter = 3,
@@ -1973,8 +1975,8 @@ impl fmt::Display for CopyKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct CopyInstInfo {
-    _src: Option<MemID>,
-    _dst: Option<MemID>,
+    src: Option<MemID>,
+    dst: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
     pub src_inst_uid: InstUID,
@@ -1997,8 +1999,8 @@ impl CopyInstInfo {
         indirect: bool,
     ) -> Self {
         CopyInstInfo {
-            _src: src,
-            _dst: dst,
+            src,
+            dst,
             src_fid,
             dst_fid,
             src_inst_uid,
@@ -2010,7 +2012,7 @@ impl CopyInstInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Copy {
     base: Base,
     fevent: EventID,
@@ -2040,61 +2042,61 @@ impl Copy {
         self.copy_inst_infos.push(copy_inst_info);
     }
 
-    fn add_channel(&mut self) -> Vec<CopyInstInfo> {
-        // sanity check
-        assert_eq!(self.chan_id, None);
-        assert_eq!(self.copy_kind, None);
-        let mut isindrect = false;
-        let mut new_copy_inst_infos = Vec::new();
-        for copy_inst_info in &self.copy_inst_infos {
-            // this is the copy inst info for points of a indirect copy (meta copy)
-            if copy_inst_info.indirect {
-                self.copy_kind = match (copy_inst_info._src, copy_inst_info._dst) {
-                    (_, None) => Some(CopyKind::Gather),     // gather (src points)
-                    (None, _) => Some(CopyKind::Scatter),    // scatter (dst points)
-                    (_, _) => Some(CopyKind::GatherScatter), // gather with scatter
-                };
-                isindrect = true;
-                break;
-            }
-        }
-        if !isindrect {
-            // sanity check
-            assert!(!self.copy_inst_infos.is_empty());
-            let chan_src = self.copy_inst_infos[0]._src.unwrap();
-            let chan_dst = self.copy_inst_infos[0]._dst.unwrap();
-            self.copy_kind = Some(CopyKind::Copy);
-            let chan_id = ChanID::new_copy(chan_src, chan_dst);
-            self.chan_id = Some(chan_id);
-            for (idx, copy_inst_info) in self.copy_inst_infos.iter_mut().enumerate() {
-                if (copy_inst_info._src.unwrap() != chan_src)
-                    || (copy_inst_info._dst.unwrap() != chan_dst)
-                {
-                    new_copy_inst_infos.extend_from_slice(&self.copy_inst_infos[idx..]);
-                    self.copy_inst_infos.truncate(idx);
-                    break;
-                }
-            }
-        } else {
-            // sanity check
-            assert!(self.copy_inst_infos.len() >= 2);
-            match self.copy_kind.unwrap() {
-                CopyKind::Gather => {
-                    // gather
-                    let chan_dst = self.copy_inst_infos[1]._dst.unwrap();
-                    let chan_id = ChanID::new_gather(chan_dst);
-                    self.chan_id = Some(chan_id);
-                }
-                CopyKind::Scatter => {
-                    // scatter
-                    let chan_src = self.copy_inst_infos[1]._src.unwrap();
-                    let chan_id = ChanID::new_scatter(chan_src);
-                    self.chan_id = Some(chan_id);
-                }
-                _ => unreachable!(),
+    fn split_by_channel(mut self, allocator: &mut ProfUIDAllocator) -> Vec<Self> {
+        assert!(self.chan_id.is_none());
+        assert!(self.copy_kind.is_none());
+
+        // Assumptions:
+        //
+        //  1. A given Copy will always be entirely direct or entirely indirect.
+        //
+        //  2. A direct copy can have multiple CopyInstInfos with different
+        //     src/dst memories/instances.
+        //
+        //  3. An indirect copy will have exactly one indirect field. However
+        //     it might have multiple direct fields, and those direct fields could
+        //     have different src/dst memories/instances.
+
+        // Find the indirect field (if any). There is always at most one.
+        let indirect = self
+            .copy_inst_infos
+            .iter()
+            .position(|i| i.indirect)
+            .map(|idx| self.copy_inst_infos.remove(idx));
+        assert!(self.copy_inst_infos.iter().all(|i| !i.indirect));
+
+        let mut result = Vec::new();
+
+        let groups = self
+            .copy_inst_infos
+            .linear_group_by(|a, b| a.src == b.src && a.dst == b.dst);
+        for group in groups {
+            let info = group.first().unwrap();
+            let copy_kind = match (info.src, info.dst) {
+                (Some(_), Some(_)) => CopyKind::Direct,
+                (None, Some(_)) => CopyKind::Gather,
+                (Some(_), None) => CopyKind::Scatter,
+                (None, None) => CopyKind::GatherScatter,
             };
+
+            let chan_id = match (info.src, info.dst) {
+                (Some(src), Some(dst)) => ChanID::new_copy(src, dst),
+                (None, Some(dst)) => ChanID::new_gather(dst),
+                (Some(src), None) => ChanID::new_scatter(src),
+                (None, None) => unimplemented!(), // don't know how to assign GatherScatter to channel
+            };
+
+            let mut group = group.to_owned();
+            indirect.map(|i| group.push(i));
+            result.push(Copy {
+                base: Base::new(allocator),
+                copy_kind: Some(copy_kind),
+                chan_id: Some(chan_id),
+                copy_inst_infos: group,
+                ..self
+            })
         }
-        new_copy_inst_infos
+        result
     }
 }
 
@@ -2604,62 +2606,19 @@ impl State {
             }
         }
         // put copies into channels
-        println!(
-            "current prof_uid from allocate:{}",
-            self.prof_uid_allocator.next_prof_uid.0
-        );
-        let mut largest_prof_uid = 0;
-        for mut copy in copies.into_values() {
+        for copy in copies.into_values() {
             if !copy.copy_inst_infos.is_empty() {
-                let mut new_copy_inst_infos = copy.add_channel();
-                let mut cur_copy = copy.clone();
-                if copy.base.prof_uid.0 > largest_prof_uid {
-                    largest_prof_uid = copy.base.prof_uid.0;
-                }
-                if let Some(chan_id) = copy.chan_id {
-                    let chan = self.find_chan_mut(chan_id);
-                    if !new_copy_inst_infos.is_empty() {
-                        println!(
-                            "copy prof_uid {}, lens {}",
-                            copy.base.prof_uid.0,
-                            copy.copy_inst_infos.len()
-                        );
-                    }
-                    chan.add_copy(copy);
-                } else {
-                    unreachable!();
-                }
-                while !new_copy_inst_infos.is_empty() {
-                    let alloc = &mut self.prof_uid_allocator;
-                    let mut new_copy = Copy::new(
-                        Base::new(alloc),
-                        cur_copy.time_range,
-                        cur_copy.op_id,
-                        cur_copy.size,
-                        cur_copy.fevent,
-                    );
-                    for copy_inst_info in new_copy_inst_infos.into_iter() {
-                        new_copy.add_copy_inst_info(copy_inst_info);
-                    }
-                    new_copy_inst_infos = new_copy.add_channel();
-                    println!(
-                        "cur prof_uid {}, new prof_uid {}",
-                        cur_copy.base.prof_uid.0, new_copy.base.prof_uid.0
-                    );
-                    cur_copy = new_copy.clone();
-                    if let Some(chan_id) = new_copy.chan_id {
+                let split = copy.split_by_channel(&mut self.prof_uid_allocator);
+                for elt in split {
+                    if let Some(chan_id) = elt.chan_id {
                         let chan = self.find_chan_mut(chan_id);
-                        chan.add_copy(new_copy);
+                        chan.add_copy(elt);
                     } else {
                         unreachable!();
                     }
                 }
             }
         }
-        println!(
-            "largest prof_uid of all existing copies:{}",
-            largest_prof_uid
-        );
         self.has_prof_data = true;
     }
 
