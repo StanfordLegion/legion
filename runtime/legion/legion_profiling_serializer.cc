@@ -78,7 +78,13 @@ namespace Legion {
          << "id:" << PROC_DESC_ID                 << delim
          << "proc_id:ProcID:" << sizeof(ProcID)   << delim
          << "kind:ProcKind:"  << sizeof(ProcKind) << delim
-         << "cuda_device_info:CudaDeviceInfo:"  << sizeof(Realm::Cuda::CudaDeviceInfo)
+#ifdef LEGION_USE_CUDA
+         //<< "cuda_device_info:CudaDeviceInfo:"  << sizeof(Realm::Cuda::CudaDeviceInfo)
+         << "uuid:array"             <<  sizeof(uint8_t) << delim
+         << "name:string"            << "-1"             << delim
+         << "driver_version:int"     << sizeof(int)      << delim
+         << "compute_capability:int" << sizeof(int)
+#endif
          << "}" << std::endl;
 
       ss << "MaxDimDesc {"
@@ -88,10 +94,10 @@ namespace Legion {
 
       ss << "MachineDesc {"
          << "id:" << MACHINE_DESC_ID                  << delim
-         << "node_id:unsigned:" << sizeof(unsigned)   << delim
+         << "node_id:unsigned:"   << sizeof(unsigned) << delim
          << "num_nodes:unsigned:" << sizeof(unsigned) << delim
-         << "hostname:string:" << "-1"                << delim
-         << "hostid::uint64_t" << sizeof(uint64_t)    << delim
+         << "hostname:string:"    << "-1"             << delim
+         << "hostid::uint64_t"    << sizeof(uint64_t) << delim
          << "processid::uint32_t" << sizeof(uint32_t)
          << "}" << std::endl;
 
@@ -1131,7 +1137,14 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
-      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info),    sizeof(proc_desc.cuda_device_info));
+#ifdef LEGION_USE_CUDA
+      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.uuid), sizeof(proc_desc.cuda_device_info.uuid));
+      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.name), sizeof(proc_desc.cuda_device_info.name));
+      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.driver_version),
+                      sizeof(proc_desc.cuda_device_info.driver_version));
+      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.compute_capability),
+                      sizeof(proc_desc.cuda_device_info.compute_capability));
+#endif
     }
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -1931,8 +1944,14 @@ namespace Legion {
       log_prof.print("Prof Proc Desc " IDFMT " %d",
                      proc_desc.proc_id, proc_desc.kind);
 #ifdef LEGION_USE_CUDA
-      log_prof.print("Prof Proc Desc %s %s %d %d",
-                    (char *)proc_desc.cuda_device_info.uuid, proc_desc.cuda_device_info.name,
+      std::ostringstream convert;
+      for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
+          convert << (int)proc_desc.cuda_device_info.uuid[i];
+      }
+
+      std::string uuid_string = convert.str();
+      log_prof.print("Prof CUDA Proc Desc %s %s %d %d",
+                    uuid_string.c_str(), proc_desc.cuda_device_info.name,
                     proc_desc.cuda_device_info.driver_version,
                     proc_desc.cuda_device_info.compute_capability);
 #endif
