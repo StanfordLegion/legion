@@ -91,19 +91,6 @@ namespace Legion {
             return false;
           return (idx < rhs->idx);
         }
-      inline bool has_timed_out(void)
-        {
-#ifdef DEBUG_LEGION
-          assert(timeout < TIMEOUT);
-#endif
-          if (++timeout == TIMEOUT)
-          {
-            timeout = 0;
-            return true;
-          }
-          else
-            return false;
-        }
     public:
       const RegionUsage usage;
       Operation *const op;
@@ -114,22 +101,9 @@ namespace Legion {
       const unsigned idx;
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
-      // This field addresses a problem regarding when
-      // to prune tasks out of logical region tree data
-      // structures.  If no later task ever performs a
-      // dependence test against this user, we might
-      // never prune it from the list.  This timeout
-      // prevents that from happening by forcing a
-      // test to be performed whenever the timeout
-      // reaches zero.
-      unsigned timeout;
 #ifdef LEGION_SPY
       UniqueID uid;
 #endif
-    public:
-      static constexpr unsigned TIMEOUT = LEGION_DEFAULT_LOGICAL_USER_TIMEOUT;
-      static_assert(TIMEOUT > 0,
-          "LEGION_DEFAULT_LOGICAL_USER_TIMEOUT must be positive");
     };
 
     /**
@@ -1740,10 +1714,8 @@ namespace Legion {
                                          const ProjectionInfo &proj_info,
                                          RegionTreeNode *previous_child,
                                          LogicalRegion privilege_root,
-                                         LogicalAnalysis &logical_analysis,
-                                         std::vector<LogicalUser*> &timeous);
-      void filter_timeout_users(std::vector<LogicalUser*> &timeout_users,
-                                LogicalAnalysis &logical_analysis);
+                                         LogicalAnalysis &logical_analysis);
+      void filter_timeout_users(LogicalAnalysis &logical_analysis);
       void promote_next_child(RegionTreeNode *child, FieldMask mask);
 #if 0
       void initialize_unrefined_fields(const FieldMask &mask, 
@@ -1778,6 +1750,21 @@ namespace Legion {
       typedef FieldMaskSet<LogicalUser,UNTRACKED_ALLOC,true/*determinisitic*/>
         OrderedFieldMaskUsers;
       OrderedFieldMaskUsers curr_epoch_users, prev_epoch_users; 
+    protected:
+      // In some cases such as repeated read-only uses of a field we can
+      // accumulate unbounded numbers of users in the curr/prev_epoch_users.
+      // To combat blow-up in the size of those data structures we check to
+      // see if the size of those data structures have grown to be at least
+      // MIN_TIMEOUT_CHECK_SIZE. If they've grown that large then we attempt
+      // to filter out those users. To avoid doing the filtering on every
+      // return to this logical state, we only perform the filters every
+      // so many returns to the logical state such that we can hide the
+      // latency of the testing those timeouts across the parent task
+      // context (can often be a non-trivial latency for control 
+      // replicated parent task contexts)
+      static constexpr unsigned MIN_TIMEOUT_CHECK_SIZE = 64;
+      unsigned total_timeout_check_iterations;
+      unsigned remaining_timeout_check_iterations;
       TimeoutMatchExchange *timeout_exchange;
     public:
       // Refinement trackers manage the state of refinements for different

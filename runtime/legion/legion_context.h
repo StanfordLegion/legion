@@ -1772,7 +1772,7 @@ namespace Legion {
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
-      virtual void match_timeouts(std::vector<LogicalUser*> &timeouts,
+      virtual bool match_timeouts(std::vector<LogicalUser*> &timeouts,
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);
     public:
@@ -2962,7 +2962,7 @@ namespace Legion {
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
                                           ProjectionSummary *two);
-      virtual void match_timeouts(std::vector<LogicalUser*> &timeouts,
+      virtual bool match_timeouts(std::vector<LogicalUser*> &timeouts,
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);
     public:

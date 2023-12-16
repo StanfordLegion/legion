@@ -1580,12 +1580,13 @@ namespace Legion {
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void perform_exchange(std::vector<LogicalUser*> &timeouts);
-      void complete_exchange(std::vector<LogicalUser*> &to_delete);
+      void perform_exchange(std::vector<LogicalUser*> &timeouts, bool ready);
+      bool complete_exchange(std::vector<LogicalUser*> &to_delete);
     protected:
       std::vector<LogicalUser*> timeout_users;
       // Pair represents <context index,region requirement index> for each user
       std::vector<std::pair<size_t,unsigned> > all_timeouts;
+      bool double_latency;
     };
 
     /**

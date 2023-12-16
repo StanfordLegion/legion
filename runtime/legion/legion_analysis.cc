@@ -43,7 +43,7 @@ namespace Legion {
                              ProjectionSummary *p, unsigned internal)
       : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()),
         internal_idx(internal), idx(id), gen(o->get_generation()),
-        shard_proj(p), timeout(0)
+        shard_proj(p)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
@@ -6636,7 +6636,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalState::LogicalState(RegionTreeNode *node, ContextID c)
-      : owner(node), timeout_exchange(NULL)
+      : owner(node), total_timeout_check_iterations(MIN_TIMEOUT_CHECK_SIZE),
+        remaining_timeout_check_iterations(total_timeout_check_iterations),
+        timeout_exchange(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6771,6 +6773,8 @@ namespace Legion {
             delete it->first;
         prev_epoch_users.clear();
       }
+      total_timeout_check_iterations = MIN_TIMEOUT_CHECK_SIZE;
+      remaining_timeout_check_iterations = total_timeout_check_iterations;
       if (timeout_exchange != NULL)
       {
         timeout_exchange->perform_collective_wait();
@@ -7811,8 +7815,7 @@ namespace Legion {
     void LogicalState::record_refinement_dependences(ContextID ctx,
         const LogicalUser &refinement_user, const FieldMask &refinement_mask,
         const ProjectionInfo &no_proj_info, RegionTreeNode *previous_child,
-        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis,
-        std::vector<LogicalUser*> &timeout_users)
+        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis)
     //--------------------------------------------------------------------------
     {
       FieldMask dummy_open_below;
@@ -7821,11 +7824,11 @@ namespace Legion {
       owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
                        refinement_user, curr_epoch_users, 
                        refinement_mask, dummy_open_below, false/*arrived*/,
-                       no_proj_info, *this, logical_analysis, timeout_users);
+                       no_proj_info, *this, logical_analysis);
       owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
                         refinement_user, prev_epoch_users,
                         refinement_mask, dummy_open_below, false/*arrived*/,
-                        no_proj_info, *this, logical_analysis, timeout_users);
+                        no_proj_info, *this, logical_analysis);
       // If we have a previous child and all the children are independent
       // then we know we don't need to traverse anything else
       if ((previous_child == NULL) || !owner->are_all_children_disjoint())
@@ -7859,28 +7862,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::filter_timeout_users(std::vector<LogicalUser*> &timeouts,
-                                            LogicalAnalysis &logical_analysis)
+    void LogicalState::filter_timeout_users(LogicalAnalysis &analysis)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!timeouts.empty());
-#endif
-      // First go through and filter the timeout users on this shard
-      for (std::vector<LogicalUser*>::iterator it =
-            timeouts.begin(); it != timeouts.end(); /*nothing*/)
+      // We only run this function if we're not doing legion spy verification
+      // as it will mess up the logical dependence analysis verification
+#ifndef LEGION_SPY
+      // Skip this if we're tracing
+      if (analysis.op->is_tracing())
+        return;
+      // First check to see if we have more users than the maximum allowed
+      if ((curr_epoch_users.size() + prev_epoch_users.size()) <= 
+          MIN_TIMEOUT_CHECK_SIZE)
+        return;
+      // Next check to see if we've hit the right number of remaining
+      // iterations to perform this check
+      if (--remaining_timeout_check_iterations > 0)
+        return;
+      // Go through and filter any current or previous epoch users that have
+      // been committed and therefore can no longer be rolled back
+      std::vector<LogicalUser*> timeout_users;
+      for (OrderedFieldMaskUsers::const_iterator it =
+            curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
       {
-        if ((*it)->op->is_operation_committed((*it)->gen))
-          it++;
-        else // Not committed yet so don't prune it
-          it = timeouts.erase(it);
+        if (!it->first->op->is_operation_committed(it->first->gen))
+          continue;
+        it->first->add_reference();
+        timeout_users.push_back(it->first);
       }
+      const size_t prev_size = timeout_users.size();
+      for (OrderedFieldMaskUsers::const_iterator it =
+            prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
+      {
+        if (!it->first->op->is_operation_committed(it->first->gen))
+          continue;
+        if (std::binary_search(timeout_users.begin(), 
+              timeout_users.begin()+prev_size, it->first))
+          continue;
+        it->first->add_reference();
+        timeout_users.push_back(it->first);
+      }
+      // Now we do the exchange and record whether we need to double 
+      // the timeout check iterations
       std::vector<LogicalUser*> to_delete;
-      // Need to exchange with the context in case we are control
-      // replicated and need to make sure all the shards agree on
-      // the timeout since we need to keep the users the same
-      logical_analysis.context->match_timeouts(timeouts, to_delete,
-                                               timeout_exchange);
+      if (analysis.context->match_timeouts(timeout_users, to_delete, 
+                                           timeout_exchange))
+        total_timeout_check_iterations *= 2;
+      remaining_timeout_check_iterations = total_timeout_check_iterations;
       for (std::vector<LogicalUser*>::const_iterator it = 
             to_delete.begin(); it != to_delete.end(); it++)
       {
@@ -7902,6 +7930,7 @@ namespace Legion {
         if ((*it)->remove_reference(references_to_remove))
           delete (*it);
       }
+#endif
     }
 
     //--------------------------------------------------------------------------

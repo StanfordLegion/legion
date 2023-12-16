@@ -367,19 +367,6 @@
 #define LEGION_DEFAULT_MAX_MESSAGE_SIZE        (DEFAULT_MAX_MESSAGE_SIZE)
 #endif
 #endif
-// Timeout before checking for whether a logical user
-// should be pruned from the logical region tree data strucutre
-// Making the value less than or equal to zero will
-// result in checks always being performed
-#ifndef DEFAULT_LOGICAL_USER_TIMEOUT // For backwards compatibility
-#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    256
-#endif
-#else
-#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    (DEFAULT_LOGICAL_USER_TIMEOUT)
-#endif
-#endif
 // Number of events to place in each GC epoch
 // Large counts improve efficiency but add latency to
 // garbage collection.  Smaller count reduce efficiency

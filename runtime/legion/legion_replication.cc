@@ -17035,7 +17035,8 @@ namespace Legion {
     TimeoutMatchExchange::TimeoutMatchExchange(ReplicateContext *ctx,
                                                CollectiveIndexLocation loc)
       : AllGatherCollective<false>(ctx,
-          ctx->get_next_collective_index(loc, true/*logical*/))
+          ctx->get_next_collective_index(loc, true/*logical*/)),
+        double_latency(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -17061,6 +17062,7 @@ namespace Legion {
         rez.serialize(all_timeouts[idx].first);
         rez.serialize(all_timeouts[idx].second);
       }
+      rez.serialize<bool>(double_latency);
     }
 
     //--------------------------------------------------------------------------
@@ -17081,13 +17083,19 @@ namespace Legion {
       }
       if (next.size() < all_timeouts.size())
         all_timeouts.swap(next);
+      bool not_ready;
+      derez.deserialize<bool>(not_ready);
+      if (not_ready)
+        double_latency = true;
     }
 
     //--------------------------------------------------------------------------
     void TimeoutMatchExchange::perform_exchange(
-                                            std::vector<LogicalUser*> &timeouts)
+                                std::vector<LogicalUser*> &timeouts, bool ready)
     //--------------------------------------------------------------------------
     {
+      if (!ready)
+        double_latency = true;
       all_timeouts.reserve(timeouts.size());
       for (std::vector<LogicalUser*>::const_iterator it =
             timeouts.begin(); it != timeouts.end(); it++)
@@ -17098,11 +17106,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TimeoutMatchExchange::complete_exchange(
+    bool TimeoutMatchExchange::complete_exchange(
                                            std::vector<LogicalUser*> &to_delete)
     //--------------------------------------------------------------------------
     {
-      perform_collective_wait();
+      // perform collective wait already called by caller
       if (!all_timeouts.empty())
       {
         for (std::vector<LogicalUser*>::iterator it =
@@ -17118,6 +17126,7 @@ namespace Legion {
             it++;
         }
       }
+      return double_latency;
     }
 
     /////////////////////////////////////////////////////////////

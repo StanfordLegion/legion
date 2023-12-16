@@ -16095,13 +16095,12 @@ namespace Legion {
       else if (!arrived)
         // Everything is open-only so make a state and merge it in
         add_open_field_state(state, user, user_mask, next_child);
-      std::vector<LogicalUser*> timeout_users;
       // Perform our local dependence analysis at this node along the path
       FieldMask dominator_mask = 
              perform_dependence_checks<true/*track dom*/>(privilege_root,
                           user, state.curr_epoch_users, user_mask,
                           open_below, arrived, proj_info,
-                          state, logical_analysis, timeout_users);
+                          state, logical_analysis);
       FieldMask non_dominated_mask = user_mask - dominator_mask;
       // For the fields that weren't dominated, we have to check
       // those fields against the previous epoch's users
@@ -16109,7 +16108,7 @@ namespace Legion {
         perform_dependence_checks<false/*track dom*/>(privilege_root,
                           user, state.prev_epoch_users, non_dominated_mask,
                           open_below, arrived, proj_info,
-                          state, logical_analysis, timeout_users); 
+                          state, logical_analysis);
       if (arrived)
       {
         // If we dominated and this is our final destination then we 
@@ -16565,8 +16564,7 @@ namespace Legion {
           // anything in an interfering sub-tree without changing the
           // state of the region tree states
           state.record_refinement_dependences(ctx, refinement_user, it->second,
-              no_projection_info, next_child, privilege_root, logical_analysis,
-              timeout_users);
+              no_projection_info, next_child, privilege_root, logical_analysis);
         }
         // A bit of a hairy case: if the user is not read-write and we have
         // refinements below then we need to promote the state of the child
@@ -16576,11 +16574,8 @@ namespace Legion {
         if ((next_child != NULL) && !IS_WRITE(user.usage))
           state.promote_next_child(next_child, refinements.get_valid_mask());
       }
-      // Note that timeout users should be deterministic across all the
-      // shards so that this set should always be empty or not empty
-      // for all shards so we can rendezvous safely
-      if (!timeout_users.empty())
-        state.filter_timeout_users(timeout_users, logical_analysis);
+      // Perform any filtering that we need to do for timeout users
+      state.filter_timeout_users(logical_analysis);
 #if 0
       // Check to see if we have any unversioned fields we need to initialize
       // with a close operation to make the equivalence set
@@ -16652,12 +16647,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       state.sanity_check();
 #endif
-      std::vector<LogicalUser*> timeout_users;
       state.record_refinement_dependences(ctx, refinement_user, 
           refinement_mask, no_proj_info, previous_child,
-          privilege_root, logical_analysis, timeout_users);
-      if (!timeout_users.empty())
-        state.filter_timeout_users(timeout_users, logical_analysis);
+          privilege_root, logical_analysis);
+      state.filter_timeout_users(logical_analysis);
     }
 
 #if 0
@@ -19909,8 +19902,7 @@ namespace Legion {
                 const LogicalUser &user, OrderedFieldMaskUsers &prev_users,
                 const FieldMask &check_mask, const FieldMask &open_below,
                 const bool arrived, const ProjectionInfo &proj_info,
-                LogicalState &state, LogicalAnalysis &logical_analysis,
-                std::vector<LogicalUser*> &timeout_users)
+                LogicalState &state, LogicalAnalysis &logical_analysis)
     //--------------------------------------------------------------------------
     {
       FieldMask dominator_mask = check_mask;
@@ -19919,9 +19911,6 @@ namespace Legion {
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
       FieldMask observed_mask; 
-#ifndef LEGION_SPY
-      const bool tracing = user.op->is_tracing();
-#endif
       const bool validates_local = arrived && (!proj_info.is_projecting() || 
                                 proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))
@@ -20045,19 +20034,6 @@ namespace Legion {
                 assert(false); // should never get here
             }
           }
-          // If we didn't register any kind of dependence, check
-          // to see if the timeout has expired.  Note that it is
-          // unsound to do this if we are tracing so don't perform
-          // the check in that case.
-#ifndef LEGION_SPY
-          if (!tracing && prev.has_timed_out() && !std::binary_search(
-                timeout_users.begin(), timeout_users.end(), it->first))
-          {
-            it->first->add_reference();
-            timeout_users.push_back(it->first);
-            std::sort(timeout_users.begin(), timeout_users.end());
-          }
-#endif
         }
         if (!to_delete.empty())
         {
@@ -20104,15 +20080,13 @@ namespace Legion {
                 const LogicalUser &user, OrderedFieldMaskUsers &prev_users,
                 const FieldMask &check_mask, const FieldMask &open_below,
                 const bool arrived, const ProjectionInfo &proj_info,
-                LogicalState &state, LogicalAnalysis &logical_analysis,
-                std::vector<LogicalUser*> &timeout_users);
+                LogicalState &state, LogicalAnalysis &logical_analysis);
     template FieldMask 
       RegionTreeNode::perform_dependence_checks<false>(LogicalRegion root,
                 const LogicalUser &user, OrderedFieldMaskUsers &prev_users,
                 const FieldMask &check_mask, const FieldMask &open_below,
                 const bool arrived, const ProjectionInfo &proj_info,
-                LogicalState &state, LogicalAnalysis &logical_analysis,
-                std::vector<LogicalUser*> &timeout_users);
+                LogicalState &state, LogicalAnalysis &logical_analysis);
 
 #if 0
     // This function is a little out of place to make sure we get the 
