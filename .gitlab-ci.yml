@@ -448,17 +448,6 @@ before_script:
       fi
 
     fi
-  - |
-    if [[ "$TEST_JUPYTER" -eq 1 ]]; then
-      # IPython is a transitive dependency here, pin for stability
-      pip3 install ipython==8.12.1 notebook==6.4.10
-    fi
-  - |
-    if [[ "$USE_PROF" -eq 1 ]]; then
-      wget https://bootstrap.pypa.io/get-pip.py
-      python3 get-pip.py
-      pip3 install mypy==0.971
-    fi
 
 
 ###
@@ -531,16 +520,16 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:230511
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:231213
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:230511
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:231213
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:230511
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:231213
 .image_icc: &image_icc
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:230525
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:231213
 .image_msvc169: &image_msvc169
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc
 
@@ -1409,18 +1398,18 @@ msvc169_realm:
     <<: [*short]
 
 # sanitizer tests (Realm only):
-gcc9_tsan_realm:
-  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+gcc12_tsan_realm:
+  <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc9, *cxx11_normal, *tsan, *short, *libdw]
-gcc9_ubsan_realm:
-  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+    <<: [*gcc12, *cxx11_normal, *tsan, *short, *libdw]
+gcc12_ubsan_realm:
+  <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc9, *cxx11_normal, *ubsan, *short, *libdw]
-gcc9_asan_realm:
-  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+    <<: [*gcc12, *cxx11_normal, *ubsan, *short, *libdw]
+gcc12_asan_realm:
+  <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc9, *cxx11_normal, *asan, *short, *libdw]
+    <<: [*gcc12, *cxx11_normal, *asan, *short, *libdw]
 clang_format_realm:
   rules:
     # Always during a merge request update
@@ -1430,4 +1419,4 @@ clang_format_realm:
     - when: never
   <<: [*linux, *image_2204, *realm_clang_format]
   variables:
-    <<: [*gcc9, *cxx11_normal, *short]
+    <<: [*gcc12, *cxx11_normal, *short]
