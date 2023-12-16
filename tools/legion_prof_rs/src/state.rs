@@ -1961,7 +1961,7 @@ impl From<spy::serialize::EventID> for EventID {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
 pub enum CopyKind {
-    Direct = 0,
+    Copy = 0,
     Gather = 1,
     Scatter = 2,
     GatherScatter = 3,
@@ -2073,7 +2073,7 @@ impl Copy {
         for group in groups {
             let info = group.first().unwrap();
             let copy_kind = match (info.src, info.dst) {
-                (Some(_), Some(_)) => CopyKind::Direct,
+                (Some(_), Some(_)) => CopyKind::Copy,
                 (None, Some(_)) => CopyKind::Gather,
                 (Some(_), None) => CopyKind::Scatter,
                 (None, None) => CopyKind::GatherScatter,
