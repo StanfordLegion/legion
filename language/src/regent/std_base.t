@@ -59,6 +59,7 @@ end
 local dlfcn
 local function dlopen_library(library_name)
   local ffi = require("ffi")
+
   if not dlfcn then
     dlfcn = terralib.includec("dlfcn.h")
   end
@@ -68,7 +69,10 @@ local function dlopen_library(library_name)
   -- LuaJIT and LLVM will both get unloaded before we're ready)
   local ok = dlfcn.dlopen(library_name, bit.bor(dlfcn.RTLD_LAZY, dlfcn.RTLD_GLOBAL))
   if ffi.cast("intptr_t", ok) == 0LL then
-    assert(false, "dlopen failed while opening '" .. tostring(library_name) .. "': " .. tostring(dlfcn.dlerror()))
+    print("dlopen failed while opening '" .. tostring(library_name) .. "': " .. tostring(dlfcn.dlerror()))
+    print("retrying with terralib.linklibrary (hopefully this provides a better error)")
+    terralib.linklibrary(library_name)
+    assert(false, "if you got here, terralib.linklibrary worked but dlopen failed????")
   end
 end
 

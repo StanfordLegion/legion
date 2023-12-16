@@ -65,6 +65,8 @@ namespace Realm {
         const void *val_in, void *val_out, size_t bytes);
     virtual void gather(NodeID root,
         const void *val_in, void *vals_out, size_t bytes);
+    virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                            std::vector<size_t> &lengths);
 
     virtual size_t sample_messages_received_count(void);
     virtual bool check_for_quiescence(size_t sampled_receive_count);

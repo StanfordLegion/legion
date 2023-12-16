@@ -3995,16 +3995,14 @@ namespace Legion {
       ExternalResource resource;
       RegionRequirement requirement;
       VersionInfo version_info;
-      const char *file_name;
-      std::map<FieldID,const char*> field_map;
-      std::map<FieldID,void*> field_pointers_map;
-      LegionFileMode file_mode;
       PhysicalRegion region;
       unsigned parent_req_index;
       InstanceSet external_instances;
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
-      size_t footprint;
+      Realm::ExternalInstanceResource *external_resource;
+      std::vector<std::string> hdf5_field_files;
+      ApEvent termination_event;
       bool restricted;
     };
 
@@ -4084,7 +4082,7 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       PhysicalRegionImpl* initialize(IndexAttachOp *owner, InnerContext *ctx,
-        const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
+        const IndexAttachLauncher &launcher,
         const DomainPoint &point, unsigned index);
     public:
       virtual void trigger_commit(void);

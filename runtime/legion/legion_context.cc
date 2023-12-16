@@ -20032,14 +20032,6 @@ namespace Legion {
         hasher.hash(launcher.collective, "collective");
         hasher.hash(launcher.deduplicate_across_shards,
                     "deduplicate_across_shards");
-        if (launcher.file_name != NULL)
-          hasher.hash(launcher.file_name, strlen(launcher.file_name), 
-                      "file_name");
-        hasher.hash(launcher.mode, "mode");
-        for (std::vector<FieldID>::const_iterator it = 
-              launcher.file_fields.begin(); it != 
-              launcher.file_fields.end(); it++)
-          hasher.hash(*it, "file_fields");
         for (std::map<FieldID,const char*>::const_iterator it = 
               launcher.field_files.begin(); it != 
               launcher.field_files.end(); it++)
@@ -20047,8 +20039,7 @@ namespace Legion {
           hasher.hash(it->first, "field_files");
           hasher.hash(it->second, strlen(it->second), "field_files");
         }
-        hash_layout_constraints(hasher, launcher.constraints, 
-                                !launcher.collective);
+        hash_layout_constraints(hasher, launcher.constraints,false/*pointers*/);
         for (std::set<FieldID>::const_iterator it = 
               launcher.privilege_fields.begin(); it !=
               launcher.privilege_fields.end(); it++)
@@ -20079,14 +20070,14 @@ namespace Legion {
                       "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
-                      "before invoking attach_hdf5 on file %s",
+                      "before invoking attach_external_resource.",
                       launcher.handle.index_space.id, 
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, 
                       regions[index].region.index_space.id,
                       regions[index].region.field_space.id,
                       regions[index].region.tree_id, index, 
-                      get_task_name(), get_unique_id(), launcher.file_name)
+                      get_task_name(), get_unique_id())
       if (inline_conflict)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
           "Attempted an attach hdf5 file operation on region "
@@ -20094,11 +20085,11 @@ namespace Legion {
                       "mapping in task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
-                      "before invoking attach_hdf5 on file %s",
+                      "before invoking attach_external_resource.",
                       launcher.handle.index_space.id, 
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, get_task_name(), 
-                      get_unique_id(), launcher.file_name)
+                      get_unique_id())
       // If we're counting this region as mapped we need to register it
       if (launcher.mapped)
         register_inline_mapped_region(result);
@@ -20124,15 +20115,12 @@ namespace Legion {
         hasher.hash(launcher.restricted, "restricted");
         hasher.hash(launcher.deduplicate_across_shards,
                     "deduplicate_across_shards");
+        hash_layout_constraints(hasher, launcher.constraints,false/*pointers*/);
         // Everything else other than the privilege fields is sharded already
         // Make sure we include privilege fields from the files too
         // Effectively the direct privilege fields or privilege fields 
         // mentioned by any of the other data structures need to be the same
         std::set<FieldID> all_privilege_fields(launcher.privilege_fields);
-        for (std::vector<FieldID>::const_iterator it =
-              launcher.file_fields.begin(); it != 
-              launcher.file_fields.end(); it++)
-          all_privilege_fields.insert(*it);
         for (std::map<FieldID,std::vector<const char*> >::const_iterator it =
               launcher.field_files.begin(); it != 
               launcher.field_files.end(); it++)

@@ -2003,6 +2003,19 @@ namespace Legion {
     {
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
     /////////////////////////////////////////////////////////////
     // AttachLauncher
     /////////////////////////////////////////////////////////////
@@ -2012,10 +2025,17 @@ namespace Legion {
                                    LogicalRegion h, LogicalRegion p,
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
-      : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
+      : resource(r), parent(p), handle(h), external_resource(NULL),
+        restricted(restr), mapped(map),
         collective((r == LEGION_EXTERNAL_INSTANCE) ? true : false),
         deduplicate_across_shards(false), file_name(NULL),
         mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AttachLauncher::~AttachLauncher(void)
     //--------------------------------------------------------------------------
     {
     }
@@ -2033,6 +2053,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLauncher::~IndexAttachLauncher(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     /////////////////////////////////////////////////////////////
     // PredicateLauncher
@@ -6681,6 +6717,19 @@ namespace Legion {
       ctx->progress_unordered_operations();
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
                                                  const char *file_name,
@@ -6721,6 +6770,16 @@ namespace Legion {
         ctx->remap_region(region, NULL/*no provenance because deprecated*/);
       return region;
     }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
