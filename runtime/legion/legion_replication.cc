@@ -1253,7 +1253,9 @@ namespace Legion {
                                                      projection_info,
                                                      privilege_paths[idx],
                                                      logical_analysis);
-        if (IS_COLLECTIVE(req))
+        if (IS_COLLECTIVE(req) && !std::binary_search(
+              check_collective_regions.begin(),
+              check_collective_regions.end(), idx))
           create_collective_view_rendezvous(req.parent.get_tree_id(), idx);
       }
       // Generate any collective view rendezvous that we will need
