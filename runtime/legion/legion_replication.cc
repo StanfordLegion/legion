@@ -1362,7 +1362,9 @@ namespace Legion {
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
-        if (IS_COLLECTIVE(req))
+        if (IS_COLLECTIVE(req) && !std::binary_search(
+              check_collective_regions.begin(),
+              check_collective_regions.end(), idx))
           create_collective_rendezvous(req.parent.get_tree_id(), idx);
       }
       // Generate any collective view rendezvous that we will need
