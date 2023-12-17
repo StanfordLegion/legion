@@ -2634,11 +2634,12 @@ namespace Legion {
         VersionInfo &version_info = version_infos[idx];
         if (version_info.has_version_info())
           continue;
+        const RegionRequirement &req = logical_regions[idx];
         if ((regions.size() <= idx) && !is_output_valid(idx-regions.size()))
         {
           RtEvent output_ready;
-          runtime->forest->perform_versioning_analysis(this, idx,
-              logical_regions[idx], version_info, ready_events, &output_ready);
+          runtime->forest->perform_versioning_analysis(this, idx, req,
+              version_info, ready_events, &output_ready);
 #ifdef DEBUG_LEGION
           assert(output_ready.exists());
 #endif
@@ -2646,10 +2647,10 @@ namespace Legion {
         }
         else
           runtime->forest->perform_versioning_analysis(this, idx,
-              logical_regions[idx], version_info, ready_events,
-              NULL/*output region*/, std::binary_search(
-                check_collective_regions.begin(), 
-                check_collective_regions.end(), idx)); 
+              req, version_info, ready_events, NULL/*output region*/,
+              IS_COLLECTIVE(req) || std::binary_search(
+                check_collective_regions.begin(),
+                check_collective_regions.end(), idx));
       }
       if (!output_events.empty())
         record_output_registered(
