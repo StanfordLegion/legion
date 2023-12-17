@@ -1356,11 +1356,15 @@ namespace Legion {
         analysis_sharding_function = 
           repl_ctx->get_universal_sharding_function();
       }
-
       analyze_region_requirements(launch_space,
                                   analysis_sharding_function,
                                   sharding_space);
-
+      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+      {
+        RegionRequirement &req = logical_regions[idx];
+        if (IS_COLLECTIVE(req))
+          create_collective_rendezvous(req.parent.get_tree_id(), idx);
+      }
       // Generate any collective view rendezvous that we will need
       for (std::vector<unsigned>::const_iterator it =
             check_collective_regions.begin(); it != 
@@ -6636,6 +6640,8 @@ namespace Legion {
     void ReplMapOp::initialize_replication(ReplicateContext *ctx) 
     //--------------------------------------------------------------------------
     {
+      // Mark that this is collective
+      requirement.prop |= LEGION_COLLECTIVE_MASK;
       if (!remap_region && !runtime->unsafe_mapper)
       {
         mapping_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);

@@ -40,18 +40,20 @@
   (((req).privilege & LEGION_WRITE_ONLY) == LEGION_WRITE_ONLY)
 #define IS_DISCARD(req) \
   (((req).privilege & LEGION_DISCARD_MASK) == LEGION_DISCARD_MASK)
+#define IS_COLLECTIVE(req) \
+  (((req).prop & LEGION_COLLECTIVE_MASK) == LEGION_COLLECTIVE_MASK)
 #define PRIV_ONLY(req) \
   ((req).privilege & LEGION_READ_WRITE)
 #define IS_REDUCE(req) \
   (((req).privilege & LEGION_READ_WRITE) == LEGION_REDUCE)
 #define IS_EXCLUSIVE(req) \
-  ((req).prop == LEGION_EXCLUSIVE)
+  (((req).prop & LEGION_RELAXED) == LEGION_EXCLUSIVE)
 #define IS_ATOMIC(req) \
-  ((req).prop == LEGION_ATOMIC)
+  (((req).prop & LEGION_RELAXED) == LEGION_ATOMIC)
 #define IS_SIMULT(req) \
-  ((req).prop == LEGION_SIMULTANEOUS)
+  (((req).prop & LEGION_RELAXED) == LEGION_SIMULTANEOUS)
 #define IS_RELAXED(req) \
-  ((req).prop == LEGION_RELAXED)
+  (((req).prop & LEGION_RELAXED) == LEGION_RELAXED)
 
 namespace Legion {
 

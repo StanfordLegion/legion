@@ -56,15 +56,20 @@ DEPENDENCE_TYPES = [
 
 NO_ACCESS     = 0x00000000
 READ_ONLY     = 0x00000001
+READ_PRIV     = 0x00000001
+WRITE_PRIV    = 0x00000002
+REDUCE_PRIV   = 0x00000004
 READ_WRITE    = 0x00000007
 WRITE_ONLY    = 0x10000002
 WRITE_DISCARD = 0x10000007
 REDUCE        = 0x00000004
+DISCARD_MASK  = 0x10000000
 
 EXCLUSIVE = 0
 ATOMIC = 1
 SIMULTANEOUS = 2
 RELAXED = 3
+COLLECTIVE_MASK = 0x10000000
 
 NO_OP_KIND = 0
 SINGLE_TASK_KIND = 1
@@ -3941,6 +3946,10 @@ class LogicalVerificationState(object):
             if dep_type is NO_DEPENDENCE:
                 dominates = False
                 continue
+            if prev_req.is_collective() and req.is_collective() and \
+                    prev_req.index == req.index and prev_logical is logical_op:
+                dominates = False
+                continue
             # Interfering operations should have been caught earlier
             assert prev_op is not op
             assert prev_logical is not logical_op
@@ -5607,7 +5616,6 @@ class EquivalenceSet(object):
             # Handle the unusual case of replicated operations with writing requirements
             # If any of them are the same index from a different shard then we ignore them
             if replicated and req.is_write():
-                assert op.context.shard is not None
                 for prev in preconditions:
                     if isinstance(prev,Operation) and prev.context.shard is not None and \
                         prev.context.op.context is op.context.op.context and \
@@ -6041,39 +6049,43 @@ class Requirement(object):
         return self.priv == NO_ACCESS
 
     def is_read_only(self):
-        return self.priv == READ_ONLY
+        return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return (self.priv == READ_ONLY) or (self.priv == READ_WRITE)
+        return bool(self.priv & READ_ONLY)
 
     def has_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
-                (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV)
 
     def is_read_write(self):
-        return self.priv == READ_WRITE
+        return self.has_read() and self.has_write()
 
     def is_write_only(self):
-        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
+        return self.has_write() and not self.has_read()
 
     def is_reduce(self):
-        return self.priv == REDUCE
+        return self.priv == REDUCE_PRIV
+
+    def is_discard(self):
+        return bool(self.priv & DISCARD_MASK)
+
+    def is_collective(self):
+        return bool(self.coher & COLLECTIVE_MASK)
 
     def is_exclusive(self):
-        return self.coher == EXCLUSIVE
+        return (self.coher & RELAXED) == EXCLUSIVE
 
     def is_atomic(self):
-        return self.coher == ATOMIC
+        return (self.coher & RELAXED) == ATOMIC
 
     def is_simult(self):
-        return self.coher == SIMULTANEOUS
+        return (self.coher & RELAXED) == SIMULTANEOUS
 
     def is_relaxed(self):
-        return self.coher == RELAXED
+        return (self.coher & RELAXED) == RELAXED
 
     def is_projection(self):
         return self.projection_function is not None
@@ -6092,28 +6104,34 @@ class Requirement(object):
     def get_privilege(self):
         if self.priv == NO_ACCESS:
             return "NO-ACCESS"
-        elif self.priv == READ_ONLY:
+        elif bool(self.priv & WRITE_PRIV):
+            if bool(self.priv & READ_PRIV):
+                if bool(self.priv & DISCARD_MASK):
+                    return "WRITE-DISCARD"
+                else:
+                    return "READ-WRITE"
+            else:
+                return "WRITE-ONLY"
+        elif bool(self.priv & READ_PRIV):
             return "READ-ONLY"
-        elif self.priv == READ_WRITE:
-            return "READ-WRITE"
-        elif self.priv == WRITE_DISCARD:
-            return "WRITE-DISCARD"
-        elif self.priv == WRITE_ONLY:
-            return "WRITE-ONLY"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
 
     def get_coherence(self):
-        if self.coher == EXCLUSIVE:
-            return "EXCLUSIVE"
-        elif self.coher == ATOMIC:
-            return "ATOMIC"
-        elif self.coher == SIMULTANEOUS:
-            return "SIMULTANEOUS"
+        if self.coher & COLLECTIVE_MASK:
+            prefix = "COLLECTIVE "
         else:
-            assert self.coher == RELAXED
-            return "RELAXED"
+            prefix = ""
+        if self.coher & RELAXED == EXCLUSIVE:
+            return prefix+"EXCLUSIVE"
+        elif self.coher & RELAXED == ATOMIC:
+            return prefix+"ATOMIC"
+        elif self.coher & RELAXED == SIMULTANEOUS:
+            return prefix+"SIMULTANEOUS"
+        else:
+            assert self.coher & RELAXED == RELAXED
+            return prefix+"RELAXED"
 
     def get_privilege_and_coherence(self):
         return self.get_privilege() + ' ' + self.get_coherence()
@@ -7055,6 +7073,11 @@ class Operation(object):
                         break
                 if fields_disjoint:
                     continue 
+                # Handle the case where they are both collective and
+                # from the same region requirement and same region name
+                if req1.is_collective() and req2.is_collective() and \
+                        req1.index == req2.index and req1.logical_node is req2.logical_node:
+                    continue
                 # Check for interference at a common ancestor
                 aliased,ancestor = self.state.has_aliased_ancestor_tree_only(
                     req1.logical_node.get_index_node(),
@@ -8114,60 +8137,38 @@ class Operation(object):
             return False
         return True
 
-    def verify_fill_requirement(self, index, req, perform_checks, register, replicated):
+    def verify_fill_requirement(self, index, req, perform_checks, collective, register):
         assert self.context
         mappings = self.find_mapping(index)
         depth = self.context.find_enclosing_context_depth(req, mappings)
         if not register:
             for field in req.fields:
+                if collective is not None:
+                    if req.logical_node not in collective:
+                        collective[req.logical_node] = set()
+                    replicated = field in collective[req.logical_node]
+                    if not replicated:
+                        collective[req.logical_node].add(field)
+                else:
+                    replicated = False
                 if not req.logical_node.perform_fill_verification(depth, field, self, req,
                                     perform_checks, register=False, replicated=replicated):
                     return False
-        elif mappings is not None and not replicated:
+        elif mappings is not None:
+            assert collective is not None
             for field in req.fields:
+                if req.logical_node not in collective:
+                    collective[req.logical_node] = set()
+                # Skip any replicated fill registrations
+                if field in collective[req.logical_node]:
+                    continue
+                collective[req.logical_node].add(field)
                 if not req.logical_node.perform_fill_verification(depth, field, self, req,
-                                    perform_checks, register=True, replicated=replicated):
+                                    perform_checks, register=True, replicated=False):
                     return False
         return True
 
-    def add_restriction(self, index, req, perform_checks, replicated):
-        assert self.context
-        assert index in self.mappings
-        mappings = self.mappings[index]
-        depth = self.context.find_enclosing_context_depth(req, mappings)
-        for field in req.fields:
-            inst = mappings[field.fid]
-            assert not inst.is_virtual()
-            if not req.logical_node.add_restriction(depth, field, self, req, inst,
-                                                    perform_checks, replicated):
-                return False
-        return True
-
-    def remove_restriction(self, index, req, perform_checks):
-        assert self.context
-        assert index in self.mappings
-        mappings = self.mappings[index]
-        depth = self.context.find_enclosing_context_depth(req, mappings)
-        perform_filter = self.kind == DETACH_OP_KIND
-        for field in req.fields:
-            if perform_filter:
-                inst = mappings[field.fid]
-            else:
-                inst = None
-            if not req.logical_node.remove_restriction(depth, field, self, req, 
-                                                       inst, perform_checks):
-                return False
-        return True
-
-    def invalidate_state(self, index, req, perform_checks):
-        assert self.context
-        depth = self.context.find_enclosing_context_depth(req, mappings=None)
-        for field in req.fields:
-            if not req.logical_node.invalidate_state(depth, field, self, req, perform_checks):
-                return False
-        return True
-
-    def verify_physical_requirement(self, index, req, perform_checks, registration, replicated=False):
+    def verify_physical_requirement(self, index, req, perform_checks, registration, collective=None):
         # We can end up with no mappings in control replicated cases
         if req.is_no_access() or len(req.fields) == 0 or self.mappings is None:
             return True
@@ -8188,9 +8189,33 @@ class Operation(object):
                 # do any analysis here since we're just passing in the state
                 continue
             if registration:
+                assert collective is not None
+                # Check to see if we're the first one to do the registration for a
+                # collective mapping (replicated=False), otherwise we'll be one of
+                # the later ones (replicated=True)
+                if req.logical_node not in collective:
+                    collective[req.logical_node] = set()
+                replicated = field in collective[req.logical_node]
+                if not replicated:
+                    collective[req.logical_node].add(field)
                 if not req.logical_node.perform_registration_verification(depth, field,
                                             self, req, inst, perform_checks, replicated):
                     return False
+                # Add or remove any restrictions for different kinds of operations
+                if self.kind == RELEASE_OP_KIND or \
+                        (self.kind == ATTACH_OP_KIND and self.restricted):
+                    if not req.logical_node.add_restriction(depth, field, self, req, inst,
+                                                            perform_checks, replicated):
+                        return False
+                elif self.kind == ACQUIRE_OP_KIND or self.kind == DETACH_OP_KIND:
+                    if self.kind != DETACH_OP_KIND:
+                        inst = None
+                    if not req.logical_node.remove_restriction(depth, field, self, req,
+                                                               inst, perform_checks):
+                        return False
+                elif self.kind == DISCARD_OP_KIND:
+                    if not req.logical_node.invalidate_state(depth, field, self, req, perform_checks):
+                        return False
             else:
                 if not req.logical_node.perform_physical_verification(depth, field,
                                                     self, req, inst, perform_checks):
@@ -8200,7 +8225,7 @@ class Operation(object):
                     return False
         return True
 
-    def perform_op_physical_verification(self, perform_checks, replicated=False):
+    def perform_op_physical_verification(self, perform_checks, collective = None):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
@@ -8211,11 +8236,11 @@ class Operation(object):
             if self.points:
                 if self.kind == INDEX_TASK_KIND:
                     for point in itervalues(self.points):
-                        if not point.op.perform_op_physical_verification(perform_checks):
+                        if not point.op.perform_op_physical_verification(perform_checks, collective):
                             return False
                 else:
                     for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                        if not point.perform_op_physical_verification(perform_checks):
+                        if not point.perform_op_physical_verification(perform_checks, collective):
                             return False
             else: # Better be in a control replicated context to not have any points
                 assert self.launch_shape.empty() or self.context.shard is not None
@@ -8275,7 +8300,7 @@ class Operation(object):
                 self.compute_current_version_numbers()
             for index,req in iteritems(self.reqs):
                 if not self.verify_fill_requirement(index, req, perform_checks, 
-                                        register=False, replicated=replicated):
+                                                    collective, register=False):
                     return False
         elif self.kind == DELETION_OP_KIND:
             # Skip deletions, they only impact logical analysis
@@ -8285,7 +8310,7 @@ class Operation(object):
             # A little sanity check at the moment: nested control replication can only
             # come from tasks replicated from a single shard. When we break that invariant
             # then we'll need to do something here
-            assert not replicated
+            assert collective is None
             if self.reqs is not None:
                 self.compute_current_version_numbers()
                 assert self.mapping is None
@@ -8294,10 +8319,9 @@ class Operation(object):
                     self.mapping = shard.op.mapping
                     for index,req in iteritems(self.reqs):
                         if not self.verify_physical_requirement(index, req, perform_checks, 
-                                                registration=False, replicated=replicated):
+                                                                registration=False):
                             return False
                     self.mapping = None
-                    replicated = True
         else:
             if self.reqs:
                 # Compute our version numbers first
@@ -8305,13 +8329,13 @@ class Operation(object):
                     self.compute_current_version_numbers()
                 for index,req, in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks, 
-                                            registration=False, replicated=replicated):
+                                                            registration=False):
                         return False
         # Don't check for spurious realm operations until later in case we
         # have copy-out operations for restricted coherence
         return True
 
-    def perform_op_registration_verification(self, perform_checks, replicated=False):
+    def perform_op_registration_verification(self, perform_checks, collective):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
@@ -8322,11 +8346,11 @@ class Operation(object):
             if self.points:
                 if self.kind == INDEX_TASK_KIND:
                     for point in itervalues(self.points):
-                        if not point.op.perform_op_registration_verification(perform_checks):
+                        if not point.op.perform_op_registration_verification(perform_checks, collective):
                             return False
                 else:
                     for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                        if not point.perform_op_registration_verification(perform_checks):
+                        if not point.perform_op_registration_verification(perform_checks, collective):
                             return False
             else: # Better be in a control replicated context to not have any points
                 assert self.launch_shape.empty() or self.context.shard is not None
@@ -8341,23 +8365,23 @@ class Operation(object):
             # the restricted instances
             for index,req in iteritems(self.reqs):
                 if not self.verify_fill_requirement(index, req, perform_checks,
-                                            register=True, replicated=replicated):
+                                                    collective, register=True):
                     return False
         elif self.task and self.task.replicants:
             # Special case for if we are (control) replicated
             # Same check here that we have for perform_op_physical_verification
             # If/when we relax this we'll need to change stuff here
-            assert not replicated
+            assert collective is None
             if self.reqs:
+                collective = dict()
                 # Do the registration for all our replicants
                 for shard in itervalues(self.task.replicants.shards):
                     self.mapping = shard.op.mapping
                     for index,req in iteritems(self.reqs):
                         if not self.verify_physical_requirement(index, req, perform_checks,
-                                                    registration=True, replicated=replicated):
+                                                    registration=True, collective=collective):
                             return False
                     self.mapping = None
-                    replicated = True
             # Last decided how to analyze each of the shards depending
             # on whether we are control replicated or not
             if self.task.replicants.control_replicated:
@@ -8373,24 +8397,10 @@ class Operation(object):
             if self.reqs:
                 for index,req in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks,
-                                                registration=True, replicated=replicated):
-                        return False
-            # Add any restrictions for different kinds of ops
-            if self.kind == RELEASE_OP_KIND or \
-                    (self.kind == ATTACH_OP_KIND and self.restricted):
-                for index,req in iteritems(self.reqs):
-                    if not self.add_restriction(index, req, perform_checks, replicated):
-                        return False
-            elif self.kind == ACQUIRE_OP_KIND or self.kind == DETACH_OP_KIND:
-                for index,req in iteritems(self.reqs):
-                    if not self.remove_restriction(index, req, perform_checks):
-                        return False
-            elif self.kind == DISCARD_OP_KIND:
-                for index,req in iteritems(self.reqs):
-                    if not self.invalidate_state(index, req, perform_checks):
+                                                registration=True, collective=collective):
                         return False
             # If we are not a leaf task, go down the task tree
-            elif self.kind == SINGLE_TASK_KIND and self.task:
+            if self.kind == SINGLE_TASK_KIND and self.task:
                 if not self.task.perform_task_physical_verification(perform_checks):
                     return False
         return self.check_for_spurious_realm_ops(perform_checks)
@@ -9252,7 +9262,7 @@ class Task(object):
             # Perform all the operations in order across the shards
             for idx in range(num_ops):
                 # Perform the verification first
-                replicated = False
+                collective = dict()
                 for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
                     # If the operation is sharded, only perform it on the owner shard
@@ -9260,23 +9270,21 @@ class Task(object):
                         assert op.context.shard is not None
                         if op.owner_shard != op.context.shard:
                             continue
-                    if not op.perform_op_physical_verification(perform_checks, replicated):
+                    if not op.perform_op_physical_verification(perform_checks, collective):
                         success = False
                         break
-                    replicated = True
                 if not success:
                     break
                 # Then perform the registration
-                replicated = False
+                collective = dict()
                 for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
                     # If the operation is sharded, only perform it on the owner shard
                     if op.owner_shard is not None and op.owner_shard != op.context.shard:
                         continue
-                    if not op.perform_op_registration_verification(perform_checks, replicated):
+                    if not op.perform_op_registration_verification(perform_checks, collective):
                         success = False
                         break
-                    replicated = True
                 if not success:
                     break
         else:
@@ -9293,7 +9301,8 @@ class Task(object):
                 if not op.perform_op_physical_verification(perform_checks):
                     success = False
                     break
-                if not op.perform_op_registration_verification(perform_checks):
+                collective = dict()
+                if not op.perform_op_registration_verification(perform_checks, collective):
                     success = False
                     break
         # Reset any physical user lists at our depth
@@ -9778,24 +9787,31 @@ class PointUser(object):
         return self.priv == NO_ACCESS
 
     def is_read_only(self):
-        return self.priv == READ_ONLY
+        return bool(self.priv & READ_ONLY) and not self.has_write()
+
+    def has_read(self):
+        return bool(self.priv & READ_ONLY)
 
     def has_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
-                (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV)
 
     def is_read_write(self):
-        return self.priv == READ_WRITE
+        return self.has_read() and self.has_write()
 
     def is_write_only(self):
-        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
+        return self.has_write() and not self.has_read()
 
     def is_reduce(self):
         return self.priv == REDUCE
+
+    def is_discard(self):
+        return bool(self.priv & DISCARD_MASK)
+
+    def is_collective(self):
+        return bool(self.coher & COLLECTIVE_MASK)
 
     def is_exclusive(self):
         return self.coher == EXCLUSIVE
@@ -10152,6 +10168,14 @@ class Instance(object):
             # as part of the dependences through other region requirements
             if logical_op is user.logical_op and req.index != user.index:
                 continue
+            # Check for the collective write case where multiple point
+            # tasks from the same collective operation are writing to
+            # the same instance
+            if req.is_collective() and req.index == user.index and user.op is not None:
+                logical_user = user.op.get_logical_op()
+                if logical_user.index_owner is not None and \
+                        logical_user.index_owner is logical_op.index_owner:
+                    continue
             dep = compute_dependence_type(user, req)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 result.add(user.op)
