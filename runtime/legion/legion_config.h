@@ -1498,10 +1498,16 @@ typedef enum legion_allocate_mode_t {
 } legion_allocate_mode_t;
 
 typedef enum legion_coherence_property_t {
-  LEGION_EXCLUSIVE    = 0,
-  LEGION_ATOMIC       = 1,
-  LEGION_SIMULTANEOUS = 2,
-  LEGION_RELAXED      = 3,
+  LEGION_EXCLUSIVE                = 0x00000000,
+  LEGION_ATOMIC                   = 0x00000001,
+  LEGION_SIMULTANEOUS             = 0x00000002,
+  LEGION_RELAXED                  = 0x00000003,
+  LEGION_COLLECTIVE_MASK          = 0x10000000,
+  // Can't make these associations explicit because the Python CFFI parsers is stupid
+  LEGION_COLLECTIVE_EXCLUSIVE     = 0x10000000, // LEGION_EXCLUSIVE | LEGION_COLLECTIVE_MASK,
+  LEGION_COLLECTIVE_ATOMIC        = 0x10000001, // LEGION_ATOMIC | LEGION_COLLECTIVE_MASK,
+  LEGION_COLLECTIVE_SIMULTANEOUS  = 0x10000002, // LEGION_SIMULTANEOUS | LEGION_COLLECTIVE_MASK,
+  LEGION_COLLECTIVE_RELAXED       = 0x10000003, // LEGION_RELAXED | LEGION_COLLECTIVE_MASK,
   // for backwards compatibility
   LEGION_DEPRECATED_ENUM(EXCLUSIVE)
   LEGION_DEPRECATED_ENUM(ATOMIC)

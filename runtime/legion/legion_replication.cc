@@ -1253,6 +1253,8 @@ namespace Legion {
                                                      projection_info,
                                                      privilege_paths[idx],
                                                      logical_analysis);
+        if (IS_COLLECTIVE(req))
+          create_collective_view_rendezvous(req.parent.get_tree_id(), idx);
       }
       // Generate any collective view rendezvous that we will need
       for (std::vector<unsigned>::const_iterator it =
@@ -6599,6 +6601,8 @@ namespace Legion {
     void ReplMapOp::initialize_replication(ReplicateContext *ctx) 
     //--------------------------------------------------------------------------
     {
+      // Mark that this is collective
+      requirement.prop |= LEGION_COLLECTIVE_MASK;
       if (!remap_region && !runtime->unsafe_mapper)
       {
         mapping_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);
