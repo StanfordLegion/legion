@@ -29,25 +29,36 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
                Processor p)
 {
   Reservation reservation = Reservation::create_reservation();
+
   {
     UserEvent start_event = UserEvent::create_user_event();
     start_event.cancel();
-    Event e = reservation.acquire(0, true, start_event);
-    reservation.release(e);
+    Event e1 = reservation.acquire(0, true, start_event);
+    Event e2 = reservation.acquire(0, true, Event::ignorefaults(e1));
+    reservation.release(e2);
+    // hangs if poisoned reservation is acquired at e1 event
+    reservation.acquire(0, true).wait();
+    reservation.release();
   }
 
   {
     UserEvent start_event = UserEvent::create_user_event();
-    Event e = reservation.acquire(0, true, start_event);
+    Event e1 = reservation.acquire(0, true, start_event);
     start_event.cancel();
-    reservation.release(e);
+    // fails if poisoned release is not dropped
+    reservation.release(e1);
+    reservation.acquire(0, true).wait();
+    reservation.release();
   }
 
   {
     UserEvent start_event = UserEvent::create_user_event();
-    Event e = reservation.acquire(0, true, start_event);
-    reservation.release(e);
+    Event e1 = reservation.acquire(0, true, start_event);
+    Event e2 = reservation.acquire(0, true, Event::ignorefaults(e1));
+    reservation.release(e2);
     start_event.cancel();
+    reservation.acquire(0, true).wait();
+    reservation.release();
   }
 
   reservation.destroy_reservation();
