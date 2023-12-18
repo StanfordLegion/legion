@@ -2065,29 +2065,37 @@ impl Copy {
             .map(|idx| self.copy_inst_infos.remove(idx));
         assert!(self.copy_inst_infos.iter().all(|i| !i.indirect));
 
+        // Figure out which side we're indirect on, if any.
+        let indirect_src = indirect.map_or(false, |i| i.src.is_some());
+        let indirect_dst = indirect.map_or(false, |i| i.dst.is_some());
+
         let mut result = Vec::new();
 
-        let groups = self
-            .copy_inst_infos
-            .linear_group_by(|a, b| a.src == b.src && a.dst == b.dst);
+        let groups = self.copy_inst_infos.linear_group_by(|a, b| {
+            (indirect_src || a.src == b.src) && (indirect_dst || a.dst == b.dst)
+        });
         for group in groups {
             let info = group.first().unwrap();
-            let copy_kind = match (info.src, info.dst) {
-                (Some(_), Some(_)) => CopyKind::Copy,
-                (None, Some(_)) => CopyKind::Gather,
-                (Some(_), None) => CopyKind::Scatter,
-                (None, None) => CopyKind::GatherScatter,
+            let copy_kind = match (indirect_src, indirect_dst) {
+                (false, false) => CopyKind::Copy,
+                (true, false) => CopyKind::Gather,
+                (false, true) => CopyKind::Scatter,
+                (true, true) => CopyKind::GatherScatter,
             };
 
-            let chan_id = match (info.src, info.dst) {
-                (Some(src), Some(dst)) => ChanID::new_copy(src, dst),
-                (None, Some(dst)) => ChanID::new_gather(dst),
-                (Some(src), None) => ChanID::new_scatter(src),
-                (None, None) => unimplemented!(), // don't know how to assign GatherScatter to channel
+            let chan_id = match (indirect_src, indirect_dst, info.src, info.dst) {
+                (false, false, Some(src), Some(dst)) => ChanID::new_copy(src, dst),
+                (true, false, _, Some(dst)) => ChanID::new_gather(dst),
+                (false, true, Some(src), _) => ChanID::new_scatter(src),
+                (true, true, _, _) => unimplemented!("can't assign GatherScatter channel"),
+                _ => unreachable!("invalid copy kind"),
             };
 
             let mut group = group.to_owned();
-            indirect.map(|i| group.push(i));
+            // Hack: currently we just always force the indirect field to go
+            // first, which matches the current Legion implementation, but is
+            // not guaranteed.
+            indirect.map(|i| group.insert(0, i));
             result.push(Copy {
                 base: Base::new(allocator),
                 copy_kind: Some(copy_kind),
