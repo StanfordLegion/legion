@@ -1762,7 +1762,7 @@ namespace Legion {
       // latency of the testing those timeouts across the parent task
       // context (can often be a non-trivial latency for control 
       // replicated parent task contexts)
-      static constexpr unsigned MIN_TIMEOUT_CHECK_SIZE = 64;
+      static constexpr unsigned MIN_TIMEOUT_CHECK_SIZE = LEGION_MAX_FIELDS;
       unsigned total_timeout_check_iterations;
       unsigned remaining_timeout_check_iterations;
       TimeoutMatchExchange *timeout_exchange;
