@@ -1944,16 +1944,24 @@ namespace Legion {
       log_prof.print("Prof Proc Desc " IDFMT " %d",
                      proc_desc.proc_id, proc_desc.kind);
 #ifdef LEGION_USE_CUDA
-      std::ostringstream convert;
-      for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
-          convert << (int)proc_desc.cuda_device_info.uuid[i];
-      }
+      if (proc_desc.kind == Processor::TOC_PROC) {
+        char uuid_str[proc_desc.cuda_device_info.UUID_SIZE];
+        for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
+          sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
+        }
 
-      std::string uuid_string = convert.str();
-      log_prof.print("Prof CUDA Proc Desc %s %s %d %d",
-                    uuid_string.c_str(), proc_desc.cuda_device_info.name,
-                    proc_desc.cuda_device_info.driver_version,
-                    proc_desc.cuda_device_info.compute_capability);
+        /*std::ostringstream convert;
+        for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
+          convert << ((int)proc_desc.cuda_device_info.uuid[i]  & 0xFF);
+        }
+
+        std::string uuid_string = convert.str();*/
+        log_prof.print("Prof CUDA Proc Desc %s %s %d %d",
+                      //uuid_string.c_str(), proc_desc.cuda_device_info.name,
+                      uuid_str, proc_desc.cuda_device_info.name,
+                      proc_desc.cuda_device_info.driver_version,
+                      proc_desc.cuda_device_info.compute_capability);
+      }
 #endif
     }
 
