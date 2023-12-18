@@ -41,16 +41,18 @@ TEST(SequenceAssemblerTest, NocontigOutOfOrderSpans)
   SequenceAssembler assembler;
 
   const size_t beg_span_a = 0;
-  const size_t end_span_a = 16;
-  const size_t beg_span_b = 17;
-  const size_t end_span_b = 24;
+  const size_t count_a = 16;
+  const size_t beg_span_b = 18;
+  const size_t count_b = 4;
 
-  EXPECT_EQ(assembler.add_span(beg_span_b, end_span_b), 0);
-  EXPECT_EQ(assembler.add_span(beg_span_a, end_span_a), end_span_a - beg_span_a);
-  
-  EXPECT_EQ(assembler.span_exists(beg_span_a, end_span_a), end_span_a);
-  EXPECT_EQ(assembler.span_exists(beg_span_b, end_span_b), end_span_b);
-  EXPECT_EQ(assembler.span_exists(4, end_span_b), end_span_a - 4);
+  EXPECT_EQ(assembler.add_span(beg_span_b, count_b), 0);
+  EXPECT_EQ(assembler.add_span(beg_span_a, count_a), count_a - beg_span_a);
+
+  EXPECT_EQ(assembler.span_exists(beg_span_a, count_a), count_a);
+  EXPECT_EQ(assembler.span_exists(beg_span_b, count_b), count_b);
+  EXPECT_EQ(assembler.span_exists(4, count_b), 4);
+
+  EXPECT_EQ(assembler.add_span(beg_span_b + count_b + 1, 1), 0);
 
   EXPECT_FALSE(assembler.empty());
 }
@@ -60,14 +62,14 @@ TEST(SequenceAssemblerTest, ContigSpans)
   SequenceAssembler assembler;
 
   const size_t beg_span_a = 0;
-  const size_t end_span_a = 16;
+  const size_t count_a = 16;
   const size_t beg_span_b = 16;
-  const size_t end_span_b = 24;
+  const size_t count_b = 24;
 
-  EXPECT_EQ(assembler.add_span(beg_span_a, end_span_a), end_span_a);
-  EXPECT_EQ(assembler.add_span(beg_span_b, end_span_b), end_span_b);
+  EXPECT_EQ(assembler.add_span(beg_span_a, count_a), count_a);
+  EXPECT_EQ(assembler.add_span(beg_span_b, count_b), count_b);
 
-  EXPECT_EQ(assembler.span_exists(beg_span_a, end_span_a), end_span_a);
-  EXPECT_EQ(assembler.span_exists(beg_span_b, end_span_b), end_span_b);
+  EXPECT_EQ(assembler.span_exists(beg_span_a, count_a), count_a);
+  EXPECT_EQ(assembler.span_exists(beg_span_b, count_b), count_b);
   EXPECT_FALSE(assembler.empty());
 }
