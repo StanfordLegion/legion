@@ -181,10 +181,12 @@ namespace Realm {
         // printf("(" IDFMT "/%d)\n", e.id, e.gen);
       } else {
         Event after_lock = GenEventImpl::create_genevent()->current_event();
-        log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << after_lock << " wait_on=" << wait_on;
-	EventImpl::add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
-	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
-	return after_lock;
+        log_reservation.info() << "reservation acquire: rsrv=" << *this
+                               << " finish=" << after_lock << " wait_on=" << wait_on;
+        EventImpl::add_waiter(
+            wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
+        // printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
+        return after_lock;
       }
     }
 
