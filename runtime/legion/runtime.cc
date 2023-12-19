@@ -2623,7 +2623,7 @@ namespace Legion {
       }
       // If this is a small future, we need to have a local visible
       // instance that we can use for packing this by value
-      if (future_size <= LEGION_MAX_RETURN_SIZE)
+      if ((0 < future_size) && (future_size <= LEGION_MAX_RETURN_SIZE))
       {
         ApEvent inst_ready;
         if (!local_visible_memory.exists())
