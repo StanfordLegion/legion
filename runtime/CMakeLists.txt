@@ -775,6 +775,26 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(RealmStatic PRIVATE rt)
+endif()
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
+target_include_directories(RealmStatic
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime
+  )
+
 # Mapper objects
 list(APPEND MAPPER_SRC
   mappers/default_mapper.h     mappers/default_mapper.cc
