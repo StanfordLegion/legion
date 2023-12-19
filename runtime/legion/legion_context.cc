@@ -173,8 +173,8 @@ namespace Legion {
         {
           const Realm::ExternalMemoryResource resource(
               reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
-          instance = new FutureInstance(value, size, ApEvent::NO_AP_EVENT,
-              runtime, true/*own allocation*/, resource.clone(), 
+          instance = new FutureInstance(value, size,
+              true/*own allocation*/, resource.clone(), 
               FutureInstance::free_host_memory, executing_processor);
         }
         else
@@ -195,7 +195,7 @@ namespace Legion {
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       FutureInstance *instance = new FutureInstance(buffer, size,
-          ApEvent::NO_AP_EVENT, runtime, owned, resource.clone(), freefunc);
+          owned, resource.clone(), freefunc);
       result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
       return result;
     }
@@ -2201,24 +2201,38 @@ namespace Legion {
 #endif
         // escape this task local instance
         LgEvent unique = escape_task_local_instance(deferred_result_instance);
-        instance = new FutureInstance(res, res_size, effects, runtime,
-            true/*eager*/, false/*external*/, true/*own alloc*/,
+        instance = new FutureInstance(res, res_size, true/*eager*/,
+            false/*external*/, true/*own alloc*/,
             unique, deferred_result_instance);
       }
       else if (resource != NULL)
       {
         if (!owned)
         {
-          FutureInstance source(res, res_size, effects, runtime,
-             false/*own allocation*/, resource->clone(), 
-             freefunc, executing_processor);
-          instance = copy_to_future_inst(
-              runtime->runtime_system_memory, &source);
+          void *buffer = malloc(res_size);
+          instance = new FutureInstance(buffer, res_size, false/*eager*/,
+              true/*external*/, true/*own allocation*/);
+          if (!FutureInstance::check_meta_visible(resource->suggested_memory()))
+          {
+            FutureInstance source(res, res_size, false/*own allocation*/,
+                resource->clone(), freefunc, executing_processor);
+            effects = instance->copy_from(&source, owner_task, effects);
+            // Need to wait for the copy to be done before returning
+            if (effects.exists())
+              effects.wait_faultignorant();
+          }
+          else
+          {
+            // We can do a simple memory copy here but we need to wait
+            // for the results to be ready first before returning
+            if (effects.exists())
+              effects.wait_faultignorant();
+            memcpy(buffer, res, res_size);
+          }
         }
         else
-          instance = new FutureInstance(res, res_size, effects, runtime, 
-              true/*own allocation*/, resource->clone(), 
-              freefunc, executing_processor);
+          instance = new FutureInstance(res, res_size, true/*own allocation*/,
+              resource->clone(), freefunc, executing_processor);
       }
       else if (res_size > 0)
       {
@@ -2229,9 +2243,9 @@ namespace Legion {
         {
           const Realm::ExternalMemoryResource resource(
               reinterpret_cast<uintptr_t>(res), res_size, true/*read only*/);
-          instance = new FutureInstance(res, res_size, effects,
-              runtime, true/*own allocation*/, resource.clone(),
-              FutureInstance::free_host_memory, executing_processor);
+          instance = new FutureInstance(res, res_size, true/*own allocation*/,
+              resource.clone(), FutureInstance::free_host_memory,
+              executing_processor);
         }
         else
         {
@@ -2239,10 +2253,6 @@ namespace Legion {
           if (!internal_task && effects.exists())
             effects.wait_faultignorant();
           instance = copy_to_future_inst(res, res_size);
-          // Since we don't own the buffer, we need to wait for the copy
-          // to be done before we can safely return
-          if (instance->ready_event.exists())
-            instance->ready_event.wait_faultignorant();
         }
       }
       // If we did an eager callback, restore whether we own it now
@@ -2312,62 +2322,23 @@ namespace Legion {
                                                      size_t size)
     //--------------------------------------------------------------------------
     {
-      // See if we need to make an eager instance for this or not
+      // Make a simple memory copy here now
       if (size > LEGION_MAX_RETURN_SIZE)
       {
-        // create an eager instance in the chosen memory
-        Memory memory = runtime->runtime_system_memory;
-        MemoryManager *manager = runtime->find_memory_manager(memory);
-        const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
-        FutureInstance *instance = manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), ready, size, true/*eager*/);
-        // create an external instance for the current allocation
-        const Realm::ExternalMemoryResource resource(
-            reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
-        FutureInstance source(value, size, ApEvent::NO_AP_EVENT, runtime,
-          false/*eager*/, true/*external allocation*/, false/*own allocation*/);
-        // issue the copy between them
-        Runtime::trigger_event(NULL, ready, 
-            instance->copy_from(&source, owner_task));
-        return instance;
-      }
-      else
-      {
-        // Make a simple memory copy here now
-        void *buffer = malloc(size);
-        memcpy(buffer, value, size);
-        return new FutureInstance(buffer, size, ApEvent::NO_AP_EVENT,
-            runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    FutureInstance* TaskContext::copy_to_future_inst(Memory memory,
-                                                     FutureInstance *source)
-    //--------------------------------------------------------------------------
-    {
-      // See if we need to make an eager instance for this or not
-      if ((source->size > LEGION_MAX_RETURN_SIZE) || !source->is_meta_visible ||
-          !FutureInstance::check_meta_visible(runtime, memory))
-      {
-        // create an eager instance in the chosen memory
-        MemoryManager *manager = runtime->find_memory_manager(memory);
-        const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+        MemoryManager *manager = 
+          runtime->find_memory_manager(runtime->runtime_system_memory);
         FutureInstance *instance = 
           manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), ready, source->size, true/*eager*/);
-        // issue the copy between them
-        Runtime::trigger_event(NULL, ready, 
-            instance->copy_from(source, owner_task));
+            owner_task->get_unique_op_id(), size, true/*eager*/);
+        memcpy(const_cast<void*>(instance->get_data()), value, size);
         return instance;
       }
       else
       {
-        // Make a simple memory copy here now
-        void *buffer = malloc(source->size);
-        memcpy(buffer, source->get_data(), source->size);
-        return new FutureInstance(buffer, source->size, ApEvent::NO_AP_EVENT,
-            runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
+        void *buffer = malloc(size);
+        memcpy(buffer, value, size);
+        return new FutureInstance(buffer, size, false/*eager*/,
+            true/*external*/, true/*own allocation*/);
       }
     }
 
@@ -2394,43 +2365,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::begin_misspeculation(void)
+    void TaskContext::handle_mispredication(void)
     //--------------------------------------------------------------------------
     {
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
       owner_task->get_context()->decrement_pending(owner_task);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::end_misspeculation(FutureInstance *instance,
-                                         const void *metadata, size_t metasize)
-    //--------------------------------------------------------------------------
-    {
-      // Grab some information before doing the next step in case it
-      // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
       assert(owner_task != NULL);
-      const TaskID owner_task_id = owner_task->task_id;
-#endif
-      Runtime *runtime_ptr = runtime;
-      // Call post end task
-      if (metadata != NULL)
-      {
-        // Make a copy of the metadata
-        void *metacopy = malloc(metasize);
-        memcpy(metacopy, metadata, metasize);
-        post_end_task(instance, ApEvent::NO_AP_EVENT, metacopy, metasize,
-                      NULL/*functor*/, false/*owner*/);
-      }
-      else
-        post_end_task(instance, ApEvent::NO_AP_EVENT, NULL/*metadata*/,
-                      0/*metasize*/, NULL/*functor*/, false/*owner*/);
-#ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+      runtime->decrement_total_outstanding_tasks(owner_task->task_id, 
                                                      false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+      runtime->decrement_total_outstanding_tasks();
 #endif
     }
 
@@ -2648,30 +2594,13 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
-        FutureInstance *canonical = 
-          launcher.predicate_false_future.impl->get_canonical_instance();
-        if (canonical != NULL)
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
-          const Memory target = runtime->find_local_memory(executing_processor,
-                                                      canonical->memory.kind());
-          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(ApEvent::NO_AP_EVENT, 
-                copy_to_future_inst(target, canonical));
-          }
+          Future f = result->get_future(itr.p, true/*internal*/);
+          f.impl->set_result(launcher.predicate_false_future.impl, owner_task);
         }
-        else
-        {
-          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
-          }
-        }
-        return FutureMap(result);
       }
-      if (launcher.predicate_false_result.get_size() == 0)
+      else if (launcher.predicate_false_result.get_size() == 0)
       {
         // Just initialize all the futures
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -2695,22 +2624,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future TaskContext::predicate_index_task_reduce_false(
-                      const IndexTaskLauncher &launcher, Provenance *provenance)
+                                    const IndexTaskLauncher &launcher,
+                                    Provenance *provenance, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       if (launcher.elide_future_return)
         return Future();
-      if (launcher.predicate_false_future.impl != NULL)
-        return launcher.predicate_false_future;
-      // Otherwise check to see if we have a value
+      if (launcher.initial_value.impl != NULL)
+        return launcher.initial_value;
+      // Otherwise initialize to the identity value for the reduction
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), provenance);
-      const size_t future_size = launcher.predicate_false_result.get_size(); 
-      if (future_size > 0)
-        result->set_local(launcher.predicate_false_result.get_ptr(),
-            future_size, false/*own*/);
+      if (launcher.initial_value.impl == NULL)
+      {
+        const ReductionOp *reduction_op = runtime->get_reduction(redop);
+        result->set_local(&reduction_op->identity, reduction_op->sizeof_rhs);
+      }
       else
-        result->set_result(ApEvent::NO_AP_EVENT, NULL);
+        result->set_result(launcher.initial_value.impl, owner_task);
       return Future(result);
     }
 
@@ -6449,7 +6380,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_reduce_false(launcher, provenance);
+        return predicate_index_task_reduce_false(launcher, provenance, redop);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain,
@@ -17812,7 +17743,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_reduce_false(launcher, provenance);
+        return predicate_index_task_reduce_false(launcher, provenance, redop);
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -23580,7 +23511,7 @@ namespace Legion {
       if (!launcher.must_parallelism && launcher.enable_inlining)
       {
         if (launcher.predicate == Predicate::FALSE_PRED)
-          return predicate_index_task_reduce_false(launcher, provenance);
+          return predicate_index_task_reduce_false(launcher, provenance, redop);
         IndexTask *task = runtime->get_available_index_task();
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
@@ -23913,7 +23844,7 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
-      f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      f.impl->request_runtime_instance(owner_task, true/*eager*/);
       const RtEvent ready = f.impl->subscribe(); 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();

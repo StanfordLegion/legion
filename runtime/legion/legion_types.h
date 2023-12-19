@@ -392,7 +392,7 @@ namespace Legion {
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFERRED_LAUNCH_TASK_ID,
-      LG_MISSPECULATE_TASK_ID,
+      LG_MISPREDICATION_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
@@ -442,6 +442,7 @@ namespace Legion {
       LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
+      LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
@@ -510,7 +511,7 @@ namespace Legion {
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
         "Deferred Task Launch",                                   \
-        "Handle Mapping Misspeculation",                          \
+        "Handle Mapping Mispredication",                          \
         "Defer Trigger Task Complete",                            \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
@@ -560,6 +561,7 @@ namespace Legion {
         "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
+        "Defer Delete Future Instance",                           \
         "Free External Allocation",                               \
         "Defer Concurrent Analysis",                              \
         "Defer Consensus Match",                                  \

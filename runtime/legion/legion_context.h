@@ -563,10 +563,7 @@ namespace Legion {
       bool is_task_local_instance(PhysicalInstance instance);
       LgEvent escape_task_local_instance(PhysicalInstance instance);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
-      FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
-      void begin_misspeculation(void);
-      void end_misspeculation(FutureInstance *instance,
-                              const void *metadata, size_t metasize);
+      void handle_mispredication(void);
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l) = 0;
@@ -702,7 +699,8 @@ namespace Legion {
                                            const IndexTaskLauncher &launcher,
                                            Provenance *provenance);
       Future predicate_index_task_reduce_false(const IndexTaskLauncher &launch,
-                                               Provenance *provenance);
+                                               Provenance *provenance,
+                                               ReductionOpID redop);
     public:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &domain,

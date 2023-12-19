@@ -571,6 +571,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
       // Allow the parent context to sample any outstanding effects 
       virtual void find_completion_effects(std::set<ApEvent> &effects,
                                            bool tracing = false);
@@ -1697,6 +1699,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3612,6 +3616,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3805,6 +3811,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
       virtual FillView* get_fill_view(void) const;
     public:
       virtual size_t get_collective_points(void) const;
@@ -4027,6 +4035,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual RtEvent convert_collective_views(unsigned requirement_index,
@@ -4189,6 +4199,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual RtEvent convert_collective_views(unsigned requirement_index,
@@ -4306,7 +4318,7 @@ namespace Legion {
                    get_acquired_instances_ref(void) { return NULL; }
     protected:
       void invoke_mapper(std::vector<Memory> &targets);
-      ApEvent finalize_serdez_targets(RtEvent &protect);
+      ApEvent finalize_serdez_targets(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -4317,7 +4329,7 @@ namespace Legion {
       virtual void populate_sources(void);
       virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void all_reduce_serdez(void);
-      virtual RtEvent all_reduce_redop(void);
+      virtual ApEvent all_reduce_redop(RtEvent &executed);
     protected:
       ApEvent init_redop_target(FutureInstance *target);
       void fold_serdez(FutureImpl *impl);
@@ -4335,6 +4347,7 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> sources;
       std::vector<FutureInstance*> targets;
       size_t future_result_size;
+      FutureInstance *serdez_redop_instance;
       void *serdez_redop_buffer;
       size_t serdez_upper_bound;
       MapperID mapper_id;
@@ -4393,6 +4406,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
     public:
       void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;
