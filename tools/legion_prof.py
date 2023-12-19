@@ -2123,67 +2123,79 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     def add_copy_inst_info(self, copy_inst_info: CopyInstInfo
     ) -> None:
         self.copy_inst_infos.append(copy_inst_info)
-
-    def add_channel(self, state: "State") -> List[CopyInstInfo]:
+        
+    def split_by_channel(self, state: "State") -> None:
         # sanity check
         assert self.chan is None
         assert self.copy_kind is None
-        isindrect = False
-        new_copy_inst_infos = []
-        for copy_inst_info in self.copy_inst_infos:
-            # this is the copy inst info for points of a indirect copy (meta copy)
+        
+        # Assumptions:
+        #
+        #  1. A given Copy will always be entirely direct or entirely indirect.
+        #
+        #  2. A direct copy can have multiple CopyInstInfos with different
+        #     src/dst memories/instances.
+        #
+        #  3. An indirect copy will have exactly one indirect field. However
+        #     it might have multiple direct fields, and those direct fields could
+        #     have different src/dst memories/instances.
+
+        # Find the indirect field (if any). There is always at most one.
+        indirect: Optional[CopyInstInfo] = None
+        indirect_idx: Optional[int] = None
+        for idx, copy_inst_info in enumerate(self.copy_inst_infos):
             if copy_inst_info.indirect:
-                # gather (src points)
-                if copy_inst_info.dst == None:
-                    assert copy_inst_info.src is not None
-                    self.copy_kind = CopyKind.Gather
-                # scatter (dst points)
-                elif copy_inst_info.src == None:
-                    assert copy_inst_info.dst is not None
-                    self.copy_kind = CopyKind.Scatter
-                # gather with scatter
-                else:
-                    self.copy_kind = CopyKind.GatherScatter
-                    assert 0, "unimplemented"
-                isindrect = True
+                indirect = copy_inst_info
+                indirect_idx = idx
                 break
-        if isindrect == False:
-            # sanity check
-            assert len(self.copy_inst_infos) >= 1
-            # check if all CopyInstInfo have the same src and dst
-            # othewise, we will need to break the Copy into pieces
-            chan_src = self.copy_inst_infos[0].src
-            chan_dst = self.copy_inst_infos[0].dst
-            self.copy_kind = CopyKind.Copy
-            channel = state.find_or_create_copy_channel(chan_src, chan_dst)
-            channel.add_copy(self)
-            for idx, copy_inst_info in enumerate(self.copy_inst_infos):
-                if (copy_inst_info.src != chan_src) or (copy_inst_info.dst != chan_dst):
-                    # move the current to the end CopyInstInfo to the new CopyInstInfo,
-                    # it is possible that we need to split the new Copy again in the next add_channel call
-                    new_copy_inst_infos = self.copy_inst_infos[idx:]
-                    self.copy_inst_infos = self.copy_inst_infos[0:idx]
-                    break
-        else:
-            # sanity check
-            assert len(self.copy_inst_infos) >= 2
-            if self.copy_kind == CopyKind.Gather:
-                chan_dst = self.copy_inst_infos[1].dst
-                # sanity check
-                for copy_inst_info in self.copy_inst_infos[1:]:
-                    assert copy_inst_info.dst == chan_dst
-                channel = state.find_or_create_gather_channel(chan_dst)
-                channel.add_copy(self)
-            elif self.copy_kind == CopyKind.Scatter:
-                chan_src = self.copy_inst_infos[1].src
-                # sanity check
-                for copy_inst_info in self.copy_inst_infos[1:]:
-                    assert copy_inst_info.src == chan_src
-                channel = state.find_or_create_scatter_channel(chan_src)
-                channel.add_copy(self)
-            else:
+        if indirect_idx is not None:
+            self.copy_inst_infos.pop(indirect_idx)
+        
+        # Figure out which side we're indirect on, if any.
+        indirect_src = False
+        if (indirect is not None) and (indirect.src is not None):
+            indirect_src = True
+        indirect_dst = False
+        if (indirect is not None) and (indirect.dst is not None):
+            indirect_dst = True
+
+        def src_dst_tuple(copy_inst_info: CopyInstInfo) -> Tuple[Union[bool, Optional[Memory]], Union[bool, Optional[Memory]]]:
+            src = True if indirect_src else copy_inst_info.src
+            dst = True if indirect_dst else copy_inst_info.dst
+            return (src, dst)
+            
+        src_dst_set = set(map(src_dst_tuple, self.copy_inst_infos))
+        groups = [[copy_inst_info for copy_inst_info in self.copy_inst_infos if src_dst_tuple(copy_inst_info) == src_dst] for src_dst in src_dst_set]
+        for group in groups:
+            info = group[0]
+            channel = None
+            if (indirect_src == True) and (indirect_dst == False):
+                copy_kind = CopyKind.Gather
+                channel = state.find_or_create_gather_channel(info.dst)
+            elif (indirect_src == False) and (indirect_dst == True):
+                copy_kind = CopyKind.Scatter
+                channel = state.find_or_create_scatter_channel(info.src)
+            elif (indirect_src == True) and (indirect_dst == True):
+                copy_kind = CopyKind.GatherScatter
                 assert 0, "unimplemented"
-        return new_copy_inst_infos
+            else:
+                copy_kind = CopyKind.Copy
+                channel = state.find_or_create_copy_channel(info.src, info.dst)
+            assert channel is not None
+                
+            # Hack: currently we just always force the indirect field to go
+            # first, which matches the current Legion implementation, but is
+            # not guaranteed
+            if indirect:
+                group.insert(0, indirect)
+            new_copy = Copy(self.initiation_op, self.size, 
+                            self.create, self.ready, 
+                            self.start, self.stop, 
+                            self.fevent)
+            new_copy.copy_kind = copy_kind
+            new_copy.copy_inst_infos = group
+            channel.add_copy(new_copy)
+            state.prof_uid_map[new_copy.prof_uid] = new_copy
 
     @typecheck
     def get_color(self) -> str:
@@ -4405,35 +4417,19 @@ class State(object):
     #   add the channel info into Copy and then add copy into Channel
     @typecheck
     def add_copy_to_channel(self) -> None:
-        global prof_uid_ctr
-        print("current prof_uid from allocate:", prof_uid_ctr)
-        largest_prof_uid = 0
-        for copy in self.copy_map.values():
+        ordered_copy_map = OrderedDict(sorted(self.copy_map.items()))
+        for copy in ordered_copy_map.values():
             if len(copy.copy_inst_infos) > 0:
-                new_copy_inst_infos = copy.add_channel(self)
-                cur_copy = copy
-                if copy.prof_uid > largest_prof_uid:
-                    largest_prof_uid = copy.prof_uid
-                #print("copy prof_uid:", copy.prof_uid)
-                while len(new_copy_inst_infos) > 0:
-                    new_copy = Copy(cur_copy.initiation_op, cur_copy.size, 
-                                    cur_copy.create, cur_copy.ready, 
-                                    cur_copy.start, cur_copy.stop, 
-                                    cur_copy.fevent)
-                    self.prof_uid_map[new_copy.prof_uid] = copy
-                    for copy_inst_info in new_copy_inst_infos:
-                        new_copy.add_copy_inst_info(copy_inst_info)
-                    new_copy_inst_infos = new_copy.add_channel(self)
-                    print("cur prof_uid:", cur_copy.prof_uid, ", new prof_uid", new_copy.prof_uid)
-                    cur_copy = new_copy
+                copy.split_by_channel(self)
+                del self.prof_uid_map[copy.prof_uid]
         # disable the copy_map because we may create new copies
         self.copy_map.clear()
-        print("largest prof_uid of all existing copies:", largest_prof_uid)
  
     # called after all fills are parsed
     #   add the channel info into Fill and then add fill into Channel
     @typecheck
     def add_fill_to_channel(self) -> None:
+        ordered_fill_map = OrderedDict(sorted(self.fill_map.items()))
         for fill in self.fill_map.values():
             if len(fill.fill_inst_infos) > 0:
                 fill.add_channel(self)
