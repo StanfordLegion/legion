@@ -12,6 +12,8 @@ use rayon::prelude::*;
 
 use serde::Serialize;
 
+use slice_group_by::GroupBy;
+
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
@@ -1973,8 +1975,8 @@ impl fmt::Display for CopyKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct CopyInstInfo {
-    _src: Option<MemID>,
-    _dst: Option<MemID>,
+    src: Option<MemID>,
+    dst: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
     pub src_inst_uid: InstUID,
@@ -1997,8 +1999,8 @@ impl CopyInstInfo {
         indirect: bool,
     ) -> Self {
         CopyInstInfo {
-            _src: src,
-            _dst: dst,
+            src,
+            dst,
             src_fid,
             dst_fid,
             src_inst_uid,
@@ -2040,54 +2042,69 @@ impl Copy {
         self.copy_inst_infos.push(copy_inst_info);
     }
 
-    fn add_channel(&mut self) {
-        // sanity check
-        assert_eq!(self.chan_id, None);
-        assert_eq!(self.copy_kind, None);
-        let mut isindrect = false;
-        for copy_inst_info in &self.copy_inst_infos {
-            // this is the copy inst info for points of a indirect copy (meta copy)
-            if copy_inst_info.indirect {
-                self.copy_kind = match (copy_inst_info._src, copy_inst_info._dst) {
-                    (_, None) => Some(CopyKind::Gather),     // gather (src points)
-                    (None, _) => Some(CopyKind::Scatter),    // scatter (dst points)
-                    (_, _) => Some(CopyKind::GatherScatter), // gather with scatter
-                };
-                isindrect = true;
-                break;
-            }
-        }
-        if !isindrect {
-            // sanity check
-            assert!(!self.copy_inst_infos.is_empty());
-            let chan_src = self.copy_inst_infos[0]._src.unwrap();
-            let chan_dst = self.copy_inst_infos[0]._dst.unwrap();
-            for copy_inst_info in &self.copy_inst_infos {
-                assert!(copy_inst_info._src.unwrap() == chan_src);
-                assert!(copy_inst_info._dst.unwrap() == chan_dst);
-            }
-            self.copy_kind = Some(CopyKind::Copy);
-            let chan_id = ChanID::new_copy(chan_src, chan_dst);
-            self.chan_id = Some(chan_id);
-        } else {
-            // sanity check
-            assert!(self.copy_inst_infos.len() >= 2);
-            match self.copy_kind.unwrap() {
-                CopyKind::Gather => {
-                    // gather
-                    let chan_dst = self.copy_inst_infos[1]._dst.unwrap();
-                    let chan_id = ChanID::new_gather(chan_dst);
-                    self.chan_id = Some(chan_id);
-                }
-                CopyKind::Scatter => {
-                    // scatter
-                    let chan_src = self.copy_inst_infos[1]._src.unwrap();
-                    let chan_id = ChanID::new_scatter(chan_src);
-                    self.chan_id = Some(chan_id);
-                }
-                _ => unreachable!(),
+    fn split_by_channel(mut self, allocator: &mut ProfUIDAllocator) -> Vec<Self> {
+        assert!(self.chan_id.is_none());
+        assert!(self.copy_kind.is_none());
+
+        // Assumptions:
+        //
+        //  1. A given Copy will always be entirely direct or entirely indirect.
+        //
+        //  2. A direct copy can have multiple CopyInstInfos with different
+        //     src/dst memories/instances.
+        //
+        //  3. An indirect copy will have exactly one indirect field. However
+        //     it might have multiple direct fields, and those direct fields could
+        //     have different src/dst memories/instances.
+
+        // Find the indirect field (if any). There is always at most one.
+        let indirect = self
+            .copy_inst_infos
+            .iter()
+            .position(|i| i.indirect)
+            .map(|idx| self.copy_inst_infos.remove(idx));
+        assert!(self.copy_inst_infos.iter().all(|i| !i.indirect));
+
+        // Figure out which side we're indirect on, if any.
+        let indirect_src = indirect.map_or(false, |i| i.src.is_some());
+        let indirect_dst = indirect.map_or(false, |i| i.dst.is_some());
+
+        let mut result = Vec::new();
+
+        let groups = self.copy_inst_infos.linear_group_by(|a, b| {
+            (indirect_src || a.src == b.src) && (indirect_dst || a.dst == b.dst)
+        });
+        for group in groups {
+            let info = group.first().unwrap();
+            let copy_kind = match (indirect_src, indirect_dst) {
+                (false, false) => CopyKind::Copy,
+                (true, false) => CopyKind::Gather,
+                (false, true) => CopyKind::Scatter,
+                (true, true) => CopyKind::GatherScatter,
             };
+
+            let chan_id = match (indirect_src, indirect_dst, info.src, info.dst) {
+                (false, false, Some(src), Some(dst)) => ChanID::new_copy(src, dst),
+                (true, false, _, Some(dst)) => ChanID::new_gather(dst),
+                (false, true, Some(src), _) => ChanID::new_scatter(src),
+                (true, true, _, _) => unimplemented!("can't assign GatherScatter channel"),
+                _ => unreachable!("invalid copy kind"),
+            };
+
+            let mut group = group.to_owned();
+            // Hack: currently we just always force the indirect field to go
+            // first, which matches the current Legion implementation, but is
+            // not guaranteed.
+            indirect.map(|i| group.insert(0, i));
+            result.push(Copy {
+                base: Base::new(allocator),
+                copy_kind: Some(copy_kind),
+                chan_id: Some(chan_id),
+                copy_inst_infos: group,
+                ..self
+            })
         }
+        result
     }
 }
 
@@ -2597,14 +2614,16 @@ impl State {
             }
         }
         // put copies into channels
-        for mut copy in copies.into_values() {
+        for copy in copies.into_values() {
             if !copy.copy_inst_infos.is_empty() {
-                copy.add_channel();
-                if let Some(chan_id) = copy.chan_id {
-                    let chan = self.find_chan_mut(chan_id);
-                    chan.add_copy(copy);
-                } else {
-                    unreachable!();
+                let split = copy.split_by_channel(&mut self.prof_uid_allocator);
+                for elt in split {
+                    if let Some(chan_id) = elt.chan_id {
+                        let chan = self.find_chan_mut(chan_id);
+                        chan.add_copy(elt);
+                    } else {
+                        unreachable!();
+                    }
                 }
             }
         }
