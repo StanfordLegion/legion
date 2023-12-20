@@ -14,7 +14,7 @@ TEST(PathCacheTest, ZeroEntries)
   auto it = cache.find(key);
   EXPECT_TRUE(it == cache.end());
   // seg-fault on zero size cache miss
-  //cache.miss(key, MemPathInfo());
+  // cache.miss(key, MemPathInfo());
 }
 
 TEST(PathCacheTest, DoubleMissCheckValueUpdate)
@@ -63,7 +63,8 @@ TEST(PathCacheTest, EvictLastRecentlyUsedEntry)
 
   // hit all the entries except one
   for(size_t i = 0; i < num_entries; i++) {
-    if (i == evict_idx) continue;
+    if(i == evict_idx)
+      continue;
     PathLRU::LRUKey key(0, 0, num_bytes + i, {}, {});
     auto it = cache.find(key);
     EXPECT_TRUE(it != cache.end());
