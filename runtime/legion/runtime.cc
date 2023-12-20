@@ -2230,9 +2230,9 @@ namespace Legion {
       assert(subscription_event.exists() || is_owner());
       assert(metadata == NULL);
 #endif
-      derez.deserialize(upper_bound_size);
+      derez.deserialize(future_size);
       derez.deserialize(result_set_space);
-      if (upper_bound_size > 0)
+      if (future_size > 0)
       {
         bool has_local = false;
         size_t num_instances;
@@ -2798,12 +2798,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(local_visible_memory.exists());
-      assert((upper_bound_size == 0) == instances.empty());
+      assert((future_size == 0) == instances.empty());
 #endif
       rez.serialize(did);
       RezCheck z(rez);
-      rez.serialize(upper_bound_size);
+      rez.serialize(future_size);
       rez.serialize(result_set_space);
       if (!instances.empty())
       {

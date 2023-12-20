@@ -9523,7 +9523,21 @@ namespace Legion {
             reduction_instance.load()->initialize(reduction_op, this);
       }
       else
+      {
+        if ((redop_initial_value.impl != NULL) &&
+            (parent_ctx->get_task()->get_shard_id() == 0))
+        {
+          const RtEvent ready = 
+            redop_initial_value.impl->request_runtime_instance(this, false);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          const void *value = redop_initial_value.impl->find_runtime_buffer(
+              parent_ctx, serdez_redop_state_size); 
+          serdez_redop_state = malloc(serdez_redop_state_size);
+          memcpy(serdez_redop_state, value, serdez_redop_state_size);
+        }
         serdez_redop_targets.swap(target_mems);
+      }
     }
 
     //--------------------------------------------------------------------------
