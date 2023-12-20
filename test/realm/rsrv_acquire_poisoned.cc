@@ -37,7 +37,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = reservation.acquire(0, true, Event::ignorefaults(e1));
     reservation.release(e2);
     // hangs if poisoned reservation is acquired at e1 event
-    reservation.acquire(0, true).wait();
+    reservation.acquire(0, true, e2).wait();
     reservation.release();
   }
 
@@ -57,7 +57,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     Event e2 = reservation.acquire(0, true, Event::ignorefaults(e1));
     reservation.release(e2);
     start_event.cancel();
-    reservation.acquire(0, true).wait();
+    reservation.acquire(0, true, e2).wait();
     reservation.release();
   }
 
