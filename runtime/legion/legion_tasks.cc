@@ -1523,8 +1523,7 @@ namespace Legion {
       const size_t offset = regions.size();
       for (unsigned idx = 0; idx < output_regions.size(); idx++)
         if (!is_output_valid(idx))
-          parent_ctx->finalize_output_eqkd_tree(find_parent_index(offset + idx),
-                output_regions[idx].parent.get_index_space());
+          parent_ctx->finalize_output_eqkd_tree(find_parent_index(offset+idx));
     }
 
     //--------------------------------------------------------------------------
@@ -7663,11 +7662,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent PointTask::perform_collective_versioning_analysis(unsigned index,
         LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
-        unsigned parent_req_index, IndexSpace root_space)
+        unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       return slice_owner->perform_collective_versioning_analysis(index,
-          handle, tracker, mask, parent_req_index, root_space);
+          handle, tracker, mask, parent_req_index);
     }
 
     //--------------------------------------------------------------------------
@@ -10632,10 +10631,9 @@ namespace Legion {
       }
       if (done)
       {
-        IndexSpace root_space = regions[index].parent.get_index_space();
         const unsigned parent_req_index = find_parent_index(index);
         finalize_collective_versioning_analysis(index, parent_req_index,
-                                                root_space, to_perform);
+                                                to_perform);
       }
     }
 
@@ -12700,22 +12698,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent SliceTask::perform_collective_versioning_analysis(unsigned index,
         LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
-        unsigned parent_req_index, IndexSpace root_space)
+        unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
         return MultiTask::rendezvous_collective_versioning_analysis(index,
-            handle, tracker, runtime->address_space, mask, parent_req_index,
-            root_space);
+            handle, tracker, runtime->address_space, mask, parent_req_index);
       else
         return index_owner->rendezvous_collective_versioning_analysis(index,
-            handle, tracker, runtime->address_space, mask, parent_req_index,
-            root_space);
+            handle, tracker, runtime->address_space, mask, parent_req_index);
     }
 
     //--------------------------------------------------------------------------
     void SliceTask::finalize_collective_versioning_analysis(unsigned index,
-                          unsigned parent_req_index, IndexSpace root_space,
+                          unsigned parent_req_index,
                           LegionMap<LogicalRegion,RegionVersioning> &to_perform)
     //--------------------------------------------------------------------------
     {

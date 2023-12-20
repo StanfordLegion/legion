@@ -1765,7 +1765,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent Operation::perform_collective_versioning_analysis(unsigned index,
         LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
-        unsigned parent_req_index, IndexSpace root_space)
+        unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       // Should only be called in derived types
@@ -3407,8 +3407,7 @@ namespace Legion {
     RtEvent 
       CollectiveVersioning<OP>::rendezvous_collective_versioning_analysis(
         unsigned index, LogicalRegion handle, EqSetTracker *tracker,
-        AddressSpaceID space, const FieldMask &mask, unsigned parent_req_index,
-        IndexSpace root_space)
+        AddressSpaceID space, const FieldMask &mask, unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       RtEvent result;
@@ -3455,14 +3454,14 @@ namespace Legion {
       }
       if (done)
         finalize_collective_versioning_analysis(index, parent_req_index,
-                                                root_space, to_perform);
+                                                to_perform);
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
     void CollectiveVersioning<OP>::finalize_collective_versioning_analysis(
-        unsigned index, unsigned parent_req_index, IndexSpace root_space,
+        unsigned index, unsigned parent_req_index,
         LegionMap<LogicalRegion,RegionVersioning> &to_perform)
     //--------------------------------------------------------------------------
     {
@@ -3513,12 +3512,12 @@ namespace Legion {
               mapping.find_nearest(region_owner_space);
             precondition = context->compute_equivalence_sets(
                 parent_req_index, targets, target_spaces,
-                creation_origin, expr, fit->set_mask, root_space);
+                creation_origin, expr, fit->set_mask);
           }
           else
             precondition = context->compute_equivalence_sets(
                 parent_req_index, targets, target_spaces,
-                region_owner_space, expr, fit->set_mask, root_space);
+                region_owner_space, expr, fit->set_mask);
           if (precondition.exists())
             preconditions.push_back(precondition);
         }
@@ -11541,7 +11540,6 @@ namespace Legion {
     {
       InternalOp::activate();
       refinement_node = NULL;
-      root_space = IndexSpace::NO_SPACE;
       parent_req_index = 0;
       refinement_number = 0;
     }
@@ -11607,7 +11605,6 @@ namespace Legion {
 #endif
       initialize_internal(creator, index);
       refinement_node = refine;
-      root_space = parent.get_index_space();
       parent_req_index = parent_index;
       if (tracing)
         trace->register_internal(this);
@@ -11862,7 +11859,7 @@ namespace Legion {
       if (refinement_node->is_region())
       {
         RegionNode *region = refinement_node->as_region_node();
-        parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
+        parent_ctx->refine_equivalence_sets(parent_req_index,
             region->row_source, refinement_mask, map_applied_conditions);
       }
       else
@@ -11876,7 +11873,7 @@ namespace Legion {
           for (ColorSpaceIterator itr(partition); itr; itr++)
           {
             IndexSpaceNode *child = partition->get_child(*itr);
-            parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
+            parent_ctx->refine_equivalence_sets(parent_req_index,
                 child, refinement_mask, map_applied_conditions);
           }
         }
@@ -11886,7 +11883,7 @@ namespace Legion {
           // have the same impact as if we did it by individual subregions 
           // For aliased but incomplete partitions we just do it from the
           // root as well since we can't compute the overlapping parts
-          parent_ctx->refine_equivalence_sets(parent_req_index, root_space,
+          parent_ctx->refine_equivalence_sets(parent_req_index,
               partition->parent, refinement_mask, map_applied_conditions);
         }
       }
@@ -12243,8 +12240,7 @@ namespace Legion {
       FieldMask refinement_mask =
         node->column_source->get_field_mask(requirement.privilege_fields);
       parent_ctx->refine_equivalence_sets(parent_req_index,
-          requirement.parent.get_index_space(), node->row_source,
-          refinement_mask, map_applied_conditions);
+          node->row_source, refinement_mask, map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -21689,11 +21685,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent PointAttachOp::perform_collective_versioning_analysis(
         unsigned index, LogicalRegion handle, EqSetTracker *tracker,
-        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+        const FieldMask &mask, unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       return owner->rendezvous_collective_versioning_analysis(index, handle,
-          tracker, runtime->address_space, mask, parent_req_index, root_space);
+          tracker, runtime->address_space, mask, parent_req_index);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -22515,11 +22511,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent PointDetachOp::perform_collective_versioning_analysis(
         unsigned index, LogicalRegion handle, EqSetTracker *tracker,
-        const FieldMask &mask, unsigned parent_req_index, IndexSpace root_space)
+        const FieldMask &mask, unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       return owner->rendezvous_collective_versioning_analysis(index, handle,
-          tracker, runtime->address_space, mask, parent_req_index, root_space);
+          tracker, runtime->address_space, mask, parent_req_index);
     }
 
     ///////////////////////////////////////////////////////////// 

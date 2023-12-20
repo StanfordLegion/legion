@@ -1439,7 +1439,7 @@ namespace Legion {
       class Finalizer {
       public:
         virtual void finalize_collective_versioning(unsigned index,
-            unsigned parent_req_index, IndexSpace root_space,
+            unsigned parent_req_index,
             LegionMap<LogicalRegion,RegionVersioning> &pending_versions) = 0;
       };
     public:
@@ -1458,7 +1458,7 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez);
       virtual RtEvent post_gather(void);
     public:
-      void perform_rendezvous(unsigned parent_req_index, IndexSpace root_space,
+      void perform_rendezvous(unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &pending_versions);
     public:
       Operation *const op;
@@ -1466,7 +1466,6 @@ namespace Legion {
       const unsigned index;
     protected:
       LegionMap<LogicalRegion,RegionVersioning> pending_versions;
-      IndexSpace root_space;
       unsigned parent_req_index;
     };
 
@@ -1822,10 +1821,10 @@ namespace Legion {
     public:
       virtual void deactivate(bool free = true);
       virtual void finalize_collective_versioning_analysis(unsigned index,
-          unsigned parent_req_index, IndexSpace root_space,
+          unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &to_perform);
       virtual void finalize_collective_versioning(unsigned index,
-            unsigned parent_req_index, IndexSpace root_space,
+            unsigned parent_req_index,
             LegionMap<LogicalRegion,RegionVersioning> &pending_versions);
     public:
       void create_collective_rendezvous(unsigned requirement_index);
@@ -2137,8 +2136,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual RtEvent initialize_fill_view(void);
       virtual void predicate_false(void);
     public:
@@ -2218,8 +2216,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2414,8 +2411,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
       void select_sharding_function(void);
       void find_remote_targets(std::vector<ApEvent> &preconditions);
@@ -2658,8 +2654,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       CollectiveID mapping_check, sources_check;
@@ -2702,8 +2697,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       RtBarrier collective_map_barrier;
@@ -2784,8 +2778,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       // Help for unordered detachments
@@ -2860,8 +2853,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2893,8 +2885,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);

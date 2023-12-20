@@ -27065,9 +27065,8 @@ namespace Legion {
     void VersionManager::perform_versioning_analysis(InnerContext *context,
                  VersionInfo *version_info, RegionNode *region_node,
                  const FieldMask &version_mask, Operation *op, unsigned index,
-                 unsigned parent_req_index, IndexSpace root_space,
-                 std::set<RtEvent> &ready_events, RtEvent *output_region_ready,
-                 bool collective_rendezvous)
+                 unsigned parent_req_index, std::set<RtEvent> &ready_events,
+                 RtEvent *output_region_ready, bool collective_rendezvous)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -27094,7 +27093,7 @@ namespace Legion {
         // EqKDTree once the index space domain is ready
         RtUserEvent done_event = Runtime::create_rt_user_event();
         FinalizeOutputEquivalenceSetArgs args(this, op->get_unique_op_id(),
-            context, parent_req_index, set, root_space, done_event);
+            context, parent_req_index, set, done_event);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
             region_node->row_source->get_ready_event());
         *output_region_ready = done_event;
@@ -27210,12 +27209,11 @@ namespace Legion {
           std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
           ready = context->compute_equivalence_sets(parent_req_index, targets,
               target_spaces, runtime->address_space, region_node->row_source,
-              remaining_mask, root_space);
+              remaining_mask);
         }
         else
           ready = op->perform_collective_versioning_analysis(index, 
-              region_node->handle, this, remaining_mask, parent_req_index,
-              root_space);
+              region_node->handle, this, remaining_mask, parent_req_index);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -27237,15 +27235,14 @@ namespace Legion {
 #endif
         // Just need to rendezvous, no need to wait for any computation
         op->perform_collective_versioning_analysis(index, region_node->handle,
-            this, remaining_mask, parent_req_index, root_space);
+            this, remaining_mask, parent_req_index);
       }
     } 
 
     //--------------------------------------------------------------------------
     RtEvent VersionManager::finalize_output_equivalence_set(EquivalenceSet *set,
                                                       InnerContext *context,
-                                                      unsigned parent_req_index,
-                                                      IndexSpace root_space)
+                                                      unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
       FieldMask set_mask;
@@ -27259,7 +27256,7 @@ namespace Legion {
         set_mask = finder->second;
       }
       return context->record_output_equivalence_set(this,
-          runtime->address_space, parent_req_index, set, set_mask, root_space);
+          runtime->address_space, parent_req_index, set, set_mask);
     } 
 
 #if 0
@@ -28938,7 +28935,7 @@ namespace Legion {
       const FinalizeOutputEquivalenceSetArgs *fargs =
         (const FinalizeOutputEquivalenceSetArgs*)args;
       RtEvent done = fargs->proxy_this->finalize_output_equivalence_set(
-        fargs->set, fargs->context, fargs->parent_req_index, fargs->root_space);
+        fargs->set, fargs->context, fargs->parent_req_index);
       Runtime::trigger_event(fargs->done_event, done);
       if (fargs->set->remove_base_gc_ref(META_TASK_REF))
         delete fargs->set;

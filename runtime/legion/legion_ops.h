@@ -540,8 +540,7 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
     public:
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
@@ -840,10 +839,9 @@ namespace Legion {
     public:
       RtEvent rendezvous_collective_versioning_analysis(unsigned index,
           LogicalRegion handle, EqSetTracker *tracker, AddressSpaceID space,
-          const FieldMask &mask, unsigned parent_req_index, 
-          IndexSpace root_space);
+          const FieldMask &mask, unsigned parent_req_index); 
       virtual void finalize_collective_versioning_analysis(unsigned index,
-          unsigned parent_req_index, IndexSpace root_space,
+          unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &to_perform);
     };
 
@@ -2316,8 +2314,6 @@ namespace Legion {
 #endif
       FieldMask refinement_mask;
       RegionTreeNode *refinement_node;
-      // Root index space of the parent region requirement
-      IndexSpace root_space;
       // The parent region requirement for the refinement to update
       unsigned parent_req_index;
       // For uniquely identify this refinement in the context of
@@ -4102,8 +4098,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_attach(void) const { return true; }
@@ -4272,8 +4267,7 @@ namespace Legion {
                                                bool &first_local);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_detach(void) const { return true; }

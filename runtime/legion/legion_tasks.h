@@ -964,8 +964,7 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -1448,10 +1447,9 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
-                       const FieldMask &mask, unsigned parent_req_index,
-                       IndexSpace root_space);
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual void finalize_collective_versioning_analysis(unsigned index,
-          unsigned parent_req_index, IndexSpace root_space,
+          unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &to_perform);
       virtual RtEvent convert_collective_views(unsigned requirement_index,
                        unsigned analysis_index, LogicalRegion region,

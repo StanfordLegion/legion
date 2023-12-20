@@ -5101,7 +5101,7 @@ namespace Legion {
 #endif
           it->first->perform_versioning_analysis(ctx, context, 
             &version_infos[index], it->second, op, 0/*index*/,
-            IndexSpace::NO_SPACE, req_it->second, eq_events);
+            req_it->second, eq_events);
         }
 #ifdef DEBUG_LEGION
         assert(req_it == trace_region_parent_req_indexes.end());

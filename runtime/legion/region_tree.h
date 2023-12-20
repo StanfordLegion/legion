@@ -4758,7 +4758,6 @@ namespace Legion {
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
                                        Operation *op, unsigned index,
-                                       IndexSpace root_space,
                                        unsigned parent_req_index,
                                        std::set<RtEvent> &ready_events,
                                        RtEvent *output_region_ready = NULL,
