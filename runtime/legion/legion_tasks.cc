@@ -6119,6 +6119,14 @@ namespace Legion {
     void IndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
+      complete_predicate_false(false/*mispredicated*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::complete_predicate_false(bool mispredicated)
+    //--------------------------------------------------------------------------
+    {
       if (!elide_future_return)
       {
         // Set the future to the false result
@@ -6134,10 +6142,10 @@ namespace Legion {
           result.impl->set_result(predicate_false_future.impl, this);
       }
       // Then clean up this task instance
-      complete_mapping();
       complete_execution();
       trigger_children_complete(ApEvent::NO_AP_EVENT);
-      trigger_children_committed();
+      if (!mispredicated)
+        trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -6502,7 +6510,7 @@ namespace Legion {
 #endif
       // Pretend like we executed the task
       execution_context->handle_mispredication();
-      predicate_false();
+      complete_predicate_false(true/*mispredicated*/);
     }
 
     //--------------------------------------------------------------------------

@@ -1743,6 +1743,7 @@ namespace Legion {
         ApEvent ready = previous->copy_to(instance, op);
         instances.emplace(std::make_pair(instance->memory,
               FutureInstanceTracker(instance, ready)));
+        local_visible_memory = instance->memory;
       }
       const void *meta = previous->get_metadata(&metasize);
       if (metasize > 0)
@@ -1871,10 +1872,10 @@ namespace Legion {
       }
       else
         future_complete = complete;
-      empty.store(false); 
       result_set_space = local_space;
       if (!pending_instances.empty())
         create_pending_instances();
+      empty.store(false); 
       if (!is_owner())
         // The owner always needs to be told of the result
         subscribers.insert(owner_space);
@@ -1980,7 +1981,7 @@ namespace Legion {
                             ready_event, false/*need lock*/, existing);
       }
 #ifdef DEBUG_LEGION
-      assert(!empty.load());
+      assert((future_size == 0) == instances.empty());
 #endif
       // Handle the case where we don't have a payload
       if (instances.empty())
@@ -2327,9 +2328,9 @@ namespace Legion {
         memcpy(metadata, derez.get_current_pointer(), metasize);
         derez.advance_pointer(metasize);
       }
-      empty.store(false);
       if (!pending_instances.empty())
         create_pending_instances();
+      empty.store(false);
       if (subscription_event.exists())
       {
         Runtime::trigger_event(subscription_event);

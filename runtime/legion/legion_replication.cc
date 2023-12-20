@@ -12755,7 +12755,7 @@ namespace Legion {
 #endif
         write_event = precondition;
         perform_collective_async();
-        return RtEvent::NO_RT_EVENT;
+        return post_broadcast(); 
       }
       else
       {
