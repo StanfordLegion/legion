@@ -2192,7 +2192,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
             new_copy = Copy(self.initiation_op, self.size, 
                             self.create, self.ready, 
                             self.start, self.stop, 
-                            self.fevent)
+                            self.fevent, self.collective)
             new_copy.copy_kind = copy_kind
             new_copy.copy_inst_infos = group
             channel.add_copy(new_copy)
