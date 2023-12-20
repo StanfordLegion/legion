@@ -7462,10 +7462,8 @@ namespace Legion {
       execution_context->handle_mispredication();
       slice_owner->set_predicate_false_result(index_point);
       // Then clean up this task instance
-      complete_mapping();
       complete_execution();
       trigger_children_complete(ApEvent::NO_AP_EVENT);
-      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
