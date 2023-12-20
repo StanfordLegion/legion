@@ -2820,17 +2820,21 @@ namespace Legion {
             target_memories.push_back(it->first);
           }
           else if ((collective_mapping != NULL) &&
-              collective_mapping->contains(inst_space))
+              collective_mapping->contains(inst_space) && 
+              (subscribers.find(inst_space) == subscribers.end()))
           {
             // If there is a collective mapping we need to check whether
             // we should send the instance to the target because the 
             // actual subscriber will come through the collective mapping
             // subscriber tree to the target.
             while ((inst_space != owner_space) && (inst_space != target) &&
-                (subscribers.find(inst_space) == subscribers.end()))
-              inst_space = 
+                    (inst_space != local_space) &&
+                    (subscribers.find(inst_space) == subscribers.end()))
+              inst_space =
                 collective_mapping->get_parent(owner_space, inst_space);
             if (inst_space == target)
+              target_memories.push_back(it->first);
+            else if ((inst_space == owner_space) && (target == owner_space))
               target_memories.push_back(it->first);
           }
         }
