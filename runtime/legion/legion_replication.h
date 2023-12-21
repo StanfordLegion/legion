@@ -1830,7 +1830,7 @@ namespace Legion {
       void create_collective_rendezvous(unsigned requirement_index);
       virtual void shard_off_collective_rendezvous(
           std::set<RtEvent> &done_events);
-      virtual void predicate_false_collective_rendezvous(void);
+      virtual void elide_collective_rendezvous(void);
     protected:
       std::map<unsigned,
              CollectiveVersioningRendezvous*> collective_versioning_rendezvous;
@@ -1865,7 +1865,7 @@ namespace Legion {
           unsigned requirement_index, unsigned analysis_index = 0);
       virtual void shard_off_collective_rendezvous(
           std::set<RtEvent> &done_events);
-      virtual void predicate_false_collective_rendezvous(void);
+      virtual void elide_collective_rendezvous(void);
     protected: 
       std::map<RendezvousKey,
                CollectiveViewRendezvous*> collective_view_rendezvous;

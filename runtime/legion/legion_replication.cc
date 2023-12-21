@@ -467,8 +467,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void ReplCollectiveVersioning<OP>::
-                                     predicate_false_collective_rendezvous(void)
+    void ReplCollectiveVersioning<OP>::elide_collective_rendezvous(void)
     //--------------------------------------------------------------------------
     {
       for (typename std::map<unsigned,
@@ -593,11 +592,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void ReplCollectiveViewCreator<OP>::
-                                     predicate_false_collective_rendezvous(void)
+    void ReplCollectiveViewCreator<OP>::elide_collective_rendezvous(void)
     //--------------------------------------------------------------------------
     {
-      ReplCollectiveVersioning<OP>::predicate_false_collective_rendezvous();
+      ReplCollectiveVersioning<OP>::elide_collective_rendezvous();
       for (typename std::map<RendezvousKey,
                              CollectiveViewRendezvous*>::const_iterator
             it = collective_view_rendezvous.begin(); 
@@ -1556,7 +1554,7 @@ namespace Legion {
         output_size_collective->elide_collective();
         Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
       }
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       // Now continue through and do the base case
       IndexTask::predicate_false();
     }
@@ -2906,11 +2904,7 @@ namespace Legion {
     void ReplFillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      // Trigger the first generation of the collective_map_barrier
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      // Advance the first generation of the barrier for trigger_ready
-      Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       // Second generation triggered by callback to finalize_complete_mapping
       FillOp::trigger_replay();
     }
@@ -2923,7 +2917,7 @@ namespace Legion {
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       // Advance the first generation of the barrier for trigger_ready
       Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       // Second generation triggered by callback to finalize_complete_mapping
       FillOp::predicate_false();
     }
@@ -7980,7 +7974,7 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       AcquireOp::predicate_false();
     }
 
@@ -7991,9 +7985,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       AcquireOp::trigger_replay();
     }
 
@@ -8174,7 +8166,7 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       ReleaseOp::predicate_false();
     }
 
@@ -8185,9 +8177,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      Runtime::advance_barrier(collective_map_barrier);
-      predicate_false_collective_rendezvous();
+      elide_collective_rendezvous();
       ReleaseOp::trigger_replay();
     }
 
