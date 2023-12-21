@@ -486,8 +486,7 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_mispredication(void) = 0;
     public:
       // From Memoizable
@@ -756,7 +755,6 @@ namespace Legion {
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs);
-      void complete_predicate_false(void);
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -792,8 +790,7 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(bool deferral, 
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_mispredication(void);
       virtual void prepare_map_must_epoch(void);
     public:
@@ -912,8 +909,7 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_mispredication(void);
     public:
       // ProjectionPoint methods
@@ -1031,8 +1027,7 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor); 
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_mispredication(void);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,

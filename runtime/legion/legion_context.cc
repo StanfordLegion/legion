@@ -2378,6 +2378,9 @@ namespace Legion {
 #else
       runtime->decrement_total_outstanding_tasks();
 #endif
+      owner_task->complete_execution();
+      owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+      owner_task->trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -11622,10 +11625,9 @@ namespace Legion {
         }
       }
       if (!preconditions.empty())
-        owner_task->handle_post_mapped(false/*deferral*/,
-            Runtime::merge_events(preconditions));
+        owner_task->handle_post_mapped(Runtime::merge_events(preconditions));
       else
-        owner_task->handle_post_mapped(false/*deferral*/);
+        owner_task->handle_post_mapped();
       if (need_complete)
       {
         if (!child_completion_events.empty())
@@ -11636,6 +11638,14 @@ namespace Legion {
       }
       if (need_commit)
         owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::handle_mispredication(void)
+    //--------------------------------------------------------------------------
+    {
+      owner_task->handle_post_mapped();
+      TaskContext::handle_mispredication();
     }
 
     //--------------------------------------------------------------------------

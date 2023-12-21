@@ -563,7 +563,7 @@ namespace Legion {
       bool is_task_local_instance(PhysicalInstance instance);
       LgEvent escape_task_local_instance(PhysicalInstance instance);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
-      void handle_mispredication(void);
+      virtual void handle_mispredication(void);
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l) = 0;
@@ -1724,6 +1724,7 @@ namespace Legion {
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
+      virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);

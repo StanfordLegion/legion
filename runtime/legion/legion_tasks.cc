@@ -6120,13 +6120,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      complete_predicate_false(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::complete_predicate_false(void)
-    //--------------------------------------------------------------------------
-    {
       if (!elide_future_return)
       {
         // Set the future to the false result
@@ -6141,7 +6134,6 @@ namespace Legion {
         else
           result.impl->set_result(predicate_false_future.impl, this);
       }
-      // Then clean up this task instance
       complete_execution();
       trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
@@ -6460,8 +6452,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_post_mapped(bool deferral,
-                                            RtEvent mapped_precondition)
+    void IndividualTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_POST_MAPPED_CALL);
@@ -6507,9 +6498,22 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       runtime->outstanding_counts[MispredicationTaskArgs::TASK_ID].fetch_add(1);
 #endif
+      if (!elide_future_return)
+      {
+        // Set the future to the false result
+        if (predicate_false_future.impl == NULL)
+        {
+          if (predicate_false_size > 0)
+            result.impl->set_local(predicate_false_result,
+                                   predicate_false_size, false/*own*/);
+          else
+            result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
+        }
+        else
+          result.impl->set_result(predicate_false_future.impl, this);
+      }
       // Pretend like we executed the task
       execution_context->handle_mispredication();
-      complete_predicate_false();
     }
 
     //--------------------------------------------------------------------------
@@ -7413,8 +7417,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_post_mapped(bool deferral, 
-                                       RtEvent mapped_precondition)
+    void PointTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_POST_MAPPED_CALL);
@@ -7457,13 +7460,9 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       runtime->outstanding_counts[MispredicationTaskArgs::TASK_ID].fetch_add(1);
 #endif
+      slice_owner->set_predicate_false_result(index_point);
       // Pretend like we executed the task
       execution_context->handle_mispredication();
-      slice_owner->set_predicate_false_result(index_point);
-      // Then clean up this task instance
-      complete_execution();
-      trigger_children_complete(ApEvent::NO_AP_EVENT);
-      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -8004,8 +8003,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_post_mapped(bool deferral, 
-                                       RtEvent mapped_precondition)
+    void ShardTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       shard_manager->handle_post_mapped(true/*local*/, mapped_precondition);

@@ -10273,8 +10273,7 @@ namespace Legion {
           runtime->send_replicate_post_mapped(owner_space, rez);
         }
         else
-          original_task->handle_post_mapped(false/*deferral*/, 
-                                            mapped_precondition);
+          original_task->handle_post_mapped(mapped_precondition);
       }
     }
 
