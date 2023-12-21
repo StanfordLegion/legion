@@ -22484,7 +22484,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock leaf(leaf_lock);
-      if (!children_complete_invoked)
+      if (task_executed && !children_complete_invoked)
       {
         children_complete_invoked = true;
         return true;
@@ -22497,7 +22497,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock leaf(leaf_lock);
-      if (!children_commit_invoked)
+      if (task_executed && !children_commit_invoked)
       {
         children_commit_invoked = true;
         return true;
