@@ -6125,10 +6125,12 @@ namespace Legion {
         return;
       const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
       AutoLock c_lock(congruence_lock);
-      std::set<IndexSpaceExpression*> &exprs = canonical_expressions[key];
-      std::set<IndexSpaceExpression*>::iterator finder = exprs.find(expr);
+      std::vector<IndexSpaceExpression*> &exprs = canonical_expressions[key];
+      std::vector<IndexSpaceExpression*>::iterator finder =
+        std::lower_bound(exprs.begin(), exprs.end(), expr);
 #ifdef DEBUG_LEGION
       assert(finder != exprs.end());
+      assert(*finder == expr);
 #endif
       exprs.erase(finder);
       if (exprs.empty())

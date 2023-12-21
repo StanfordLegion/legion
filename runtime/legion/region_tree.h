@@ -897,8 +897,12 @@ namespace Legion {
     public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs,
                   IndexSpaceExpression *rhs, OperationCreator *creator = NULL);
-    public:
+    protected:
+      // You don't call this method directly, call 
+      // IndexSpaceExpression::get_canonical_expression instead
+      friend class IndexSpaceExpression;
       IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
+    public:
       void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
     private:
       static inline bool compare_expressions(IndexSpaceExpression *one,
@@ -971,7 +975,7 @@ namespace Legion {
       // we don't have multiple symbols for congruent expressions. This data
       // structure is used to find congruent expressions where they exist
       std::map<std::pair<size_t,TypeTag>,
-               std::set<IndexSpaceExpression*> > canonical_expressions;
+               std::vector<IndexSpaceExpression*> > canonical_expressions;
     public:
       static const unsigned MAX_EXPRESSION_FANOUT = 32;
     };
@@ -1390,7 +1394,7 @@ namespace Legion {
          const Domain *padding_delta) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::set<IndexSpaceExpression*> &expressions) = 0;
+                  std::vector<IndexSpaceExpression*> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
@@ -1496,7 +1500,7 @@ namespace Legion {
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
-                        std::set<IndexSpaceExpression*> &expressions);
+                        std::vector<IndexSpaceExpression*> &expressions);
       template<int DIM, typename T>
       inline KDTree* get_sparsity_map_kd_tree_internal(void);
     public:
@@ -1720,7 +1724,7 @@ namespace Legion {
          const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::set<IndexSpaceExpression*> &expressions);
+                  std::vector<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
@@ -2666,7 +2670,7 @@ namespace Legion {
          const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::set<IndexSpaceExpression*> &expressions);
+                  std::vector<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,

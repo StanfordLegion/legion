@@ -919,22 +919,22 @@ namespace Legion {
       // Note that we don't need to explicitly delete it if it is not the
       // canonical expression since it has a live expression reference that
       // will be cleaned up after this meta-task is done running
-      return forest->find_canonical_expression(result);
+      return result->get_canonical_expression(forest);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceExpression*
               IndexSpaceExpression::find_congruent_expression_internal(
-                                   std::set<IndexSpaceExpression*> &expressions)
+                                std::vector<IndexSpaceExpression*> &expressions)
     //--------------------------------------------------------------------------
     {
       if (expressions.empty())
       {
-        expressions.insert(this);
+        expressions.push_back(this);
         return this;
       }
-      else if (expressions.find(this) != expressions.end())
+      else if (std::binary_search(expressions.begin(), expressions.end(), this))
         return this;
       Realm::IndexSpace<DIM,T> local_space;
       // No need to wait for the event, we know it is already triggered
@@ -942,7 +942,7 @@ namespace Legion {
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
       size_t local_rect_count = 0;
       KDNode<DIM,T,void> *local_tree = NULL;
-      for (std::set<IndexSpaceExpression*>::const_iterator it =
+      for (std::vector<IndexSpaceExpression*>::const_iterator it =
             expressions.begin(); it != expressions.end(); it++)
       {
         Realm::IndexSpace<DIM,T> other_space;
@@ -1055,7 +1055,9 @@ namespace Legion {
         }
       }
       // Did not find any congruences so add ourself
-      expressions.insert(this);
+      expressions.push_back(this);
+      // Keep the expressions sorted for searching
+      std::sort(expressions.begin(), expressions.end());
       // If we have a KD tree we can save it for later congruence tests
       if (local_tree != NULL)
       {
@@ -1491,7 +1493,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceExpression* 
       IndexSpaceOperationT<DIM,T>::find_congruent_expression(
-                                   std::set<IndexSpaceExpression*> &expressions)
+                                std::vector<IndexSpaceExpression*> &expressions)
     //--------------------------------------------------------------------------
     {
       return find_congruent_expression_internal<DIM,T>(expressions); 
@@ -5058,7 +5060,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceExpression* 
             IndexSpaceNodeT<DIM,T>::find_congruent_expression(
-                                   std::set<IndexSpaceExpression*> &expressions)
+                                std::vector<IndexSpaceExpression*> &expressions)
     //--------------------------------------------------------------------------
     {
       return find_congruent_expression_internal<DIM,T>(expressions); 
@@ -6692,7 +6694,7 @@ namespace Legion {
       // Note that we don't need to explicitly delete it if it is not the
       // canonical expression since it has a live expression reference that
       // will be cleaned up after this meta-task is done running
-      return forest->find_canonical_expression(result);
+      return result->get_canonical_expression(forest);
     }
 
     //--------------------------------------------------------------------------
