@@ -12848,7 +12848,17 @@ namespace Legion {
 #endif
       instance = inst;
       ready = precondition;
-      perform_collective_async();
+      // This is a small, but important optimization:
+      // For futures that are meta visible and less than the size of the
+      // maximum pass-by-value size that are not ready yet, delay starting
+      // the collective until they are ready so that we can do as much 
+      // as possible passing the data by value rather than having to defer
+      // to Realm too much.
+      if (inst->is_meta_visible && (inst->size <= LEGION_MAX_RETURN_SIZE) &&
+          precondition.exists() && !precondition.has_triggered_faultignorant())
+        perform_collective_async(Runtime::protect_event(precondition));
+      else
+        perform_collective_async();
     }
 
     //--------------------------------------------------------------------------
