@@ -2887,17 +2887,20 @@ namespace Legion {
     RtEvent ReplFillOp::finalize_complete_mapping(RtEvent pre)
     //--------------------------------------------------------------------------
     {
+      if (collective_map_barrier.exists())
+      {
+        // Normal analysis path
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
 #ifdef DEBUG_LEGION
-      assert(collective_map_barrier.exists());
-#endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
-#ifdef DEBUG_LEGION
-      const RtEvent result = collective_map_barrier;
-      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
-      return result;
+        const RtEvent result = collective_map_barrier;
+        collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+        return result;
 #else
-      return collective_map_barrier;
+        return collective_map_barrier;
 #endif
+      }
+      else // Tracing path
+        return pre;
     }
 
     //--------------------------------------------------------------------------
@@ -7936,11 +7939,14 @@ namespace Legion {
     RtEvent ReplAcquireOp::finalize_complete_mapping(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(collective_map_barrier.exists());
-#endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
-      return collective_map_barrier;
+      if (collective_map_barrier.exists())
+      {
+        // Normal analysis path
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+        return collective_map_barrier;
+      }
+      else // Tracing path
+        return pre;
     }
 
     //--------------------------------------------------------------------------
@@ -8128,11 +8134,14 @@ namespace Legion {
     RtEvent ReplReleaseOp::finalize_complete_mapping(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(collective_map_barrier.exists());
-#endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
-      return collective_map_barrier;
+      if (collective_map_barrier.exists())
+      {
+        // Normal analysis path
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+        return collective_map_barrier;
+      }
+      else // Tracing path
+        return pre;
     }
 
     //--------------------------------------------------------------------------
