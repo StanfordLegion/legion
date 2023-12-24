@@ -9339,7 +9339,6 @@ namespace Legion {
                                std::vector<DomainPoint> &&shards,
                                std::vector<DomainPoint> &&sorted,
                                std::vector<ShardID> &&lookup,
-                               AddressSpaceID owner, 
                                SingleTask *original/*= NULL*/, RtBarrier bar)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(id, SHARD_MANAGER_DC), true, mapping),
@@ -9419,6 +9418,100 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::distribute_explicit(SingleTask *task, VariantID variant,
+                                      std::vector<Processor> &target_processors)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_spaces == NULL);
+      assert(target_processors.size() == total_shards);
+#endif
+      // Initialize the address spaces data structure
+      address_spaces = new ShardMapping();
+      address_spaces->add_reference();
+      address_spaces->resize(local_shards.size());
+      for (unsigned idx = 0; idx < target_processors.size(); idx++)
+        (*address_spaces)[idx] = target_processors[idx].address_space();
+      if (collective_mapping == NULL)
+        return;
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space, children);
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          pack_shard_manager(rez);
+          rez.serialize<bool>(true/*explicit*/);
+          for (unsigned idx = 0; idx < total_shards; idx++)
+            rez.serialize(target_processors[idx]);
+          rez.serialize(variant);
+          // Now pack the task data for replication
+          // Only back the base task version of this task
+          task->pack_base_task(rez, *it);
+        }
+        runtime->send_replicate_distribution(*it, rez);
+        remote_constituents++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::distribute_implicit(TaskID task_id, MapperID mapper_id,
+         Processor::Kind kind, unsigned shards_per_space, DistributedID ctx_did)
+    //--------------------------------------------------------------------------
+    {
+      if (collective_mapping == NULL)
+        return;
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space, children);
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          pack_shard_manager(rez);
+          rez.serialize<bool>(false/*explicit*/);
+          rez.serialize(task_id);
+          rez.serialize(mapper_id);
+          rez.serialize(kind);
+          rez.serialize(shards_per_space);
+          rez.serialize(ctx_did);
+        }
+        runtime->send_replicate_distribution(*it, rez);
+        remote_constituents++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::pack_shard_manager(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did);
+      rez.serialize(shard_domain);
+      rez.serialize<size_t>(total_shards);
+      rez.serialize<bool>(isomorphic_points);
+      if (isomorphic_points)
+      {
+        for (unsigned idx = 0; idx < total_shards; idx++)
+          rez.serialize(shard_points[idx]);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          rez.serialize(sorted_points[idx]);
+          rez.serialize(shard_lookup[idx]);
+        }
+      }
+      rez.serialize<bool>(control_replicated);
+      rez.serialize<bool>(top_level_task);
+      rez.serialize(shard_task_barrier);
+      collective_mapping->pack(rez);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::set_shard_mapping(const std::vector<Processor> &mapping)
     //--------------------------------------------------------------------------
     {
@@ -9461,14 +9554,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardTask* ShardManager::create_shard(ShardID id, Processor target)
+    ShardTask* ShardManager::create_shard(ShardID id, Processor target, 
+                                          VariantID variant)
     //--------------------------------------------------------------------------
     {
-      ShardTask *shard = new ShardTask(runtime, this, id, target);
+      ShardTask *shard = new ShardTask(runtime, this, id, target, variant);
       local_shards.push_back(shard);
       return shard;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ShardManager::launch(const std::vector<bool> &virtual_mapped)
     //--------------------------------------------------------------------------
@@ -9635,15 +9730,7 @@ namespace Legion {
           launch_shard(shard);
       }
     }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::launch_shard(ShardTask *task, RtEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-      ShardManagerLaunchArgs args(task);
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                       precondition);
-    }
+#endif
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx,
@@ -10415,8 +10502,7 @@ namespace Legion {
           runtime->send_replicate_post_mapped(owner_space, rez);
         }
         else
-          original_task->handle_post_mapped(false/*deferral*/, 
-                                            mapped_precondition);
+          original_task->handle_post_mapped(mapped_precondition);
       }
     }
 
@@ -11594,16 +11680,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_launch(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const ShardManagerLaunchArgs *largs = (const ShardManagerLaunchArgs*)args;
-      largs->shard->launch_shard();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_launch(Deserializer &derez, 
-                                        Runtime *runtime, AddressSpaceID source)
+    /*static*/ void ShardManager::handle_distribution(Deserializer &derez, 
+                                                      Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11648,12 +11726,82 @@ namespace Legion {
       assert(num_spaces > 0);
 #endif
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
-      ShardManager *manager = 
+      ShardManager *manager =
        new ShardManager(runtime, repl_id, mapping, control_repl, top_level_task,
                 isomorphic_points, shard_domain, std::move(shard_points),
                 std::move(sorted_points), std::move(shard_lookup), 
-                source, NULL/*original*/, shard_task_barrier);
-      manager->unpack_shards_and_launch(derez);
+                NULL/*original*/, shard_task_barrier);
+      bool explicit_distribution;
+      derez.deserialize(explicit_distribution);
+      if (explicit_distribution)
+      {
+        std::vector<Processor> target_processors(total_shards);
+        for (unsigned idx = 0; idx < total_shards; idx++)
+          derez.deserialize(target_processors[idx]);
+        VariantID variant;
+        derez.deserialize(variant);
+        // Create the local shards
+        std::set<RtEvent> ready_events;
+        std::vector<ShardTask*> local_shards;
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          if (target_processors[idx].address_space() != runtime->address_space)
+            continue;
+          ShardTask *shard = 
+            manager->create_shard(idx, target_processors[idx], variant);
+          if (local_shards.empty())
+            shard->unpack_base_task(derez, ready_events);
+          local_shards.push_back(shard);
+        }
+#ifdef DEBUG_LEGION
+        assert(!local_shards.empty());
+#endif
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        manager->distribute_explicit(local_shards.front(), variant, 
+                                     target_processors);
+        // Clone the other shards from the first one and launch them
+        for (unsigned idx = 1; idx < local_shards.size(); idx++)
+        {
+          local_shards[idx]->clone_single_from(local_shards.front());
+          local_shards[idx]->dispatch();
+        }
+        local_shards.front()->dispatch();
+      }
+      else
+      {
+        TaskID task_id;
+        derez.deserialize(task_id);
+        MapperID mapper_id;
+        derez.deserialize(mapper_id);
+        Processor::Kind kind;
+        derez.deserialize(kind);
+        unsigned shards_per_space;
+        derez.deserialize(shards_per_space);
+        DistributedID ctx_did;
+        derez.deserialize(ctx_did);
+        // Continue the distribution on to the other nodes
+        manager->distribute_implicit(task_id, mapper_id, kind,
+                                     shards_per_space, ctx_did);
+        ImplicitShardManager *implicit_manager = 
+          runtime->find_implicit_shard_manager(task_id, mapper_id, 
+                                          kind, shards_per_space);
+        // This is a top-level implicit context so we know we can make
+        // a new TopLevelContext here directly
+        TopLevelContext *top_context = 
+          new TopLevelContext(runtime, ctx_did, mapping); 
+        top_context->register_with_runtime();
+        RtUserEvent to_trigger = 
+          implicit_manager->set_shard_manager(manager, top_context);
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        if (implicit_manager->remove_reference())
+          delete implicit_manager;
+      }
     }
 
     //--------------------------------------------------------------------------

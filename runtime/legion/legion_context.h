@@ -52,7 +52,8 @@ namespace Legion {
                   const std::vector<RegionRequirement> &reqs,
                   const std::vector<OutputRequirement> &output_reqs,
                   DistributedID did, bool perform_registration,
-                  bool inline_task, bool implicit_ctx = false);
+                  bool inline_task, bool implicit_ctx = false,
+                  CollectiveMapping *mapping = NULL);
       virtual ~TaskContext(void);
     public:
       // This is used enough that we want it inlined
@@ -1071,7 +1072,8 @@ namespace Legion {
                    const std::vector<bool> &virt_mapped,
                    ApEvent execution_fence, DistributedID did = 0,
                    bool inline_task = false, bool implicit_task = false,
-                   bool concurrent_task = false);
+                   bool concurrent_task = false,
+                   CollectiveMapping *mapping = NULL);
       InnerContext(const InnerContext &rhs) = delete;
       virtual ~InnerContext(void);
     public:
@@ -2128,7 +2130,8 @@ namespace Legion {
      */
     class TopLevelContext : public InnerContext {
     public:
-      TopLevelContext(Runtime *runtime);
+      TopLevelContext(Runtime *runtime, DistributedID id = 0,
+                      CollectiveMapping *mapping = NULL);
       TopLevelContext(const TopLevelContext &rhs) = delete;
       virtual ~TopLevelContext(void);
     public:
@@ -3503,7 +3506,8 @@ namespace Legion {
         const unsigned index;
       };
     public:
-      RemoteContext(DistributedID did, Runtime *runtime);
+      RemoteContext(DistributedID did, Runtime *runtime,
+                    CollectiveMapping *mapping = NULL);
       RemoteContext(const RemoteContext &rhs) = delete;
       virtual ~RemoteContext(void);
     public:

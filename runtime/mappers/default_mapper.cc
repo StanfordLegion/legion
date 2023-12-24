@@ -1512,6 +1512,123 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::replicate_task(MapperContext              ctx,
+                                       const Task&                task,
+                                       const ReplicateTaskInput&  input,
+                                             ReplicateTaskOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      // Invoke the old version of this method in case users are still
+      // overloading it from the default mapper
+      MapTaskInput old_input;
+      MapTaskOutput old_default;
+      MapReplicateTaskOutput old_output;
+      // We only need to do this if there are no regions since the old
+      // format never actually supported having multiple regions anyway
+      if (task.regions.empty())
+      {
+        // This is the backwards compatibility path for the old way of
+        // mapping (control-)replicated tasks
+        old_default.chosen_variant = 0;
+        old_default.task_priority = 0;
+        old_default.copy_fill_priority = 0;
+        old_default.profiling_priority = 0;
+        old_default.postmap_task = false;
+        map_replicate_task(ctx, task, old_input, old_default, old_output);
+      }
+      if (old_output.task_mappings.empty())
+      {
+        // These are our own local heuristics for when to replicate a task
+        // We only replicate the task if it is the top-level task and we
+        // can find a replicable task variant
+        if (task.get_depth() > 0)
+          return;
+        const Processor::Kind target_kind = task.target_proc.kind();
+        // Get the variant that we are going to use to map this task
+        const VariantInfo chosen = default_find_preferred_variant(task, ctx,
+                      true/*needs tight bound*/, true/*cache*/, target_kind);
+        if (chosen.is_replicable)
+        {
+          output.chosen_variant = chosen.variant;
+          const std::vector<Processor> &remote_procs = 
+            remote_procs_by_kind(target_kind);
+          // Place on replicate on each node by default
+          assert(remote_procs.size() == total_nodes);
+          output.target_processors.resize(total_nodes, Processor::NO_PROC);
+          // Only check for MPI interop case when dealing with CPUs
+          if ((target_kind == Processor::LOC_PROC) &&
+              runtime->is_MPI_interop_configured(ctx))
+          {
+            // Check to see if we're interoperating with MPI
+            const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
+              runtime->find_reverse_MPI_mapping(ctx);
+            // If we're interoperating with MPI make the shards align with ranks
+            assert(mpi_interop_mapping.size() == total_nodes);
+            for (std::vector<Processor>::const_iterator it = 
+                  remote_procs.begin(); it != remote_procs.end(); it++)
+            {
+              AddressSpace space = it->address_space();
+              std::map<AddressSpace,int>::const_iterator finder = 
+                mpi_interop_mapping.find(space);
+              assert(finder != mpi_interop_mapping.end());
+              assert(finder->second < int(output.target_processors.size()));
+              assert(!output.target_processors[finder->second].exists());
+              output.target_processors[finder->second] = (*it);
+            }
+          }
+          else
+          {
+            // Otherwise we can just assign shards based on address space
+            if (total_nodes > 1)
+            {
+              for (std::vector<Processor>::const_iterator it = 
+                    remote_procs.begin(); it != remote_procs.end(); it++)
+              {
+                AddressSpace space = it->address_space();
+                assert(space < output.target_processors.size());
+                assert(!output.target_processors[space].exists());
+                output.target_processors[space] = (*it);
+              }
+            }
+#ifdef DEBUG_CTRL_REPL
+            else
+              output.target_processors = local_procs_by_kind(target_kind);
+#endif
+          }
+        }
+        else
+          log_mapper.warning("WARNING: Default mapper was unable to locate "
+                             "a replicable task variant for the top-level "
+                             "task during a multi-node execution! We STRONGLY "
+                             "encourage users to make their top-level tasks "
+                             "replicable to avoid sequential bottlenecks on "
+                             "one node during the execution of an application!");
+      }
+      else if (old_output.task_mappings.size() > 1)
+      {
+        // Translate the result into the new format
+        output.chosen_variant = old_output.task_mappings.front().chosen_variant;
+        for (unsigned idx = 1; idx < old_output.task_mappings.size(); idx++)
+          assert(output.chosen_variant == 
+              old_output.task_mappings[idx].chosen_variant);
+        if (old_output.control_replication_map.empty())
+        {
+          output.target_processors.reserve(old_output.task_mappings.size());
+          for (unsigned idx = 0; old_output.task_mappings.size(); idx++)
+          {
+            assert(!old_output.task_mappings[idx].target_procs.empty());
+            output.target_processors.push_back(
+                old_output.task_mappings[idx].target_procs.front());
+          }
+        }
+        else
+          output.target_processors.swap(old_output.control_replication_map);
+        output.shard_points.swap(old_output.shard_points);
+        output.shard_domain = old_output.shard_domain;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::map_replicate_task(const MapperContext      ctx,
                                            const Task&              task,
                                            const MapTaskInput&      input,
@@ -1519,104 +1636,8 @@ namespace Legion {
                                            MapReplicateTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
-      // Should only be replicated for the top-level task
-      assert((task.get_depth() == 0) && (task.regions.size() == 0));
-      const Processor::Kind target_kind = task.target_proc.kind();
-      // Get the variant that we are going to use to map this task
-      const VariantInfo chosen = default_find_preferred_variant(task, ctx,
-                        true/*needs tight bound*/, true/*cache*/, target_kind);
-      if (chosen.is_replicable)
-      {
-        const std::vector<Processor> &remote_procs = 
-          remote_procs_by_kind(target_kind);
-        // Place on replicate on each node by default
-        assert(remote_procs.size() == total_nodes);
-        output.task_mappings.resize(total_nodes, def_output);
-        // Only check for MPI interop case when dealing with CPUs
-        if ((target_kind == Processor::LOC_PROC) &&
-            runtime->is_MPI_interop_configured(ctx))
-        {
-          // Check to see if we're interoperating with MPI
-          const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
-            runtime->find_reverse_MPI_mapping(ctx);
-          // If we're interoperating with MPI make the shards align with ranks
-          assert(mpi_interop_mapping.size() == total_nodes);
-          for (std::vector<Processor>::const_iterator it = 
-                remote_procs.begin(); it != remote_procs.end(); it++)
-          {
-            AddressSpace space = it->address_space();
-            std::map<AddressSpace,int>::const_iterator finder = 
-              mpi_interop_mapping.find(space);
-            assert(finder != mpi_interop_mapping.end());
-            assert(finder->second < int(output.task_mappings.size()));
-            output.task_mappings[finder->second].target_procs.push_back(*it);
-          }
-        }
-        else
-        {
-          // Otherwise we can just assign shards based on address space
-          if (total_nodes > 1)
-          {
-            for (std::vector<Processor>::const_iterator it = 
-                  remote_procs.begin(); it != remote_procs.end(); it++)
-            {
-              AddressSpace space = it->address_space();
-              assert(space < output.task_mappings.size());
-              output.task_mappings[space].target_procs.push_back(*it);
-            }
-          }
-#ifdef DEBUG_CTRL_REPL
-          else
-          {
-            const std::vector<Processor> &local_procs = 
-              local_procs_by_kind(target_kind);
-            output.task_mappings.resize(local_cpus.size());
-            unsigned index = 0;
-            for (std::vector<Processor>::const_iterator it = 
-                  local_procs.begin(); it != local_procs.end(); it++, index++)
-              output.task_mappings[index].target_procs.push_back(*it);
-          }
-#endif
-        }
-        // Indicate that we want to do control replication by filling
-        // in the control replication map with our chosen processors
-        // Also set our chosen variant
-        if (total_nodes > 1)
-        {
-          output.control_replication_map.resize(total_nodes);
-          for (unsigned idx = 0; idx < total_nodes; idx++)
-          {
-            output.task_mappings[idx].chosen_variant = chosen.variant;
-            output.control_replication_map[idx] = 
-              output.task_mappings[idx].target_procs[0];
-          }
-        }
-#ifdef DEBUG_CTRL_REPL
-        else
-        {
-          const std::vector<Processor> &local_procs = 
-            local_procs_by_kind(target_kind);
-          output.control_replication_map.resize(local_procs.size());
-          for (unsigned idx = 0; idx < local_procs.size(); idx++)
-          {
-            output.task_mappings[idx].chosen_variant = chosen.variant;
-            output.control_replication_map[idx] = 
-              output.task_mappings[idx].target_procs[0];
-          }
-        }
-#endif
-      }
-      else
-      {
-        log_mapper.warning("WARNING: Default mapper was unable to locate "
-                           "a replicable task variant for the top-level "
-                           "task during a multi-node execution! We STRONGLY "
-                           "encourage users to make their top-level tasks "
-                           "replicable to avoid sequential bottlenecks on "
-                           "one node during the execution of an application!");
-        output.task_mappings.resize(1);
-        map_task(ctx, task, input, output.task_mappings[0]);
-      }
+      // Don't do anything here since it is just for backwards compatiblity
+      // in case other users want to override it
     }
 
     //--------------------------------------------------------------------------

@@ -150,7 +150,7 @@ namespace Legion {
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
-      inline bool is_replicated(void) const { return replicate; }
+      inline bool is_replicable(void) const { return replicate; }
       int get_depth(void) const;
     public:
       void set_current_proc(Processor current);
@@ -413,9 +413,9 @@ namespace Legion {
         { return profiling_reported; }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
-      void initialize_map_task_input(Mapper::MapTaskInput &input,
-                                     Mapper::MapTaskOutput &output,
-                                     MustEpochOp *must_epoch_owner);
+      virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
+                                             Mapper::MapTaskOutput &output,
+                                             MustEpochOp *must_epoch_owner);
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner);
@@ -432,8 +432,8 @@ namespace Legion {
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
     protected:
+      bool replicate_task(void);
       void invoke_mapper(MustEpochOp *must_epoch_owner);
-      void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);
       RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
@@ -503,8 +503,7 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
@@ -811,8 +810,7 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(bool deferral, 
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
       virtual void prepare_map_must_epoch(void);
     public:
@@ -933,8 +931,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
       // ProjectionPoint methods
@@ -993,11 +989,11 @@ namespace Legion {
     class ShardTask : public SingleTask {
     public:
       ShardTask(Runtime *rt, ShardManager *manager, 
-                ShardID shard_id, Processor target);
-      ShardTask(const ShardTask &rhs);
+                ShardID shard_id, Processor target, VariantID chosen);
+      ShardTask(const ShardTask &rhs) = delete;
       virtual ~ShardTask(void);
     public:
-      ShardTask& operator=(const ShardTask &rhs);
+      ShardTask& operator=(const ShardTask &rhs) = delete;
     public:
       virtual void activate(void); 
       virtual void deactivate(bool free = true);
@@ -1030,6 +1026,9 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
+      virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
+                                             Mapper::MapTaskOutput &output,
+                                             MustEpochOp *must_epoch_owner);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1051,8 +1050,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor); 
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
@@ -1060,7 +1057,7 @@ namespace Legion {
     public:
       virtual InnerContext* create_implicit_context(void);
     public:
-      void launch_shard(void);
+      void dispatch(void);
       void return_resources(ResourceTracker *target,
                             std::set<RtEvent> &preconditions);
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);

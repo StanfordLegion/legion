@@ -43,8 +43,9 @@ namespace Legion {
                              const std::vector<RegionRequirement> &reqs,
                              const std::vector<OutputRequirement> &out_reqs,
                              DistributedID id, bool perform_registration,
-                             bool inline_t, bool implicit_t)
-      : DistributedCollectable(rt, id, perform_registration),
+                             bool inline_t, bool implicit_t,
+                             CollectiveMapping *mapping)
+      : DistributedCollectable(rt, id, perform_registration, mapping),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), inlined_tasks(0), overhead_profiler(NULL), 
@@ -2700,11 +2701,13 @@ namespace Legion {
                                const std::vector<bool> &virt_mapped,
                                ApEvent exec_fence, 
                                DistributedID id, bool inline_task, 
-                               bool implicit_task, bool concurrent)
+                               bool implicit_task, bool concurrent,
+                               CollectiveMapping *mapping)
       : TaskContext(rt, owner, d, reqs, out_reqs, 
           LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id : 
           rt->get_available_distributed_id(), INNER_CONTEXT_DC),
-          (id == 0)/*register if not remote*/, inline_task, implicit_task),
+          (id == 0)/*register if not remote*/, 
+          inline_task, implicit_task, mapping),
         tree_context(rt->allocate_region_tree_context()),
         full_inner_context(finner),
         concurrent_context(concurrent), finished_execution(false),
@@ -12663,10 +12666,9 @@ namespace Legion {
         }
       }
       if (!preconditions.empty())
-        owner_task->handle_post_mapped(false/*deferral*/,
-            Runtime::merge_events(preconditions));
+        owner_task->handle_post_mapped(Runtime::merge_events(preconditions));
       else
-        owner_task->handle_post_mapped(false/*deferral*/);
+        owner_task->handle_post_mapped();
       if (need_complete)
       {
         if (!child_completion_events.empty())
@@ -13099,10 +13101,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TopLevelContext::TopLevelContext(Runtime *rt)
+    TopLevelContext::TopLevelContext(Runtime *rt, DistributedID id,
+                                     CollectiveMapping *mapping)
       : InnerContext(rt, NULL, -1, false/*full inner*/,
                      dummy_requirements, dummy_output_requirements,
-                     dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT),
+                     dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT,
+                     id, false, false, false, mapping),
         root_uid(rt->get_unique_operation_id())
     //--------------------------------------------------------------------------
     {
@@ -23873,10 +23877,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RemoteContext::RemoteContext(DistributedID id, Runtime *rt)
+    RemoteContext::RemoteContext(DistributedID id, Runtime *rt,
+                                 CollectiveMapping *mapping)
       : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions,
                      remote_task.output_regions, local_parent_req_indexes,
-                     local_virtual_mapped, ApEvent::NO_AP_EVENT, id),
+                     local_virtual_mapped, ApEvent::NO_AP_EVENT, id,
+                     false, false, false, mapping),
         parent_ctx(NULL), shard_manager(NULL), provenance(NULL),
         top_level_context(false), remote_task(RemoteTask(this)),
         remote_uid(0), repl_id(0)

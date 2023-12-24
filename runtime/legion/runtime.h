@@ -1244,20 +1244,18 @@ namespace Legion {
     public:
       ImplicitShardManager& operator=(const ImplicitShardManager &rhs) = delete;
     public:
-      bool record_arrival(bool local);
       ShardTask* create_shard(int shard_id, const DomainPoint &shard_point,
                               Processor proxy, const char *task_name);
     protected:
       void create_shard_manager(void);
       void request_shard_manager(void);
     public:
-      void process_implicit_request(Deserializer &derez, AddressSpaceID source);
-      RtUserEvent process_implicit_response(ShardManager *manager,
-                                            InnerContext *context);
+      void process_implicit_rendezvous(Deserializer &derez);
+      RtUserEvent set_shard_manager(ShardManager *manager,
+                                    InnerContext *context);
     public:
-      static void handle_remote_request(Deserializer &derez, Runtime *runtime, 
-                                        AddressSpaceID remote_space);
-      static void handle_remote_response(Deserializer &derez, Runtime *runtime);
+      static void handle_remote_rendezvous(Deserializer &derez, 
+                                           Runtime *runtime); 
     public:
       Runtime *const runtime;
       const TaskID task_id;
@@ -1266,17 +1264,16 @@ namespace Legion {
       const unsigned shards_per_address_space;
     protected:
       mutable LocalLock manager_lock;
-      unsigned remaining_create_arrivals;
-      unsigned expected_local_arrivals;
-      unsigned expected_remote_arrivals;
+      unsigned remaining_local_arrivals;
+      unsigned remaining_remote_arrivals;
       unsigned local_shard_id;
       InnerContext *top_context;
       ShardManager *shard_manager;
+      CollectiveMapping *collective_mapping;
       RtUserEvent manager_ready;
       Processor local_proxy;
       const char *local_task_name;
       std::map<DomainPoint,ShardID> shard_points;
-      std::vector<std::pair<AddressSpaceID,void*> > remote_spaces;
     };
 
     /**
@@ -2721,14 +2718,18 @@ namespace Legion {
       MPIRankTable *const mpi_rank_table;
     public:
       void register_static_variants(void);
-      void register_static_constraints(void);
+      CollectiveMapping* register_static_constraints(uint64_t &next_static_did,
+          LayoutConstraintID virtual_constraint_id, 
+          LayoutConstraints *&constraints);
       void register_static_projections(void);
       void register_static_sharding_functors(void);
       void initialize_legion_prof(const LegionConfiguration &config);
       void log_local_machine(void) const;
       void initialize_mappers(void);
-      void initialize_virtual_manager(void);
-      void initialize_runtime(void);
+      void initialize_virtual_manager(uint64_t &next_static_did,
+                                      LayoutConstraints *virtual_constraints,
+                                      CollectiveMapping *mapping);
+      TopLevelContext* initialize_runtime(LayoutConstraintID virtual_id);
 #ifdef LEGION_USE_LIBDL
       void send_registration_callback(AddressSpaceID space,
                                       Realm::DSOReferenceImplementation *impl,
@@ -3334,10 +3335,8 @@ namespace Legion {
                                                        Serializer &rez);
       void send_control_replicate_trace_update(AddressSpaceID target,
                                                Serializer &rez);
-      void send_control_replicate_implicit_request(AddressSpaceID target,
-                                                   Serializer &rez);
-      void send_control_replicate_implicit_response(AddressSpaceID target,
-                                                    Serializer &rez);
+      void send_control_replicate_implicit_rendezvous(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
                                                        Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -3460,7 +3459,7 @@ namespace Legion {
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
-      void send_replicate_launch(AddressSpaceID target, Serializer &rez);
+      void send_replicate_distribution(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_execution(AddressSpaceID target,
                                          Serializer &rez);
@@ -3815,7 +3814,7 @@ namespace Legion {
       void handle_constraint_release(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
-      void handle_replicate_launch(Deserializer &derez,AddressSpaceID source);
+      void handle_replicate_distribution(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
       void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
@@ -3840,9 +3839,7 @@ namespace Legion {
                                                         Deserializer &derez);
       void handle_control_replicate_trace_update(Deserializer &derez,
                                                  AddressSpaceID source);
-      void handle_control_replicate_implicit_request(Deserializer &derez,
-                                                     AddressSpaceID source);
-      void handle_control_replicate_implicit_response(Deserializer &derez);
+      void handle_control_replicate_implicit_rendezvous(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
@@ -3966,6 +3963,7 @@ namespace Legion {
                                 ApEvent &previous, RtEvent precondition);
       static void handle_concurrent_analysis(const void *args);
     public:
+      DistributedID get_next_static_distributed_id(uint64_t &next_did);
       DistributedID get_available_distributed_id(void); 
       DistributedID get_remote_distributed_id(AddressSpaceID from);
       void handle_remote_distributed_id_request(Deserializer &derez,
@@ -4712,16 +4710,18 @@ namespace Legion {
           bool background, bool default_mapper);
       static int wait_for_shutdown(void);
       static void set_return_code(int return_code);
-      Future launch_top_level_task(const TaskLauncher &launcher);
+      Future launch_top_level_task(const TaskLauncher &launcher,
+                                   TopLevelContext *context = NULL);
       IndividualTask* create_implicit_top_level(TaskID top_task_id,
-                                                MapperID top_mapper_id,
-                                                Processor proxy,
-                                                const char *task_name);
+                                            MapperID top_mapper_id,
+                                            Processor proxy,
+                                            const char *task_name,
+                                            CollectiveMapping *mapping = NULL);
       ImplicitShardManager* find_implicit_shard_manager(TaskID top_task_id,
                                                 MapperID top_mapper_id,
                                                 Processor::Kind kind,
-                                                unsigned shards_per_space,
-                                                bool local);
+                                                unsigned shards_per_space);
+      void unregister_implicit_shard_manager(TaskID top_task_id);
       Context begin_implicit_task(TaskID top_task_id,
                                   MapperID top_mapper_id,
                                   Processor::Kind proc_kind,
@@ -6063,13 +6063,8 @@ namespace Legion {
           break;
         case SEND_REPL_TRACE_UPDATE:
           break;
-        case SEND_REPL_IMPLICIT_REQUEST:
+        case SEND_REPL_IMPLICIT_RENDEZVOUS:
           break;
-        // This has to go on the task virtual channel so that it is ordered
-        // with respect to any distributions
-        // See Runtime::send_replicate_launch
-        case SEND_REPL_IMPLICIT_RESPONSE:
-          return TASK_VIRTUAL_CHANNEL;
         case SEND_REPL_FIND_COLLECTIVE_VIEW:
           break;
         case SEND_MAPPER_MESSAGE:
@@ -6226,8 +6221,8 @@ namespace Legion {
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_MPI_RANK_EXCHANGE:
           break;
-        case SEND_REPLICATE_LAUNCH:
-          return TASK_VIRTUAL_CHANNEL;
+        case SEND_REPLICATE_DISTRIBUTION:
+          break;
         case SEND_REPLICATE_POST_MAPPED:
           break;
         case SEND_REPLICATE_POST_EXECUTION:
