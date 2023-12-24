@@ -3502,7 +3502,10 @@ namespace Legion {
         // We group all reservations together anyway
         tpl->get_task_reservations(this, atomic_locks);
       if (!single_task_termination.exists())
+      {
         single_task_termination = Runtime::create_ap_user_event(NULL);
+        record_completion_effect(single_task_termination);
+      }
       set_origin_mapped(true); // it's like this was origin mapped
       return single_task_termination;
     }
@@ -4036,7 +4039,10 @@ namespace Legion {
               is_remote() || (must_epoch_op != NULL));
 #endif
       if (!single_task_termination.exists())
+      {
         single_task_termination = Runtime::create_ap_user_event(NULL); 
+        record_completion_effect(single_task_termination);
+      }
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization
       const TraceInfo trace_info = is_remote() ?
@@ -4712,7 +4718,7 @@ namespace Legion {
       // condition with us getting pre-empted and the task running to completion
       // before we get a chance to trigger the event
       ApUserEvent chain_task_termination;
-      if (variant->is_leaf())
+      if (variant->is_leaf() && !inline_task)
       {
 #ifdef DEBUG_LEGION
         assert(single_task_termination.exists());
@@ -7175,8 +7181,7 @@ namespace Legion {
         deferred_complete_mapping = Runtime::create_rt_user_event();
         applied_condition = deferred_complete_mapping;
       }
-      slice_owner->record_point_mapped(applied_condition,
-            single_task_termination, acquired_instances);
+      slice_owner->record_point_mapped(applied_condition, acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
     }
@@ -7197,8 +7202,7 @@ namespace Legion {
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_point_mapped(mapped_precondition, 
-                 ApEvent::NO_AP_EVENT, acquired_instances);
+      slice_owner->record_point_mapped(mapped_precondition, acquired_instances);
       SingleTask::shard_off(mapped_precondition);
     }
 
@@ -7354,7 +7358,7 @@ namespace Legion {
       assert(is_origin_mapped());
 #endif
       slice_owner->record_point_mapped(deferred_complete_mapping,
-                         ApEvent::NO_AP_EVENT, acquired_instances);
+                                       acquired_instances);
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
       return false;
@@ -7500,15 +7504,15 @@ namespace Legion {
       assert(single_task_termination.exists());
       assert(region_preconditions.empty());
 #endif
+      if (completion_postcondition.exists())
+        record_completion_effect(completion_postcondition);
       const AddressSpaceID target_space =
         runtime->find_address_space(target_processors.front());
       // Check to see if we're replaying this locally or remotely
       if (target_space != runtime->address_space)
       {
-        if (completion_postcondition.exists())
-          record_completion_effect(completion_postcondition);
         slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
-                  single_task_termination, acquired_instances);
+                                         acquired_instances);
         // Record this slice as an origin-mapped slice so that it
         // will be deactivated accordingly
         slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
@@ -7530,7 +7534,7 @@ namespace Legion {
         // This is the local case
         if (!is_remote())
           slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
-                      completion_postcondition, acquired_instances);
+                                           acquired_instances); 
         region_preconditions.resize(regions.size(), instance_ready_event);
         execution_fence_event = instance_ready_event;
         update_no_access_regions();
@@ -11680,7 +11684,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::record_point_mapped(RtEvent child_mapped,
-     ApEvent child_complete,std::map<PhysicalManager*,unsigned> &child_acquired)
+                            std::map<PhysicalManager*,unsigned> &child_acquired)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -11688,8 +11692,6 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (child_mapped.exists())
           map_applied_conditions.insert(child_mapped);
-        if (child_complete.exists())
-          point_completions.insert(child_complete);
         if (!child_acquired.empty())
         {
           if (!acquired_instances.empty())

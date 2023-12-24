@@ -1359,7 +1359,7 @@ namespace Legion {
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_point_mapped(RtEvent child_mapped, ApEvent child_complete,
+      void record_point_mapped(RtEvent child_mapped,
           std::map<PhysicalManager*,unsigned> &child_acquired);
       void record_point_complete(RtEvent child_complete);
       void record_point_committed(RtEvent commit_precondition =
