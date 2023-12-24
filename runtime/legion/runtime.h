@@ -607,8 +607,7 @@ namespace Legion {
                          bool allow_by_value = true);
       static FutureInstance* unpack_instance(Deserializer &derez);
     public:
-      static bool check_meta_visible(Memory memory,
-                                     bool has_freefunc = false);
+      static bool check_meta_visible(Memory memory);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own);
       static void handle_free_external(Deserializer &derez, Runtime *runtime);

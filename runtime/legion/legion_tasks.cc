@@ -2240,7 +2240,7 @@ namespace Legion {
       TaskOp::activate();
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
-      remote_completion_event = ApEvent::NO_AP_EVENT;
+      single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
       concurrent_fence_event = ApEvent::NO_AP_EVENT;
       copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
@@ -2290,7 +2290,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
       assert(!deferred_complete_mapping.exists());
-      assert(!single_task_termination.exists());
       assert(remote_trace_recorder == NULL);
 #endif
     }
@@ -2379,7 +2378,6 @@ namespace Legion {
         rez.serialize(deferred_complete_mapping);
         deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         rez.serialize(single_task_termination);
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
         rez.serialize<size_t>(physical_instances.size());
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           physical_instances[idx].pack_references(rez);
@@ -2401,10 +2399,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
           rez.serialize(untracked_valid_regions[idx]); 
         rez.serialize(concurrent_fence_event);
-        if (!is_remote() && !remote_completion_event.exists())
-          remote_completion_event = 
-            Runtime::merge_events(NULL, task_completion_effects);
-        rez.serialize(remote_completion_event);
       }
       else
       { 
@@ -2505,7 +2499,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
           derez.deserialize(untracked_valid_regions[idx]); 
         derez.deserialize(concurrent_fence_event);
-        derez.deserialize(remote_completion_event);
       }
       else
       {
@@ -2527,7 +2520,7 @@ namespace Legion {
       // Do the stuff to record that this is mapped and executed
       complete_mapping(mapped_precondition);
       complete_execution();
-      trigger_children_complete(ApEvent::NO_AP_EVENT);
+      trigger_children_complete();
       trigger_children_committed();
     }
 
@@ -3250,8 +3243,6 @@ namespace Legion {
                             mapper->get_mapper_name(), target.id, idx,
                             get_task_name(), get_unique_id())
           }
-        if (!single_task_termination.exists())
-          single_task_termination = Runtime::create_ap_user_event(NULL);
         const size_t output_offset = regions.size();
         for (unsigned idx = 0; idx < output_regions.size(); idx++)
         {
@@ -4046,7 +4037,6 @@ namespace Legion {
 #endif
       if (!single_task_termination.exists())
         single_task_termination = Runtime::create_ap_user_event(NULL); 
-      record_completion_effect(single_task_termination);
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization
       const TraceInfo trace_info = is_remote() ?
@@ -4721,15 +4711,14 @@ namespace Legion {
       // We have to pull it onto the stack here though to avoid the race 
       // condition with us getting pre-empted and the task running to completion
       // before we get a chance to trigger the event
-      ApEvent chain_precondition;
-      const ApUserEvent chain_task_termination = single_task_termination;
-      if (!variant->is_leaf())
+      ApUserEvent chain_task_termination;
+      if (variant->is_leaf())
       {
-        single_task_termination = Runtime::create_ap_user_event(NULL);
-        chain_precondition = single_task_termination;
+#ifdef DEBUG_LEGION
+        assert(single_task_termination.exists());
+#endif
+        chain_task_termination = single_task_termination;
       }
-      else // We're going to trigger this right now with no precondition
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
          execution_context, start_condition, task_priority, profiling_requests);
       // Release any reservations that we took on behalf of this task
@@ -4758,13 +4747,7 @@ namespace Legion {
         }
       }
       if (chain_task_termination.exists())
-      {
-        if (chain_precondition.exists())
-          Runtime::trigger_event(NULL, chain_task_termination,
-              Runtime::merge_events(NULL, chain_precondition, task_launch_event));
-        else
-          Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
-      }
+        Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
@@ -5062,8 +5045,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!concurrent_fence_event.exists());
 #endif
-      if (!single_task_termination.exists())
-        single_task_termination = Runtime::create_ap_user_event(NULL);
       // Find the concurrent fence event
       const RtEvent postcondition = runtime->find_concurrent_fence_event(target,
           single_task_termination, concurrent_fence_event, precondition);
@@ -5072,28 +5053,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::trigger_children_complete(ApEvent all_children_complete)
+    void SingleTask::record_inner_termination(ApEvent termination_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!all_children_complete.exists() || 
-              single_task_termination.exists() || is_implicit_top_level_task());
+      assert(single_task_termination.exists() || is_implicit_top_level_task());
 #endif
       if (single_task_termination.exists())
       {
         Runtime::trigger_event(NULL, 
-            single_task_termination, all_children_complete); 
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
+            single_task_termination, termination_event); 
       }
-      else if (all_children_complete.exists())
+      else
       {
 #ifdef DEBUG_LEGION
         assert(is_implicit_top_level_task());
 #endif
-        AutoLock o_lock(op_lock);
-        task_completion_effects.insert(all_children_complete);
+        if (termination_event.exists())
+        {
+          AutoLock o_lock(op_lock);
+          task_completion_effects.insert(termination_event);
+        }
       }
-      TaskOp::trigger_children_complete();
     }
 
     //--------------------------------------------------------------------------
@@ -6135,7 +6116,7 @@ namespace Legion {
           result.impl->set_result(predicate_false_future.impl, this);
       }
       complete_execution();
-      trigger_children_complete(ApEvent::NO_AP_EVENT);
+      trigger_children_complete();
       trigger_children_committed();
     }
 
@@ -6397,14 +6378,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_post_execution(FutureInstance *instance,
-                                       ApEvent effects,
                                        void *metadata, size_t metasize,
                                        FutureFunctor *functor,
                                        Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
-      if (effects.exists())
-        record_completion_effect(effects);
+      record_completion_effect(single_task_termination);
       if (functor != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -6418,20 +6397,15 @@ namespace Legion {
             delete functor;
         }
         else
-        {
-          if (is_remote())
-            result.impl->set_result(remote_completion_event, functor,
-                                    own_functor, future_proc);
-          else
-            result.impl->set_result(get_completion_event(), functor,
-                                    own_functor, future_proc);
-        }
+          result.impl->set_result(single_task_termination, functor,
+                                  own_functor, future_proc);
       }
       else
       {
         if (elide_future_return)
         {
-          if (instance != NULL)
+          if ((instance != NULL) && 
+              !instance->defer_deletion(single_task_termination))
             delete instance;
           if (metadata != NULL)
             free(metadata);
@@ -6440,12 +6414,8 @@ namespace Legion {
         {
           if ((instance != NULL) && (instance->size > 0))
             check_future_return_bounds(instance);
-          if (is_remote())
-            result.impl->set_result(remote_completion_event, instance,
-                                    metadata, metasize);
-          else
-            result.impl->set_result(get_completion_event(), instance,
-                                    metadata, metasize);
+          result.impl->set_result(single_task_termination, instance,
+                                  metadata, metasize);
         }
       }
       complete_execution();
@@ -7392,7 +7362,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::handle_post_execution(FutureInstance *instance,
-                                  ApEvent effects,
                                   void *metadata, size_t metasize,
                                   FutureFunctor *functor, 
                                   Processor future_proc, bool own_functor)
@@ -7400,19 +7369,8 @@ namespace Legion {
     {
       if ((instance != NULL) && (instance->size > 0))
         check_future_return_bounds(instance);
-      if (effects.exists())
-        record_completion_effect(effects);
-      if (!is_remote())
-      {
-        ApEvent effects_done;
-        if (!task_completion_effects.empty())
-          effects_done = Runtime::merge_events(NULL, task_completion_effects);
-        slice_owner->handle_future(effects_done, index_point, instance,
-            metadata, metasize, functor, future_proc, own_functor);
-      }
-      else
-        slice_owner->handle_future(remote_completion_event, index_point,
-            instance, metadata, metasize, functor, future_proc, own_functor); 
+      slice_owner->handle_future(single_task_termination, index_point,
+          instance, metadata, metasize, functor, future_proc, own_functor); 
       complete_execution();
     }
 
@@ -7990,15 +7948,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_post_execution(FutureInstance *instance,
-        ApEvent effects, void *metadata, size_t metasize,
+        void *metadata, size_t metasize,
         FutureFunctor *functor, Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(functor == NULL);
 #endif
-      shard_manager->handle_post_execution(instance, effects, metadata, 
-                                           metasize, true/*local*/);
+      shard_manager->handle_post_execution(instance, single_task_termination, 
+                                           metadata, metasize, true/*local*/);
       complete_execution();
     }
 
@@ -11438,25 +11396,8 @@ namespace Legion {
           if (own_functor)
             delete functor;
         }
-        else
-        {
-          if (instance != NULL)
-          {
-            if (effects.exists())
-            {
-              // We can't delete it now but we can delete it later
-              AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-              assert(temporary_futures.find(point) == temporary_futures.end());
-#endif
-              temporary_futures[point] = std::make_pair(instance, effects);
-            }
-            else
-              delete instance;
-          }
-          if (metadata != NULL)
-            free(metadata);
-        }
+        else if ((instance != NULL) && !instance->defer_deletion(effects))
+          delete instance;
       }
       else if (redop > 0)
       {

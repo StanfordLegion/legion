@@ -481,7 +481,6 @@ namespace Legion {
                     const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -500,7 +499,7 @@ namespace Legion {
       static void process_remote_profiling_response(Deserializer &derez);
     public:
       void perform_concurrent_analysis(Processor target, RtEvent precondition);
-      void trigger_children_complete(ApEvent all_children_complete);
+      void record_inner_termination(ApEvent termination_event);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
@@ -535,9 +534,6 @@ namespace Legion {
       // It does NOT encapsulate the 'effects_complete' of this task
       // Only the actual operation completion event captures that
       ApUserEvent                           single_task_termination;
-      // On remote nodes this event encompasses all the task_completion_effects
-      // including the single_task_termination
-      ApEvent                               remote_completion_event;
       // An event describing the fence event for concurrent execution
       ApEvent                               concurrent_fence_event;
       // Event recording when all "effects" are complete
@@ -785,7 +781,6 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -904,7 +899,6 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
@@ -1022,7 +1016,6 @@ namespace Legion {
               const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,

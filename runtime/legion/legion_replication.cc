@@ -761,7 +761,7 @@ namespace Legion {
 #endif
       complete_mapping(mapped_precondition);
       complete_execution();
-      trigger_children_complete(ApEvent::NO_AP_EVENT);
+      trigger_children_complete();
       trigger_children_committed();
     }
 
@@ -10346,7 +10346,8 @@ namespace Legion {
         }
         else
         {
-          original_task->handle_post_execution(result, effects, metadata, 
+          original_task->record_inner_termination(effects);
+          original_task->handle_post_execution(result, metadata, 
               metasize, NULL/*functor*/, Processor::NO_PROC, 
               false/*own functor*/);
           // we no longer own this, it got passed through
@@ -10417,7 +10418,9 @@ namespace Legion {
           RtEvent applied_event;
           if (!applied_events.empty())
             applied_event = Runtime::merge_events(applied_events);
-          original_task->trigger_children_complete(all_shard_effects);
+          if (all_shard_effects.exists())
+            original_task->record_completion_effect(all_shard_effects);
+          original_task->trigger_children_complete();
           return applied_event;
         }
       }

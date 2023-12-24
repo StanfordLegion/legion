@@ -3068,7 +3068,7 @@ namespace Legion {
               s, false/*read only*/)), freefunc(inst.exists() || !p.exists() ? 
               NULL : free_host_memory), freeproc(p),
         eager_allocation(eager), external_allocation(external),
-        is_meta_visible(check_meta_visible(memory, !external || !own)),
+        is_meta_visible(check_meta_visible(memory)),
         own_allocation(own), data(d), instance(inst), use_event(use),
         unique_event(unique), own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
@@ -3096,7 +3096,7 @@ namespace Legion {
           inst.get_location() : allocation->suggested_memory()),
         resource(allocation), freefunc(func), freeproc(proc),
         eager_allocation(false), external_allocation(true),
-        is_meta_visible(check_meta_visible(memory, !own)), 
+        is_meta_visible(check_meta_visible(memory)), 
         own_allocation(own), data(d), instance(inst), use_event(use),
         unique_event(unique), own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
@@ -3658,8 +3658,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ bool FutureInstance::check_meta_visible(Memory memory,
-                                                       bool has_freefunc)
+    /*static*/ bool FutureInstance::check_meta_visible(Memory memory)
     //--------------------------------------------------------------------------
     {
       // Common case, if it is the local system memory, we can see it
@@ -3668,10 +3667,6 @@ namespace Legion {
       // If it's not in the local process, we definitely can't see it
       if (memory.address_space() != implicit_runtime->address_space)
         return false;
-      // If doesn't have a freefunc, then we know it can be freed
-      // by the system 'free' function, so we can definitely see it
-      if (!has_freefunc)
-        return true;
       // switch on the memory kind and see if there are any we support
       switch (memory.kind())
       {
