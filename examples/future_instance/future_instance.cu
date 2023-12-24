@@ -1,4 +1,5 @@
 #include "legion.h"
+#include "mappers/default_mapper.h"
 #include "realm/cuda/cuda_access.h" // ExternalCudaMemoryResource
 #include <cuda_runtime.h>
 
@@ -58,20 +59,12 @@ void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx,
                     Runtime *runtime) {
-  int num_gpus = -1;
-  const InputArgs& command_args = Runtime::get_input_args();
-  for (int i = 1; i < command_args.argc; i++) {
-    auto s = std::string(command_args.argv[i]);
-    if (s.compare("-ll:gpu") == 0 && i + 1 < command_args.argc) {
-      num_gpus = std::stoi(command_args.argv[i + 1]);
-      break;
-    }
-  }
+  Future fgpus = runtime->select_tunable_value(ctx, Mapping::DefaultMapper::DEFAULT_TUNABLE_GLOBAL_GPUS);
+  const int num_gpus = fgpus.get_result<long>(false/*silence warnings*/);
   if (num_gpus <= 0) {
-    std::cout << "Unable to parse #gpus" << std::endl;
+    std::cout << "No GPUs found so exiting early" << std::endl;
     return;
   }
-  num_gpus *= Machine::get_machine().get_address_space_count();
   std::cout << "Got #GPUs: " << num_gpus << std::endl;
   IndexSpace is_gpu = runtime->create_index_space(ctx, Rect<1>(0, num_gpus - 1));
 
@@ -93,6 +86,7 @@ __host__
 int main(int argc, char **argv) {
   {
     TaskVariantRegistrar registrar(TID_TOP_LEVEL, "top_level");
+    registrar.set_replicable();
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
@@ -102,7 +96,7 @@ int main(int argc, char **argv) {
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     CodeDescriptor desc(make_future);
     Runtime::preregister_task_variant(registrar, desc, NULL, 0, "make_future",
-                            LEGION_AUTO_GENERATE_ID, true/*has return type*/);
+        LEGION_AUTO_GENERATE_ID, 4/*sizeof return type*/, true/*has return type*/);
   }
   Runtime::set_top_level_task_id(TID_TOP_LEVEL);
   return Runtime::start(argc, argv);
