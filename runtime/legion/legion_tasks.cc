@@ -3974,6 +3974,14 @@ namespace Legion {
         // of tracing (e.g. those with control replication) don't work otherwise
         remote_trace_recorder->request_term_event(single_task_termination);
       }
+      // Create our task termination event at this point
+      // Note that tracing doesn't track this as a user event, it is just
+      // a name we're making for the termination event
+      if (!single_task_termination.exists())
+      {
+        single_task_termination = Runtime::create_ap_user_event(NULL); 
+        record_completion_effect(single_task_termination);
+      }
       // Only do this the first or second time through
       if ((defer_args == NULL) || (defer_args->invocation_count < 2))
       {
@@ -4027,22 +4035,7 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
           return defer_perform_mapping(ready, must_epoch_op,
                                        defer_args, 2/*invocation count*/);
-      }
-      // Create our task termination event at this point
-      // Note that tracing doesn't track this as a user event, it is just
-      // a name we're making for the termination event
-      // This might already exist if it is a point task,
-      // see comment in PointTask::initialize_point for details about tracing
-      // We might also have made this event already if we have output regions
-#ifdef DEBUG_LEGION
-      assert(!single_task_termination.exists() || !output_regions.empty() ||
-              is_remote() || (must_epoch_op != NULL));
-#endif
-      if (!single_task_termination.exists())
-      {
-        single_task_termination = Runtime::create_ap_user_event(NULL); 
-        record_completion_effect(single_task_termination);
-      }
+      } 
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization
       const TraceInfo trace_info = is_remote() ?
