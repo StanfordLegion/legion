@@ -2718,18 +2718,17 @@ namespace Legion {
       MPIRankTable *const mpi_rank_table;
     public:
       void register_static_variants(void);
-      CollectiveMapping* register_static_constraints(uint64_t &next_static_did,
-          LayoutConstraintID virtual_constraint_id, 
-          LayoutConstraints *&constraints);
+      CollectiveMapping* register_static_constraints(
+          uint64_t &next_static_did, LayoutConstraintID &virtual_layout_id);
       void register_static_projections(void);
       void register_static_sharding_functors(void);
       void initialize_legion_prof(const LegionConfiguration &config);
       void log_local_machine(void) const;
       void initialize_mappers(void);
       void initialize_virtual_manager(uint64_t &next_static_did,
-                                      LayoutConstraints *virtual_constraints,
+                                      LayoutConstraintID virtual_layout_id,
                                       CollectiveMapping *mapping);
-      TopLevelContext* initialize_runtime(LayoutConstraintID virtual_id);
+      TopLevelContext* initialize_runtime(void);
 #ifdef LEGION_USE_LIBDL
       void send_registration_callback(AddressSpaceID space,
                                       Realm::DSOReferenceImplementation *impl,

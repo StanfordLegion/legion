@@ -16869,7 +16869,7 @@ namespace Legion {
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_redop_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_serdez_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
-        unique_distributed_id(unique)
+        unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -17289,17 +17289,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveMapping* Runtime::register_static_constraints(
-        uint64_t &next_static_did, LayoutConstraintID virtual_layout_id,
-        LayoutConstraints *&virtual_layout_constraints)
+        uint64_t &next_static_did, LayoutConstraintID &virtual_layout_id)
     //--------------------------------------------------------------------------
     {
       // Register any pending constraint sets
       std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
         &pending_constraints = get_pending_constraint_table();
-#ifdef DEBUG_LEGION
-      // We should always have at least one virtual constraint
-      assert(!pending_constraints.empty());
-#endif
+      // Create a collective mapping for all the nodes
       CollectiveMapping *mapping = NULL;
       if (total_address_spaces > 1)
       {
@@ -17308,7 +17304,6 @@ namespace Legion {
           all_spaces[idx] = idx;
         mapping = new CollectiveMapping(all_spaces, legion_collective_radix);
       }
-      // Create a collective mapping for all the nodes
       unsigned already_used = 0;
       // Now do the registrations
       std::map<AddressSpaceID,unsigned> address_counts;
@@ -17320,28 +17315,21 @@ namespace Legion {
           already_used++;
         register_layout(it->second, it->first,
           get_next_static_distributed_id(next_static_did), mapping);
-        if (it->first == virtual_layout_id)
-        {
-#ifdef DEBUG_LEGION
-          assert(virtual_layout_constraints == NULL);
-#endif
-          virtual_layout_constraints = find_layout_constraints(it->first);
-        }
       }
-#ifdef DEBUG_LEGION
-      assert(virtual_layout_constraints != NULL);
-#endif
-      // Update all the next unique constraint IDs
-      if (already_used > 0)
-      {
-        // Round this up to the nearest number of nodes
-        unsigned remainder = already_used % total_address_spaces;
-        if (remainder == 0)
-          unique_constraint_id += already_used;
-        else
-          unique_constraint_id += 
-            (already_used + total_address_spaces - remainder);
-      }
+      // Now register the virtual layout constraints
+      LayoutConstraintRegistrar virtual_registrar;
+      virtual_registrar.add_constraint(
+          SpecializedConstraint(LEGION_VIRTUAL_SPECIALIZE));
+      virtual_layout_id = LEGION_MAX_APPLICATION_LAYOUT_ID + ++already_used;
+      register_layout(virtual_registrar, virtual_layout_id,
+          get_next_static_distributed_id(next_static_did), mapping);
+      // Round this up to the nearest number of nodes
+      unsigned remainder = already_used % total_address_spaces;
+      if (remainder == 0)
+        unique_constraint_id += already_used;
+      else
+        unique_constraint_id += 
+          (already_used + total_address_spaces - remainder);
       // avoid races if we are doing separate runtime creation
       if (!separate_runtime_instances)
         pending_constraints.clear();
@@ -17696,7 +17684,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::initialize_virtual_manager(uint64_t &next_static_did,
-             LayoutConstraints *virtual_constraints, CollectiveMapping *mapping)
+               LayoutConstraintID virtual_layout_id, CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -17707,32 +17695,33 @@ namespace Legion {
       std::vector<unsigned> mask_index_map;
       std::vector<CustomSerdezID> serdez;
       std::vector<std::pair<FieldID,size_t> > field_sizes;
+      LayoutConstraints *virtual_constraints =
+        find_layout_constraints(virtual_layout_id);
       LayoutDescription *layout = 
         new LayoutDescription(all_ones, virtual_constraints);
-      virtual_manager = new VirtualManager(this, 
-          get_next_static_distributed_id(next_static_did), layout, mapping);
+      virtual_manager = new VirtualManager(this, 0/*did*/, layout, mapping);
       virtual_manager->add_base_gc_ref(NEVER_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    TopLevelContext* Runtime::initialize_runtime(
-                                       LayoutConstraintID virtual_constraint_id)
+    TopLevelContext* Runtime::initialize_runtime(void)
     //--------------------------------------------------------------------------
     {  
       // If we have an MPI rank table do the exchanges before initializing
       // the mappers as they may want to look at the rank table
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
-      uint64_t next_static_did = 0;
+      // Starts at 1 since 0 is a reserved ID for the virtual manager
+      uint64_t next_static_did = 1;
       // Pull in any static registrations that were done
-      LayoutConstraints *virtual_constraints = NULL;
-      CollectiveMapping *mapping = register_static_constraints(next_static_did,
-          virtual_constraint_id, virtual_constraints);
+      LayoutConstraintID virtual_layout_id = 0;
+      CollectiveMapping *mapping =
+        register_static_constraints(next_static_did, virtual_layout_id);
       register_static_variants();
       register_static_projections();
       register_static_sharding_functors();
       // Has to come after registring the static constraints
-      initialize_virtual_manager(next_static_did, virtual_constraints, mapping);
+      initialize_virtual_manager(next_static_did, virtual_layout_id, mapping);
       // Initialize the mappers
       initialize_mappers(); 
       // If we have main top-level task, make a context for it
@@ -30119,18 +30108,8 @@ namespace Legion {
           "DEBUG_SHUTDOWN_HANG requires a COMPILE_TIME_MIN_LEVEL "
           "of at most LEVEL_INFO.");
 #endif
-
       // Register builtin reduction operators
       register_builtin_reduction_operators();
-      // Always register a static constraint for virtual constraints
-      LayoutConstraintID virtual_constraint_id = 0;
-      {
-        LayoutConstraintRegistrar registrar;
-        registrar.add_constraint(
-            SpecializedConstraint(LEGION_VIRTUAL_SPECIALIZE));
-        virtual_constraint_id = preregister_layout(
-            registrar, LEGION_AUTO_GENERATE_ID);
-      }
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -30215,12 +30194,12 @@ namespace Legion {
         for (std::map<Processor,Runtime*>::const_iterator it =
               processor_mapping.begin(); it != processor_mapping.end(); it++)
           if (top_context == NULL)
-            top_context = it->second->initialize_runtime(virtual_constraint_id);
+            top_context = it->second->initialize_runtime();
           else
-            it->second->initialize_runtime(virtual_constraint_id);
+            it->second->initialize_runtime();
       }
       else
-        top_context = the_runtime->initialize_runtime(virtual_constraint_id);
+        top_context = the_runtime->initialize_runtime();
       if (startup_barrier.exists())
       {
         // Make sure all the nodes are done
