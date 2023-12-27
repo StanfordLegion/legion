@@ -718,49 +718,7 @@ namespace Legion {
             get_task_name(), get_unique_id(),
             target_proc.id, runtime->address_space)
       stealable = options.stealable;
-      map_origin = options.map_locally;
-      replicate = options.replicate;
-      if (replicate)
-      {
-        if (concurrent_task)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Mapper %s requested to replicate concurrent task %s (UID %lld). "
-              "Replication of concurrent tasks are not supported.",
-              mapper->get_mapper_name(), get_task_name(), get_unique_id())
-        if (must_epoch_task)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Mapper %s requested to replicate must epoch task %s (UID %lld). "
-              "Replication of must epoch tasks are not supported.",
-              mapper->get_mapper_name(), get_task_name(), get_unique_id())
-        if (!output_regions.empty())
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-              "Mapper %s requested to replicate task %s (UID %lld) "
-              "with %zd output regions. Legion does not currently support "
-              "the replication of tasks with output regions, but we may "
-              "consider supporting it in the future.",mapper->get_mapper_name(),
-              get_task_name(), get_unique_id(), output_regions.size())
-        // Reduction-only privileges and relaxed coherence modes
-        // are not permitted for tasks that are going to be replicated
-        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-        {
-          if (IS_REDUCE(logical_regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Mapper %s requested to replicate task %s (UID %lld) "
-                          "but region requirement %d has reduction privileges. "
-                          "Tasks with reduction-only privileges are not "
-                          "permitted to be replicated.", 
-                          mapper->get_mapper_name(), get_task_name(),
-                          get_unique_id(), idx)
-          else if (!IS_EXCLUSIVE(logical_regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Mapper %s requested to replicate task %s (UID %lld) "
-                          "but region requirement %d has relaxed coherence. "
-                          "Tasks with relaxed coherence modes are not "
-                          "permitted to be replicated.", 
-                          mapper->get_mapper_name(), get_task_name(),
-                          get_unique_id(), idx)
-        }
-      }
+      map_origin = options.map_locally; 
       request_valid_instances = options.valid_instances;
       if (parent_priority != options.parent_priority)
       {
@@ -822,6 +780,66 @@ namespace Legion {
             }
           }
         }
+      }
+      if (options.replicate)
+      {
+        // Replication of concurrent index space task launches are illegal
+        if (concurrent_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s request to replicate task %s (UID %lld) that is a "
+              "concurrent index space task launch in 'select_task_options'. "
+              "It is illegal to replicate the point tasks of a concurrent "
+              "index space task launch.", mapper->get_mapper_name(),
+              get_task_name(), get_unique_id())
+        // Replication of must epoch tasks are not allowed
+        if (must_epoch_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s requested to replicate must epoch task %s (UID %lld). "
+              "Replication of must epoch tasks are not supported.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        // Replication of origin-mapped tasks is not supported
+        if (map_origin)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+              "Mapper %s requested to both replicate and origin map task %s "
+              "(UID %lld) in 'select_task_options'. Replication of origin-"
+              "mapped tasks is not currently supported and the request to "
+              "replicate the task will be ignored.", mapper->get_mapper_name(),
+              get_task_name(), get_unique_id())
+          options.replicate = false;
+        }
+        // Output regions are not currently supported
+        if (!output_regions.empty())
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+              "Mapper %s requested to replicate task %s (UID %lld) with output "
+              "regions in 'select_task_options'. Legion does not currently "
+              "support replication of tasks with output regions at the moment. "
+              "You can request support for this feature by emailing the "
+              "the Legion developers list or opening a github issue. The "
+              "mapper call to replicate_task is being elided.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+          options.replicate = false;
+        }
+        // Reduction-only privileges are not currently supported for tasks
+        // that are going to be replicated
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+        {
+          if (!IS_REDUCE(logical_regions[idx]))
+            continue;
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+              "Mapper %s requested to replicate task %s (UID %lld) with "
+              "reduction privilege on region requirement %d in "
+              "'select_task_options'. Legion does not currently support "
+              "replication of tasks with reduction privileges. You can "
+              "request support for this feature by emailing the Legion "
+              "developers list or opening a github issue. The mapper "
+              "call to replicate_task is being elided.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id(), idx)
+          options.replicate = false;
+          break;
+        }
+        replicate = options.replicate;
       }
       if (options.inline_task)
       {
@@ -2757,6 +2775,21 @@ namespace Legion {
       // owner then we also know there is only one valid choice
       if (must_epoch_owner == NULL)
       {
+        if (input.shard_processor.exists())
+        {
+          // This is a replicated task, the mapper isn't allowed to 
+          // mutate the target_processors from the shard processor
+          if ((output.target_procs.size() != 1) ||
+              (output.target_procs.front() != input.shard_processor))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s provided invalid target_processors from call to "
+                "'map_task' for replicated task %s (UID %lld). Replicated "
+                "tasks are only permitted to have one target processor and "
+                "it must be exactly 'input.shard_procesor' as that is where "
+                "this replicated copy of the task has been assigned to run "
+                "by this same mapper.", mapper->get_mapper_name(),
+                get_task_name(), get_unique_id())
+        }
         if (output.target_procs.empty())
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_OUTPUT_TARGET,
@@ -2780,7 +2813,7 @@ namespace Legion {
           else if (runtime->separate_runtime_instances)
             // Ignore additional processors in separate runtime instances
             output.target_procs.resize(1);
-        }
+        } 
         if (!runtime->unsafe_mapper)
           validate_target_processors(output.target_procs);
         // Save the target processors from the output
@@ -2943,6 +2976,20 @@ namespace Legion {
         if (!profiling_reported.exists())
           profiling_reported = Runtime::create_rt_user_event();
       }
+      // If task is replicated make sure the mapper kept the right variant
+      if (input.shard_processor.exists() &&
+          (output.chosen_variant != input.shard_variant))
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper specified an invalid task variant "
+                      "of ID %d for replicated task %s (ID %lld), which "
+                      "differs from the specified 'input.shard_variant' %d "
+                      "previously chosen by the mapper in 'replicate_task'. "
+                      "The mapper is required to maintain the previously "
+                      "selected variant in the output 'map_task'.",
+                      "map_task", mapper->get_mapper_name(),
+                      output.chosen_variant, get_task_name(),
+                      get_unique_id(), input.shard_variant)
       // See whether the mapper picked a variant or a generator
       VariantImpl *variant_impl = NULL;
       if (output.chosen_variant > 0)
@@ -3685,6 +3732,9 @@ namespace Legion {
     {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
+      // There are some local invariants checked here, but there are more
+      // of them checked in select_task_options right after the mapper call
+      // that decides whether we're going to try to replicate this task
       if (is_recording())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
@@ -3697,18 +3747,7 @@ namespace Legion {
             get_task_name(), get_unique_id(), mapper->get_mapper_name())
         return false;
       }
-      if (!output_regions.empty())
-      {
-        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
-            "Unsupported request to replicate task %s (UID %lld) with output "
-            "regions by mapper %s. Legion does not currently support "
-            "replication of tasks with output regions at the moment. "
-            "You can request support for this feature by emailing the "
-            "the Legion developers list or opening a github issue. The "
-            "mapper call to replicate_task is being elided.",
-            get_task_name(), get_unique_id(), mapper->get_mapper_name())
-        return false;
-      }
+#if 0
       if (!check_collective_regions.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
@@ -3735,6 +3774,7 @@ namespace Legion {
             get_task_name(), get_unique_id(), mapper->get_mapper_name())
         return false;
       }
+#endif
       Mapper::ReplicateTaskInput input;
       Mapper::ReplicateTaskOutput output;
       output.chosen_variant = 0;
@@ -3753,19 +3793,18 @@ namespace Legion {
                       "to be replicated.", "replicate_task",
                       mapper->get_mapper_name(), output.chosen_variant,
                       get_task_name(), get_unique_id())
+      // Check that the chosen variant is replicable
+      if (!var_impl->is_replicable())
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' "
+                      "on mapper %s. Mapper failed to pick an valid task "
+                      "variant %d for task %s (UID %lld) that was chosen "
+                      "to be replicated. Task variants selected for "
+                      "replication must be marked as replicable variants.",
+                      "replicate_task", mapper->get_mapper_name(),
+                      output.chosen_variant, get_task_name(), get_unique_id())
       if (!runtime->unsafe_mapper)
       {
-        // Check that the chosen variant is either leaf or replicable
-        if (!var_impl->is_replicable() && !var_impl->is_leaf())
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from invocation of '%s' "
-                        "on mapper %s. Mapper failed to pick an invalid task "
-                        "variant %d for task %s (UID %lld) that was chosen "
-                        "to be replicated. Task variants selected for "
-                        "replication must be either replicable or leaf "
-                        "variants.", "replicate_task",
-                        mapper->get_mapper_name(), output.chosen_variant,
-                        get_task_name(), get_unique_id())
         // Check that all the processors exist
         for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
           if (!output.target_processors[idx].exists())
@@ -8200,6 +8239,8 @@ namespace Legion {
       input.shard_domain = get_shard_domain();
       input.shard_processor = current_proc; 
       input.shard_variant = selected_variant;
+      output.chosen_variant = selected_variant;
+      output.target_procs.resize(1, current_proc);
     }
 
     //--------------------------------------------------------------------------
