@@ -5671,11 +5671,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(reduction_instance != NULL); 
 #endif
+        if (effects.exists())
+        {
+          if (reduction_instance_precondition.exists())
+            effects = Runtime::merge_events(NULL, effects, 
+                reduction_instance_precondition);
+        }
+        else
+          effects = reduction_instance_precondition;
         if (!deterministic_redop)
         {
           const ApEvent done = reduction_instance.load()->reduce_from(instance,
-              this, redop, reduction_op, false/*exclusive*/,
-              reduction_instance_precondition);
+              this, redop, reduction_op, false/*exclusive*/, effects);
           if (done.exists())
           {
             AutoLock o_lock(op_lock);
@@ -5690,8 +5697,8 @@ namespace Legion {
           // No need for the lock since we know the caller is ensuring order
           reduction_instance_precondition = 
             reduction_instance.load()->reduce_from(instance, this, redop,
-              reduction_op, true/*exclusive*/, reduction_instance_precondition);
-          return reduction_instance_precondition.exists();
+              reduction_op, true/*exclusive*/, effects);
+          return !reduction_instance_precondition.exists();
         }
       }
     } 
