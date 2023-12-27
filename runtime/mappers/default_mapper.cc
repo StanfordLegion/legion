@@ -1275,13 +1275,37 @@ namespace Legion {
       
       Processor::Kind target_kind = task.target_proc.kind();
       // Get the variant that we are going to use to map this task
-      VariantInfo chosen = default_find_preferred_variant(task, ctx,
+      VariantInfo chosen;
+      if (input.shard_processor.exists())
+      {
+        const std::pair<TaskID,Processor::Kind> key(
+            task.task_id, input.shard_processor.kind());
+        std::map<std::pair<TaskID,Processor::Kind>,VariantInfo>::const_iterator
+          finder = preferred_variants.find(key);
+        if (finder == preferred_variants.end())
+        {
+          chosen.variant = input.shard_variant;
+          chosen.proc_kind = input.shard_processor.kind();
+          chosen.tight_bound = true;
+          chosen.is_inner =
+            runtime->is_inner_variant(ctx, task.task_id, input.shard_variant);
+          chosen.is_replicable = true;
+          preferred_variants.emplace(std::make_pair(key, chosen));
+        }
+        else
+          chosen = finder->second;
+      }
+      else
+        chosen = default_find_preferred_variant(task, ctx,
                         true/*needs tight bound*/, true/*cache*/, target_kind);
       output.chosen_variant = chosen.variant;
       output.task_priority = default_policy_select_task_priority(ctx, task);
       output.postmap_task = false;
       // Figure out our target processors
-      default_policy_select_target_processors(ctx, task, output.target_procs);
+      if (input.shard_processor.exists())
+        output.target_procs.resize(1, input.shard_processor);
+      else
+        default_policy_select_target_processors(ctx, task, output.target_procs);
       Processor target_proc = output.target_procs[0];
       // See if we have an inner variant, if we do virtually map all the regions
       // We don't even both caching these since they are so simple
