@@ -26,6 +26,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_analysis.h"
 #include "legion/mapper_manager.h"
+#include <utility>
 
 namespace Legion {
   namespace Internal {
@@ -1135,7 +1136,9 @@ namespace Legion {
     template<typename OP>
     class Memoizable : public OP {
     public:
-      Memoizable(Runtime *rt) : OP(rt) { }
+      template<typename ... Args>
+      Memoizable(Runtime *rt, Args&& ... args) 
+        : OP(rt, std::forward<Args>(args) ...) { }
       virtual ~Memoizable(void) { }
     public:
       virtual void trigger_dependence_analysis(void) override;

@@ -3520,15 +3520,8 @@ namespace Legion {
         else
           Runtime::trigger_event(to_trigger);
       }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
       else
-      {
-        assert(!mapped_precondition.exists());
-        assert(map_applied_conditions.empty());
-      }
-#endif
-#endif
+        complete_mapping(mapped_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -3988,15 +3981,15 @@ namespace Legion {
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       // Distribute the shard manager and launch the shards 
       shard_manager->distribute_explicit(this, output.chosen_variant,
-                                         output.target_processors);
+          output.target_processors, parent_ctx->did);
       // Now create our local shards and start them mapping
       for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
       {
         const Processor processor = output.target_processors[idx];
         if (processor.address_space() != runtime->address_space)
           continue;
-        ShardTask *shard = 
-          shard_manager->create_shard(idx, processor, output.chosen_variant);
+        ShardTask *shard = shard_manager->create_shard(idx, processor,
+            output.chosen_variant, parent_ctx);
         shard->dispatch();
       }
       return true;
@@ -4878,15 +4871,8 @@ namespace Legion {
       // STEP 2: Set up the task's context
       {
         const bool is_leaf_variant = variant->is_leaf();
-        if (is_leaf_variant)
-        {
-          execution_context = new LeafContext(runtime, this, inline_task);
-          // Add a reference to our execution context
-          execution_context->add_base_gc_ref(SINGLE_TASK_REF);
-        }
-        else // This method adds a reference to the context for us
-          execution_context = 
-            initialize_inner_execution_context(variant, inline_task);
+        execution_context = create_execution_context(variant, 
+            wait_on_events, inline_task, is_leaf_variant);
         std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
@@ -5386,17 +5372,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* SingleTask::initialize_inner_execution_context(VariantImpl *v,
-                                                               bool inline_task)
+    TaskContext* SingleTask::create_execution_context(VariantImpl *v,
+        std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task)
     //--------------------------------------------------------------------------
     {
-      InnerContext *inner_ctx = new InnerContext(runtime, this, 
-          get_depth(), v->is_inner(), regions, output_regions,
-          parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
-          inline_task, concurrent_task || parent_ctx->is_concurrent_context());
-      configure_execution_context(inner_ctx);
-      inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
-      return inner_ctx;
+      if (!leaf_task)
+      {
+        InnerContext *inner_ctx = new InnerContext(runtime, this, 
+            get_depth(), v->is_inner(), regions, output_regions,
+            parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
+            inline_task,concurrent_task || parent_ctx->is_concurrent_context());
+        configure_execution_context(inner_ctx);
+        inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
+        return inner_ctx;
+      }
+      else
+      {
+        LeafContext *leaf_ctx = new LeafContext(runtime, this, inline_task);
+        leaf_ctx->add_base_gc_ref(SINGLE_TASK_REF);
+        return leaf_ctx;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6815,38 +6810,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_post_mapped(RtEvent mapped_precondition)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDIVIDUAL_POST_MAPPED_CALL);
-      if (deferred_complete_mapping.exists())
-      {
-        if (mapped_precondition.exists())
-          map_applied_conditions.insert(mapped_precondition);
-        // Little race condition here so pull it on the stack first
-        RtUserEvent to_trigger = deferred_complete_mapping;
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        if (!map_applied_conditions.empty())
-          Runtime::trigger_event(to_trigger, 
-              Runtime::merge_events(map_applied_conditions)); 
-        else
-          Runtime::trigger_event(to_trigger);
-      }
-      // If we're an implicit top-level we do our complete mapping call here
-      else if (top_level_task && implicit_top_level_task)
-        complete_mapping(mapped_precondition);
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      else
-      {
-        assert(!mapped_precondition.exists());
-        assert(map_applied_conditions.empty());
-      }
-#endif
-#endif
-    } 
-
-    //--------------------------------------------------------------------------
     void IndividualTask::handle_misspeculation(void)
     //--------------------------------------------------------------------------
     {
@@ -8032,8 +7995,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardTask::ShardTask(Runtime *rt, ShardManager *manager,
-                         ShardID id, Processor proc, VariantID variant)
+    ShardTask::ShardTask(Runtime *rt, InnerContext *parent,
+        ShardManager *manager, ShardID id, Processor proc, VariantID variant)
       : SingleTask(rt), shard_id(id), all_shards_complete(false)
     //--------------------------------------------------------------------------
     {
@@ -8045,6 +8008,7 @@ namespace Legion {
       stealable = false;
       target_proc = proc;
       current_proc = proc;
+      parent_ctx = parent;
       shard_manager = manager;
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       selected_variant = variant;
@@ -8189,6 +8153,7 @@ namespace Legion {
         applied_condition = deferred_complete_mapping;
       }
       shard_manager->handle_post_mapped(true/*local*/, applied_condition);
+      complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -8389,16 +8354,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* ShardTask::initialize_inner_execution_context(VariantImpl *v,
-                                                              bool inline_task)
+    RtEvent ShardTask::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+#if 0
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_collective_rendezvous(unique_op_id, 
+                        requirement_index, analysis_index);
+      return slice_owner->convert_collective_views(requirement_index, 
+          analysis_index, region, targets, physical_ctx, analysis_mapping,
+          first_local, target_views, collective_arrivals);
+#endif
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardTask::perform_collective_versioning_analysis(unsigned index,
+        LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
+        unsigned parent_req_index)
+    //--------------------------------------------------------------------------
+    {
+#if 0
+      return slice_owner->perform_collective_versioning_analysis(index,
+          handle, tracker, mask, parent_req_index);
+#endif
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskContext* ShardTask::create_execution_context(VariantImpl *v,
+        std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_shard(LEGION_DISTRIBUTED_ID_FILTER(shard_manager->did),
                              shard_id, get_unique_id());
-      // Check to see if we are control replicated or not
-      if (shard_manager->control_replicated)
+      if (!leaf_task)
       {
+#ifdef DEBUG_LEGION
+        assert(shard_barrier.exists());
+        assert(shard_manager->control_replicated);
+#endif
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
@@ -8410,12 +8413,21 @@ namespace Legion {
         repl_ctx->configure_context(mapper, task_priority);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
-        // Wait until all the other shards are ready too
-        complete_startup_initialization();
+        // Make sure that none of the shards start until all the replicate
+        // contexts have been made across all the shards 
+        RtEvent ready = complete_startup_initialization();
+        launch_events.insert(ApEvent(ready));
         return repl_ctx;
       }
-      else // No control replication so do the normal thing
-        return SingleTask::initialize_inner_execution_context(v, inline_task);
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!shard_manager->control_replicated);
+#endif
+        // TODO: support for leaf-replicated tasks
+        assert(false);
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8430,21 +8442,24 @@ namespace Legion {
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
-      complete_startup_initialization();
+      const RtEvent wait_on = complete_startup_initialization();
+      if (!wait_on.has_triggered())
+        wait_on.wait();
       return repl_ctx;
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::complete_startup_initialization(void)
+    RtEvent ShardTask::complete_startup_initialization(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(shard_barrier.exists());
 #endif
       Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
-      shard_barrier.wait();
+      const RtEvent result = shard_barrier;
       // Advance this for when we get to completion
       Runtime::advance_barrier(shard_barrier);
+      return result;
     }
 
     //--------------------------------------------------------------------------

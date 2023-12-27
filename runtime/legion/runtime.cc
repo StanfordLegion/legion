@@ -7051,9 +7051,11 @@ namespace Legion {
           m_lock.reacquire();
         }
 #ifdef DEBUG_LEGION
+        assert(top_context != NULL);
         assert(shard_manager != NULL);
 #endif
-        task = shard_manager->create_shard(shard, proxy, 0/*variant id*/);
+        task = shard_manager->create_shard(shard, proxy, 
+                          0/*variant id*/, top_context);
       }
       top_context->increment_pending();
       implicit_context = top_context;

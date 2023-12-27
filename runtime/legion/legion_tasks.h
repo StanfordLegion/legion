@@ -419,6 +419,7 @@ namespace Legion {
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner);
+      void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     protected:
       void prepare_output_instance(unsigned index,
                                    InstanceSet &instance_set,
@@ -503,7 +504,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
@@ -519,8 +519,8 @@ namespace Legion {
       void perform_concurrent_analysis(Processor target, RtEvent precondition);
       void trigger_children_complete(ApEvent all_children_complete);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
-                                                            bool inline_task);
+      virtual TaskContext* create_execution_context(VariantImpl *v,
+          std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task);
     public:
       static void handle_deferred_task_complete(const void *args);
     protected:
@@ -810,7 +810,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
       virtual void prepare_map_must_epoch(void);
     public:
@@ -988,7 +987,7 @@ namespace Legion {
      */
     class ShardTask : public SingleTask {
     public:
-      ShardTask(Runtime *rt, ShardManager *manager, 
+      ShardTask(Runtime *rt, InnerContext *parent, ShardManager *manager,
                 ShardID shard_id, Processor target, VariantID chosen);
       ShardTask(const ShardTask &rhs) = delete;
       virtual ~ShardTask(void);
@@ -1051,9 +1050,18 @@ namespace Legion {
                                  Processor future_proc,
                                  bool own_functor); 
       virtual void handle_misspeculation(void);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
-                                                            bool inline_task);
+      virtual TaskContext* create_execution_context(VariantImpl *v,
+          std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:
@@ -1080,7 +1088,7 @@ namespace Legion {
     public:
       void initialize_implicit_task(InnerContext *context, TaskID tid,
                                     MapperID mid, Processor proxy);
-      void complete_startup_initialization(void);
+      RtEvent complete_startup_initialization(void);
     public:
       const ShardID shard_id;
     protected:
