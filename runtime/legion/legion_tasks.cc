@@ -4018,19 +4018,18 @@ namespace Legion {
           output.shard_domain, std::move(output.shard_points),
           std::move(sorted_points), std::move(shard_lookup), this);
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
-      // Distribute the shard manager and launch the shards 
-      shard_manager->distribute_explicit(this, output.chosen_variant,
-                                         output.target_processors);
       // Now create our local shards and start them mapping
       for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
       {
         const Processor processor = output.target_processors[idx];
         if (processor.address_space() != runtime->address_space)
           continue;
-        ShardTask *shard = shard_manager->create_shard(idx, processor,
+        shard_manager->create_shard(idx, processor,
             output.chosen_variant, parent_ctx, this);
-        shard->dispatch();
       }
+      // Distribute the shard manager and launch the shards 
+      shard_manager->distribute_explicit(this, output.chosen_variant,
+                                         output.target_processors);
       return true;
     }
 
