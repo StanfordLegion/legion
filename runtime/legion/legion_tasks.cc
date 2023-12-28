@@ -4020,7 +4020,7 @@ namespace Legion {
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       // Distribute the shard manager and launch the shards 
       shard_manager->distribute_explicit(this, output.chosen_variant,
-          output.target_processors, parent_ctx->did);
+                                         output.target_processors);
       // Now create our local shards and start them mapping
       for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
       {
@@ -4028,7 +4028,7 @@ namespace Legion {
         if (processor.address_space() != runtime->address_space)
           continue;
         ShardTask *shard = shard_manager->create_shard(idx, processor,
-            output.chosen_variant, parent_ctx);
+            output.chosen_variant, parent_ctx, this);
         shard->dispatch();
       }
       return true;
@@ -8034,7 +8034,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardTask::ShardTask(Runtime *rt, InnerContext *parent,
+    ShardTask::ShardTask(Runtime *rt, SingleTask *source, InnerContext *parent,
         ShardManager *manager, ShardID id, Processor proc, VariantID variant)
       : SingleTask(rt), shard_id(id), all_shards_complete(false)
     //--------------------------------------------------------------------------
@@ -8043,6 +8043,31 @@ namespace Legion {
       assert(proc.address_space() == runtime->address_space);
 #endif
       SingleTask::activate();
+      target_proc = proc;
+      if (source != NULL)
+        clone_single_from(source);
+      resolved = true;
+      stealable = false;
+      current_proc = proc;
+      parent_ctx = parent;
+      shard_manager = manager;
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      selected_variant = variant;
+      shard_barrier = shard_manager->get_shard_task_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    ShardTask::ShardTask(Runtime *rt, Deserializer &derez, InnerContext *parent,
+        ShardManager *manager, ShardID id, Processor proc, VariantID variant)
+      : SingleTask(rt), shard_id(id), all_shards_complete(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proc.address_space() == runtime->address_space);
+#endif
+      SingleTask::activate();
+      std::set<RtEvent> ready_events;
+      unpack_base_task(derez, ready_events);
       resolved = true;
       stealable = false;
       target_proc = proc;
@@ -8052,6 +8077,11 @@ namespace Legion {
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
     }
     
     //--------------------------------------------------------------------------

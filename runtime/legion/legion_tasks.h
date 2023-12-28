@@ -987,8 +987,12 @@ namespace Legion {
      */
     class ShardTask : public SingleTask {
     public:
-      ShardTask(Runtime *rt, InnerContext *parent, ShardManager *manager,
-                ShardID shard_id, Processor target, VariantID chosen);
+      ShardTask(Runtime *rt, SingleTask *source, InnerContext *parent,
+          ShardManager *manager, ShardID shard_id,
+          Processor target, VariantID chosen);
+      ShardTask(Runtime *rt, Deserializer &derez, InnerContext *parent,
+          ShardManager *manager, ShardID shard_id, 
+          Processor target, VariantID chosen);
       ShardTask(const ShardTask &rhs) = delete;
       virtual ~ShardTask(void);
     public:

@@ -3181,8 +3181,7 @@ namespace Legion {
           get_shard_execution_context()->get_logical_tree_context(); }
     public:
       void distribute_explicit(SingleTask *task, VariantID chosen_variant,
-                               std::vector<Processor> &target_processors,
-                               DistributedID ctx_did);
+                               std::vector<Processor> &target_processors);
       void distribute_implicit(TaskID top_task_id, MapperID mapper_id,
                                Processor::Kind kind, unsigned shards_per_space,
                                DistributedID ctx_did);
@@ -3191,7 +3190,9 @@ namespace Legion {
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
       void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target,
-          VariantID variant, InnerContext *parent_ctx);
+          VariantID variant, InnerContext *parent_ctx, SingleTask *source);
+      ShardTask* create_shard(ShardID id, Processor target,
+          VariantID variant, InnerContext *parent_ctx, Deserializer &derez);
 #if 0
       void launch(const std::vector<bool> &virtual_mapped);
       void unpack_shards_and_launch(Deserializer &derez);

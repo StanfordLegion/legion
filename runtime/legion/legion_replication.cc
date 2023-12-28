@@ -9419,8 +9419,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::distribute_explicit(SingleTask *task, VariantID variant,
-                                      std::vector<Processor> &target_processors,
-                                      DistributedID ctx_did)
+                                      std::vector<Processor> &target_processors)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9448,7 +9447,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < total_shards; idx++)
             rez.serialize(target_processors[idx]);
           rez.serialize(variant);
-          rez.serialize(ctx_did);
+          task->get_context()->pack_task_context(rez);
           // Now pack the task data for replication
           // Only back the base task version of this task
           task->pack_base_task(rez, *it);
@@ -9557,11 +9556,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardTask* ShardManager::create_shard(ShardID id, Processor target, 
-                                    VariantID variant, InnerContext *parent_ctx)
+                    VariantID variant, InnerContext *parent, SingleTask *source)
     //--------------------------------------------------------------------------
     {
-      ShardTask *shard = new Memoizable<ShardTask>(runtime, parent_ctx, this, 
-                                                   id, target, variant);
+      ShardTask *shard = new Memoizable<ShardTask>(runtime, source, parent,
+                                                   this, id, target, variant);
+      local_shards.push_back(shard);
+      return shard;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardTask* ShardManager::create_shard(ShardID id, Processor target, 
+                   VariantID variant, InnerContext *parent, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardTask *shard = new Memoizable<ShardTask>(runtime, derez, parent,
+                                                   this, id, target, variant);
       local_shards.push_back(shard);
       return shard;
     }
@@ -11743,37 +11753,30 @@ namespace Legion {
           derez.deserialize(target_processors[idx]);
         VariantID variant;
         derez.deserialize(variant);
-        DistributedID ctx_did;
-        derez.deserialize(ctx_did);
         RtEvent ctx_ready;
         InnerContext *parent_ctx =
-          runtime->find_or_request_inner_context(ctx_did, ctx_ready);
-        std::set<RtEvent> ready_events;
-        if (ctx_ready.exists() && !ctx_ready.has_triggered())
-          ready_events.insert(ctx_ready);
+          InnerContext::unpack_task_context(derez, runtime, ctx_ready);
         // Create the local shards
         std::vector<ShardTask*> local_shards;
         for (unsigned idx = 0; idx < total_shards; idx++)
         {
           if (target_processors[idx].address_space() != runtime->address_space)
             continue;
-          ShardTask *shard = manager->create_shard(idx, 
-              target_processors[idx], variant, parent_ctx);
           if (local_shards.empty())
-            shard->unpack_base_task(derez, ready_events);
-          local_shards.push_back(shard);
+            local_shards.push_back(manager->create_shard(idx, 
+                  target_processors[idx], variant, parent_ctx, derez));
+          else
+            local_shards.push_back(manager->create_shard(idx,
+                  target_processors[idx], variant, parent_ctx,
+                  local_shards.front()));
         }
 #ifdef DEBUG_LEGION
         assert(!local_shards.empty());
 #endif
-        if (!ready_events.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(ready_events);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
-        }
+        if (ctx_ready.exists() && !ctx_ready.has_triggered())
+          ctx_ready.wait();
         manager->distribute_explicit(local_shards.front(), variant,
-                                     target_processors, ctx_did);
+                                     target_processors);
         // Clone the other shards from the first one and launch them
         for (unsigned idx = 1; idx < local_shards.size(); idx++)
         {
