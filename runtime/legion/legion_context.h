@@ -2130,8 +2130,8 @@ namespace Legion {
      */
     class TopLevelContext : public InnerContext {
     public:
-      TopLevelContext(Runtime *runtime, DistributedID id = 0,
-                      CollectiveMapping *mapping = NULL);
+      TopLevelContext(Runtime *runtime, Processor executing,
+          DistributedID id = 0, CollectiveMapping *mapping = NULL);
       TopLevelContext(const TopLevelContext &rhs) = delete;
       virtual ~TopLevelContext(void);
     public:

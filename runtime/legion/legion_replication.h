@@ -3184,10 +3184,9 @@ namespace Legion {
                                std::vector<Processor> &target_processors);
       void distribute_implicit(TaskID top_task_id, MapperID mapper_id,
                                Processor::Kind kind, unsigned shards_per_space,
-                               DistributedID ctx_did);
+                               InnerContext *top_context);
       void pack_shard_manager(Serializer &rez) const;
-      void set_shard_mapping(const std::vector<Processor> &shard_mapping);
-      void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
+      void set_shard_mapping(std::vector<Processor> &shard_mapping);
       void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target,
           VariantID variant, InnerContext *parent_ctx, SingleTask *source);

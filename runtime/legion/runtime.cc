@@ -7013,6 +7013,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(local_shard_id < shards_per_address_space);
 #endif
+        local_proxy = proxy;
         const ShardID shard = (shard_id < 0) ? (runtime->address_space * 
             shards_per_address_space + local_shard_id++) : shard_id;
         const size_t total_shards = 
@@ -7023,9 +7024,9 @@ namespace Legion {
               "control replicated task %s", total_shards, task_name)
         const DomainPoint shard_point = 
           (point.get_dim() > 0) ? point : DomainPoint(shard);
-        std::pair<std::map<DomainPoint,ShardID>::iterator,bool> result =
-         shard_points.insert(std::pair<DomainPoint,ShardID>(shard_point,shard));
-        if (!result.second)
+        const bool result = shard_points.emplace(std::make_pair(shard_point,
+              std::make_pair(shard, proxy))).second;
+        if (!result)
           REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
               "Discovered multiple ranks with the same implicit shard point "
               "for implicit control replicated task %s", task_name)
@@ -7059,8 +7060,7 @@ namespace Legion {
       }
       top_context->increment_pending();
       implicit_context = top_context;
-      task->initialize_implicit_task(top_context, task_id, mapper_id, proxy);
-      task->complete_mapping();
+      task->initialize_implicit_task(task_id, mapper_id, proxy);
       return task;
     }
 
@@ -7094,23 +7094,25 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
               "Discovered multiple ranks with the same implicit shard point "
               "for implicit control replicated task %s", local_task_name)
-      for (std::map<DomainPoint,ShardID>::const_iterator it =
-            shard_points.begin(); it != shard_points.end(); it++)
+      std::vector<Processor> shard_mapping(total_shards);
+      for (std::map<DomainPoint,std::pair<ShardID,Processor> >::const_iterator
+            it = shard_points.begin(); it != shard_points.end(); it++)
       {
         if (isomorphic_points && ((it->first.get_dim() != 1) ||
-            (it->first[0] != it->second)))
+            (it->first[0] != it->second.first)))
           isomorphic_points = false;
         sorted_points.push_back(it->first);
-        shard_lookup.push_back(it->second);
+        shard_lookup.push_back(it->second.first);
 #ifdef DEBUG_LEGION
-        assert(it->second < points.size());
+        assert(it->second.first < points.size());
 #endif
         // Should not be any duplicate shard IDs
-        if (points[it->second].get_dim() > 0)
+        if (points[it->second.first].get_dim() > 0)
           REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
               "Discovered multiple ranks with the same implicit shard ID "
               "for implicit control replicated task %s", local_task_name)
-        points[it->second] = it->first;
+        points[it->second.first] = it->first;
+        shard_mapping[it->second.first] = it->second.second;
       }
       Domain shard_domain;
       if (isomorphic_points)
@@ -7122,18 +7124,7 @@ namespace Legion {
           std::move(shard_lookup), implicit_top);
       shard_manager = manager;
       implicit_top->set_shard_manager(manager);
-      // This is a dummy shard_mapping for now since we won't actually need
-      // a real one, this just needs to make sure all the checks pass
-      std::vector<Processor> shard_mapping(total_shards, Processor::NO_PROC);
       manager->set_shard_mapping(shard_mapping);
-      std::vector<AddressSpaceID> address_spaces(total_shards);
-      for (AddressSpaceID space = 0; 
-            space < runtime->total_address_spaces; space++)
-      {
-        for (unsigned idx = 0; idx < shards_per_address_space; idx++)
-          address_spaces[space * shards_per_address_space + idx] = space;
-      }
-      manager->set_address_spaces(address_spaces);
       // We also need to make the callback barrier here, but its easy here
       // because we know that this has to contain all address spaces
       manager->create_callback_barrier(runtime->total_address_spaces);
@@ -7141,7 +7132,7 @@ namespace Legion {
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
                                    true/*control replication*/);
       manager->distribute_implicit(task_id, mapper_id, kind,
-          shards_per_address_space, top_context->did);
+          shards_per_address_space, top_context); 
       if (manager_ready.exists())
         Runtime::trigger_event(manager_ready);
     }
@@ -7151,8 +7142,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
       assert(runtime->address_space > 0);
-      assert(manager_ready.exists());
       assert(shard_points.size() == shards_per_address_space);
 #endif
       Serializer rez;
@@ -7163,11 +7154,12 @@ namespace Legion {
         rez.serialize(kind);
         rez.serialize(shards_per_address_space);
         rez.serialize<size_t>(shard_points.size());
-        for (std::map<DomainPoint,ShardID>::const_iterator it =
-              shard_points.begin(); it != shard_points.end(); it++)
+        for (std::map<DomainPoint,std::pair<ShardID,Processor> >::const_iterator
+              it = shard_points.begin(); it != shard_points.end(); it++)
         {
           rez.serialize(it->first);
-          rez.serialize(it->second);
+          rez.serialize(it->second.first);
+          rez.serialize(it->second.second);
         }
       }
       runtime->send_control_replicate_implicit_rendezvous(
@@ -7191,7 +7183,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(shard_points.find(point) == shard_points.end());
 #endif
-        derez.deserialize(shard_points[point]);
+        std::pair<ShardID,Processor> &pair = shard_points[point];
+        derez.deserialize(pair.first);
+        derez.deserialize(pair.second);
       }
 #ifdef DEBUG_LEGION
       assert(remaining_remote_arrivals > 0);
@@ -17706,7 +17700,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TopLevelContext* Runtime::initialize_runtime(void)
+    TopLevelContext* Runtime::initialize_runtime(Processor first_proc)
     //--------------------------------------------------------------------------
     {  
       // If we have an MPI rank table do the exchanges before initializing
@@ -17751,7 +17745,7 @@ namespace Legion {
       // If we have main top-level task, make a context for it
       if (legion_main_set)
       {
-        TopLevelContext *top_context = new TopLevelContext(this, 
+        TopLevelContext *top_context = new TopLevelContext(this, first_proc,
             get_next_static_distributed_id(next_static_did), mapping);
         top_context->register_with_runtime();
         return top_context;
@@ -18025,9 +18019,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *map_context = new TopLevelContext(this);
+      TopLevelContext *map_context = new TopLevelContext(this, proc);
       map_context->add_base_gc_ref(RUNTIME_REF);
-      map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       // Get an individual task to be the top-level task
       IndividualTask *mapper_task = get_available_individual_task();
@@ -30197,12 +30190,12 @@ namespace Legion {
         for (std::map<Processor,Runtime*>::const_iterator it =
               processor_mapping.begin(); it != processor_mapping.end(); it++)
           if (top_context == NULL)
-            top_context = it->second->initialize_runtime();
+            top_context = it->second->initialize_runtime(first_proc);
           else
-            it->second->initialize_runtime();
+            it->second->initialize_runtime(first_proc);
       }
       else
-        top_context = the_runtime->initialize_runtime();
+        top_context = the_runtime->initialize_runtime(first_proc);
       if (startup_barrier.exists())
       {
         // Make sure all the nodes are done
@@ -30652,7 +30645,7 @@ namespace Legion {
 #endif
       // Get a remote task to serve as the top of the top-level task
       if (top_context == NULL)
-        top_context = new TopLevelContext(this);
+        top_context = new TopLevelContext(this, target);
       // Save the current context if there is one and restore it later
       TaskContext *previous_implicit = implicit_context;
       // Save the context in the implicit context
@@ -30660,14 +30653,12 @@ namespace Legion {
       implicit_runtime = this;
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
-      // Set the executing processor
-      top_context->set_executing_processor(target);
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       AutoProvenance provenance(launcher.provenance);
       // Mark that this task is the top-level task
       Future result = top_task->initialize_task(top_context, launcher,
-          provenance, false/*track parent*/,true/*top level task*/);
+          provenance, false/*track parent*/, true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
       increment_outstanding_top_level_tasks();
@@ -30704,17 +30695,15 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = new TopLevelContext(this,0/*did*/,mapping);
+      TopLevelContext *top_context =
+        new TopLevelContext(this, proxy, 0/*did*/, mapping);
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
-      // Set the executing processor
-      top_context->set_executing_processor(proxy);
       TaskLauncher launcher(top_task_id, UntypedBuffer(),
                             Predicate::TRUE_PRED, top_mapper_id);
       // Mark that this task is the top-level task
       top_task->initialize_task(top_context, launcher, NULL/*provenance*/,
-          false/*track parent*/, true/*top level task*/,
-          true/*implicit top level task*/);
+          false/*track parent*/, true/*top level task*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done

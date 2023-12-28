@@ -1273,7 +1273,7 @@ namespace Legion {
       RtUserEvent manager_ready;
       Processor local_proxy;
       const char *local_task_name;
-      std::map<DomainPoint,ShardID> shard_points;
+      std::map<DomainPoint,std::pair<ShardID,Processor> > shard_points;
     };
 
     /**
@@ -2728,7 +2728,7 @@ namespace Legion {
       void initialize_virtual_manager(uint64_t &next_static_did,
                                       LayoutConstraintID virtual_layout_id,
                                       CollectiveMapping *mapping);
-      TopLevelContext* initialize_runtime(void);
+      TopLevelContext* initialize_runtime(Processor local_proc);
 #ifdef LEGION_USE_LIBDL
       void send_registration_callback(AddressSpaceID space,
                                       Realm::DSOReferenceImplementation *impl,

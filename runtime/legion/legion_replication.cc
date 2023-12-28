@@ -5293,7 +5293,7 @@ namespace Legion {
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx],
                               provenance, false/*track*/, false/*top level*/,
-                              false/*implicit*/, true/*must epoch*/);
+                              true/*must epoch*/);
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -9422,16 +9422,8 @@ namespace Legion {
                                       std::vector<Processor> &target_processors)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(address_spaces == NULL);
-      assert(target_processors.size() == total_shards);
-#endif
       // Initialize the address spaces data structure
-      address_spaces = new ShardMapping();
-      address_spaces->add_reference();
-      address_spaces->resize(target_processors.size());
-      for (unsigned idx = 0; idx < target_processors.size(); idx++)
-        (*address_spaces)[idx] = target_processors[idx].address_space();
+      set_shard_mapping(target_processors);
       if (collective_mapping == NULL)
         return;
       std::vector<AddressSpaceID> children;
@@ -9459,7 +9451,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::distribute_implicit(TaskID task_id, MapperID mapper_id,
-         Processor::Kind kind, unsigned shards_per_space, DistributedID ctx_did)
+         Processor::Kind kind, unsigned shards_per_space, InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       if (collective_mapping == NULL)
@@ -9478,7 +9470,8 @@ namespace Legion {
           rez.serialize(mapper_id);
           rez.serialize(kind);
           rez.serialize(shards_per_space);
-          rez.serialize(ctx_did);
+          rez.serialize(ctx->did);
+          rez.serialize(ctx->get_executing_processor());
         }
         runtime->send_replicate_distribution(*it, rez);
         remote_constituents++;
@@ -9510,33 +9503,33 @@ namespace Legion {
       rez.serialize<bool>(top_level_task);
       rez.serialize(shard_task_barrier);
       collective_mapping->pack(rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::set_shard_mapping(const std::vector<Processor> &mapping)
-    //--------------------------------------------------------------------------
-    {
 #ifdef DEBUG_LEGION
-      assert(mapping.size() == total_shards);
+      assert(shard_mapping.size() == total_shards);
 #endif
-      shard_mapping = mapping;
+      for (unsigned idx = 0; idx < total_shards; idx++)
+        rez.serialize(shard_mapping[idx]);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::set_address_spaces(
-                                      const std::vector<AddressSpaceID> &spaces)
+    void ShardManager::set_shard_mapping(std::vector<Processor> &mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(address_spaces == NULL);
+      assert(mapping.size() == total_shards);
 #endif
-      address_spaces = new ShardMapping(spaces);
+      shard_mapping.swap(mapping);
+      address_spaces = new ShardMapping();
       address_spaces->add_reference();
+      address_spaces->resize(shard_mapping.size());
+      for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
+        (*address_spaces)[idx] = shard_mapping[idx].address_space();
+      // Also initialize the collective parameters
       // We just need the collective radix, but use the existing routine
       int collective_radix = runtime->legion_collective_radix;
       int collective_log_radix, collective_stages;
       int participating_spaces, collective_last_radix;
-      configure_collective_settings(spaces.size(), runtime->address_space,
+      configure_collective_settings(shard_mapping.size(),runtime->address_space,
           collective_radix, collective_log_radix, collective_stages,
           participating_spaces, collective_last_radix);
     }
@@ -11744,13 +11737,13 @@ namespace Legion {
                 isomorphic_points, shard_domain, std::move(shard_points),
                 std::move(sorted_points), std::move(shard_lookup), 
                 NULL/*original*/, shard_task_barrier);
+      std::vector<Processor> target_processors(total_shards);
+      for (unsigned idx = 0; idx < total_shards; idx++)
+        derez.deserialize(target_processors[idx]);
       bool explicit_distribution;
       derez.deserialize(explicit_distribution);
       if (explicit_distribution)
       {
-        std::vector<Processor> target_processors(total_shards);
-        for (unsigned idx = 0; idx < total_shards; idx++)
-          derez.deserialize(target_processors[idx]);
         VariantID variant;
         derez.deserialize(variant);
         RtEvent ctx_ready;
@@ -11770,6 +11763,7 @@ namespace Legion {
                   target_processors[idx], variant, parent_ctx,
                   local_shards.front()));
         }
+        manager->set_shard_mapping(target_processors);
 #ifdef DEBUG_LEGION
         assert(!local_shards.empty());
 #endif
@@ -11797,17 +11791,20 @@ namespace Legion {
         derez.deserialize(shards_per_space);
         DistributedID ctx_did;
         derez.deserialize(ctx_did);
+        Processor exec_proc;
+        derez.deserialize(exec_proc);
+        // This is a top-level implicit context so we know we can make
+        // a new TopLevelContext here directly
+        TopLevelContext *top_context =
+          new TopLevelContext(runtime, exec_proc, ctx_did, mapping);
+        top_context->register_with_runtime();
+        manager->set_shard_mapping(target_processors);
         // Continue the distribution on to the other nodes
         manager->distribute_implicit(task_id, mapper_id, kind,
-                                     shards_per_space, ctx_did);
+                                     shards_per_space, top_context);
         ImplicitShardManager *implicit_manager = 
           runtime->find_implicit_shard_manager(task_id, mapper_id, 
                                           kind, shards_per_space);
-        // This is a top-level implicit context so we know we can make
-        // a new TopLevelContext here directly
-        TopLevelContext *top_context = 
-          new TopLevelContext(runtime, ctx_did, mapping); 
-        top_context->register_with_runtime();
         RtUserEvent to_trigger = 
           implicit_manager->set_shard_manager(manager, top_context);
         if (to_trigger.exists())

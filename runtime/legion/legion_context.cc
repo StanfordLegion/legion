@@ -7226,7 +7226,6 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, provenance,
                                             true/*track parent*/,
                                             false/*top level*/,
-                                            false/*implicit top level*/,
                                             false/*must epoch*/,
                                             outputs);
 #ifdef DEBUG_LEGION
@@ -13101,7 +13100,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TopLevelContext::TopLevelContext(Runtime *rt, DistributedID id,
+    TopLevelContext::TopLevelContext(Runtime *rt, Processor p, DistributedID id,
                                      CollectiveMapping *mapping)
       : InnerContext(rt, NULL, -1, false/*full inner*/,
                      dummy_requirements, dummy_output_requirements,
@@ -13110,6 +13109,10 @@ namespace Legion {
         root_uid(rt->get_unique_operation_id())
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(p.exists());
+#endif
+      set_executing_processor(p);
     }
 
     //--------------------------------------------------------------------------
@@ -18845,7 +18848,6 @@ namespace Legion {
                                             provenance,
                                             true /*track*/,
                                             false /*top_level*/,
-                                            false /*implicit_top_level*/,
                                             false /*must epoch*/,
                                             outputs);
 #ifdef DEBUG_LEGION
@@ -25646,8 +25648,7 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         Future result =
           task->initialize_task(parent, launcher, provenance, 
-              false/*track*/, false/*top level*/, false/*implicit*/,
-              false/*must epoch*/, outputs);
+              false/*track*/, false/*top level*/, false/*must epoch*/, outputs);
         inline_child_task(task);
         return result;
       }

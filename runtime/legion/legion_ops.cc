@@ -14835,7 +14835,6 @@ namespace Legion {
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           provenance, false/*track*/,
                                           false/*top level*/,
-                                          false/*implicit*/,
                                           true/*must epoch*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well

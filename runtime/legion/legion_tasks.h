@@ -458,9 +458,6 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual bool is_top_level_task(void) const { return false; }
-#ifdef DEBUG_LEGION
-      virtual bool is_implicit_top_level_task(void) const { return false; }
-#endif
       virtual bool is_shard_task(void) const { return false; }
       virtual SingleTask* get_origin_task(void) const = 0;
     public:
@@ -768,7 +765,6 @@ namespace Legion {
                              const TaskLauncher &launcher,
                              Provenance *provenance,
                              bool track = true, bool top_level=false,
-                             bool implicit_top_level = false, 
                              bool must_epoch_launch = false,
                              std::vector<OutputRequirement> *outputs = NULL);
       void perform_base_dependence_analysis(void);
@@ -817,10 +813,6 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-#ifdef DEBUG_LEGION
-      virtual bool is_implicit_top_level_task(void) const 
-        { return implicit_top_level_task; }
-#endif
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -860,7 +852,6 @@ namespace Legion {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
-      bool implicit_top_level_task;
     };
 
     /**
@@ -1087,8 +1078,7 @@ namespace Legion {
                                                  ShardID remote_shard);
       ReplicateContext* get_shard_execution_context(void) const;
     public:
-      void initialize_implicit_task(InnerContext *context, TaskID tid,
-                                    MapperID mid, Processor proxy);
+      void initialize_implicit_task(TaskID tid, MapperID mid, Processor proxy);
       RtEvent complete_startup_initialization(void);
     public:
       const ShardID shard_id;

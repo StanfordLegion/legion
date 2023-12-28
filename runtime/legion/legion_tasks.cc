@@ -5454,10 +5454,6 @@ namespace Legion {
     void SingleTask::trigger_children_complete(ApEvent all_children_complete)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!all_children_complete.exists() || 
-              single_task_termination.exists() || is_implicit_top_level_task());
-#endif
       if (single_task_termination.exists())
       {
         Runtime::trigger_event(NULL, 
@@ -5466,9 +5462,6 @@ namespace Legion {
       }
       else if (all_children_complete.exists())
       {
-#ifdef DEBUG_LEGION
-        assert(is_implicit_top_level_task());
-#endif
         AutoLock o_lock(op_lock);
         task_completion_effects.insert(all_children_complete);
       }
@@ -6144,7 +6137,6 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
-      implicit_top_level_task = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6174,7 +6166,6 @@ namespace Legion {
                                            Provenance *provenance,
                                            bool track /*=true*/,
                                            bool top_level /*=false*/,
-                                           bool implicit_top_level /*=false*/,
                                            bool must_epoch_launch /*=false*/,
                               std::vector<OutputRequirement> *outputs /*=NULL*/)
     //--------------------------------------------------------------------------
@@ -6270,10 +6261,7 @@ namespace Legion {
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
-      {
         this->top_level_task = true;
-        this->implicit_top_level_task = implicit_top_level;
-      }
       if (runtime->legion_spy_enabled)
       {
         if (top_level)
@@ -8754,18 +8742,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::initialize_implicit_task(InnerContext *context, TaskID tid,
+    void ShardTask::initialize_implicit_task(TaskID tid,
                                              MapperID mid, Processor proxy)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(parent_ctx == NULL);
-#endif
-      parent_ctx = context;
       task_id = tid;
       map_id = mid;
       orig_proc = proxy;
       current_proc = proxy;
+#ifdef DEBUG_LEGION
+      assert(!deferred_complete_mapping.exists());
+#endif
+      deferred_complete_mapping = Runtime::create_rt_user_event();
+      shard_manager->handle_post_mapped(true/*local*/, 
+          deferred_complete_mapping);
+      complete_mapping(deferred_complete_mapping);
     }
 
     //--------------------------------------------------------------------------
