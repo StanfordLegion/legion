@@ -8242,23 +8242,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardTask::can_early_complete(ApUserEvent &chain_event)
-    //--------------------------------------------------------------------------
-    {
-      // no point for early completion for shard tasks
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>*
-                                     ShardTask::get_acquired_instances_ref(void)
-    //--------------------------------------------------------------------------
-    {
-      // We shouldn't actually have any references for this kind of task
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     void ShardTask::initialize_map_task_input(Mapper::MapTaskInput &input,
                                               Mapper::MapTaskOutput &output,
                                               MustEpochOp *must_epoch_owner)

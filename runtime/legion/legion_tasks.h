@@ -1026,9 +1026,6 @@ namespace Legion {
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
       virtual bool is_stealable(void) const;
-      virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual std::map<PhysicalManager*,unsigned>*
-                                       get_acquired_instances_ref(void);
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
                                              Mapper::MapTaskOutput &output,
                                              MustEpochOp *must_epoch_owner);
