@@ -1178,7 +1178,13 @@ public:
     switch(task.task_id) {
     case TOP_LEVEL_TASK_ID:
       {
-	p = procs[0];
+        if (input.shard_processor.exists())
+        {
+          output.target_procs.resize(1, input.shard_processor);
+          output.chosen_variant = input.shard_variant;
+          return;
+        }
+        p = procs[0];
 	break;
       }
 
