@@ -28965,7 +28965,13 @@ namespace Legion {
     bool Runtime::is_local(Processor proc) const
     //--------------------------------------------------------------------------
     {
-      return (local_procs.find(proc) != local_procs.end());
+#ifdef DEBUG_LEGION
+      assert(proc.exists());
+#endif
+      if (separate_runtime_instances)
+        return (local_procs.find(proc) != local_procs.end());
+      else
+        return (proc.address_space() == address_space);
     }
 
     //--------------------------------------------------------------------------
