@@ -6826,6 +6826,9 @@ namespace Legion {
       }
       else
       {
+        if ((instance != NULL) && (instance->size > 0) && 
+            (shard_manager == NULL))
+          check_future_return_bounds(instance);
         if (elide_future_return)
         {
           if (instance != NULL)
@@ -6835,8 +6838,7 @@ namespace Legion {
         }
         else
         {
-          if ((instance != NULL) && (instance->size > 0))
-            check_future_return_bounds(instance);
+          
           if (is_remote())
             result.impl->set_result(remote_completion_event, instance,
                                     metadata, metasize);
@@ -7775,7 +7777,7 @@ namespace Legion {
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
-      if ((instance != NULL) && (instance->size > 0))
+      if ((instance != NULL) && (instance->size > 0) && (shard_manager == NULL))
         check_future_return_bounds(instance);
       if (effects.exists())
         record_completion_effect(effects);
@@ -8394,6 +8396,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(functor == NULL);
 #endif
+      if ((instance != NULL) && (instance->size > 0))
+        check_future_return_bounds(instance);
       shard_manager->handle_post_execution(instance, effects, metadata, 
                                            metasize, true/*local*/);
       complete_execution();

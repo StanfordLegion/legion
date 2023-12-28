@@ -17726,14 +17726,6 @@ namespace Legion {
       initialize_virtual_manager(next_static_did, virtual_layout_id, mapping);
       // Initialize the mappers
       initialize_mappers(); 
-      // If we have main top-level task, make a context for it
-      TopLevelContext *top_context = NULL;
-      if (legion_main_set)
-      {
-        top_context = new TopLevelContext(this, 
-            get_next_static_distributed_id(next_static_did), mapping);
-        top_context->register_with_runtime();
-      }
       // Finally perform the registration callback methods
       std::vector<RegistrationCallback> &registration_callbacks
         = get_pending_registration_callbacks();
@@ -17756,7 +17748,16 @@ namespace Legion {
         if (!separate_runtime_instances)
           registration_callbacks.clear();
       }
-      return top_context;
+      // If we have main top-level task, make a context for it
+      if (legion_main_set)
+      {
+        TopLevelContext *top_context = new TopLevelContext(this, 
+            get_next_static_distributed_id(next_static_did), mapping);
+        top_context->register_with_runtime();
+        return top_context;
+      }
+      else
+        return NULL;
     }
 
 #ifdef LEGION_USE_LIBDL
