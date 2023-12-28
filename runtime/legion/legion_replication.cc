@@ -1357,9 +1357,11 @@ namespace Legion {
         assert(!reduction_instances.empty());
         assert(reduction_instance == reduction_instances.front());
 #endif
-        ApEvent local_precondition;
+        ApEvent local_precondition = reduction_instance_precondition;
         if (!reduction_effects.empty())
         {
+          if (reduction_instance_precondition.exists())
+            reduction_effects.push_back(reduction_instance_precondition);
           local_precondition = Runtime::merge_events(NULL, reduction_effects);
           reduction_effects.clear();
         }
