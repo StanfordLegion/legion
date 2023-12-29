@@ -9440,9 +9440,7 @@ namespace Legion {
             rez.serialize<bool>(true/*explicit*/);
             rez.serialize(variant);
             task->get_context()->pack_inner_context(rez);
-            // Now pack the task data for replication
-            // Only back the base task version of this task
-            task->pack_base_task(rez, *it);
+            task->pack_single_task(rez, *it);
           }
           runtime->send_replicate_distribution(*it, rez);
           remote_constituents++;
@@ -9567,10 +9565,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardTask* ShardManager::create_shard(ShardID id, Processor target, 
-                   VariantID variant, InnerContext *parent, Deserializer &derez)
+               VariantID variant, InnerContext *parent_ctx, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ShardTask *shard = new Memoizable<ShardTask>(runtime, derez, parent,
+      ShardTask *shard = new Memoizable<ShardTask>(runtime, parent_ctx, derez,
                                                    this, id, target, variant);
       local_shards.push_back(shard);
       return shard;
@@ -11754,7 +11752,7 @@ namespace Legion {
       {
         VariantID variant;
         derez.deserialize(variant);
-        InnerContext *parent_ctx =
+        InnerContext *parent_ctx = 
           InnerContext::unpack_inner_context(derez, runtime);
         // Create the local shards
         ShardTask *first_shard = NULL;

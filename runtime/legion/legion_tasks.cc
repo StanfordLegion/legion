@@ -2343,6 +2343,8 @@ namespace Legion {
       this->no_access_regions = rhs->no_access_regions;
       this->target_processors = rhs->target_processors;
       this->physical_instances = rhs->physical_instances;
+      this->intra_space_mapping_dependences = 
+        rhs->intra_space_mapping_dependences;
       // no need to copy the control replication map
       this->selected_variant  = rhs->selected_variant;
       this->task_priority     = rhs->task_priority;
@@ -2405,25 +2407,10 @@ namespace Legion {
       }
       else
       { 
-        if (!deferred_complete_mapping.exists())
-        {
-#ifdef DEBUG_LEGION
-          assert(!is_remote()); // should only happen on the owner
-#endif
-          // Make a user event to send remotely to serve as the 
-          // mapping completion trigger
-          RtUserEvent remote_deferred_complete_mapping = 
-            Runtime::create_rt_user_event();
-          rez.serialize(remote_deferred_complete_mapping);
-          // We can do the trigger now and defer it
-          complete_mapping(remote_deferred_complete_mapping);
-        }
-        else
-        {
-          rez.serialize(deferred_complete_mapping);
-          // Clear it once we've packed it up
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
+        rez.serialize<size_t>(intra_space_mapping_dependences.size());
+        for (unsigned idx = 0;
+              idx < intra_space_mapping_dependences.size(); idx++)
+          rez.serialize(intra_space_mapping_dependences[idx]);
       }
     }
 
@@ -2435,9 +2422,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, UNPACK_SINGLE_TASK_CALL);
       DerezCheck z(derez);
       unpack_base_task(derez, ready_events);
-#ifdef DEBUG_LEGION
-      assert(!deferred_complete_mapping.exists());
-#endif
       if (map_origin)
       {
         derez.deserialize(selected_variant);
@@ -2506,8 +2490,11 @@ namespace Legion {
       }
       else
       {
-        derez.deserialize(deferred_complete_mapping);
-        version_infos.resize(logical_regions.size());
+        size_t num_intra_space_dependences;
+        derez.deserialize(num_intra_space_dependences);
+        intra_space_mapping_dependences.resize(num_intra_space_dependences);
+        for (unsigned idx = 0; idx < num_intra_space_dependences; idx++)
+          derez.deserialize(intra_space_mapping_dependences[idx]);
       }
       update_no_access_regions();
     } 
@@ -6892,6 +6879,28 @@ namespace Legion {
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
       pack_single_task(rez, target);
+      if (!is_origin_mapped())
+      {
+        if (!deferred_complete_mapping.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert(!is_remote()); // should only happen on the owner
+#endif
+          // Make a user event to send remotely to serve as the 
+          // mapping completion trigger
+          RtUserEvent remote_deferred_complete_mapping = 
+            Runtime::create_rt_user_event();
+          rez.serialize(remote_deferred_complete_mapping);
+          // We can do the trigger now and defer it
+          complete_mapping(remote_deferred_complete_mapping);
+        }
+        else
+        {
+          rez.serialize(deferred_complete_mapping);
+          // Clear it once we've packed it up
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
       size_t valid_output_regions_size = valid_output_regions.size();
       rez.serialize(valid_output_regions_size);
       for (unsigned idx = 0; idx < valid_output_regions.size(); idx++)
@@ -6932,6 +6941,14 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
+      if (!is_origin_mapped())
+      {
+#ifdef DEBUG_LEGION
+        assert(!deferred_complete_mapping.exists());
+#endif
+        derez.deserialize(deferred_complete_mapping);
+        version_infos.resize(logical_regions.size());
+      }
       size_t valid_output_regions_size = 0;
       derez.deserialize(valid_output_regions_size);
       valid_output_regions.resize(valid_output_regions_size);
@@ -7990,7 +8007,13 @@ namespace Legion {
           {
             const DomainPoint &prev = dependences[idx-1];
             const RtEvent pre = slice_owner->find_intra_space_dependence(prev);
-            intra_space_mapping_dependences.insert(pre);
+            if (!std::binary_search(intra_space_mapping_dependences.begin(),
+                  intra_space_mapping_dependences.end(), pre))
+            {
+              intra_space_mapping_dependences.push_back(pre);
+              std::sort(intra_space_mapping_dependences.begin(),
+                        intra_space_mapping_dependences.end());
+            }
             if (runtime->legion_spy_enabled)
             {
               // We know we only need a dependence on the previous point but
@@ -8028,13 +8051,13 @@ namespace Legion {
       assert(proc.address_space() == runtime->address_space);
 #endif
       SingleTask::activate();
-      target_proc = proc;
+      set_current_proc(proc); // do this before clone_single_from
       if (source != NULL)
         clone_single_from(source);
+      else
+        parent_ctx = parent;
       resolved = true;
       stealable = false;
-      current_proc = proc;
-      parent_ctx = parent;
       shard_manager = manager;
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       selected_variant = variant;
@@ -8042,7 +8065,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardTask::ShardTask(Runtime *rt, Deserializer &derez, InnerContext *parent,
+    ShardTask::ShardTask(Runtime *rt, InnerContext *parent, Deserializer &derez,
         ShardManager *manager, ShardID id, Processor proc, VariantID variant)
       : SingleTask(rt), shard_id(id), all_shards_complete(false)
     //--------------------------------------------------------------------------
@@ -8051,12 +8074,11 @@ namespace Legion {
       assert(proc.address_space() == runtime->address_space);
 #endif
       SingleTask::activate();
+      set_current_proc(proc);
       std::set<RtEvent> ready_events;
-      unpack_base_task(derez, ready_events);
+      unpack_single_task(derez, ready_events);
       resolved = true;
       stealable = false;
-      target_proc = proc;
-      current_proc = proc;
       parent_ctx = parent;
       shard_manager = manager;
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
@@ -8345,17 +8367,11 @@ namespace Legion {
     {
       DerezCheck z(derez);
 #ifdef DEBUG_LEGION
-      assert(single_task_termination.exists());
-#endif
-      // Save this on the stack to prevent it being overwritten by unpack_single
-      const ApUserEvent temp_single_task_termination = single_task_termination;
-      unpack_single_task(derez, ready_events);
-      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
-      // Restore the single task termination event
-#ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
 #endif
-      single_task_termination = temp_single_task_termination;
+      unpack_single_task(derez, ready_events);
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
+      set_current_proc(current);
       return false;
     }
 
@@ -8793,7 +8809,7 @@ namespace Legion {
       if (intra_space_mapping_dependences.empty())
         return false;
       unsigned count = 0;
-      for (std::set<RtEvent>::const_iterator it =
+      for (std::vector<RtEvent>::const_iterator it =
             intra_space_mapping_dependences.begin(); it !=
             intra_space_mapping_dependences.end(); it++)
       {

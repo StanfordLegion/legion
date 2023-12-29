@@ -540,7 +540,7 @@ namespace Legion {
     protected:
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;
-      std::set<RtEvent>                     intra_space_mapping_dependences;
+      std::vector<RtEvent>                  intra_space_mapping_dependences;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
       RtUserEvent                           deferred_complete_mapping;
@@ -981,9 +981,9 @@ namespace Legion {
       ShardTask(Runtime *rt, SingleTask *source, InnerContext *parent,
           ShardManager *manager, ShardID shard_id,
           Processor target, VariantID chosen);
-      ShardTask(Runtime *rt, Deserializer &derez, InnerContext *parent,
-          ShardManager *manager, ShardID shard_id, 
-          Processor target, VariantID chosen);
+      ShardTask(Runtime *rt, InnerContext *parent_ctx, Deserializer &derez,
+          ShardManager *manager, ShardID shard_id, Processor target,
+          VariantID chosen);
       ShardTask(const ShardTask &rhs) = delete;
       virtual ~ShardTask(void);
     public:
