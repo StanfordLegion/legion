@@ -23429,7 +23429,7 @@ namespace Legion {
       rez.serialize(remote_ptr);
       rez.serialize(source);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_inner_context(rez);
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
         provenance->serialize(rez);
@@ -23439,17 +23439,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime,
-                                      std::set<RtEvent> &ready_events)
+    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      parent_ctx = runtime->find_or_request_inner_context(did, ready);
-      if (ready.exists())
-        ready_events.insert(ready);
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       set_provenance(Provenance::deserialize(derez));
       derez.deserialize<bool>(tracing);
     }
@@ -23621,7 +23615,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteOp* RemoteOp::unpack_remote_operation(Deserializer &derez,
-                              Runtime *runtime, std::set<RtEvent> &ready_events)
+                                                           Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       Operation::OpKind kind;
@@ -23707,7 +23701,7 @@ namespace Legion {
           assert(false);
       }
       // Do the rest of the unpack
-      result->unpack_remote_base(derez, runtime, ready_events);
+      result->unpack_remote_base(derez, runtime);
       result->unpack(derez);
       return result;
     }

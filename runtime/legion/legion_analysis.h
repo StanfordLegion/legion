@@ -2819,7 +2819,7 @@ namespace Legion {
       virtual bool remove_analysis_reference(void) 
         { return remove_reference(); }
       static RemoteCollectiveAnalysis* unpack(Deserializer &derez,
-                Runtime *runtime, std::set<RtEvent> &ready_events);
+                                              Runtime *runtime);
     public:
       const size_t context_index;
       const unsigned requirement_index;

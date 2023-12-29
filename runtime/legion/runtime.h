@@ -3987,8 +3987,7 @@ namespace Legion {
                                                         RtEvent &ready);
       EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
                                                       RtEvent &ready);
-      InnerContext* find_or_request_inner_context(DistributedID did,
-                                                  RtEvent &ready);
+      InnerContext* find_or_request_inner_context(DistributedID did);
       ShardManager* find_shard_manager(DistributedID did, bool can_fail=false);
     protected:
       template<typename T, MessageKind MK>

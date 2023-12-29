@@ -1743,9 +1743,9 @@ namespace Legion {
 #endif
       virtual VirtualCloseOp* get_virtual_close_op(void);
     public:
-      virtual void pack_task_context(Serializer &rez) const;
-      static InnerContext* unpack_task_context(Deserializer &derez,
-          Runtime *runtime, RtEvent &ctx_ready);
+      virtual void pack_inner_context(Serializer &rez) const;
+      static InnerContext* unpack_inner_context(Deserializer &derez,
+                                                Runtime *runtime);
     public:
       bool nonexclusive_virtual_mapping(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -3098,7 +3098,7 @@ namespace Legion {
 #endif
       virtual VirtualCloseOp* get_virtual_close_op(void);
     public:
-      virtual void pack_task_context(Serializer &rez) const;
+      virtual void pack_inner_context(Serializer &rez) const;
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -3504,39 +3504,6 @@ namespace Legion {
      */
     class RemoteContext : public InnerContext {
     public:
-      struct RemotePhysicalRequestArgs :
-        public LgTaskArgs<RemotePhysicalRequestArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_REQUEST_TASK_ID;
-      public:
-        RemotePhysicalRequestArgs(RemoteContext *ctx,
-                                  InnerContext *loc, unsigned idx, 
-                                  AddressSpaceID src, RtUserEvent trig)
-          : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
-            target(ctx), local(loc), index(idx), 
-            source(src), to_trigger(trig) { }
-      public:
-        RemoteContext *const target;
-        InnerContext *const local;
-        const unsigned index;
-        const AddressSpaceID source;
-        const RtUserEvent to_trigger;
-      };
-      struct RemotePhysicalResponseArgs : 
-        public LgTaskArgs<RemotePhysicalResponseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID;
-      public:
-        RemotePhysicalResponseArgs(RemoteContext *ctx, InnerContext *res, 
-                                   unsigned idx)
-          : LgTaskArgs<RemotePhysicalResponseArgs>(implicit_provenance), 
-            target(ctx), result(res), index(idx) { }
-      public:
-        RemoteContext *const target;
-        InnerContext *const result;
-        const unsigned index;
-      };
-    public:
       RemoteContext(DistributedID did, Runtime *runtime,
                     CollectiveMapping *mapping = NULL);
       RemoteContext(const RemoteContext &rhs) = delete;
@@ -3562,7 +3529,7 @@ namespace Legion {
                       AddressSpaceID source_space, unsigned req_index,
                       EquivalenceSet *set, const FieldMask &mask);
       virtual InnerContext* find_parent_physical_context(unsigned index);
-      virtual void pack_task_context(Serializer &rez) const;
+      virtual void pack_inner_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
@@ -3589,12 +3556,10 @@ namespace Legion {
       static void handle_context_response(Deserializer &derez,Runtime *runtime);
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
-      static void defer_physical_request(const void *args, Runtime *runtime);
       void set_physical_context_result(unsigned index, 
                                        InnerContext *result);
       static void handle_physical_response(Deserializer &derez, 
                                            Runtime *runtime);
-      static void defer_physical_response(const void *args);
       static void handle_find_collective_view_request(Deserializer &derez,
                                   Runtime *runtime, AddressSpaceID source);
       static void handle_find_collective_view_response(Deserializer &derez,

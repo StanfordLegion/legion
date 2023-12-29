@@ -3780,8 +3780,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(get_replication_id());
-          rez.serialize(did);
+          pack_inner_context(rez);
           rez.serialize(runtime->address_space);
           target_mapping.pack(rez);
           for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -3874,21 +3873,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID repl_did;
-      derez.deserialize(repl_did);
-      DistributedID ctx_did;
-      derez.deserialize(ctx_did);
-      InnerContext *context = NULL; 
-      if (repl_did > 0)
-      {
-        ShardManager *shard_manager =
-          runtime->find_shard_manager(repl_did, true/*can fail*/);
-        if (shard_manager != NULL)
-          context = shard_manager->find_local_context()->as_inner_context();
-      }
-      RtEvent ctx_ready;
-      if (context == NULL)
-        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      InnerContext *context = unpack_inner_context(derez, runtime);
       AddressSpaceID source_space;
       derez.deserialize(source_space);
       size_t total_spaces;
@@ -4028,8 +4013,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(repl_did);
-          rez.serialize(ctx_did);
+          context->pack_inner_context(rez);
           rez.serialize(source_space);
           target_mapping.pack(rez);
           for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -4106,14 +4090,10 @@ namespace Legion {
       // Wait for any ready events to be complete
       if (!ready_events.empty())
       {
-        if (ctx_ready.exists())
-          ready_events.push_back(ctx_ready);
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      else if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       // Find the local target
 #ifdef DEBUG_LEGION
       assert(target_mapping.contains(runtime->address_space));
@@ -4164,11 +4144,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID ctx_did;
-      derez.deserialize(ctx_did);
-      RtEvent ctx_ready;
-      InnerContext *context = 
-        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      InnerContext *context = unpack_inner_context(derez, runtime);
       EqSetTracker *source;
       derez.deserialize(source);
       AddressSpaceID source_space;
@@ -4184,8 +4160,6 @@ namespace Legion {
       derez.deserialize(mask);
       RtUserEvent recorded;
       derez.deserialize(recorded);
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       if (set_ready.exists() && !set_ready.has_triggered())
         set_ready.wait();
       Runtime::trigger_event(recorded,
@@ -10883,7 +10857,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::pack_task_context(Serializer &rez) const
+    void InnerContext::pack_inner_context(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(did); // pack our distributed ID
@@ -10891,8 +10865,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ InnerContext* InnerContext::unpack_task_context(
-                    Deserializer &derez, Runtime *runtime, RtEvent &ready_event)
+    /*static*/ InnerContext* InnerContext::unpack_inner_context(
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DistributedID ctx_did, man_did;
@@ -10906,7 +10880,7 @@ namespace Legion {
         if (manager != NULL)
           return manager->find_local_context()->as_inner_context();
       }
-      return runtime->find_or_request_inner_context(ctx_did, ready_event);
+      return runtime->find_or_request_inner_context(ctx_did);
     }
 
     //--------------------------------------------------------------------------
@@ -11896,8 +11870,7 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(get_replication_id());
-            rez.serialize(did);
+            pack_inner_context(rez);
             rez.serialize(creator_did);
             rez.serialize(collective_did);
             mapping->pack(rez);
@@ -11948,8 +11921,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(get_replication_id());
-          rez.serialize(did);
+          pack_inner_context(rez);
           rez.serialize(creator_did);
           rez.serialize(collective_did);
           mapping->pack(rez);
@@ -11970,21 +11942,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID repl_id;
-      derez.deserialize(repl_id);
-      DistributedID context_did;
-      derez.deserialize(context_did);
-      InnerContext *context = NULL;
-      if (repl_id > 0)
-      {
-        ShardManager *shard_manager =
-          runtime->find_shard_manager(repl_id, true/*can fail*/);
-        if (shard_manager != NULL)
-          context = shard_manager->find_local_context()->as_inner_context();
-      }
-      RtEvent ctx_ready;
-      if (context == NULL)
-        context = runtime->find_or_request_inner_context(context_did,ctx_ready);
+      InnerContext *context = unpack_inner_context(derez, runtime);
       DistributedID creator_did, collective_did;
       derez.deserialize(creator_did);
       derez.deserialize(collective_did);
@@ -11999,8 +11957,6 @@ namespace Legion {
         derez.deserialize(individual_dids[idx]);
       RtUserEvent done;
       derez.deserialize(done);
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       Runtime::trigger_event(done, context->create_collective_view(
             creator_did, collective_did, mapping, individual_dids));
       if (mapping->remove_reference())
@@ -21610,7 +21566,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::pack_task_context(Serializer &rez) const
+    void ReplInnerContext::pack_inner_context(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(did); // pack our distributed ID
@@ -23994,10 +23950,7 @@ namespace Legion {
 #endif
       // THIS IS ONLY SAFE BECAUSE THIS FUNCTION IS NEVER CALLED BY
       // A MESSAGE IN THE CONTEXT_VIRTUAL_CHANNEL
-      RtEvent ready;
-      result = runtime->find_or_request_inner_context(parent_context_did,ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      result = runtime->find_or_request_inner_context(parent_context_did);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -24049,7 +24002,7 @@ namespace Legion {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(did);
+        pack_inner_context(rez);
         rez.serialize(source);
         rez.serialize(source_space);
         rez.serialize(req_index);
@@ -24129,7 +24082,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteContext::pack_task_context(Serializer &rez) const
+    void RemoteContext::pack_inner_context(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(did); // pack our distributed ID
@@ -24356,11 +24309,7 @@ namespace Legion {
       InnerContext *parent = parent_ctx.load();
       if (parent == NULL)
       {
-        RtEvent ready;
-        parent =
-          runtime->find_or_request_inner_context(parent_context_did, ready);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
+        parent = runtime->find_or_request_inner_context(parent_context_did);
         const Task *result = parent->get_task();
         if (parent_ctx.exchange(parent) == NULL)
           remote_task.parent_task = result;
@@ -24422,11 +24371,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready;
       RemoteContext *context = static_cast<RemoteContext*>(
-          runtime->find_or_request_inner_context(did, ready));
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+          runtime->find_or_request_inner_context(did));
       context->unpack_local_field_update(derez);
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -24449,34 +24395,17 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       RtEvent ctx_ready;
-      InnerContext *local =
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
-
-      // Always defer this in case it blocks, we can't block the virtual channel
-      RemotePhysicalRequestArgs args(target, local, 
-                                     index, source, to_trigger);
-      runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteContext::defer_physical_request(const void *args,
-                                                          Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      const RemotePhysicalRequestArgs *rargs = 
-        (const RemotePhysicalRequestArgs*)args;
-      InnerContext *result = 
-        rargs->local->find_parent_physical_context(rargs->index);
+      InnerContext *local = runtime->find_or_request_inner_context(context_did);
+      InnerContext *result = local->find_parent_physical_context(index);
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(rargs->target);
-        rez.serialize(rargs->index);
-        rez.serialize(result->did);
-        rez.serialize(rargs->to_trigger);
+        rez.serialize(target);
+        rez.serialize(index);
+        result->pack_inner_context(rez);
+        rez.serialize(to_trigger);
       }
-      runtime->send_remote_context_physical_response(rargs->source, rez);
+      runtime->send_remote_context_physical_response(source, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -24507,36 +24436,11 @@ namespace Legion {
       derez.deserialize(target);
       unsigned index;
       derez.deserialize(index);
-      DistributedID result_did;
-      derez.deserialize(result_did);
+      InnerContext *result = unpack_inner_context(derez, runtime);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      RtEvent ctx_ready;
-      InnerContext *result = 
-        runtime->find_or_request_inner_context(result_did, ctx_ready);
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-      {
-        // Launch a continuation in case we need to page in the context
-        // We obviously can't block the virtual channel
-        RemotePhysicalResponseArgs args(target, result, index);
-        RtEvent done = runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
-        Runtime::trigger_event(to_trigger, done);
-      }
-      else
-      {
-        target->set_physical_context_result(index, result);
-        Runtime::trigger_event(to_trigger);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteContext::defer_physical_response(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const RemotePhysicalResponseArgs *rargs = 
-        (const RemotePhysicalResponseArgs*)args;
-      rargs->target->set_physical_context_result(rargs->index, rargs->result);
+      target->set_physical_context_result(index, result);
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -24547,9 +24451,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID context_did;
       derez.deserialize(context_did);
-      RtEvent ctx_ready;
-      InnerContext *local = 
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
+      InnerContext *local = runtime->find_or_request_inner_context(context_did);
       RegionTreeID tid;
       derez.deserialize(tid);
       size_t num_insts;
@@ -24562,8 +24464,6 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
 
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       RtEvent result_ready;
       CollectiveResult *result = local->find_or_create_collective_view(tid, 
                                                   instances, result_ready);

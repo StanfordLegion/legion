@@ -27165,16 +27165,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* Runtime::find_or_request_inner_context(DistributedID did,
-                                                         RtEvent &ready)
+    InnerContext* Runtime::find_or_request_inner_context(DistributedID did)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == INNER_CONTEXT_DC);
 #endif
+      RtEvent ready;
       DistributedCollectable *dc = find_or_request_distributed_collectable<
         RemoteContext, SEND_REMOTE_CONTEXT_REQUEST>(did, ready);
-      // Have to static cast since the memory might not have been initialized
+      // Because of multiple inheritance on context classes we can't use
+      // a static cast here, so we need to wait for the event to be ready
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       return static_cast<TaskContext*>(dc)->as_inner_context();
     }
 
@@ -27284,10 +27287,7 @@ namespace Legion {
           return result;
         }
       }
-      RtEvent ctx_ready;
-      InnerContext *context = find_or_request_inner_context(ctx_did, ctx_ready);
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
+      InnerContext *context = find_or_request_inner_context(ctx_did);
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
              op, gen, op_ctx_index, op_point,
 #ifdef LEGION_SPY
@@ -32571,16 +32571,6 @@ namespace Legion {
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
           {
             IndexSpaceExpression::handle_tighten_index_space(args);
-            break;
-          }
-        case LG_REMOTE_PHYSICAL_REQUEST_TASK_ID:
-          {
-            RemoteContext::defer_physical_request(args, runtime);
-            break;
-          }
-        case LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID:
-          {
-            RemoteContext::defer_physical_response(args);
             break;
           }
         case LG_REPLAY_SLICE_TASK_ID:

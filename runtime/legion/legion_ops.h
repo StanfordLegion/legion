@@ -4471,15 +4471,14 @@ namespace Legion {
     public:
       void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;
-      void unpack_remote_base(Deserializer &derez, Runtime *runtime,
-                              std::set<RtEvent> &ready_events);
+      void unpack_remote_base(Deserializer &derez, Runtime *runtime);
       void pack_profiling_requests(Serializer &rez, 
                                    std::set<RtEvent> &applied) const;
       void unpack_profiling_requests(Deserializer &derez);
       static void handle_deferred_deletion(const void *args);
       // Caller takes ownership of this object and must delete it when done
       static RemoteOp* unpack_remote_operation(Deserializer &derez,
-                         Runtime *runtime, std::set<RtEvent> &ready_events);
+                                               Runtime *runtime);
       static void handle_report_uninitialized(Deserializer &derez);
       static void handle_report_profiling_count_update(Deserializer &derez);
       static void handle_completion_effect(Deserializer &derez);

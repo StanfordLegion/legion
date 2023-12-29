@@ -7523,8 +7523,7 @@ namespace Legion {
       derez.deserialize(precondition);
       PredEvent predicate_guard;
       derez.deserialize(predicate_guard);
-      Operation *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -8545,24 +8544,17 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(did, manager_ready);
-      std::set<RtEvent> applied_events;
       RemoteCollectiveAnalysis *analysis = 
-        RemoteCollectiveAnalysis::unpack(derez, runtime, applied_events);
+        RemoteCollectiveAnalysis::unpack(derez, runtime);
       analysis->add_reference();
       RtUserEvent applied;
       derez.deserialize(applied);
 
       if (view_ready.exists() && !view_ready.has_triggered())
-        applied_events.insert(view_ready);
+        view_ready.wait();
       if (manager_ready.exists() && !manager_ready.has_triggered())
-        applied_events.insert(manager_ready);
-      if (!applied_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(applied_events);
-        applied_events.clear();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        manager_ready.wait();
+      std::set<RtEvent> applied_events;
       collective_view->register_collective_analysis(manager, analysis,
                                                     applied_events);
       if (!applied_events.empty())
@@ -9291,7 +9283,7 @@ namespace Legion {
       Operation *op = NULL;
       std::set<RtEvent> ready_events;
       if (fill_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -9492,8 +9484,7 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask, dst_mask;
@@ -10432,7 +10423,7 @@ namespace Legion {
       derez.deserialize(copy_restricted);
       Operation *op = NULL;
       if (copy_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -10723,7 +10714,7 @@ namespace Legion {
       derez.deserialize(copy_restricted);
       Operation *op = NULL;
       if (copy_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -11092,8 +11083,7 @@ namespace Legion {
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       std::set<RtEvent> ready_events;
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events); 
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime); 
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -11426,7 +11416,7 @@ namespace Legion {
       Operation *op = NULL;
       std::set<RtEvent> ready_events;
       if (copy_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -12118,8 +12108,7 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask, dst_mask;
@@ -12336,8 +12325,7 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask, dst_mask;

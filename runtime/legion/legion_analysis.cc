@@ -11922,7 +11922,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteCollectiveAnalysis* RemoteCollectiveAnalysis::unpack(
-         Deserializer &derez, Runtime *runtime, std::set<RtEvent> &ready_events)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       size_t context_index;
@@ -11931,8 +11931,7 @@ namespace Legion {
       derez.deserialize(requirement_index);
       IndexSpaceID match_space;
       derez.deserialize(match_space);
-      RemoteOp *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       return new RemoteCollectiveAnalysis(context_index, requirement_index,
                                           match_space, op, derez, runtime);
     }
@@ -12161,8 +12160,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       ReductionOpID redop;
@@ -12377,8 +12375,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMaskSet<LogicalView> valid_instances;
@@ -12607,8 +12604,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMaskSet<LogicalView> antivalid_instances;
@@ -13001,8 +12997,7 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         user_mask |= eq_masks[idx];
       }
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       LogicalRegion handle;
@@ -13295,8 +13290,7 @@ namespace Legion {
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionNode *region = runtime->forest->get_node(handle);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       RtUserEvent returned;
@@ -13614,8 +13608,7 @@ namespace Legion {
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionNode *region = runtime->forest->get_node(handle);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       ApEvent precondition;
@@ -13996,8 +13989,7 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         src_mask |= eq_masks[idx];
       }
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned src_index, dst_index;
       derez.deserialize(src_index);
       derez.deserialize(dst_index);
@@ -14527,8 +14519,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr =
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       RegionUsage usage;
@@ -14776,8 +14767,7 @@ namespace Legion {
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionNode *region = runtime->forest->get_node(handle);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMaskSet<InstanceView> filter_views;
@@ -14960,8 +14950,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr =
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       size_t num_sources;
@@ -22854,8 +22843,7 @@ namespace Legion {
         rez.serialize(did);
         set_expr->pack_expression(rez, target);
         rez.serialize(tree_id);
-        rez.serialize(context->get_replication_id());
-        rez.serialize(context->did);
+        context->pack_inner_context(rez);
         // There be dragons here!
         // In the case where we first make a new equivalence set on a
         // remote node that is about to be the owner, we can't mark it
@@ -22928,23 +22916,7 @@ namespace Legion {
       derez.deserialize(ctx_did);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      
-      InnerContext *context = NULL;
-      if (repl_id > 0)
-      {
-        // See if there is a local shard manager
-        ShardManager *manager = 
-          runtime->find_shard_manager(repl_id, true/*can fail*/);
-        if (manager != NULL)
-          context = manager->find_local_context()->as_inner_context();
-      }
-      if (context == NULL)
-      {
-        RtEvent ctx_ready;
-        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
-        if (ctx_ready.exists() && !ctx_ready.has_triggered())
-          ctx_ready.wait();
-      }
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       void *location = runtime->find_or_create_pending_collectable_location<
                                                         EquivalenceSet>(did);
       EquivalenceSet *set = new(location) EquivalenceSet(runtime, did, 
@@ -25487,7 +25459,7 @@ namespace Legion {
                 else
                   rez.serialize(node->handle);
                 rez.serialize(set->tree_id);
-                context->pack_task_context(rez);
+                context->pack_inner_context(rez);
                 mapping->pack(rez);
                 rez.serialize(ready);
                 rez.serialize<size_t>(to_notify.size());
@@ -26364,9 +26336,7 @@ namespace Legion {
       }
       RegionTreeID tid;
       derez.deserialize(tid);
-      RtEvent ctx_ready;
-      InnerContext *context =
-        InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       size_t num_spaces;
       derez.deserialize(num_spaces);
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
@@ -26431,12 +26401,7 @@ namespace Legion {
                 rez.serialize(rectangles[idx]);
             }
             rez.serialize(tid);
-            if (ctx_ready.exists() && !ctx_ready.has_triggered())
-            {
-              ctx_ready.wait();
-              ctx_ready = RtEvent::NO_RT_EVENT;
-            }
-            context->pack_task_context(rez);
+            context->pack_inner_context(rez);
             mapping->pack(rez);
             rez.serialize(local_ready);
             rez.serialize<size_t>(to_notify.size());
@@ -26485,8 +26450,6 @@ namespace Legion {
             runtime->forest, rectangles) :
         local_target->get_tracker_expression()->create_from_rectangles(
             rectangles_set);
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       void *location = 
         runtime->find_or_create_pending_collectable_location<EquivalenceSet>(
           did);

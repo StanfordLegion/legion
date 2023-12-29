@@ -9439,7 +9439,7 @@ namespace Legion {
             pack_shard_manager(rez);
             rez.serialize<bool>(true/*explicit*/);
             rez.serialize(variant);
-            task->get_context()->pack_task_context(rez);
+            task->get_context()->pack_inner_context(rez);
             // Now pack the task data for replication
             // Only back the base task version of this task
             task->pack_base_task(rez, *it);
@@ -11754,9 +11754,8 @@ namespace Legion {
       {
         VariantID variant;
         derez.deserialize(variant);
-        RtEvent ctx_ready;
         InnerContext *parent_ctx =
-          InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+          InnerContext::unpack_inner_context(derez, runtime);
         // Create the local shards
         ShardTask *first_shard = NULL;
         for (unsigned idx = 0; idx < total_shards; idx++)
@@ -11770,8 +11769,6 @@ namespace Legion {
             manager->create_shard(idx, target_processors[idx], variant,
                 parent_ctx, first_shard);
         }
-        if (ctx_ready.exists() && !ctx_ready.has_triggered())
-          ctx_ready.wait();
         manager->distribute_explicit(first_shard, variant, target_processors);
       }
       else
