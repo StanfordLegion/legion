@@ -6052,7 +6052,7 @@ class Requirement(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY)
+        return bool(self.priv & READ_ONLY) and not self.is_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -8310,7 +8310,7 @@ class Operation(object):
             # A little sanity check at the moment: nested control replication can only
             # come from tasks replicated from a single shard. When we break that invariant
             # then we'll need to do something here
-            assert collective is None
+            assert not collective
             if self.reqs is not None:
                 self.compute_current_version_numbers()
                 assert self.mapping is None
@@ -8371,7 +8371,7 @@ class Operation(object):
             # Special case for if we are (control) replicated
             # Same check here that we have for perform_op_physical_verification
             # If/when we relax this we'll need to change stuff here
-            assert collective is None
+            assert not collective
             if self.reqs:
                 collective = dict()
                 # Do the registration for all our replicants
@@ -9790,7 +9790,7 @@ class PointUser(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY)
+        return bool(self.priv & READ_ONLY) and not self.is_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
