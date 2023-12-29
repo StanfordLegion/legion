@@ -2846,7 +2846,7 @@ namespace Legion {
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_inner_context(rez);
       if (provenance != NULL)
         provenance->serialize(rez);
       else

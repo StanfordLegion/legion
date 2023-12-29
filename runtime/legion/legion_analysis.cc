@@ -22911,12 +22911,9 @@ namespace Legion {
                                         runtime->determine_owner(did));
       RegionTreeID tid;
       derez.deserialize(tid);
-      DistributedID repl_id, ctx_did;
-      derez.deserialize(repl_id);
-      derez.deserialize(ctx_did);
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       void *location = runtime->find_or_create_pending_collectable_location<
                                                         EquivalenceSet>(did);
       EquivalenceSet *set = new(location) EquivalenceSet(runtime, did, 
