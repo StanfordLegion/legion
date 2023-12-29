@@ -27165,20 +27165,65 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* Runtime::find_or_request_inner_context(DistributedID did)
+    InnerContext* Runtime::find_or_request_inner_context(DistributedID to_find)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == INNER_CONTEXT_DC);
+      assert(LEGION_DISTRIBUTED_HELP_DECODE(to_find) == INNER_CONTEXT_DC);
 #endif
+      const DistributedID did = LEGION_DISTRIBUTED_ID_FILTER(to_find);
       RtEvent ready;
-      DistributedCollectable *dc = find_or_request_distributed_collectable<
-        RemoteContext, SEND_REMOTE_CONTEXT_REQUEST>(did, ready);
-      // Because of multiple inheritance on context classes we can't use
-      // a static cast here, so we need to wait for the event to be ready
-      if (ready.exists() && !ready.has_triggered())
+      bool send_request = false;
+      // You might think you can call find_or_request_distributed_collectable
+      // here, but in-place new does not seem to work with classes with 
+      // multiple inheritance in some compilers (C++ is terrible and untested)
+      // so we have to allocate the classes directly, which is fine since we
+      // we're going to block waiting on the result anyway
+      {
+        AutoLock d_lock(distributed_collectable_lock);
+        std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(did);
+        // If we've already got it, then we are done
+        if (finder != dist_collectables.end())
+          return static_cast<TaskContext*>(finder->second)->as_inner_context();
+        std::map<DistributedID,std::pair<DistributedCollectable*,RtUserEvent> 
+          >::iterator pending_finder = pending_collectables.find(did);
+        if (pending_finder == pending_collectables.end())
+          pending_finder = pending_collectables.emplace(std::make_pair(did,
+                std::pair<DistributedCollectable*,RtUserEvent>(NULL,
+                  RtUserEvent::NO_RT_USER_EVENT))).first;
+        if (!pending_finder->second.second.exists())
+        {
+          pending_finder->second.second = Runtime::create_rt_user_event();
+          send_request = true;
+        }
+        ready = pending_finder->second.second;
+      }
+      if (send_request)
+      {
+        AddressSpaceID target = determine_owner(did);
+#ifdef DEBUG_LEGION
+        assert(target != address_space); // shouldn't be sending to ourself
+#endif
+        // Now send the message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(to_find);
+          rez.serialize(address_space);
+        }
+        find_messenger(target)->send_message(
+            SEND_REMOTE_CONTEXT_REQUEST, rez, true/*flush*/);
+      }
+      if (!ready.has_triggered())
         ready.wait();
-      return static_cast<TaskContext*>(dc)->as_inner_context();
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+        dist_collectables.find(did);
+#ifdef DEBUG_LEGION
+      assert(finder != dist_collectables.end());
+#endif
+      return static_cast<TaskContext*>(finder->second)->as_inner_context();
     }
 
     //--------------------------------------------------------------------------

@@ -24528,9 +24528,12 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      void *location = runtime->find_or_create_pending_collectable_location<
-                                                          RemoteContext>(did);
-      RemoteContext *context = new(location) RemoteContext(did, runtime);
+      // Note you don't need to call find_or_create_pending_collectable_location
+      // here because find_or_request_inner_context does not return pointers
+      // to buffers before they are allocated. The reason for that is that
+      // some C++ compilers don't seem to do well with in-place allocation
+      // of classes with virtual inheritance in their type hierarchy
+      RemoteContext *context = new RemoteContext(did, runtime);
       context->unpack_remote_context(derez);
       context->register_with_runtime();
     }
