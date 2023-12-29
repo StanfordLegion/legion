@@ -809,10 +809,10 @@ namespace Legion {
         if (collective_id > 0)
         {
 #ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
+          ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(context);
           assert(repl_ctx != NULL);
 #else
-          ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context);
+          ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(context);
 #endif
           collective = new PredicateCollective(this, repl_ctx, collective_id);
           collective->async_all_reduce(max_observed_index);
@@ -4509,19 +4509,19 @@ namespace Legion {
       if (!collective_performed)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx =
-          dynamic_cast<ReplicateContext*>(implicit_context);
+        ReplInnerContext *repl_ctx =
+          dynamic_cast<ReplInnerContext*>(implicit_context);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = 
-          static_cast<ReplicateContext*>(implicit_context);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+            implicit_context->as_replicate_context());
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
           Murmur3Hasher hasher(repl_ctx, 
               runtime->safe_control_replication > 1, i > 0);
           hasher.hash(
-              ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
+              ReplInnerContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
           repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
           if (hasher.verify(__func__))
             break;
@@ -4552,12 +4552,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =
-        dynamic_cast<ReplicateContext*>(implicit_context);
+      ReplInnerContext *repl_ctx =
+        dynamic_cast<ReplInnerContext*>(implicit_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(implicit_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          implicit_context->as_replicate_context());
 #endif
       if (runtime->runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())
@@ -4575,7 +4575,7 @@ namespace Legion {
         Murmur3Hasher hasher(repl_ctx, 
             runtime->safe_control_replication > 1, i > 0);
         hasher.hash(
-            ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
+            ReplInnerContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
         repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
         if (hasher.verify(__func__))
           break;
@@ -17366,9 +17366,9 @@ namespace Legion {
           new CyclicShardingFunctor(), false/*need check*/, 
           true/*was preregistered*/, NULL, true/*preregistered*/);
       // Register the attach-detach sharding functor
-      ReplicateContext::register_attach_detach_sharding_functor(this);
+      ReplInnerContext::register_attach_detach_sharding_functor(this);
       // Register the universal sharding functor
-      ReplicateContext::register_universal_sharding_functor(this);
+      ReplInnerContext::register_universal_sharding_functor(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20287,7 +20287,7 @@ namespace Legion {
     {
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__, 
-            ReplicateContext::REPLICATE_ATTACH_TASK_INFO, &task_id,
+            ReplInnerContext::REPLICATE_ATTACH_TASK_INFO, &task_id,
             sizeof(task_id), tag, buffer, size, is_mutable, send_to_owner))
         return;
       if ((tag == LEGION_NAME_SEMANTIC_TAG) && legion_spy_enabled)
@@ -20309,7 +20309,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplicateContext::REPLICATE_ATTACH_INDEX_SPACE_INFO, &handle,
+            ReplInnerContext::REPLICATE_ATTACH_INDEX_SPACE_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20328,7 +20328,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplicateContext::REPLICATE_ATTACH_INDEX_PARTITION_INFO, &handle,
+            ReplInnerContext::REPLICATE_ATTACH_INDEX_PARTITION_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20347,7 +20347,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplicateContext::REPLICATE_ATTACH_FIELD_SPACE_INFO, &handle,
+            ReplInnerContext::REPLICATE_ATTACH_FIELD_SPACE_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20366,7 +20366,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplicateContext::REPLICATE_ATTACH_FIELD_INFO, &handle,
+            ReplInnerContext::REPLICATE_ATTACH_FIELD_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global, 
             &fid, sizeof(fid)))
         return;
@@ -20386,7 +20386,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplicateContext::REPLICATE_ATTACH_LOGICAL_REGION_INFO, &handle,
+            ReplInnerContext::REPLICATE_ATTACH_LOGICAL_REGION_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20405,7 +20405,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplicateContext::REPLICATE_ATTACH_LOGICAL_PARTITION_INFO, &handle,
+            ReplInnerContext::REPLICATE_ATTACH_LOGICAL_PARTITION_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -27175,7 +27175,7 @@ namespace Legion {
       DistributedCollectable *dc = find_or_request_distributed_collectable<
         RemoteContext, SEND_REMOTE_CONTEXT_REQUEST>(did, ready);
       // Have to static cast since the memory might not have been initialized
-      return static_cast<InnerContext*>(dc);
+      return static_cast<TaskContext*>(dc)->as_inner_context();
     }
 
     //--------------------------------------------------------------------------

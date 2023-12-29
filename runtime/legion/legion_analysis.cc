@@ -4392,7 +4392,7 @@ namespace Legion {
     ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
                            ProjectionNode *node, Operation *op, unsigned index,
                            const RegionRequirement &req, LogicalState *state,
-                           ReplicateContext *context)
+                           ReplInnerContext *context)
       : owner(state), domain(proj_info.projection_space),
         projection(proj_info.projection), sharding(proj_info.sharding_function),
         sharding_domain(proj_info.sharding_space),
@@ -22936,7 +22936,7 @@ namespace Legion {
         ShardManager *manager = 
           runtime->find_shard_manager(repl_id, true/*can fail*/);
         if (manager != NULL)
-          context = manager->find_local_context();
+          context = manager->find_local_context()->as_inner_context();
       }
       if (context == NULL)
       {

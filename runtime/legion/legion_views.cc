@@ -6882,8 +6882,9 @@ namespace Legion {
         }
         else
         {
-          InnerContext *context = static_cast<InnerContext*>(
-              runtime->weak_find_distributed_collectable(context_did));
+          InnerContext *context = static_cast<TaskContext*>(
+              runtime->weak_find_distributed_collectable(
+                context_did))->as_inner_context();
           if (context != NULL)
           {
             context->notify_collective_deletion(tid, did);

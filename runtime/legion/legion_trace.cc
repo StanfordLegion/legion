@@ -2336,7 +2336,7 @@ namespace Legion {
     PhysicalTrace::PhysicalTrace(Runtime *rt, LogicalTrace *lt)
       : runtime(rt), logical_trace(lt), perform_fence_elision(
           !(runtime->no_trace_optimization || runtime->no_fence_elision)),
-        repl_ctx(dynamic_cast<ReplicateContext*>(lt->context)),
+        repl_ctx(dynamic_cast<ReplInnerContext*>(lt->context)),
         previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
         new_template_count(0), last_memoized(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
@@ -8374,7 +8374,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
-       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplicateContext *ctx)
+       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplInnerContext *ctx)
       : PhysicalTemplate(trace, fence_event, std::move(coords)), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
@@ -9887,10 +9887,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context); 
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(context); 
 #endif
       ReplTraceSummaryOp *op = trace->runtime->get_available_repl_summary_op();
       op->initialize_summary(repl_ctx, this, invalidator, provenance);

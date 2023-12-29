@@ -692,7 +692,7 @@ namespace Legion {
       Runtime * const runtime;
       const LogicalTrace *logical_trace;
       const bool perform_fence_elision;
-      ReplicateContext *const repl_ctx;
+      ReplInnerContext *const repl_ctx;
     private:
       mutable LocalLock trace_lock;
       FenceOp *previous_replay;
@@ -1493,7 +1493,7 @@ namespace Legion {
     public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                               TaskTreeCoordinates &&coordinates,
-                              ReplicateContext *repl_ctx);
+                              ReplInnerContext *repl_ctx);
       ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs) = delete;
       virtual ~ShardedPhysicalTemplate(void);
     public:
@@ -1627,7 +1627,7 @@ namespace Legion {
       virtual void rewrite_frontiers(
                       std::map<unsigned,unsigned> &substitutions);
     public:
-      ReplicateContext *const repl_ctx;
+      ReplInnerContext *const repl_ctx;
       const ShardID local_shard;
       const size_t total_shards;
       // Make this last since it registers the template with the

@@ -71,6 +71,16 @@ namespace Legion {
       inline bool is_priority_mutable(void) const { return mutable_priority; }
       inline int get_depth(void) const { return depth; }
     public:
+      virtual LeafContext* as__context(void)
+        { assert(false); return NULL; }
+      virtual InnerContext* as_inner_context(void)
+        { assert(false); return NULL; }
+      virtual ReplicateContext* as_replicate_context(void)
+        { assert(false); return NULL; }
+      virtual ShardID get_shard_id(void) const { return 0; }
+      virtual DistributedID get_replication_id(void) const { return 0; }
+      virtual size_t get_total_shards(void) const { return 1; }
+    public:
       // Interface for task contexts
       virtual ContextID get_logical_tree_context(void) const = 0;
       virtual ContextID get_physical_tree_context(void) const = 0;
@@ -699,6 +709,10 @@ namespace Legion {
       IndexSpace find_index_launch_space(const Domain &domain,
                                          Provenance *provenance);
     public:
+      // A little help for ConsensusMatchExchange since it is templated
+      static void help_complete_future(Future &f, const void *ptr,
+                                       size_t size, bool own);
+    public:
       SingleTask *const owner_task;
       const std::vector<RegionRequirement> &regions;
       const std::vector<OutputRequirement> &output_reqs;
@@ -800,8 +814,10 @@ namespace Legion {
       const bool implicit_task; 
     }; 
 
-    class InnerContext : public TaskContext, public Murmur3Hasher::HashVerifier,
-         public InstanceDeletionSubscriber, public LegionHeapify<InnerContext> {
+    class InnerContext : public virtual TaskContext, 
+                         public Murmur3Hasher::HashVerifier,
+                         public InstanceDeletionSubscriber,
+                         public LegionHeapify<InnerContext> {
     public:
       enum PipelineStage {
         EXECUTING_STAGE,
@@ -1082,12 +1098,11 @@ namespace Legion {
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
       void record_physical_trace_replay(RtEvent ready, bool replay);
-      bool is_replaying_physical_trace(void);
-      virtual ShardID get_shard_id(void) const { return 0; }
-      virtual DistributedID get_replication_id(void) const { return 0; }
-      virtual size_t get_total_shards(void) const { return 1; }
+      bool is_replaying_physical_trace(void); 
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
+    public:
+      virtual InnerContext* as_inner_context(void) { return this; }
     public: // Garbage collection methods
       virtual void notify_local(void);
     public: // Privilege tracker methods
@@ -2170,10 +2185,11 @@ namespace Legion {
 
     /**
      * \class ReplicateContext
-     * A replicate context is a special kind of inner context for
-     * executing control-replicated tasks.
+     * This class is the common base class for all replicated contexts
+     * and provides general functionality for creating region tree
+     * resources in both replicated inner and leaf contexts
      */
-    class ReplicateContext : public InnerContext {
+    class ReplicateContext : public virtual TaskContext {
     public: 
       struct ISBroadcast {
       public:
@@ -2239,24 +2255,6 @@ namespace Legion {
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
-#if 0
-    public:
-      struct DeferDisjointCompleteResponseArgs :
-        public LgTaskArgs<DeferDisjointCompleteResponseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
-      public:
-        DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
-                               AddressSpaceID space, VersionInfo *version_info,
-                               RtUserEvent done, const FieldMask *mask = NULL);
-      public:
-        VersionManager *const target;
-        VersionInfo *const version_info;
-        FieldMask *const request_mask;
-        const RtUserEvent done_event;
-        const AddressSpaceID target_space;
-      };
-#endif
     public:
       template<typename T, bool LOGICAL, bool SINGLE=false>
       class ReplBarrier {
@@ -2308,6 +2306,12 @@ namespace Legion {
         T barrier;
         bool owner;
       };
+      typedef ReplBarrier<RtBarrier,false> RtReplBar;
+      typedef ReplBarrier<ApBarrier,false> ApReplBar;
+      typedef ReplBarrier<ApBarrier,false,true> ApReplSingleBar;
+      typedef ReplBarrier<RtBarrier,false,true> RtReplSingleBar;
+      typedef ReplBarrier<RtBarrier,true> RtLogicalBar;
+      typedef ReplBarrier<ApBarrier,true> ApLogicalBar;
     public:
       enum ReplicateAPICall {
         REPLICATE_PERFORM_REGISTRATION_CALLBACK,
@@ -2395,6 +2399,114 @@ namespace Legion {
         REPLICATE_ATTACH_LOGICAL_PARTITION_INFO,
       };
     public:
+      ReplicateContext(ShardManager *shard_manager, ShardTask *owner, int depth,
+                       const std::vector<RegionRequirement> &reqs,
+                       const std::vector<OutputRequirement> &output_reqs,
+                       DistributedID did, bool inline_task, bool implicit_ctx);
+      virtual ~ReplicateContext(void);
+    public:
+      inline int get_shard_collective_radix(void) const
+        { return shard_collective_radix; }
+      inline int get_shard_collective_log_radix(void) const
+        { return shard_collective_log_radix; }
+      inline int get_shard_collective_stages(void) const
+        { return shard_collective_stages; }
+      inline int get_shard_collective_participating_shards(void) const
+        { return shard_collective_participating_shards; }
+      inline int get_shard_collective_last_radix(void) const
+        { return shard_collective_last_radix; }
+      const DomainPoint& get_shard_point(void) const;
+    public:
+      virtual ReplicateContext* as_replicate_context(void) { return this; }
+      virtual DistributedID get_replication_id(void) const;
+      virtual ShardID get_shard_id(void) const { return owner_shard->shard_id; }
+      virtual size_t get_total_shards(void) const { return total_shards; }
+    public:
+      CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
+                                             bool logical = false);
+      void register_collective(ShardCollective *collective);
+      ShardCollective* find_or_buffer_collective(Deserializer &derez);
+      void unregister_collective(ShardCollective *collective);
+      void handle_collective_message(Deserializer &derez);
+    protected:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      // Versions of the methods below but with reduction initialization
+      bool create_new_replicate_barrier(RtBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+      bool create_new_replicate_barrier(ApBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+      // This one can only be called inside the logical dependence analysis
+      bool create_new_logical_barrier(RtBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+      bool create_new_logical_barrier(ApBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+#else
+      // These can only be called inside the task for this context
+      // since they assume that all the shards are aligned and doing
+      // the same calls for the same operations in the same order
+      bool create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
+      bool create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
+      // This one can only be called inside the logical dependence analysis
+      bool create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
+      bool create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
+#endif 
+    public:
+      ShardManager *const shard_manager;
+      ShardTask *const owner_shard;
+      const size_t total_shards;
+    protected:
+      mutable LocalLock replication_lock;
+      int shard_collective_radix;
+      int shard_collective_log_radix;
+      int shard_collective_stages;
+      int shard_collective_participating_shards;
+      int shard_collective_last_radix;
+    private:
+      CollectiveID next_available_collective_index;
+      // We also need to create collectives in the logical dependence
+      // analysis stage of the pipeline. We'll have those count on the
+      // odd numbers of the collective IDs whereas the ones from the 
+      // application task will be the even numbers.
+      CollectiveID next_logical_collective_index;
+      std::map<CollectiveID,ShardCollective*> collectives;
+      std::map<CollectiveID,std::vector<
+                std::pair<void*,size_t> > > pending_collective_updates;
+      unsigned next_replicate_bar_index;
+      unsigned next_logical_bar_index;
+#ifdef DEBUG_LEGION_COLLECTIVES
+    protected:
+      RtReplBar collective_check_barrier;
+      RtLogicalBar logical_check_barrier;
+      bool collective_guard_reentrant;
+      bool logical_guard_reentrant;
+#endif
+    };
+
+    /**
+     * \class ReplInnerContext
+     * A replicate context is a special kind of inner context for
+     * executing control-replicated tasks.
+     */
+    class ReplInnerContext : public InnerContext, public ReplicateContext { 
+#if 0
+    public:
+      struct DeferDisjointCompleteResponseArgs :
+        public LgTaskArgs<DeferDisjointCompleteResponseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
+      public:
+        DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
+                               AddressSpaceID space, VersionInfo *version_info,
+                               RtUserEvent done, const FieldMask *mask = NULL);
+      public:
+        VersionManager *const target;
+        VersionInfo *const version_info;
+        FieldMask *const request_mask;
+        const RtUserEvent done_event;
+        const AddressSpaceID target_space;
+      };
+#endif  
+    public:
       class AttachDetachShardingFunctor : public ShardingFunctor {
       public:
         AttachDetachShardingFunctor(void) { }
@@ -2426,7 +2538,7 @@ namespace Legion {
                               const size_t total_shards) { return UINT_MAX; }
       };
     public:
-      ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
+      ReplInnerContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<OutputRequirement> &output_reqs,
                        const std::vector<unsigned> &parent_indexes,
@@ -2434,24 +2546,11 @@ namespace Legion {
                        ApEvent execution_fence_event,
                        ShardManager *manager, bool inline_task, 
                        bool implicit_task = false, bool concurrent = false);
-      ReplicateContext(const ReplicateContext &rhs) = delete;
-      virtual ~ReplicateContext(void);
+      ReplInnerContext(const ReplInnerContext &rhs) = delete;
+      virtual ~ReplInnerContext(void);
     public:
-      ReplicateContext& operator=(const ReplicateContext &rhs) = delete;
-    public:
-      inline int get_shard_collective_radix(void) const
-        { return shard_collective_radix; }
-      inline int get_shard_collective_log_radix(void) const
-        { return shard_collective_log_radix; }
-      inline int get_shard_collective_stages(void) const
-        { return shard_collective_stages; }
-      inline int get_shard_collective_participating_shards(void) const
-        { return shard_collective_participating_shards; }
-      inline int get_shard_collective_last_radix(void) const
-        { return shard_collective_last_radix; } 
-      virtual ShardID get_shard_id(void) const { return owner_shard->shard_id; }
-      virtual DistributedID get_replication_id(void) const;
-      virtual size_t get_total_shards(void) const { return total_shards; }
+      ReplInnerContext& operator=(const ReplInnerContext &rhs) = delete;
+    public:  
       virtual ContextID get_physical_tree_context(void) const;
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
@@ -3005,7 +3104,6 @@ namespace Legion {
                                        AddressSpaceID target,
                                        bool replicate = false);
     public:
-      void handle_collective_message(Deserializer &derez);
 #if 0
       void handle_disjoint_complete_request(Deserializer &derez);
       static void handle_disjoint_complete_response(Deserializer &derez, 
@@ -3045,12 +3143,7 @@ namespace Legion {
           PartitionKind part_kind, LegionColor partition_color,
           bool color_generated);
     public:
-      // Collective methods
-      CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
-                                             bool logical = false);
-      void register_collective(ShardCollective *collective);
-      ShardCollective* find_or_buffer_collective(Deserializer &derez);
-      void unregister_collective(ShardCollective *collective);
+      // Collective methods 
       ShardRendezvous* find_or_buffer_rendezvous(Deserializer &derez);
     public:
       // Physical template methods
@@ -3209,31 +3302,7 @@ namespace Legion {
           if (++next_indirection_bar_index == indirection_barriers.size())
             next_indirection_bar_index = 0;
           return result;
-        }
-    protected:
-#ifdef DEBUG_LEGION_COLLECTIVES
-      // Versions of the methods below but with reduction initialization
-      bool create_new_replicate_barrier(RtBarrier &bar, ReductionOpID redop,
-          const void *init, size_t init_size, size_t arrivals);
-      bool create_new_replicate_barrier(ApBarrier &bar, ReductionOpID redop,
-          const void *init, size_t init_size, size_t arrivals);
-      // This one can only be called inside the logical dependence analysis
-      bool create_new_logical_barrier(RtBarrier &bar, ReductionOpID redop,
-          const void *init, size_t init_size, size_t arrivals);
-      bool create_new_logical_barrier(ApBarrier &bar, ReductionOpID redop,
-          const void *init, size_t init_size, size_t arrivals);
-#else
-      // These can only be called inside the task for this context
-      // since they assume that all the shards are aligned and doing
-      // the same calls for the same operations in the same order
-      bool create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
-      bool create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
-      // This one can only be called inside the logical dependence analysis
-      bool create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
-      bool create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
-#endif
-    public:
-      const DomainPoint& get_shard_point(void) const; 
+        } 
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);
@@ -3269,22 +3338,8 @@ namespace Legion {
       void hash_execution_constraints(Murmur3Hasher &hasher,
           const ExecutionConstraintSet &constraints);
       void hash_layout_constraints(Murmur3Hasher &hasher,
-          const LayoutConstraintSet &constraints, bool hash_pointers);
-    public:
-      // A little help for ConsensusMatchExchange since it is templated
-      static void help_complete_future(Future &f, const void *ptr,
-                                       size_t size, bool own);
-    public:
-      ShardTask *const owner_shard;
-      ShardManager *const shard_manager;
-      const size_t total_shards;
-    protected: 
-      typedef ReplBarrier<RtBarrier,false> RtReplBar;
-      typedef ReplBarrier<ApBarrier,false> ApReplBar;
-      typedef ReplBarrier<ApBarrier,false,true> ApReplSingleBar;
-      typedef ReplBarrier<RtBarrier,false,true> RtReplSingleBar;
-      typedef ReplBarrier<RtBarrier,true> RtLogicalBar;
-      typedef ReplBarrier<ApBarrier,true> ApLogicalBar;
+          const LayoutConstraintSet &constraints, bool hash_pointers); 
+    protected:  
       // These barriers are used to identify when close operations are mapped
       std::vector<RtLogicalBar>  close_mapped_barriers;
       unsigned                   next_close_mapped_bar_index;
@@ -3337,36 +3392,15 @@ namespace Legion {
       RtReplBar output_regions_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
-      RtReplBar collective_check_barrier;
-      RtLogicalBar logical_check_barrier;
       RtLogicalBar close_check_barrier;
       RtLogicalBar refinement_check_barrier;
-      bool collective_guard_reentrant;
-      bool logical_guard_reentrant;
 #endif
     protected:
       // local barriers to this context for handling returned
       // resources from sub-tasks
       RtBarrier returned_resource_ready_barrier;
       RtBarrier returned_resource_mapped_barrier;
-      RtBarrier returned_resource_execution_barrier;
-    protected:
-      int shard_collective_radix;
-      int shard_collective_log_radix;
-      int shard_collective_stages;
-      int shard_collective_participating_shards;
-      int shard_collective_last_radix;
-    protected:
-      mutable LocalLock replication_lock;
-      CollectiveID next_available_collective_index;
-      // We also need to create collectives in the logical dependence
-      // analysis stage of the pipeline. We'll have those count on the
-      // odd numbers of the collective IDs whereas the ones from the 
-      // application task will be the even numbers.
-      CollectiveID next_logical_collective_index;
-      std::map<CollectiveID,ShardCollective*> collectives;
-      std::map<CollectiveID,std::vector<
-                std::pair<void*,size_t> > > pending_collective_updates;
+      RtBarrier returned_resource_execution_barrier; 
     protected:
       std::map<ShardID,ShardRendezvous*> shard_rendezvous;
       std::map<ShardID,std::vector<
@@ -3422,10 +3456,7 @@ namespace Legion {
         IndexSpaceNode *const launch_space;
         std::vector<size_t> shard_sizes;
       };
-      std::vector<AttachLaunchSpace*> index_attach_launch_spaces;
-    protected:
-      unsigned next_replicate_bar_index;
-      unsigned next_logical_bar_index;
+      std::vector<AttachLaunchSpace*> index_attach_launch_spaces; 
     protected:
       static const unsigned MIN_UNORDERED_OPS_EPOCH = 32;
       static const unsigned MAX_UNORDERED_OPS_EPOCH = 32768;
@@ -3600,7 +3631,7 @@ namespace Legion {
      * \class LeafContext
      * A context for the execution of a leaf task
      */
-    class LeafContext : public TaskContext,
+    class LeafContext : public virtual TaskContext,
                         public LegionHeapify<LeafContext> {
     public:
       LeafContext(Runtime *runtime, SingleTask *owner,bool inline_task = false);
@@ -3608,6 +3639,8 @@ namespace Legion {
       virtual ~LeafContext(void);
     public:
       LeafContext& operator=(const LeafContext &rhs) = delete;
+    public:
+      virtual LeafContext* as_leaf_context(void) { return this; }
     public: // Garbage collection methods
       virtual void notify_local(void) { /* nothing to do */ }
     public: // Privilege tracker methods
@@ -4046,6 +4079,21 @@ namespace Legion {
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
+    };
+
+    /**
+     * \class ReplLeafContext
+     */
+    class ReplLeafContext : public LeafContext, public ReplicateContext {
+    public:
+      ReplLeafContext(ShardManager *manager, ShardTask *owner, int depth,
+                      const std::vector<RegionRequirement> &reqs,
+                      const std::vector<OutputRequirement> &output_reqs,
+                      bool inline_task);
+      ReplLeafContext(const ReplLeafContext &rhs) = delete;
+      virtual ~ReplLeafContext(void);
+    public:
+      ReplLeafContext& operator=(const ReplLeafContext &rhs) = delete;
     };
 
     //--------------------------------------------------------------------------

@@ -514,10 +514,10 @@ namespace Legion {
         }
 #ifdef DEBUG_LEGION
         assert(!child_spaces.empty());
-        ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+        ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(ctx);
 #endif
         CrossProductExchange exchange(repl_ctx, COLLECTIVE_LOC_50);
         if (first_local_shard)

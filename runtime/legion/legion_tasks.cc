@@ -8444,11 +8444,10 @@ namespace Legion {
       if (!leaf_task)
       {
 #ifdef DEBUG_LEGION
-        assert(shard_barrier.exists());
         assert(shard_manager->control_replicated);
 #endif
         // If we have a control replication context then we do the special path
-        ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+        ReplInnerContext *repl_ctx = new ReplInnerContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, execution_fence_event,
             shard_manager, inline_task, parent_ctx->is_concurrent_context());
@@ -8460,26 +8459,27 @@ namespace Legion {
         execution_context = repl_ctx;
         // Make sure that none of the shards start until all the replicate
         // contexts have been made across all the shards 
-        RtEvent ready = complete_startup_initialization();
-        launch_events.insert(ApEvent(ready));
-        return repl_ctx;
+        
       }
       else
       {
 #ifdef DEBUG_LEGION
         assert(!shard_manager->control_replicated);
 #endif
-        // TODO: support for leaf-replicated tasks
-        assert(false);
-        return NULL;
+        execution_context = new ReplLeafContext(shard_manager, this,
+            get_depth(), regions, output_regions, inline_task);
+        execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       }
+      RtEvent ready = complete_startup_initialization();
+      launch_events.insert(ApEvent(ready));
+      return execution_context;
     }
 
     //--------------------------------------------------------------------------
     InnerContext* ShardTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
-      ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+      ReplInnerContext *repl_ctx = new ReplInnerContext(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, execution_fence_event,
           shard_manager, false/*inline task*/, true/*implicit*/);
@@ -8546,15 +8546,7 @@ namespace Legion {
     void ShardTask::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
+      ReplicateContext *repl_ctx = execution_context->as_replicate_context();
       repl_ctx->handle_collective_message(derez);
     }
 
@@ -8564,12 +8556,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_rendezvous_message(derez);
     }
@@ -8580,12 +8572,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_compute_equivalence_sets(derez);
     }
@@ -8596,12 +8588,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_output_equivalence_set(derez);
     }
@@ -8612,12 +8604,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_refine_equivalence_sets(derez);
     }
@@ -8628,12 +8620,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_intra_space_dependence(derez);
     }
@@ -8645,12 +8637,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_resource_update(derez, applied);
     }
@@ -8662,12 +8654,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_created_region_contexts(derez, applied);
     }
@@ -8679,12 +8671,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       repl_ctx->handle_trace_update(derez, source);
     }
@@ -8696,12 +8688,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       return repl_ctx->handle_find_trace_shard_event(template_index, event,
                                                      remote_shard);
@@ -8714,12 +8706,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(execution_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+          execution_context->as_replicate_context());
 #endif
       return repl_ctx->handle_find_trace_shard_frontier(template_index, event,
                                                         remote_shard);
@@ -8729,15 +8721,7 @@ namespace Legion {
     ReplicateContext* ShardTask::get_shard_execution_context(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-      return repl_ctx;
-#else
-      return static_cast<ReplicateContext*>(execution_context);
-#endif
+      return execution_context->as_replicate_context();
     }
 
     //--------------------------------------------------------------------------

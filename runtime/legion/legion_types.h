@@ -1946,8 +1946,10 @@ namespace Legion {
     class InnerContext;;
     class TopLevelContext;
     class ReplicateContext;
+    class ReplInnerContext;
     class RemoteContext;
     class LeafContext;
+    class ReplLeafContext;
 
     // legion_trace.h
     class LogicalTrace;
@@ -2321,7 +2323,7 @@ namespace Legion {
     friend class Internal::TopLevelContext;                 \
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
-    friend class Internal::ReplicateContext;                \
+    friend class Internal::ReplInnerContext;                \
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \

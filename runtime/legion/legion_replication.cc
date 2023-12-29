@@ -430,12 +430,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_versioning_rendezvous.find(requirement_index) ==
               collective_versioning_rendezvous.end());
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(this->get_context());
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(this->get_context());
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(this->get_context());
+      ReplInnerContext *repl_ctx = 
+        static_cast<ReplInnerContext*>(this->get_context());
 #endif
       const CollectiveID id =
        repl_ctx->get_next_collective_index(COLLECTIVE_LOC_20,true/*logical*/);
@@ -538,12 +538,12 @@ namespace Legion {
     {
       const RendezvousKey key(requirement_index, analysis_index);
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(this->get_context());
+      ReplInnerContext *repl_ctx = 
+        dynamic_cast<ReplInnerContext*>(this->get_context());
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(this->get_context());
+      ReplInnerContext *repl_ctx = 
+        static_cast<ReplInnerContext*>(this->get_context());
 #endif
       // This should always be in the dependence analysis stage of the pipeline
       // so we need to make sure we make the right kind of collective ID
@@ -672,10 +672,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // We might be able to skip this if the sharding function was already
       // picked for us which occurs when we're part of a must-epoch launch
@@ -731,11 +731,11 @@ namespace Legion {
         // on a different shard than any other tasks, but on the same shard
         // for all the tasks in the must epoch launch.
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         analysis_sharding_function = 
           repl_ctx->get_universal_sharding_function();
@@ -752,10 +752,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Figure out whether this shard owns this point
       if (sharding_space.exists())
@@ -806,10 +806,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_remote());
       assert(tpl != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       owner_shard = tpl->find_owner_shard(trace_local_id);
       if (runtime->legion_spy_enabled)
@@ -832,10 +832,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Only set the future on shard 0 (note we know that all the shards
       // have resolved false so we don't need to ask the sharding functor
@@ -869,12 +869,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(must_epoch != NULL);
       assert(sharding_function != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       set_origin_mapped(true);
       // See if we're going to be a local point or not
@@ -893,7 +893,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
+    void ReplIndividualTask::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle;
@@ -928,10 +928,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       DistributedID future_did = repl_ctx->get_next_distributed_id();
       return repl_ctx->shard_manager->deduplicate_future_creation(
@@ -1029,12 +1029,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(must_epoch != NULL);
       assert(sharding_function != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       set_origin_mapped(true);
       total_points = launch_space->get_volume();
@@ -1060,10 +1060,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // We might be able to skip this if the sharding function was already
       // picked for us which occurs when we're part of a must-epoch launch
@@ -1140,7 +1140,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::select_sharding_function(ReplicateContext *repl_ctx)
+    void ReplIndexTask::select_sharding_function(ReplInnerContext *repl_ctx)
     //--------------------------------------------------------------------------
     {
       // Do the mapper call to get the sharding function to use
@@ -1165,10 +1165,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // If we have a future map then set the sharding function
       if ((redop == 0) && !elide_future_return && (must_epoch == NULL))
@@ -1344,11 +1344,11 @@ namespace Legion {
         // on a different shard than any other tasks, but on the same shard
         // for all the tasks in the must epoch launch.
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         analysis_sharding_function = 
           repl_ctx->get_universal_sharding_function();
@@ -1509,12 +1509,12 @@ namespace Legion {
         if (redop == 0)
         {
 #ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx = 
-            dynamic_cast<ReplicateContext*>(parent_ctx);
+          ReplInnerContext *repl_ctx = 
+            dynamic_cast<ReplInnerContext*>(parent_ctx);
           assert(repl_ctx != NULL);
 #else
-          ReplicateContext *repl_ctx = 
-            static_cast<ReplicateContext*>(parent_ctx);
+          ReplInnerContext *repl_ctx = 
+            static_cast<ReplInnerContext*>(parent_ctx);
 #endif
 #ifdef DEBUG_LEGION
           assert(sharding_function != NULL);
@@ -1560,7 +1560,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexTask::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1636,10 +1636,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+      ReplInnerContext *repl_ctx = 
+        static_cast<ReplInnerContext*>(ctx->as_inner_context());
 #endif
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       IndexSpaceNode *shard_node = 
@@ -1656,10 +1657,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // See if we are the first local shard on the lowest address space
       const CollectiveMapping &mapping =
@@ -1735,10 +1736,10 @@ namespace Legion {
       // If not, check to see if this is a point that we expect to own
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
@@ -1772,10 +1773,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Determine if the next point is one that we own or is one that is
       // going to be coming from a remote shard
@@ -1866,10 +1867,10 @@ namespace Legion {
         return;
       }
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       if (!repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
         return;
@@ -2156,10 +2157,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // We need a consistent way to decide which shard is going to issue
       // the copies for different sources. We do that based on the owner
@@ -2517,10 +2518,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       InnerContext *context = find_physical_context(0/*index*/);
       std::set<RtEvent> map_applied_conditions;
@@ -2586,10 +2587,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       std::vector<RtEvent> map_applied_conditions;
       // Check to see if this is a region or a parttiion
@@ -2691,10 +2692,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       reset_barrier = repl_ctx->get_next_collective_map_barriers(); 
       ResetOp::trigger_dependence_analysis(); 
@@ -2747,7 +2748,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFillOp::initialize_replication(ReplicateContext *ctx,
+    void ReplFillOp::initialize_replication(ReplInnerContext *ctx,
                                             DistributedID fresh, bool is_first)
     //--------------------------------------------------------------------------
     {
@@ -2789,10 +2790,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // If we get here then we're not doing a physical trace replay
       // so we're going to need a collective fill barrier to sync
@@ -2854,11 +2855,11 @@ namespace Legion {
         fill_view = parent_ctx->find_fill_view(value, value_size);
       // Create the rendezvous collective
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(collective == NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       collective = new CreateCollectiveFillView(repl_ctx, collective_id, this,
           (fill_view == NULL) ? 0 : fill_view->did, fresh_did);
@@ -2872,10 +2873,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       mapping = &(repl_ctx->shard_manager->get_collective_mapping()); 
       mapping->add_reference();
@@ -2998,10 +2999,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Do the mapper call to get the sharding function to use
       if (mapper == NULL)
@@ -3049,11 +3050,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(launch_space != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
       IndexSpace local_space;
@@ -3130,11 +3131,11 @@ namespace Legion {
         fill_view = parent_ctx->find_fill_view(value, value_size);
       // Create the rendezvous collective
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(collective == NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       collective = new CreateCollectiveFillView(repl_ctx, collective_id, this,
           (fill_view == NULL) ? 0 : fill_view->did, fresh_did);
@@ -3186,7 +3187,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx,
+    void ReplIndexFillOp::initialize_replication(ReplInnerContext *ctx,
                                                  DistributedID fresh)
     //--------------------------------------------------------------------------
     {
@@ -3212,7 +3213,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDiscardOp::initialize_replication(ReplicateContext *ctx,
+    void ReplDiscardOp::initialize_replication(ReplInnerContext *ctx,
                                                bool is_first_local)
     //--------------------------------------------------------------------------
     {
@@ -3247,10 +3248,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       create_collective_rendezvous(0/*requirement index*/);
@@ -3306,10 +3307,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       mapping = &(repl_ctx->shard_manager->get_collective_mapping()); 
       mapping->add_reference();
@@ -3363,7 +3364,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
+    void ReplCopyOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle;
@@ -3411,10 +3412,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Do the mapper call to get the sharding function to use
       if (mapper == NULL)
@@ -3472,10 +3473,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Figure out whether this shard owns this point
       ShardID owner_shard;
@@ -3520,10 +3521,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tpl != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
       if (runtime->legion_spy_enabled)
@@ -3626,10 +3627,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Do the mapper call to get the sharding function to use
       if (mapper == NULL)
@@ -3685,12 +3686,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(pre_indirection_barriers.size() == 
               post_indirection_barriers.size());
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
       IndexSpace local_space;
@@ -4019,7 +4020,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexCopyOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     { 
       if (!src_indirect_requirements.empty() && collective_src_indirect_points)
@@ -4078,10 +4079,10 @@ namespace Legion {
       // If not, check to see if this is a point that we expect to own
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       Domain launch_domain;
       if (sharding_space.exists())
@@ -4115,10 +4116,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Determine if the next point is one that we own or is one that is
       // going to be coming from a remote shard
@@ -4218,10 +4219,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!mapping_barrier.exists());
       assert(!execution_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Only field and region deletions need a ready barrier since they
       // will be touching the physical states of the region tree
@@ -4274,10 +4275,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       if (kind == FIELD_DELETION)
       {
@@ -4348,10 +4349,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       std::set<RtEvent> applied;
       const CollectiveMapping &mapping =
@@ -4448,7 +4449,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
+    void ReplDeletionOp::initialize_replication(ReplInnerContext *ctx,
                                                 bool is_first,
                                                 RtBarrier *ready_bar,
                                                 RtBarrier *mapping_bar,
@@ -4637,10 +4638,10 @@ namespace Legion {
     {
       // We know we are in a replicate context
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Perform the partitioning operation
       ApEvent ready_event;
@@ -4673,7 +4674,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_replication(ReplicateContext *ctx)
+    void ReplDependentPartitionOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       mapping_barrier = ctx->get_next_dependent_partition_mapping_barrier();
@@ -4723,11 +4724,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(sharding_function == NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Do the mapper call to get the sharding function to use
       if (mapper == NULL)
@@ -4766,12 +4767,12 @@ namespace Legion {
       else
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
         assert(sharding_function == NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         // Check here that all the shards pick the same partition
         requirement.partition = LogicalPartition::NO_PART;   
@@ -4816,11 +4817,11 @@ namespace Legion {
       if (is_index_space)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         // Now that we know that we have the right region requirement we
         // can ask the mapper to also pick the sharding function
@@ -4866,10 +4867,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Do different things if this is an index space point or a single point
       if (is_index_space)
@@ -4984,10 +4985,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapped_insts.size() == 1);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       if (is_index_space)
       {
@@ -5093,10 +5094,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_index_space);
       assert(requirement.privilege_fields.size() == 1);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Check to see if we're the first shard in this address space 
       const bool first_local_shard =
@@ -5276,10 +5277,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(ctx);
 #endif
       Provenance *provenance = get_provenance();
       // Initialize operations for everything in the launcher
@@ -5340,10 +5341,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+      ReplInnerContext *repl_ctx =
+        static_cast<ReplInnerContext*>(ctx->as_inner_context());
 #endif
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       IndexSpaceNode *shard_node = 
@@ -5359,10 +5361,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // See if we are the first local shard on the lowest address space
       const CollectiveMapping &mapping = 
@@ -5386,10 +5388,10 @@ namespace Legion {
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // We want to do the map must epoch call
       // First find all the tasks that we own on this shard
@@ -5532,10 +5534,10 @@ namespace Legion {
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Select our sharding functor and then do the base call
       this->individual_tasks.resize(indiv_tasks.size());
@@ -5847,7 +5849,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::initialize_replication(ReplicateContext *ctx)
+    void ReplMustEpochOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5960,10 +5962,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Shard 0 will handle the timing operation so do the normal mapping
       if (repl_ctx->owner_shard->shard_id > 0)
@@ -5985,10 +5987,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Shard 0 will handle the timing operation
       if (repl_ctx->owner_shard->shard_id > 0)     
@@ -6096,18 +6098,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTunableOp::initialize_replication(ReplicateContext *repl_ctx)
+    void ReplTunableOp::initialize_replication(ReplInnerContext *repl_ctx)
     //--------------------------------------------------------------------------
     {
       if (!runtime->unsafe_mapper)
       {
 #ifdef DEBUG_LEGION
         assert(value_broadcast == NULL);
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         // We'll always make node zero the owner shard here
         if (repl_ctx->owner_shard->shard_id > 0)
@@ -6127,11 +6129,11 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(value_broadcast != NULL);
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         if (repl_ctx->owner_shard->shard_id != value_broadcast->origin)
         {
@@ -6187,7 +6189,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAllReduceOp::initialize_replication(ReplicateContext *ctx)
+    void ReplAllReduceOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6250,10 +6252,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sources.empty());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       future_map.impl->get_shard_local_futures(
           repl_ctx->owner_shard->shard_id, sources);
@@ -6511,18 +6513,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFenceOp::initialize_fence_barriers(ReplicateContext *repl_ctx)
+    void ReplFenceOp::initialize_fence_barriers(ReplInnerContext *repl_ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapping_fence_barrier.exists());
       assert(!execution_fence_barrier.exists());
       if (repl_ctx == NULL)
-        repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+        repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       if (repl_ctx == NULL)
-        repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // If we get here that means we weren't replayed so make our fences
       mapping_fence_barrier = repl_ctx->get_next_mapping_fence_barrier();
@@ -6595,10 +6597,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!mapping_fence_barrier.exists());
       assert(!execution_fence_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Get ourselves an execution fence barrier
       // No need for a mapping fence since we're just replaying
@@ -6634,7 +6636,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::initialize_replication(ReplicateContext *ctx) 
+    void ReplMapOp::initialize_replication(ReplInnerContext *ctx) 
     //--------------------------------------------------------------------------
     {
       // Mark that this is collective
@@ -6683,11 +6685,11 @@ namespace Legion {
       if (IS_WRITE(requirement))
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
         assert(!collective_map_barrier.exists());
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       }
@@ -6732,11 +6734,11 @@ namespace Legion {
       if (!runtime->unsafe_mapper)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx =
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx =
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         // For read-write or write-discard cases make sure that all the 
         // shards mapped to independent physical instances
@@ -6853,7 +6855,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
+    void ReplAttachOp::initialize_replication(ReplInnerContext *ctx,
                                               bool collective_inst,
                                               bool dedup_across_shards,
                                               bool first_local_shard)
@@ -6949,11 +6951,11 @@ namespace Legion {
         check_privilege();
       analyze_region_requirements();
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(!collective_map_barrier.exists());
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // We need collective attach barriers for synchronizing the collective
       // updates to the equivalence sets across the shards
@@ -7038,11 +7040,11 @@ namespace Legion {
       if (!collective_instances)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         mapping = &repl_ctx->shard_manager->get_collective_mapping();
         mapping->add_reference();
@@ -7069,10 +7071,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Only some of the shards are going to actually be creating the 
       // instances in this case, this flag will say whether the local shard
@@ -7272,7 +7274,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
+    void ReplDetachOp::initialize_replication(ReplInnerContext *ctx,
                                         bool collective, bool first_local_shard)
     //--------------------------------------------------------------------------
     {
@@ -7308,11 +7310,11 @@ namespace Legion {
     {
       analyze_region_requirements();
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
       assert(!collective_map_barrier.exists());
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers(); 
       effects_barrier = repl_ctx->get_next_detach_effects_barrier();
@@ -7375,11 +7377,11 @@ namespace Legion {
       if (!collective_instances)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         mapping = &repl_ctx->shard_manager->get_collective_mapping();
         mapping->add_reference();
@@ -7419,11 +7421,11 @@ namespace Legion {
       if (collective_instances)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx =
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx =
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         ShardManager *shard_manager = repl_ctx->shard_manager;
         // See if all local shards have the same manager or not
@@ -7498,7 +7500,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexAttachOp::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexAttachOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7519,10 +7521,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function == NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       sharding_function = repl_ctx->get_attach_detach_sharding_function();
       IndexAttachOp::trigger_prepipeline_stage();
@@ -7595,10 +7597,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       unsigned check_count = 0;
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
@@ -7630,10 +7632,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       AllReduceCollective<ProdReduction<bool> > all_direct_children(repl_ctx,
        repl_ctx->get_next_collective_index(COLLECTIVE_LOC_27, true/*logical*/));
@@ -7690,7 +7692,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexDetachOp::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexDetachOp::initialize_replication(ReplInnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       participants = new ShardParticipantsExchange(ctx, COLLECTIVE_LOC_103);
@@ -7732,10 +7734,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function == NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       sharding_function = repl_ctx->get_attach_detach_sharding_function();
       IndexDetachOp::trigger_prepipeline_stage();
@@ -7747,10 +7749,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // Get the projection ID which we know is valid on the external resources
       requirement.projection = resources.impl->get_projection();
@@ -7831,7 +7833,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAcquireOp::initialize_replication(ReplicateContext *context,
+    void ReplAcquireOp::initialize_replication(ReplInnerContext *context,
                                                bool first_local_shard)
     //--------------------------------------------------------------------------
     {
@@ -7894,10 +7896,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // If we get here then we're not doing a physical trace replay
       // so we're going to need a collective fill barrier to sync
@@ -7957,12 +7959,12 @@ namespace Legion {
       if (!restricted_region.impl->collective)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
         assert(!collective_map_barrier.exists());
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         mapping = &repl_ctx->shard_manager->get_collective_mapping();
         mapping->add_reference();
@@ -8023,7 +8025,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplReleaseOp::initialize_replication(ReplicateContext *context,
+    void ReplReleaseOp::initialize_replication(ReplInnerContext *context,
                                                bool first_local_shard)
     //--------------------------------------------------------------------------
     {
@@ -8089,10 +8091,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       // If we get here then we're not doing a physical trace replay
       // so we're going to need a collective fill barrier to sync
@@ -8152,12 +8154,12 @@ namespace Legion {
       if (!restricted_region.impl->collective)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
         assert(!collective_map_barrier.exists());
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         mapping = &repl_ctx->shard_manager->get_collective_mapping();
         mapping->add_reference();
@@ -8202,10 +8204,10 @@ namespace Legion {
       if (!runtime->unsafe_mapper)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         CheckCollectiveSources sources_collective(repl_ctx, sources_check);
         if (!sources_collective.verify(source_instances))
@@ -8275,7 +8277,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplTraceOp::exchange_replayable(ReplicateContext *ctx,bool replayable)
+    bool ReplTraceOp::exchange_replayable(ReplInnerContext *ctx,bool replayable)
     //--------------------------------------------------------------------------
     {
       // Should only be called by derived classes
@@ -8328,7 +8330,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCaptureOp::initialize_capture(ReplicateContext *ctx, 
+    void ReplTraceCaptureOp::initialize_capture(ReplInnerContext *ctx, 
                   Provenance *provenance, bool has_block, bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
@@ -8406,11 +8408,11 @@ namespace Legion {
         // the capture which could induce races
 #ifdef DEBUG_LEGION
         assert(!recording_fence.exists());
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         recording_fence = repl_ctx->get_next_mapping_fence_barrier();
         // Save this for later since we can't access it safely in mapping stage
@@ -8479,17 +8481,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       SlowBarrier replay_sync_barrier(repl_ctx, replay_sync_collective_id);
       replay_sync_barrier.perform_collective_sync();
     }
 
     //--------------------------------------------------------------------------
-    bool ReplTraceCaptureOp::exchange_replayable(ReplicateContext *repl_ctx,
+    bool ReplTraceCaptureOp::exchange_replayable(ReplInnerContext *repl_ctx,
                                                  bool shard_replayable)
     //--------------------------------------------------------------------------
     {
@@ -8504,10 +8506,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       SlowBarrier pre_sync_barrier(repl_ctx,
           sync_compute_frontiers_collective_id);
@@ -8551,7 +8553,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::initialize_complete(ReplicateContext *ctx, 
+    void ReplTraceCompleteOp::initialize_complete(ReplInnerContext *ctx, 
                                          Provenance *provenance, bool has_block)
     //--------------------------------------------------------------------------
     {
@@ -8662,11 +8664,11 @@ namespace Legion {
         // the capture which could induce races
 #ifdef DEBUG_LEGION
         assert(!recording_fence.exists());
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = 
+          dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
         recording_fence = repl_ctx->get_next_mapping_fence_barrier();
         // Save this for later since we can't access it safely in mapping stage
@@ -8762,17 +8764,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       SlowBarrier replay_sync_barrier(repl_ctx, replay_sync_collective_id);
       replay_sync_barrier.perform_collective_sync();
     }
 
     //--------------------------------------------------------------------------
-    bool ReplTraceCompleteOp::exchange_replayable(ReplicateContext *repl_ctx,
+    bool ReplTraceCompleteOp::exchange_replayable(ReplInnerContext *repl_ctx,
                                                   bool shard_replayable)
     //--------------------------------------------------------------------------
     {
@@ -8787,10 +8789,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
       SlowBarrier pre_sync_barrier(repl_ctx,
           sync_compute_frontiers_collective_id);
@@ -8834,7 +8836,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceReplayOp::initialize_replay(ReplicateContext *ctx, 
+    void ReplTraceReplayOp::initialize_replay(ReplInnerContext *ctx, 
                                        LogicalTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -8899,10 +8901,10 @@ namespace Legion {
         }
 #ifdef DEBUG_LEGION
         assert(!(trace->is_recording() || trace->is_replaying()));
-        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx =dynamic_cast<ReplInnerContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(parent_ctx);
 #endif
 
         if (physical_trace->get_current_template() == NULL)
@@ -9068,7 +9070,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceBeginOp::initialize_begin(ReplicateContext *ctx, 
+    void ReplTraceBeginOp::initialize_begin(ReplInnerContext *ctx, 
                                        LogicalTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -9152,7 +9154,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceSummaryOp::initialize_summary(ReplicateContext *ctx,
+    void ReplTraceSummaryOp::initialize_summary(ReplInnerContext *ctx,
                                                 ShardedPhysicalTemplate *tpl,
                                                 Operation *invalidator,
                                                 Provenance *provenance)
@@ -10171,7 +10173,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ShardManager::deduplicate_future_creation(ReplicateContext *ctx,
+    Future ShardManager::deduplicate_future_creation(ReplInnerContext *ctx,
                DistributedID did, Operation *op, const DomainPoint &index_point)
     //--------------------------------------------------------------------------
     {
@@ -10235,7 +10237,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap ShardManager::deduplicate_future_map_creation(
-        ReplicateContext *ctx, Operation *op, IndexSpaceNode *domain,
+        ReplInnerContext *ctx, Operation *op, IndexSpaceNode *domain,
         IndexSpaceNode *shard_domain, DistributedID map_did, 
         Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -10287,7 +10289,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap ShardManager::deduplicate_future_map_creation(
-        ReplicateContext *ctx, IndexSpaceNode *domain,
+        ReplInnerContext *ctx, IndexSpaceNode *domain,
         IndexSpaceNode *shard_domain, size_t index,
         DistributedID map_did, ApEvent completion, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -11641,7 +11643,8 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          InnerContext *context = (*it)->get_shard_execution_context();
+          InnerContext *context = 
+            (*it)->get_shard_execution_context()->as_inner_context();
           RegionTreeID tid;
           derez.deserialize(tid);
           size_t num_insts;
@@ -16123,7 +16126,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_collective_wait();
-      return context->compute_index_attach_launch_spaces(sizes, provenance);
+#ifdef DEBUG_LEGIOn
+      ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(context);
+      assert(repl_ctx != NULL);
+#else
+      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(context);
+#endif
+      return repl_ctx->compute_index_attach_launch_spaces(sizes, provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -17406,7 +17415,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardRendezvous::ShardRendezvous(ReplicateContext *ctx, ShardID origin,
+    ShardRendezvous::ShardRendezvous(ReplInnerContext *ctx, ShardID origin,
                                               const std::vector<ShardID> &parts)
       : context(ctx), origin_shard(origin), 
         local_shard(ctx->owner_shard->shard_id), participants(parts),
@@ -17588,7 +17597,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardedChildrenBroadcast::ShardedChildrenBroadcast(ReplicateContext *ctx,
+    ShardedChildrenBroadcast::ShardedChildrenBroadcast(ReplInnerContext *ctx,
                               ShardID source, const std::vector<ShardID> &parts,
                               std::vector<IndexPartNode*> &child)
       : ShardRendezvous(ctx, source, parts), children(child), received(false)
@@ -17696,7 +17705,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TotalLeavesRendezvous::TotalLeavesRendezvous(ReplicateContext *ctx,
+    TotalLeavesRendezvous::TotalLeavesRendezvous(ReplInnerContext *ctx,
                                 ShardID root, const std::vector<ShardID> &parts)
       : ShardRendezvous(ctx, root, parts)
     //--------------------------------------------------------------------------

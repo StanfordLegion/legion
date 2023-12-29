@@ -2864,7 +2864,7 @@ namespace Legion {
         ShardManager *shard_manager = 
           runtime->find_shard_manager(repl_id, true/*can fail*/);
         if (shard_manager != NULL)
-          context = shard_manager->find_local_context();
+          context = shard_manager->find_local_context()->as_inner_context();
       }
       if (context == NULL)
         context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
