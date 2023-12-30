@@ -3137,7 +3137,7 @@ namespace Legion {
       };
     public:
       ShardManager(Runtime *rt, DistributedID did,
-                   CollectiveMapping *mapping,
+                   CollectiveMapping *mapping, unsigned local_count,
                    bool top, bool isomorphic_points,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
@@ -3362,6 +3362,8 @@ namespace Legion {
       const Domain shard_domain;
       const size_t total_shards;
       SingleTask *const original_task;
+      const unsigned local_constituents;
+      const unsigned remote_constituents;
       const bool top_level_task;
       const bool isomorphic_points;
     protected:
@@ -3383,7 +3385,6 @@ namespace Legion {
       unsigned    local_execution_complete, remote_execution_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
-      unsigned    remote_constituents;
       unsigned    semantic_attach_counter;
       FutureInstance *local_future_result;
       std::set<RtEvent> mapping_preconditions;

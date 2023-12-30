@@ -9335,7 +9335,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, DistributedID id, 
-                               CollectiveMapping *mapping,
+                               CollectiveMapping *mapping, unsigned local,
                                bool top, bool iso, const Domain &dom,
                                std::vector<DomainPoint> &&shards,
                                std::vector<DomainPoint> &&sorted,
@@ -9345,18 +9345,22 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(id, SHARD_MANAGER_DC), true, mapping),
         shard_points(shards), sorted_points(sorted), shard_lookup(lookup), 
         shard_domain(dom), total_shards(shard_points.size()),
-        original_task(original), top_level_task(top), isomorphic_points(iso),
+        original_task(original), local_constituents(local),
+        remote_constituents((mapping == NULL) ? 0 : 
+            mapping->count_children(owner_space, local_space)),
+        top_level_task(top), isomorphic_points(iso),
         address_spaces(NULL), local_mapping_complete(0),
         remote_mapping_complete(0), local_execution_complete(0),
         remote_execution_complete(0), trigger_local_complete(0),
         trigger_remote_complete(0), trigger_local_commit(0),
-        trigger_remote_commit(0), remote_constituents(0),
-        semantic_attach_counter(0), local_future_result(NULL),
-        shard_task_barrier(bar), attach_deduplication(NULL)
+        trigger_remote_commit(0), semantic_attach_counter(0),
+        local_future_result(NULL), shard_task_barrier(bar),
+        attach_deduplication(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(total_shards > 0);
+      assert(local_constituents > 0);
       assert(shard_points.size() == sorted_points.size());
       assert(shard_points.size() == shard_lookup.size());
 #endif
@@ -9422,6 +9426,9 @@ namespace Legion {
                                       std::vector<Processor> &target_processors)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!local_shards.empty());
+#endif
       // Initialize the address spaces data structure
       set_shard_mapping(target_processors);
       if (collective_mapping != NULL)
@@ -9441,12 +9448,8 @@ namespace Legion {
             task->pack_single_task(rez, *it);
           }
           runtime->send_replicate_distribution(*it, rez);
-          remote_constituents++;
         }
       }
-#ifdef DEBUG_LEGION
-      assert(!local_shards.empty());
-#endif
       for (std::vector<ShardTask*>::const_iterator it =
             local_shards.begin(); it != local_shards.end(); it++)
         (*it)->dispatch();
@@ -9477,7 +9480,6 @@ namespace Legion {
           rez.serialize(ctx->get_executing_processor());
         }
         runtime->send_replicate_distribution(*it, rez);
-        remote_constituents++;
       }
     }
 
@@ -10484,7 +10486,7 @@ namespace Legion {
         {
           local_mapping_complete++;
 #ifdef DEBUG_LEGION
-          assert(local_mapping_complete <= local_shards.size());
+          assert(local_mapping_complete <= local_constituents);
 #endif
         }
         else
@@ -10494,7 +10496,7 @@ namespace Legion {
           assert(remote_mapping_complete <= remote_constituents);
 #endif
         }
-        notify = (local_mapping_complete == local_shards.size()) &&
+        notify = (local_mapping_complete == local_constituents) &&
                  (remote_mapping_complete == remote_constituents);
       }
       if (notify)
@@ -10528,7 +10530,7 @@ namespace Legion {
         {
           local_execution_complete++;
 #ifdef DEBUG_LEGION
-          assert(local_execution_complete <= local_shards.size());
+          assert(local_execution_complete <= local_constituents);
 #endif
         }
         else
@@ -10538,7 +10540,7 @@ namespace Legion {
           assert(remote_execution_complete <= remote_constituents);
 #endif
         }
-        notify = (local_execution_complete == local_shards.size()) &&
+        notify = (local_execution_complete == local_constituents) &&
                  (remote_execution_complete == remote_constituents);
         // See if we need to save the future or compare it
         if (inst != NULL)
@@ -10607,7 +10609,7 @@ namespace Legion {
         {
           trigger_local_complete++;
 #ifdef DEBUG_LEGION
-          assert(trigger_local_complete <= local_shards.size());
+          assert(trigger_local_complete <= local_constituents);
 #endif
         }
         else
@@ -10619,7 +10621,7 @@ namespace Legion {
         }
         if (effects.exists())
           shard_effects.insert(effects);
-        notify = (trigger_local_complete == local_shards.size()) &&
+        notify = (trigger_local_complete == local_constituents) &&
                  (trigger_remote_complete == remote_constituents);
       }
       if (notify)
@@ -10672,7 +10674,7 @@ namespace Legion {
         {
           trigger_local_commit++;
 #ifdef DEBUG_LEGION
-          assert(trigger_local_commit <= local_shards.size());
+          assert(trigger_local_commit <= local_constituents);
 #endif
         }
         else
@@ -10682,7 +10684,7 @@ namespace Legion {
           assert(trigger_remote_commit <= remote_constituents);
 #endif
         }
-        notify = (trigger_local_commit == local_shards.size()) &&
+        notify = (trigger_local_commit == local_constituents) &&
                  (trigger_remote_commit == remote_constituents);
       }
       if (notify)
@@ -11733,14 +11735,19 @@ namespace Legion {
       assert(num_spaces > 0);
 #endif
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+      unsigned local_shards = 0;
+      std::vector<Processor> target_processors(total_shards);
+      for (unsigned idx = 0; idx < total_shards; idx++)
+      {
+        derez.deserialize(target_processors[idx]);
+        if (target_processors[idx].address_space() == runtime->address_space)
+          local_shards++;
+      }
       ShardManager *manager =
-       new ShardManager(runtime, repl_id, mapping, top_level_task,
+       new ShardManager(runtime, repl_id, mapping, local_shards, top_level_task,
                 isomorphic_points, shard_domain, std::move(shard_points),
                 std::move(sorted_points), std::move(shard_lookup), 
                 NULL/*original*/, shard_task_barrier);
-      std::vector<Processor> target_processors(total_shards);
-      for (unsigned idx = 0; idx < total_shards; idx++)
-        derez.deserialize(target_processors[idx]);
       bool explicit_distribution;
       derez.deserialize<bool>(explicit_distribution);
       if (explicit_distribution)

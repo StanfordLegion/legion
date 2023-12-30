@@ -3997,20 +3997,23 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_manager == NULL);
 #endif
-      shard_manager = new ShardManager(runtime, manager_did, mapping,
-          is_top_level_task(), isomorphic_points,
-          output.shard_domain, std::move(output.shard_points),
-          std::move(sorted_points), std::move(shard_lookup), this);
-      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
-      // Now create our local shards and start them mapping
+      std::vector<Processor> local_procs;
       for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
       {
         const Processor processor = output.target_processors[idx];
         if (processor.address_space() != runtime->address_space)
           continue;
-        shard_manager->create_shard(idx, processor,
-            output.chosen_variant, parent_ctx, this);
+        local_procs.push_back(processor);
       }
+      shard_manager = new ShardManager(runtime, manager_did, mapping,
+          local_procs.size(), is_top_level_task(), isomorphic_points,
+          output.shard_domain, std::move(output.shard_points),
+          std::move(sorted_points), std::move(shard_lookup), this);
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      // Now create our local shards and start them mapping
+      for (unsigned idx = 0; idx < local_procs.size(); idx++)
+        shard_manager->create_shard(idx, local_procs[idx],
+            output.chosen_variant, parent_ctx, this);
       // Distribute the shard manager and launch the shards 
       shard_manager->distribute_explicit(this, output.chosen_variant,
                                          output.target_processors);

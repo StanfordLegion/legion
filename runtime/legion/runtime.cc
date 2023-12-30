@@ -7119,9 +7119,9 @@ namespace Legion {
         shard_domain = Domain(DomainPoint(0),DomainPoint(total_shards-1));
       // The shard manager will take ownership of this
       ShardManager *manager = new ShardManager(runtime, repl_context,
-          collective_mapping, true/*top level*/, isomorphic_points,
-          shard_domain, std::move(points), std::move(sorted_points),
-          std::move(shard_lookup), implicit_top);
+          collective_mapping, shards_per_address_space, true/*top level*/,
+          isomorphic_points, shard_domain, std::move(points),
+          std::move(sorted_points), std::move(shard_lookup), implicit_top);
       shard_manager = manager;
       implicit_top->set_shard_manager(manager);
       manager->set_shard_mapping(shard_mapping);
