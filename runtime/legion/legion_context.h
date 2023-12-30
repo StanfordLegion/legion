@@ -2087,10 +2087,6 @@ namespace Legion {
       RtEvent inorder_concurrent_replay_analysis;
       RtEvent total_hack_function_for_inorder_concurrent_replay_analysis(
                                                             RtEvent mapped);
-#ifdef LEGION_SPY
-    protected:
-      UniqueID current_fence_uid;
-#endif
     };
 
     /**
