@@ -24287,12 +24287,11 @@ namespace Legion {
       // See if we can find our parent task, if not don't worry about it
       // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
       // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
-      InnerContext *parent = static_cast<TaskContext*>( 
-        runtime->weak_find_distributed_collectable(
-          parent_context_did))->as_inner_context();;
+      TaskContext *parent = static_cast<TaskContext*>(
+        runtime->weak_find_distributed_collectable(parent_context_did));
       if (parent != NULL)
       {
-        parent_ctx.store(parent);
+        parent_ctx.store(parent->as_inner_context());
         remote_task.parent_task = parent->get_task();
         if (parent->remove_base_resource_ref(RUNTIME_REF))
           delete parent;
