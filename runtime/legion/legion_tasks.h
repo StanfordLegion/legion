@@ -234,7 +234,7 @@ namespace Legion {
       void complete_point_projection(void);
       bool prepare_steal(void);
     public:
-      void compute_parent_indexes(TaskContext *alt_context = NULL);
+      void compute_parent_indexes(InnerContext *alt_context = NULL);
       void perform_intra_task_alias_analysis(bool is_tracing,
           LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
     public:

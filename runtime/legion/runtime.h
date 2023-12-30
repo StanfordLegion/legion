@@ -118,7 +118,7 @@ namespace Legion {
       bool remove_point(const DomainPoint &point);
       UntypedBuffer get_point(const DomainPoint &point);
     public:
-      FutureMap freeze(TaskContext *ctx, Provenance *provenance);
+      FutureMap freeze(InnerContext *ctx, Provenance *provenance);
       void unfreeze(void);
     public:
       Runtime *const runtime;

@@ -402,7 +402,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ArgumentMapImpl::freeze(TaskContext *ctx, Provenance *provenance)
+    FutureMap ArgumentMapImpl::freeze(InnerContext *ctx, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       // If we already have a future map then we are good

@@ -5585,8 +5585,6 @@ namespace Legion {
       }
       // Make sure the other shards have received all their returns too
       Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
-      if (!has_return_resources())
-        return;
       if (!resource_return_barrier.has_triggered())
       {
         DeferMustEpochReturnResourcesArgs args(this);
