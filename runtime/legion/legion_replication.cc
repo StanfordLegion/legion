@@ -9336,8 +9336,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, DistributedID id, 
                                CollectiveMapping *mapping,
-                               bool control, bool top, bool iso,
-                               const Domain &dom,
+                               bool top, bool iso, const Domain &dom,
                                std::vector<DomainPoint> &&shards,
                                std::vector<DomainPoint> &&sorted,
                                std::vector<ShardID> &&lookup,
@@ -9346,15 +9345,14 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(id, SHARD_MANAGER_DC), true, mapping),
         shard_points(shards), sorted_points(sorted), shard_lookup(lookup), 
         shard_domain(dom), total_shards(shard_points.size()),
-        original_task(original), control_replicated(control),
-        top_level_task(top), isomorphic_points(iso), address_spaces(NULL),
-        local_mapping_complete(0), remote_mapping_complete(0),
-        local_execution_complete(0), remote_execution_complete(0),
-        trigger_local_complete(0), trigger_remote_complete(0),
-        trigger_local_commit(0), trigger_remote_commit(0), 
-        remote_constituents(0), semantic_attach_counter(0), 
-        local_future_result(NULL), shard_task_barrier(bar),
-        attach_deduplication(NULL)
+        original_task(original), top_level_task(top), isomorphic_points(iso),
+        address_spaces(NULL), local_mapping_complete(0),
+        remote_mapping_complete(0), local_execution_complete(0),
+        remote_execution_complete(0), trigger_local_complete(0),
+        trigger_remote_complete(0), trigger_local_commit(0),
+        trigger_remote_commit(0), remote_constituents(0),
+        semantic_attach_counter(0), local_future_result(NULL),
+        shard_task_barrier(bar), attach_deduplication(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9362,7 +9360,7 @@ namespace Legion {
       assert(shard_points.size() == sorted_points.size());
       assert(shard_points.size() == shard_lookup.size());
 #endif
-      if (control_replicated && (owner_space == runtime->address_space))
+      if (is_owner())
       {
 #ifdef DEBUG_LEGION
         assert(!shard_task_barrier.exists());
@@ -9374,7 +9372,7 @@ namespace Legion {
         // ShardManager::launch
       }
 #ifdef DEBUG_LEGION
-      else if (control_replicated)
+      else
         assert(shard_task_barrier.exists());
 #endif
 #ifdef LEGION_GC
@@ -9397,7 +9395,7 @@ namespace Legion {
         delete it->second;
       sharding_functions.clear();
       // Finally unregister ourselves with the runtime
-      if (is_owner() && control_replicated)
+      if (is_owner())
       {
         shard_task_barrier.destroy_barrier();
         callback_barrier.destroy_barrier();
@@ -9504,7 +9502,6 @@ namespace Legion {
           rez.serialize(shard_lookup[idx]);
         }
       }
-      rez.serialize<bool>(control_replicated);
       rez.serialize<bool>(top_level_task);
       rez.serialize(shard_task_barrier);
       collective_mapping->pack(rez);
@@ -11726,8 +11723,6 @@ namespace Legion {
           shard_points[shard_lookup[idx]] = sorted_points[idx];
         }
       }
-      bool control_repl;
-      derez.deserialize(control_repl);
       bool top_level_task;
       derez.deserialize(top_level_task);
       RtBarrier shard_task_barrier;
@@ -11739,7 +11734,7 @@ namespace Legion {
 #endif
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
       ShardManager *manager =
-       new ShardManager(runtime, repl_id, mapping, control_repl, top_level_task,
+       new ShardManager(runtime, repl_id, mapping, top_level_task,
                 isomorphic_points, shard_domain, std::move(shard_points),
                 std::move(sorted_points), std::move(shard_lookup), 
                 NULL/*original*/, shard_task_barrier);

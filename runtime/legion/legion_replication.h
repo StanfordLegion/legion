@@ -3138,7 +3138,7 @@ namespace Legion {
     public:
       ShardManager(Runtime *rt, DistributedID did,
                    CollectiveMapping *mapping,
-                   bool control, bool top, bool isomorphic_points,
+                   bool top, bool isomorphic_points,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
                    std::vector<DomainPoint> &&sorted_points,
@@ -3362,7 +3362,6 @@ namespace Legion {
       const Domain shard_domain;
       const size_t total_shards;
       SingleTask *const original_task;
-      const bool control_replicated;
       const bool top_level_task;
       const bool isomorphic_points;
     protected:

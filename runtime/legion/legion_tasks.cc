@@ -3828,21 +3828,18 @@ namespace Legion {
                          get_task_name(), get_unique_id())
         }
         // If the chosen variant is replicable check that processors are unique
-        if (!var_impl->is_leaf())
-        {
-          std::vector<Processor> sorted_procs = output.target_processors;
-          std::sort(sorted_procs.begin(), sorted_procs.end());
-          for (unsigned idx = 1; idx < sorted_procs.size(); idx++)
-            if (sorted_procs[idx-1] == sorted_procs[idx])
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from invocation of '%s' "
-                        "on mapper %s. Mapper provided duplicate target "
-                        "processors for non-leaf task variant %d when "
-                        "replicating task %s (UID %lld). In order to control "
-                        "replicate a task all the target processors must be "
-                        "unique.", "replicate_task", mapper->get_mapper_name(),
-                        output.chosen_variant, get_task_name(), get_unique_id())
-        }
+        std::vector<Processor> sorted_procs = output.target_processors;
+        std::sort(sorted_procs.begin(), sorted_procs.end());
+        for (unsigned idx = 1; idx < sorted_procs.size(); idx++)
+          if (sorted_procs[idx-1] == sorted_procs[idx])
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' "
+                      "on mapper %s. Mapper provided duplicate target "
+                      "processors for non-leaf task variant %d when "
+                      "replicating task %s (UID %lld). In order to control "
+                      "replicate a task all the target processors must be "
+                      "unique.", "replicate_task", mapper->get_mapper_name(),
+                      output.chosen_variant, get_task_name(), get_unique_id())
         // Check that shard points match the size target processors if not empty
         if (!output.shard_points.empty())
         {
@@ -4001,7 +3998,7 @@ namespace Legion {
       assert(shard_manager == NULL);
 #endif
       shard_manager = new ShardManager(runtime, manager_did, mapping,
-          !var_impl->is_leaf(), is_top_level_task(), isomorphic_points,
+          is_top_level_task(), isomorphic_points,
           output.shard_domain, std::move(output.shard_points),
           std::move(sorted_points), std::move(shard_lookup), this);
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
@@ -8058,6 +8055,7 @@ namespace Legion {
         parent_ctx = parent;
       resolved = true;
       stealable = false;
+      replicate = false;
       shard_manager = manager;
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       selected_variant = variant;
@@ -8079,6 +8077,7 @@ namespace Legion {
       unpack_single_task(derez, ready_events);
       resolved = true;
       stealable = false;
+      replicate = false;
       parent_ctx = parent;
       shard_manager = manager;
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
@@ -8452,9 +8451,6 @@ namespace Legion {
                              shard_id, get_unique_id());
       if (!leaf_task)
       {
-#ifdef DEBUG_LEGION
-        assert(shard_manager->control_replicated);
-#endif
         // If we have a control replication context then we do the special path
         ReplInnerContext *repl_ctx = new ReplInnerContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
@@ -8466,19 +8462,15 @@ namespace Legion {
         repl_ctx->configure_context(mapper, task_priority);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
-        // Make sure that none of the shards start until all the replicate
-        // contexts have been made across all the shards 
-        
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(!shard_manager->control_replicated);
-#endif
         execution_context = new ReplLeafContext(shard_manager, this,
             get_depth(), regions, output_regions, inline_task);
         execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       }
+      // Make sure that none of the shards start until all the replicate
+      // contexts have been made across all the shards
       RtEvent ready = complete_startup_initialization();
       launch_events.insert(ApEvent(ready));
       return execution_context;
