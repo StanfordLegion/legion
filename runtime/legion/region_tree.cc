@@ -209,7 +209,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_pending_partition(TaskContext *ctx,
+    RtEvent RegionTreeForest::create_pending_partition(InnerContext *ctx,
                                                        IndexPartition pid,
                                                        IndexSpace parent,
                                                        IndexSpace color_space,
@@ -312,7 +312,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_pending_cross_product(TaskContext *ctx,
+    void RegionTreeForest::create_pending_cross_product(InnerContext *ctx,
                                                  IndexPartition handle1,
                                                  IndexPartition handle2,
                              std::map<IndexSpace,IndexPartition> &user_handles,

@@ -194,7 +194,7 @@ namespace Legion {
                               IndexSpace left, IndexSpace right,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
-      RtEvent create_pending_partition(TaskContext *ctx,
+      RtEvent create_pending_partition(InnerContext *ctx,
                                        IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
@@ -205,7 +205,7 @@ namespace Legion {
                                        ApEvent partition_ready,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT,
                                        std::set<RtEvent> *applied = NULL);
-      void create_pending_cross_product(TaskContext *ctx,
+      void create_pending_cross_product(InnerContext *ctx,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
