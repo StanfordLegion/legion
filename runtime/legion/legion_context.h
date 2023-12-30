@@ -2021,17 +2021,34 @@ namespace Legion {
                 std::deque<InstanceSet> &physical_instances);
       virtual bool is_leaf_context(void) const;
     public:
-      using TaskContext::create_index_space;
-      using TaskContext::create_field_space;
-      using TaskContext::allocate_field;
-      using TaskContext::allocate_fields;
       // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(const Future &future, TypeTag tag,
+      virtual IndexSpace create_index_space(const Domain &bounds,
+                                            TypeTag type_tag,
                                             const char *provenance);
+      virtual IndexSpace create_index_space(const Future &future,
+                                            TypeTag type_tag,
+                                            const char *provenance);
+      virtual IndexSpace create_index_space(
+                           const std::vector<DomainPoint> &points,
+                           const char *provenance);
+      virtual IndexSpace create_index_space(
+                           const std::vector<Domain> &rects,
+                           const char *provenance);
+      virtual IndexSpace union_index_spaces(
+                           const std::vector<IndexSpace> &spaces,
+                           const char *provenance);
+      virtual IndexSpace intersect_index_spaces(
+                           const std::vector<IndexSpace> &spaces,
+                           const char *provenance);
+      virtual IndexSpace subtract_index_spaces(
+                           IndexSpace left, IndexSpace right,
+                           const char *provenance);
+      virtual void create_shared_ownership(IndexSpace handle);
       virtual void destroy_index_space(IndexSpace handle, 
                                        const bool unordered,
                                        const bool recurse,
                                        const char *provenance);
+      virtual void create_shared_ownership(IndexPartition handle);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered, 
                                            const bool recurse,
@@ -2202,20 +2219,41 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles,
                                             const char *provenance);
+      virtual FieldSpace create_field_space(const char *provenance);
+      virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance);
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         CustomSerdezID serdez_id,
                                         const char *provenance);
+      virtual void create_shared_ownership(FieldSpace handle);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered,
                                        const char *provenance);
+      virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpaceNode *node);
+      virtual FieldID allocate_field(FieldSpace space, size_t field_size,
+                                     FieldID fid, bool local,
+                                     CustomSerdezID serdez_id,
+                                     const char *provenance);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id,
                                      const char *provenance);
-      virtual void allocate_local_field(FieldSpace space, size_t field_size,
+      virtual void allocate_local_field(
+                                     FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events,
                                      const char *provenance);
+      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
+                              FieldID fid, const bool unordered,
+                              const char *provenance);
+      virtual void allocate_fields(FieldSpace space,
+                                   const std::vector<size_t> &sizes,
+                                   std::vector<FieldID> &resuling_fields,
+                                   bool local, CustomSerdezID serdez_id,
+                                   const char *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
@@ -2227,12 +2265,16 @@ namespace Legion {
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events,
                                    const char *provenance);
-      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
-                              FieldID fid, const bool unordered,
-                              const char *provenance);
-      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
+      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space, 
                                const std::set<FieldID> &to_free,
-                               const bool unordered, const char *provenance);
+                               const bool unordered,
+                               const char *provenance);
+      virtual LogicalRegion create_logical_region(
+                                            IndexSpace index_space,
+                                            FieldSpace field_space,
+                                            bool task_local,
+                                            const char *provenance);
+      virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered,
                                           const char *provenance);

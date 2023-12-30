@@ -11735,15 +11735,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(const Domain &bounds, 
+                                       TypeTag type_tag, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(
+                 const std::vector<DomainPoint> &points, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(const std::vector<Domain> &rects,
+                                               const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag,
                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-        "Illegal index space from future creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
       return IndexSpace::NO_SPACE;
     } 
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space create shared ownership performed in leaf task "
+        "%s (ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::union_index_spaces(
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal union index spaces performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::intersect_index_spaces(
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal intersect index spaces performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::subtract_index_spaces(
+                      IndexSpace left, IndexSpace right, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal subtract index spaces performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_space(IndexSpace handle, 
@@ -11800,6 +11875,15 @@ namespace Legion {
         execution_events.insert(preconditions.begin(), preconditions.end());
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index partition create shared ownership performed in leaf "
+        "task %s (ID %lld)", get_task_name(), get_unique_id())
+    }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle,
@@ -12219,16 +12303,49 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     FieldSpace LeafContext::create_field_space(const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          CustomSerdezID serdez_id,
                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
-       "Illegal deferred field allocations performed in leaf task %s (ID %lld)",
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space creation performed in leaf task %s (ID %lld)",
        get_task_name(), get_unique_id())
       return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal field space create shared ownership performed in leaf task "
+        "%s (ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -12236,44 +12353,54 @@ namespace Legion {
                                    const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      // Check to see if this is one that we should be allowed to destory
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<FieldSpace,unsigned>::iterator finder = 
-          created_field_spaces.find(handle);
-        if (finder != created_field_spaces.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second > 0);
-#endif
-          if (--finder->second == 0)
-            created_field_spaces.erase(finder);
-          else
-            return;
-        }
-        else
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy field space %x in task %s (UID %lld) "
-            "which is not the task that made the field space or one of its "
-            "ancestor tasks. Field space deletions must be lexicographically "
-            "scoped by the task tree.", handle.get_id(), 
-            get_task_name(), get_unique_id())
-#ifdef DEBUG_LEGION
-      log_field.debug("Destroying field space %x in task %s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id());
-#endif
-      std::set<RtEvent> preconditions;
-      runtime->forest->destroy_field_space(handle, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space destruction performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl* LeafContext::create_field_allocator(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocator creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_field_allocator(FieldSpaceNode *node)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocator destruction performed in leaf task %s "
+       "(ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID LeafContext::allocate_field(FieldSpace space, size_t field_size,
+                                        FieldID fid, bool local,
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::allocate_fields(FieldSpace space,
+                                      const std::vector<size_t> &sizes,
+                                      std::vector<FieldID> &resulting_fields,
+                                      bool local, CustomSerdezID serdez_id,
+                                      const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocations performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -12282,40 +12409,9 @@ namespace Legion {
                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        const std::pair<FieldSpace,FieldID> key(space, fid);
-        std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-          created_fields.find(key);
-        if (finder != created_fields.end())
-          created_fields.erase(finder);
-        else // No need to check for local fields since we can't make them
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to deallocate field %d in field space %x in task %s "
-            "(UID %lld) which is not the task that allocated the field "
-            "or one of its ancestor tasks. Field deallocations must be " 
-            "lexicographically scoped by the task tree.", fid, space.id,
-            get_task_name(), get_unique_id())
-      // If the allocator is not ready we need to wait for it here
-      if (allocator->ready_event.exists() && 
-          !allocator->ready_event.has_triggered())
-        allocator->ready_event.wait();
-      // Free the indexes first and immediately
-      std::vector<FieldID> to_free(1,fid);
-      runtime->forest->free_field_indexes(space, to_free, RtEvent::NO_RT_EVENT);
-      // We can free this field immediately
-      std::set<RtEvent> preconditions;
-      runtime->forest->free_field(space, fid, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field free performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -12325,49 +12421,9 @@ namespace Legion {
                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      long bad_fid = -1;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<FieldID>::const_iterator it = 
-              to_free.begin(); it != to_free.end(); it++)
-        {
-          const std::pair<FieldSpace,FieldID> key(space, *it);
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-            created_fields.find(key);
-          if (finder == created_fields.end())
-          {
-            // No need to check for local fields since we know
-            // that leaf tasks are not allowed to make them
-            bad_fid = *it;
-            break;
-          }
-          else
-            created_fields.erase(finder);
-        }
-      }
-      if (bad_fid != -1)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to deallocate field %ld in field space %x in task %s "
-            "(UID %lld) which is not the task that allocated the field "
-            "or one of its ancestor tasks. Field deallocations must be " 
-            "lexicographically scoped by the task tree.", bad_fid, space.id,
-            get_task_name(), get_unique_id())
-      // If the allocator is not ready we need to wait for it here
-      if (allocator->ready_event.exists() && 
-          !allocator->ready_event.has_triggered())
-        allocator->ready_event.wait();
-      // Free the indexes first and immediately
-      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
-      runtime->forest->free_field_indexes(space,field_vec,RtEvent::NO_RT_EVENT);
-      // We can free these fields immediately
-      std::set<RtEvent> preconditions;
-      runtime->forest->free_fields(space, field_vec, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field free performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -12424,61 +12480,35 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    LogicalRegion LeafContext::create_logical_region(IndexSpace index_space,
+                                                     FieldSpace field_space,
+                                                     bool task_local,
+                                                     const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal logical region creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal logical region create shared ownership performed in leaf task "
+        "%s (ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::destroy_logical_region(LogicalRegion handle,
                                    const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      // Check to see if this is a top-level logical region, if not then
-      // we shouldn't even be destroying it
-      if (!runtime->forest->is_top_level_region(handle))
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy logical region (%x,%x,%x in task %s "
-            "(UID %lld) which is not a top-level logical region. Legion only "
-            "permits top-level logical regions to be destroyed.", 
-            handle.index_space.id, handle.field_space.id, handle.tree_id,
-            get_task_name(), get_unique_id())
-      // Check to see if this is one that we should be allowed to destory
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<LogicalRegion,unsigned>::iterator finder = 
-          created_regions.find(handle);
-        if (finder != created_regions.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second > 0);
-#endif
-          if (--finder->second == 0)
-            created_regions.erase(finder);
-          else
-            return;
-        }
-        else
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy logical region (%x,%x,%x) in task %s "
-            "(UID %lld) which is not the task that made the logical region "
-            "or one of its ancestor tasks. Logical region deletions must be " 
-            "lexicographically scoped by the task tree.", handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
-            get_task_name(), get_unique_id())
-#ifdef DEBUG_LEGION
-      log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
-                       handle.index_space.id, handle.field_space.id, 
-                       get_task_name(), get_unique_id());
-#endif
-      std::set<RtEvent> preconditions;
-      runtime->forest->destroy_logical_region(handle, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal logical region deletion performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
