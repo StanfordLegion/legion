@@ -3827,19 +3827,24 @@ namespace Legion {
                          output.chosen_variant, 
                          get_task_name(), get_unique_id())
         }
-        // If the chosen variant is replicable check that processors are unique
-        std::vector<Processor> sorted_procs = output.target_processors;
-        std::sort(sorted_procs.begin(), sorted_procs.end());
-        for (unsigned idx = 1; idx < sorted_procs.size(); idx++)
-          if (sorted_procs[idx-1] == sorted_procs[idx])
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' "
-                      "on mapper %s. Mapper provided duplicate target "
-                      "processors for non-leaf task variant %d when "
-                      "replicating task %s (UID %lld). In order to control "
-                      "replicate a task all the target processors must be "
-                      "unique.", "replicate_task", mapper->get_mapper_name(),
-                      output.chosen_variant, get_task_name(), get_unique_id())
+        // If the chosen variant is not a leaf check that processors are unique
+        // Note that if the chosen variant is a leaf then they don't need to be
+        // unique since the different shards won't need to synchronize
+        if (!var_impl->is_leaf())
+        {
+          std::vector<Processor> sorted_procs = output.target_processors;
+          std::sort(sorted_procs.begin(), sorted_procs.end());
+          for (unsigned idx = 1; idx < sorted_procs.size(); idx++)
+            if (sorted_procs[idx-1] == sorted_procs[idx])
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided duplicate target "
+                        "processors for non-leaf task variant %d when "
+                        "replicating task %s (UID %lld). In order to control "
+                        "replicate a task all the target processors must be "
+                        "unique.", "replicate_task", mapper->get_mapper_name(),
+                        output.chosen_variant, get_task_name(), get_unique_id())
+        }
         // Check that shard points match the size target processors if not empty
         if (!output.shard_points.empty())
         {
@@ -8455,7 +8460,7 @@ namespace Legion {
       if (!leaf_task)
       {
         // If we have a control replication context then we do the special path
-        ReplInnerContext *repl_ctx = new ReplInnerContext(runtime, this,
+        ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, execution_fence_event,
             shard_manager, inline_task, parent_ctx->is_concurrent_context());
@@ -8465,17 +8470,16 @@ namespace Legion {
         repl_ctx->configure_context(mapper, task_priority);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
+        // Make sure that none of the shards start until all the replicate
+        // contexts have been made across all the shards
+        RtEvent ready = complete_startup_initialization();
+        launch_events.insert(ApEvent(ready));
       }
       else
       {
-        execution_context = new ReplLeafContext(shard_manager, this,
-            get_depth(), regions, output_regions, inline_task);
+        execution_context = new LeafContext(runtime, this, inline_task);
         execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       }
-      // Make sure that none of the shards start until all the replicate
-      // contexts have been made across all the shards
-      RtEvent ready = complete_startup_initialization();
-      launch_events.insert(ApEvent(ready));
       return execution_context;
     }
 
@@ -8483,7 +8487,7 @@ namespace Legion {
     InnerContext* ShardTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
-      ReplInnerContext *repl_ctx = new ReplInnerContext(runtime, this,
+      ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, execution_fence_event,
           shard_manager, false/*inline task*/, true/*implicit*/);
@@ -8550,88 +8554,42 @@ namespace Legion {
     void ShardTask::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ReplicateContext *repl_ctx = execution_context->as_replicate_context();
-      repl_ctx->handle_collective_message(derez);
+      get_replicate_context()->handle_collective_message(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_rendezvous_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_rendezvous_message(derez);
+      get_replicate_context()->handle_rendezvous_message(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_compute_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_compute_equivalence_sets(derez);
+      get_replicate_context()->handle_compute_equivalence_sets(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_output_equivalence_set(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_output_equivalence_set(derez);
+      get_replicate_context()->handle_output_equivalence_set(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_refine_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_refine_equivalence_sets(derez);
+      get_replicate_context()->handle_refine_equivalence_sets(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_intra_space_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_intra_space_dependence(derez);
+      get_replicate_context()->handle_intra_space_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -8639,16 +8597,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_resource_update(derez, applied);
+      get_replicate_context()->handle_resource_update(derez, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -8656,16 +8605,7 @@ namespace Legion {
                                                    std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_created_region_contexts(derez, applied);
+      get_replicate_context()->handle_created_region_contexts(derez, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -8673,16 +8613,7 @@ namespace Legion {
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      repl_ctx->handle_trace_update(derez, source);
+      get_replicate_context()->handle_trace_update(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -8690,17 +8621,8 @@ namespace Legion {
                                             ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      return repl_ctx->handle_find_trace_shard_event(template_index, event,
-                                                     remote_shard);
+      return get_replicate_context()->handle_find_trace_shard_event(
+          template_index, event, remote_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -8708,24 +8630,23 @@ namespace Legion {
                                             ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplInnerContext *repl_ctx = 
-        dynamic_cast<ReplInnerContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
-          execution_context->as_replicate_context());
-#endif
-      return repl_ctx->handle_find_trace_shard_frontier(template_index, event,
-                                                        remote_shard);
+      return get_replicate_context()->handle_find_trace_shard_frontier(
+          template_index, event, remote_shard);
     }
 
     //--------------------------------------------------------------------------
-    ReplicateContext* ShardTask::get_shard_execution_context(void) const
+    ReplicateContext* ShardTask::get_replicate_context(void) const
     //--------------------------------------------------------------------------
     {
-      return execution_context->as_replicate_context();
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+      return repl_ctx;
+#else
+      return static_cast<ReplicateContext*>(execution_context);
+#endif
     }
 
     //--------------------------------------------------------------------------

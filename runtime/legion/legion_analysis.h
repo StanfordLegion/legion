@@ -1347,7 +1347,7 @@ namespace Legion {
       // General replicated 
       ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
           Operation *op, unsigned index, const RegionRequirement &req, 
-          LogicalState *owner, ReplInnerContext *context);
+          LogicalState *owner, ReplicateContext *context);
       ProjectionSummary(const ProjectionSummary &rhs) = delete;
       ~ProjectionSummary(void);
     public:

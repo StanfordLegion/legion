@@ -809,10 +809,10 @@ namespace Legion {
         if (collective_id > 0)
         {
 #ifdef DEBUG_LEGION
-          ReplInnerContext *repl_ctx = dynamic_cast<ReplInnerContext*>(context);
+          ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
           assert(repl_ctx != NULL);
 #else
-          ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(context);
+          ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context);
 #endif
           collective = new PredicateCollective(this, repl_ctx, collective_id);
           collective->async_all_reduce(max_observed_index);
@@ -4509,11 +4509,11 @@ namespace Legion {
       if (!collective_performed)
       {
 #ifdef DEBUG_LEGION
-        ReplInnerContext *repl_ctx =
-          dynamic_cast<ReplInnerContext*>(implicit_context);
+        ReplicateContext *repl_ctx =
+          dynamic_cast<ReplicateContext*>(implicit_context);
         assert(repl_ctx != NULL);
 #else
-        ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(
             implicit_context->as_replicate_context());
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
@@ -4521,7 +4521,7 @@ namespace Legion {
           Murmur3Hasher hasher(repl_ctx, 
               runtime->safe_control_replication > 1, i > 0);
           hasher.hash(
-              ReplInnerContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
+              ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
           repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
           if (hasher.verify(__func__))
             break;
@@ -4552,11 +4552,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplInnerContext *repl_ctx =
-        dynamic_cast<ReplInnerContext*>(implicit_context);
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(implicit_context);
       assert(repl_ctx != NULL);
 #else
-      ReplInnerContext *repl_ctx = static_cast<ReplInnerContext*>(
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(
           implicit_context->as_replicate_context());
 #endif
       if (runtime->runtime_warnings && !silence_warnings && 
@@ -4575,7 +4575,7 @@ namespace Legion {
         Murmur3Hasher hasher(repl_ctx, 
             runtime->safe_control_replication > 1, i > 0);
         hasher.hash(
-            ReplInnerContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
+            ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
         repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
         if (hasher.verify(__func__))
           break;
@@ -17366,9 +17366,9 @@ namespace Legion {
           new CyclicShardingFunctor(), false/*need check*/, 
           true/*was preregistered*/, NULL, true/*preregistered*/);
       // Register the attach-detach sharding functor
-      ReplInnerContext::register_attach_detach_sharding_functor(this);
+      ReplicateContext::register_attach_detach_sharding_functor(this);
       // Register the universal sharding functor
-      ReplInnerContext::register_universal_sharding_functor(this);
+      ReplicateContext::register_universal_sharding_functor(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20287,7 +20287,7 @@ namespace Legion {
     {
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__, 
-            ReplInnerContext::REPLICATE_ATTACH_TASK_INFO, &task_id,
+            ReplicateContext::REPLICATE_ATTACH_TASK_INFO, &task_id,
             sizeof(task_id), tag, buffer, size, is_mutable, send_to_owner))
         return;
       if ((tag == LEGION_NAME_SEMANTIC_TAG) && legion_spy_enabled)
@@ -20309,7 +20309,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplInnerContext::REPLICATE_ATTACH_INDEX_SPACE_INFO, &handle,
+            ReplicateContext::REPLICATE_ATTACH_INDEX_SPACE_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20328,7 +20328,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplInnerContext::REPLICATE_ATTACH_INDEX_PARTITION_INFO, &handle,
+            ReplicateContext::REPLICATE_ATTACH_INDEX_PARTITION_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20347,7 +20347,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplInnerContext::REPLICATE_ATTACH_FIELD_SPACE_INFO, &handle,
+            ReplicateContext::REPLICATE_ATTACH_FIELD_SPACE_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20366,7 +20366,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplInnerContext::REPLICATE_ATTACH_FIELD_INFO, &handle,
+            ReplicateContext::REPLICATE_ATTACH_FIELD_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global, 
             &fid, sizeof(fid)))
         return;
@@ -20386,7 +20386,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplInnerContext::REPLICATE_ATTACH_LOGICAL_REGION_INFO, &handle,
+            ReplicateContext::REPLICATE_ATTACH_LOGICAL_REGION_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -20405,7 +20405,7 @@ namespace Legion {
       bool global = true;
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(__func__,
-            ReplInnerContext::REPLICATE_ATTACH_LOGICAL_PARTITION_INFO, &handle,
+            ReplicateContext::REPLICATE_ATTACH_LOGICAL_PARTITION_INFO, &handle,
             sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
@@ -27165,65 +27165,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* Runtime::find_or_request_inner_context(DistributedID to_find)
+    InnerContext* Runtime::find_or_request_inner_context(DistributedID did)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(LEGION_DISTRIBUTED_HELP_DECODE(to_find) == INNER_CONTEXT_DC);
+      assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == INNER_CONTEXT_DC);
 #endif
-      const DistributedID did = LEGION_DISTRIBUTED_ID_FILTER(to_find);
       RtEvent ready;
-      bool send_request = false;
-      // You might think you can call find_or_request_distributed_collectable
-      // here, but in-place new does not seem to work with classes with 
-      // multiple inheritance in some compilers (C++ is terrible and untested)
-      // so we have to allocate the classes directly, which is fine since we
-      // we're going to block waiting on the result anyway
-      {
-        AutoLock d_lock(distributed_collectable_lock);
-        std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
-          dist_collectables.find(did);
-        // If we've already got it, then we are done
-        if (finder != dist_collectables.end())
-          return static_cast<TaskContext*>(finder->second)->as_inner_context();
-        std::map<DistributedID,std::pair<DistributedCollectable*,RtUserEvent> 
-          >::iterator pending_finder = pending_collectables.find(did);
-        if (pending_finder == pending_collectables.end())
-          pending_finder = pending_collectables.emplace(std::make_pair(did,
-                std::pair<DistributedCollectable*,RtUserEvent>(NULL,
-                  RtUserEvent::NO_RT_USER_EVENT))).first;
-        if (!pending_finder->second.second.exists())
-        {
-          pending_finder->second.second = Runtime::create_rt_user_event();
-          send_request = true;
-        }
-        ready = pending_finder->second.second;
-      }
-      if (send_request)
-      {
-        AddressSpaceID target = determine_owner(did);
-#ifdef DEBUG_LEGION
-        assert(target != address_space); // shouldn't be sending to ourself
-#endif
-        // Now send the message
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(to_find);
-          rez.serialize(address_space);
-        }
-        find_messenger(target)->send_message(
-            SEND_REMOTE_CONTEXT_REQUEST, rez, true/*flush*/);
-      }
-      if (!ready.has_triggered())
+      DistributedCollectable *dc = find_or_request_distributed_collectable<
+        RemoteContext, SEND_REMOTE_CONTEXT_REQUEST>(did, ready);
+      if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
-      std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
-        dist_collectables.find(did);
-#ifdef DEBUG_LEGION
-      assert(finder != dist_collectables.end());
-#endif
-      return static_cast<TaskContext*>(finder->second)->as_inner_context();
+      return static_cast<InnerContext*>(dc);
     }
 
     //--------------------------------------------------------------------------

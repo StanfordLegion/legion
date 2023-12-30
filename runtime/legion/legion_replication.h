@@ -1694,7 +1694,7 @@ namespace Legion {
      */
     class ShardRendezvous {
     public:
-      ShardRendezvous(ReplInnerContext *ctx, ShardID origin,
+      ShardRendezvous(ReplicateContext *ctx, ShardID origin,
                       const std::vector<ShardID> &participants);
       ShardRendezvous(const ShardRendezvous &rhs) = delete;
       virtual ~ShardRendezvous(void) { }
@@ -1715,7 +1715,7 @@ namespace Legion {
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
     public:
-      ReplInnerContext *const context;
+      ReplicateContext *const context;
       const ShardID origin_shard;
       const ShardID local_shard;
       const std::vector<ShardID> &participants;
@@ -1730,7 +1730,7 @@ namespace Legion {
      */
     class ShardedChildrenBroadcast : public ShardRendezvous {
     public:
-      ShardedChildrenBroadcast(ReplInnerContext *ctx,
+      ShardedChildrenBroadcast(ReplicateContext *ctx,
           ShardID source, const std::vector<ShardID> &participants,
           std::vector<IndexPartNode*> &children);
       ShardedChildrenBroadcast(const ShardedChildrenBroadcast &rhs) = delete;
@@ -1756,7 +1756,7 @@ namespace Legion {
      */
     class TotalLeavesRendezvous : public ShardRendezvous {
     public:
-      TotalLeavesRendezvous(ReplInnerContext *ctx,
+      TotalLeavesRendezvous(ReplicateContext *ctx,
           ShardID root, const std::vector<ShardID> &participants);
       TotalLeavesRendezvous(const TotalLeavesRendezvous &rhs) = delete;
       virtual ~TotalLeavesRendezvous(void) { }
@@ -1902,7 +1902,7 @@ namespace Legion {
       virtual void record_output_registered(RtEvent registered,
                                       std::set<RtEvent> &applied_events);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
     protected:
       ShardID owner_shard;
@@ -1948,14 +1948,14 @@ namespace Legion {
       virtual void predicate_false(void);
       virtual void prepare_map_must_epoch(void);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       virtual void initialize_concurrent_analysis(bool replay);
       virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
                                                   Processor target);
-      void select_sharding_function(ReplInnerContext *repl_ctx);
+      void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -2119,7 +2119,7 @@ namespace Legion {
     public:
       ReplFillOp& operator=(const ReplFillOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *ctx,
+      void initialize_replication(ReplicateContext *ctx,
                                   DistributedID fresh_did,
                                   bool is_first_local);
     public:
@@ -2172,7 +2172,7 @@ namespace Legion {
         { return shard_points; }
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
-      void initialize_replication(ReplInnerContext *ctx,
+      void initialize_replication(ReplicateContext *ctx,
                                   DistributedID fresh_did);
     protected:
       ShardingID sharding_functor;
@@ -2205,7 +2205,7 @@ namespace Legion {
     public:
       ReplDiscardOp& operator=(const ReplDiscardOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *ctx, bool is_first_local);
+      void initialize_replication(ReplicateContext *ctx, bool is_first_local);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2235,7 +2235,7 @@ namespace Legion {
     public:
       ReplCopyOp& operator=(const ReplCopyOp &rhs);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2294,7 +2294,7 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -2335,7 +2335,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     public:
-      void initialize_replication(ReplInnerContext *ctx, bool is_first,
+      void initialize_replication(ReplicateContext *ctx, bool is_first,
                                   RtBarrier *ready_barrier = NULL,
                                   RtBarrier *mapping_barrier = NULL,
                                   RtBarrier *execution_barrier = NULL);
@@ -2389,7 +2389,7 @@ namespace Legion {
       ReplDependentPartitionOp& operator=(
                                const ReplDependentPartitionOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *context);
+      void initialize_replication(ReplicateContext *context);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2491,7 +2491,7 @@ namespace Legion {
       void map_replicate_tasks(void);
       void distribute_replicate_tasks(void);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
       Domain get_shard_domain(void) const;
       size_t count_shard_local_points(IndexSpaceNode *launch_domain);
     public:
@@ -2555,7 +2555,7 @@ namespace Legion {
     public:
       ReplTunableOp& operator=(const ReplTunableOp &rhs);
     public:
-      void initialize_replication(ReplInnerContext *context);
+      void initialize_replication(ReplicateContext *context);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2578,7 +2578,7 @@ namespace Legion {
     public:
       ReplAllReduceOp& operator=(const ReplAllReduceOp &rhs);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2616,7 +2616,7 @@ namespace Legion {
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent pre, ApEvent complete_event);
     protected:
-      void initialize_fence_barriers(ReplInnerContext *repl_ctx = NULL);
+      void initialize_fence_barriers(ReplicateContext *repl_ctx = NULL);
     protected:
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
@@ -2640,7 +2640,7 @@ namespace Legion {
     public:
       ReplMapOp& operator=(const ReplMapOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2675,7 +2675,7 @@ namespace Legion {
     public:
       ReplAttachOp& operator=(const ReplAttachOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *ctx,
+      void initialize_replication(ReplicateContext *ctx,
                                   bool collective_instances,
                                   bool deduplicate_across_shards,
                                   bool first_local_shard);
@@ -2743,7 +2743,7 @@ namespace Legion {
       virtual bool are_all_direct_children(bool local);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       IndexAttachExchange *collective;
       ShardParticipantsExchange *participants;
@@ -2764,7 +2764,7 @@ namespace Legion {
     public:
       ReplDetachOp& operator=(const ReplDetachOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *ctx,
+      void initialize_replication(ReplicateContext *ctx,
                                   bool collective_instances,
                                   bool first_local_shard);
     public:
@@ -2813,7 +2813,7 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual ApEvent get_complete_effects(void);
     public:
-      void initialize_replication(ReplInnerContext *ctx);
+      void initialize_replication(ReplicateContext *ctx);
       void record_unordered_kind(std::map<
           std::pair<LogicalRegion,FieldID>,Operation*> &region_detachments,
           std::map<std::pair<
@@ -2838,7 +2838,7 @@ namespace Legion {
     public:
       ReplAcquireOp& operator=(const ReplAcquireOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *context,
+      void initialize_replication(ReplicateContext *context,
                                   bool first_local_shard);
     public:
       virtual void activate(void);
@@ -2872,7 +2872,7 @@ namespace Legion {
     public:
       ReplReleaseOp& operator=(const ReplReleaseOp &rhs) = delete;
     public:
-      void initialize_replication(ReplInnerContext *context,
+      void initialize_replication(ReplicateContext *context,
                                   bool first_local_shard);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -2909,7 +2909,7 @@ namespace Legion {
     public:
       virtual bool is_tracing_fence(void) const override { return true; }
       virtual void sync_for_replayable_check(void);
-      virtual bool exchange_replayable(ReplInnerContext *ctx, bool replayable);
+      virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
       virtual void sync_compute_frontiers(RtEvent precondition);
     };
     
@@ -2927,7 +2927,7 @@ namespace Legion {
     public:
       ReplTraceCaptureOp& operator=(const ReplTraceCaptureOp &rhs);
     public:
-      void initialize_capture(ReplInnerContext *ctx, Provenance *provenance,
+      void initialize_capture(ReplicateContext *ctx, Provenance *provenance,
           bool has_blocking_call, bool remove_trace_reference);
     public:
       virtual void activate(void);
@@ -2938,7 +2938,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
-      virtual bool exchange_replayable(ReplInnerContext *ctx, bool replayable);
+      virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
       virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
@@ -2965,7 +2965,7 @@ namespace Legion {
     public:
       ReplTraceCompleteOp& operator=(const ReplTraceCompleteOp &rhs);
     public:
-      void initialize_complete(ReplInnerContext *ctx, Provenance *provenance,
+      void initialize_complete(ReplicateContext *ctx, Provenance *provenance,
                                bool has_blocking_call);
     public:
       virtual void activate(void);
@@ -2976,7 +2976,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
-      virtual bool exchange_replayable(ReplInnerContext *ctx, bool replayable);
+      virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
       virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
@@ -3004,7 +3004,7 @@ namespace Legion {
     public:
       ReplTraceReplayOp& operator=(const ReplTraceReplayOp &rhs);
     public:
-      void initialize_replay(ReplInnerContext *ctx, LogicalTrace *trace,
+      void initialize_replay(ReplicateContext *ctx, LogicalTrace *trace,
                              Provenance *provenance);
     public:
       virtual void activate(void);
@@ -3040,7 +3040,7 @@ namespace Legion {
     public:
       ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs);
     public:
-      void initialize_begin(ReplInnerContext *ctx, LogicalTrace *trace,
+      void initialize_begin(ReplicateContext *ctx, LogicalTrace *trace,
                             Provenance *provenance);
     public:
       virtual void activate(void);
@@ -3064,7 +3064,7 @@ namespace Legion {
     public:
       ReplTraceSummaryOp& operator=(const ReplTraceSummaryOp &rhs);
     public:
-      void initialize_summary(ReplInnerContext *ctx,
+      void initialize_summary(ReplicateContext *ctx,
                               ShardedPhysicalTemplate *tpl,
                               Operation *invalidator,
                               Provenance *provenance);
@@ -3165,7 +3165,7 @@ namespace Legion {
       inline const std::set<AddressSpace>& get_unique_shard_spaces(void) const
         { return unique_shard_spaces; }
       inline ReplicateContext* find_local_context(void) const
-        { return local_shards[0]->get_shard_execution_context(); }
+        { return local_shards[0]->get_replicate_context(); }
       inline size_t count_local_shards(void) const 
         { return local_shards.size(); }
       inline unsigned find_local_index(ShardTask *task) const
@@ -3178,7 +3178,7 @@ namespace Legion {
         }
       inline ContextID get_first_shard_tree_context(void) const
         { return local_shards.front()->
-          get_shard_execution_context()->get_logical_tree_context(); }
+          get_replicate_context()->get_logical_tree_context(); }
     public:
       void distribute_explicit(SingleTask *task, VariantID chosen_variant,
                                std::vector<Processor> &target_processors);
@@ -3210,12 +3210,12 @@ namespace Legion {
                                                bool &set_view);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
-      Future deduplicate_future_creation(ReplInnerContext *ctx,
+      Future deduplicate_future_creation(ReplicateContext *ctx,
           DistributedID did, Operation *op, const DomainPoint &point);
-      FutureMap deduplicate_future_map_creation(ReplInnerContext *ctx,
+      FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
           Operation *op, IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
           DistributedID did, Provenance *provenance); 
-      FutureMap deduplicate_future_map_creation(ReplInnerContext *ctx,
+      FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
           IndexSpaceNode *domain, IndexSpaceNode *shard_domain, size_t index,
           DistributedID did, ApEvent completion, Provenance *provenance);
       // Return true if we have a shard on every address space

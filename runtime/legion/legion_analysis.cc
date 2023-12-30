@@ -4392,7 +4392,7 @@ namespace Legion {
     ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
                            ProjectionNode *node, Operation *op, unsigned index,
                            const RegionRequirement &req, LogicalState *state,
-                           ReplInnerContext *context)
+                           ReplicateContext *context)
       : owner(state), domain(proj_info.projection_space),
         projection(proj_info.projection), sharding(proj_info.sharding_function),
         sharding_domain(proj_info.sharding_space),

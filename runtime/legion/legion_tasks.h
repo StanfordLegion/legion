@@ -1076,7 +1076,7 @@ namespace Legion {
                                               ShardID remote_shard);
       ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
                                                  ShardID remote_shard);
-      ReplicateContext* get_shard_execution_context(void) const;
+      ReplicateContext* get_replicate_context(void) const;
     public:
       void initialize_implicit_task(TaskID tid, MapperID mid, Processor proxy);
       RtEvent complete_startup_initialization(void);

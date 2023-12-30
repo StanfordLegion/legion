@@ -2763,7 +2763,12 @@ namespace Legion {
       if (owner != NULL)
       {
         TaskContext *owner_ctx = owner_task->get_context();
-        InnerContext *parent_ctx = owner_ctx->as_inner_context();
+#ifdef DEBUG_LEGION
+        InnerContext *parent_ctx = dynamic_cast<InnerContext*>(owner_ctx);
+        assert(parent_ctx != NULL);
+#else
+        InnerContext *paarent_ctx = static_cast<InnerContext*>(owner_ctx);
+#endif
         parent_ctx->clone_local_fields(local_field_infos);
         // Get the coordinates for the parent task
         parent_ctx->compute_task_tree_coordinates(context_coordinates);
@@ -10878,7 +10883,7 @@ namespace Legion {
         ShardManager *manager =
           runtime->find_shard_manager(man_did, true/*can fail*/);
         if (manager != NULL)
-          return manager->find_local_context()->as_inner_context();
+          return manager->find_local_context();
       }
       return runtime->find_or_request_inner_context(ctx_did);
     }
@@ -11729,8 +11734,8 @@ namespace Legion {
       derez.deserialize(context_did);
       // This should always be coming back to the owner node so there's no
       // need to defer this is at should always be here
-      InnerContext *local_ctx = static_cast<TaskContext*>(
-        runtime->find_distributed_collectable(context_did))->as_inner_context();
+      InnerContext *local_ctx = static_cast<InnerContext*>(
+        runtime->find_distributed_collectable(context_did));
       std::vector<EqSetTracker*> targets(1);
       derez.deserialize(targets.back());
       IndexSpaceExpression *expr = 
@@ -12003,9 +12008,8 @@ namespace Legion {
       DistributedID context_did;
       derez.deserialize(context_did);
       // The context might already be deleted so do a weak find
-      InnerContext *context = static_cast<TaskContext*>(
-          runtime->weak_find_distributed_collectable(
-            context_did))->as_inner_context();
+      InnerContext *context = static_cast<InnerContext*>(
+          runtime->weak_find_distributed_collectable(context_did));
       if (context == NULL)
         return;
       context->notify_collective_deletion(tid, collective_did);
@@ -13062,11 +13066,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, Processor p, DistributedID id,
                                      CollectiveMapping *mapping)
-      : TaskContext(rt, NULL, -1, dummy_requirements, dummy_output_requirements,
-                    LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id :
-                      rt->get_available_distributed_id(), INNER_CONTEXT_DC),
-                    (id == 0)/*register if not remote*/, false, false, mapping),
-        InnerContext(rt, NULL, -1, false/*full inner*/,
+      : InnerContext(rt, NULL, -1, false/*full inner*/,
                      dummy_requirements, dummy_output_requirements,
                      dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT,
                      id, false, false, false, mapping),
@@ -13159,353 +13159,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplicateContext::ReplicateContext(ShardManager *manager, ShardTask *owner,
-                         int d, const std::vector<RegionRequirement> &reqs,
-                         const std::vector<OutputRequirement> &output_reqs,
-                         DistributedID did, bool inline_task, bool implicit_ctx)
-      : TaskContext(manager->runtime, owner, d, reqs, output_reqs, did, true,
-                    inline_task, implicit_ctx), shard_manager(manager),
-        owner_shard(owner), total_shards(manager->total_shards),
-        next_available_collective_index(0), next_logical_collective_index(1),
-        next_replicate_bar_index(0), next_logical_bar_index(0)
-    //--------------------------------------------------------------------------
-    {
-      // Configure our collective settings
-      shard_collective_radix = runtime->legion_collective_radix;
-      configure_collective_settings(total_shards, owner->shard_id,
-          shard_collective_radix, shard_collective_log_radix,
-          shard_collective_stages, shard_collective_participating_shards,
-          shard_collective_last_radix);
-#ifdef DEBUG_LEGION_COLLECTIVES
-      collective_guard_reentrant = false;
-      logical_guard_reentrant = false;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    ReplicateContext::~ReplicateContext(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    const DomainPoint& ReplicateContext::get_shard_point(void) const
-    //--------------------------------------------------------------------------
-    {
-      return shard_manager->shard_points[owner_shard->shard_id];
-    }
-
-    //--------------------------------------------------------------------------
-    DistributedID ReplicateContext::get_replication_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return shard_manager->did;
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveID ReplicateContext::get_next_collective_index(
-                                      CollectiveIndexLocation loc, bool logical)
-    //--------------------------------------------------------------------------
-    {
-      // No need for a lock, should only be coming from the creation
-      // of operations directly from the application and therefore
-      // should be deterministic
-      // Count by 2s to avoid conflicts with the collectives from the 
-      // logical depedence analysis stage of the pipeline
-      if (logical)
-      {
-#ifdef DEBUG_LEGION_COLLECTIVES
-        if (!logical_guard_reentrant)
-        {
-          CollectiveCheckReduction::RHS location = loc;
-          // Guard against coming back in here when advancing the barrier
-          logical_guard_reentrant = true;
-          const RtBarrier logical_check_bar = logical_check_barrier.next(this,
-              CollectiveCheckReduction::REDOP, 
-              &CollectiveCheckReduction::IDENTITY,
-              sizeof(CollectiveCheckReduction::IDENTITY));
-          logical_guard_reentrant = false;
-          Runtime::phase_barrier_arrive(logical_check_bar, 1/*count*/,
-                             RtEvent::NO_RT_EVENT, &location, sizeof(location));
-          logical_check_bar.wait();
-          CollectiveCheckReduction::RHS actual_location;
-          bool ready = Runtime::get_barrier_result(logical_check_bar,
-                                     &actual_location, sizeof(actual_location));
-          assert(ready);
-          assert(location == actual_location);
-        }
-#endif
-        const CollectiveID result = next_logical_collective_index;
-        next_logical_collective_index += 2;
-        return result;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION_COLLECTIVES
-        if (!collective_guard_reentrant)
-        {
-          CollectiveCheckReduction::RHS location = loc;
-          // Guard against coming back in here when advancing the barrier
-          collective_guard_reentrant = true;
-          const RtBarrier collective_check_bar = collective_check_barrier.next(
-              this, CollectiveCheckReduction::REDOP, 
-              &CollectiveCheckReduction::IDENTITY,
-              sizeof(CollectiveCheckReduction::IDENTITY));
-          collective_guard_reentrant = false;
-          Runtime::phase_barrier_arrive(collective_check_bar, 1/*count*/,
-                             RtEvent::NO_RT_EVENT, &location, sizeof(location));
-          collective_check_bar.wait();
-          CollectiveCheckReduction::RHS actual_location;
-          bool ready = Runtime::get_barrier_result(collective_check_bar,
-                                     &actual_location, sizeof(actual_location));
-          assert(ready);
-          assert(location == actual_location);
-        }
-#endif
-        const CollectiveID result = next_available_collective_index;
-        next_available_collective_index += 2; 
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_collective(ShardCollective *collective)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<std::pair<void*,size_t> > to_apply;
-      {
-        AutoLock repl_lock(replication_lock);
-#ifdef DEBUG_LEGION
-        assert(collectives.find(collective->collective_index) == 
-               collectives.end());
-        assert(shard_manager != NULL);
-#endif
-        // If the collectives are empty then we add a reference to the
-        // shard manager to prevent it being collected before we're
-        // done handling all the collectives
-        if (collectives.empty())
-          shard_manager->add_nested_gc_ref(did);
-        collectives[collective->collective_index] = collective;
-        std::map<CollectiveID,std::vector<std::pair<void*,size_t> > >::
-          iterator finder = pending_collective_updates.find(
-                                                collective->collective_index);
-        if (finder != pending_collective_updates.end())
-        {
-          to_apply.swap(finder->second);
-          pending_collective_updates.erase(finder);
-        }
-      }
-      if (!to_apply.empty())
-      {
-        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
-              to_apply.begin(); it != to_apply.end(); it++)
-        {
-          Deserializer derez(it->first, it->second);
-          collective->handle_collective_message(derez);
-          free(it->first);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    ShardCollective* ReplicateContext::find_or_buffer_collective(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveID collective_index;
-      derez.deserialize(collective_index);
-      AutoLock repl_lock(replication_lock);
-      // See if we already have the collective in which case we can just
-      // return it, otherwise we need to buffer the deserializer
-      std::map<CollectiveID,ShardCollective*>::const_iterator finder = 
-        collectives.find(collective_index);
-      if (finder != collectives.end())
-        return finder->second;
-      // If we couldn't find it then we have to buffer it for the future
-      const size_t remaining_bytes = derez.get_remaining_bytes();
-      void *buffer = malloc(remaining_bytes);
-      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
-      derez.advance_pointer(remaining_bytes);
-      pending_collective_updates[collective_index].push_back(
-          std::pair<void*,size_t>(buffer, remaining_bytes));
-      return NULL;
-    } 
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::handle_collective_message(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardCollective *collective = find_or_buffer_collective(derez);   
-      if (collective != NULL)
-        collective->handle_collective_message(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::unregister_collective(ShardCollective *collective)
-    //--------------------------------------------------------------------------
-    {
-      bool remove_reference = false;
-      {
-        AutoLock repl_lock(replication_lock); 
-        std::map<CollectiveID,ShardCollective*>::iterator finder =
-          collectives.find(collective->collective_index);
-        // Sometimes collectives are not used
-        if (finder != collectives.end())
-        {
-          collectives.erase(finder);
-          // Once we've done all our collectives then we can remove the
-          // reference that we added on the shard manager
-          remove_reference = collectives.empty();
-        }
-      }
-      if (remove_reference && shard_manager->remove_nested_gc_ref(did))
-        delete shard_manager;
-    } 
-
-    //--------------------------------------------------------------------------
-    bool ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 
-#ifdef DEBUG_LEGION_COLLECTIVES
-                ReductionOpID redop, const void *init, size_t init_size,
-#endif
-                                                        size_t arrivals)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!bar.exists());
-      assert(next_replicate_bar_index < total_shards);
-#endif
-      bool created = false;
-      ValueBroadcast<RtBarrier> 
-        collective(this, next_replicate_bar_index, COLLECTIVE_LOC_83);
-      if (owner_shard->shard_id == next_replicate_bar_index++)
-      {
-#ifdef DEBUG_LEGION_COLLECTIVES
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                       init, init_size));
-#else
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
-#endif
-        collective.broadcast(bar);
-        created = true;
-      }
-      else
-        bar = collective.get_value();
-      // Check to see if we need to reset the next_replicate_bar_index
-      if (next_replicate_bar_index == total_shards)
-       next_replicate_bar_index = 0;
-      return created;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplicateContext::create_new_replicate_barrier(ApBarrier &bar,
-#ifdef DEBUG_LEGION_COLLECTIVES
-                ReductionOpID redop, const void *init, size_t init_size,
-#endif
-                                                        size_t arrivals)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!bar.exists());
-      assert(next_replicate_bar_index < total_shards);
-#endif
-      bool created = false;
-      ValueBroadcast<ApBarrier> 
-        collective(this, next_replicate_bar_index, COLLECTIVE_LOC_84);
-      if (owner_shard->shard_id == next_replicate_bar_index++)
-      {
-#ifdef DEBUG_LEGION_COLLECTIVES
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                       init, init_size));
-#else
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-#endif
-        collective.broadcast(bar);
-        created = true;
-      }
-      else
-        bar = collective.get_value();
-      // Check to see if we need to reset the next_replicate_bar_index
-      if (next_replicate_bar_index == total_shards)
-        next_replicate_bar_index = 0;
-      return created;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplicateContext::create_new_logical_barrier(RtBarrier &bar, 
-#ifdef DEBUG_LEGION_COLLECTIVES
-                ReductionOpID redop, const void *init, size_t init_size,
-#endif
-                                                      size_t arrivals)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!bar.exists());
-      assert(next_logical_bar_index < total_shards);
-#endif
-      bool created = false;
-      const CollectiveID cid =
-        get_next_collective_index(COLLECTIVE_LOC_18, true/*logical*/);
-      ValueBroadcast<RtBarrier> collective(cid, this, next_logical_bar_index);
-      if (owner_shard->shard_id == next_logical_bar_index++)
-      {
-#ifdef DEBUG_LEGION_COLLECTIVES
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                       init, init_size));
-#else
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
-#endif
-        collective.broadcast(bar);
-        created = true;
-      }
-      else
-        bar = collective.get_value();
-      // Check to see if we need to reset the next_replicate_bar_index
-      if (next_logical_bar_index == total_shards)
-        next_logical_bar_index = 0;
-      return created;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplicateContext::create_new_logical_barrier(ApBarrier &bar, 
-#ifdef DEBUG_LEGION_COLLECTIVES
-                ReductionOpID redop, const void *init, size_t init_size,
-#endif
-                                                      size_t arrivals)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!bar.exists());
-      assert(next_logical_bar_index < total_shards);
-#endif
-      bool created = false;
-      const CollectiveID cid =
-        get_next_collective_index(COLLECTIVE_LOC_24, true/*logical*/);
-      ValueBroadcast<ApBarrier> collective(cid, this, next_logical_bar_index);
-      if (owner_shard->shard_id == next_logical_bar_index++)
-      {
-#ifdef DEBUG_LEGION_COLLECTIVES
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                       init, init_size));
-#else
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-#endif
-        collective.broadcast(bar);
-        created = true;
-      }
-      else
-        bar = collective.get_value();
-      // Check to see if we need to reset the next_replicate_bar_index
-      if (next_logical_bar_index == total_shards)
-        next_logical_bar_index = 0;
-      return created;
-    } 
-
-    /////////////////////////////////////////////////////////////
-    // Replicate Inner Context 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReplInnerContext::ReplInnerContext(Runtime *rt, 
+    ReplicateContext::ReplicateContext(Runtime *rt, 
                                  ShardTask *owner, int d, bool full,
                                  const std::vector<RegionRequirement> &reqs,
                                  const std::vector<OutputRequirement> &out_reqs,
@@ -13514,21 +13168,19 @@ namespace Legion {
                                  ApEvent exec_fence,
                                  ShardManager *manager, bool inline_task,
                                  bool implicit_task, bool concurrent)
-      : TaskContext(rt, owner, d, reqs, out_reqs,
-          LEGION_DISTRIBUTED_HELP_ENCODE(
-            rt->get_available_distributed_id(), INNER_CONTEXT_DC),
-            true/*register*/, inline_task, implicit_task),
-        InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
+      : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
          virt_mapped, exec_fence, 0, inline_task, implicit_task, concurrent),
-        ReplicateContext(manager, owner, d, reqs, out_reqs, did, 
-                         inline_task, implicit_task),
+        owner_shard(owner), shard_manager(manager),
+        total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
         next_refinement_mapped_bar_index(0), next_indirection_bar_index(0), 
         next_collective_map_bar_index(0), distributed_id_allocator_shard(0),
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), dynamic_id_allocator_shard(0),
-        equivalence_set_allocator_shard(0),  next_physical_template_index(0),  
+        equivalence_set_allocator_shard(0), next_available_collective_index(0),
+        next_logical_collective_index(1), next_physical_template_index(0), 
+        next_replicate_bar_index(0), next_logical_bar_index(0),
         unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH),
         unordered_collective(NULL)
     //--------------------------------------------------------------------------
@@ -13543,11 +13195,17 @@ namespace Legion {
       refinement_ready_barriers.resize(num_barriers);
       refinement_mapped_barriers.resize(num_barriers);
       indirection_barriers.resize(num_barriers);
-      collective_map_barriers.resize(num_barriers); 
+      collective_map_barriers.resize(num_barriers);
+      // Configure our collective settings
+      shard_collective_radix = runtime->legion_collective_radix;
+      configure_collective_settings(total_shards, owner->shard_id,
+          shard_collective_radix, shard_collective_log_radix,
+          shard_collective_stages, shard_collective_participating_shards,
+          shard_collective_last_radix);
     }
 
     //--------------------------------------------------------------------------
-    ReplInnerContext::~ReplInnerContext(void)
+    ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13564,18 +13222,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ContextID ReplInnerContext::get_physical_tree_context(void) const
+    ContextID ReplicateContext::get_physical_tree_context(void) const
     //--------------------------------------------------------------------------
     {
       // We have all the shards on the same node use the same physical
       // tree context. This is vital for the correct implementation of
       // some parts of physical analysis equivalence set discovery.
       return shard_manager->get_first_shard_tree_context();
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedID ReplicateContext::get_replication_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->did;
+    }
 
 #ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
-    void ReplInnerContext::perform_global_registration_callbacks(
+    void ReplicateContext::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
                      size_t buffer_size, bool withargs, size_t dedup_tag,
                      RtEvent local_done, RtEvent global_done, 
@@ -13603,7 +13268,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::print_once(FILE *f, const char *message) const
+    void ReplicateContext::print_once(FILE *f, const char *message) const
     //--------------------------------------------------------------------------
     {
       // Only print from shard 0
@@ -13612,7 +13277,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::log_once(Realm::LoggerMessage &message) const
+    void ReplicateContext::log_once(Realm::LoggerMessage &message) const
     //--------------------------------------------------------------------------
     {
       // Deactivate all the messages except shard 0
@@ -13621,7 +13286,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::from_value(const void *value, size_t size,
+    Future ReplicateContext::from_value(const void *value, size_t size,
                            bool owned, Provenance *provenance, bool shard_local)
     //--------------------------------------------------------------------------
     {
@@ -13642,7 +13307,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::from_value(const void *buffer, size_t size,
+    Future ReplicateContext::from_value(const void *buffer, size_t size,
                    bool owned, const Realm::ExternalInstanceResource &resource,
                    void (*freefunc)(const Realm::ExternalInstanceResource&),
                    Provenance *provenance, bool shard_local)
@@ -13665,7 +13330,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::consensus_match(const void *input, void *output,
+    Future ReplicateContext::consensus_match(const void *input, void *output,
                size_t num_elements, size_t element_size, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -13728,7 +13393,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantID ReplInnerContext::register_variant(
+    VariantID ReplicateContext::register_variant(
           const TaskVariantRegistrar &registrar, const void *user_data,
           size_t user_data_size, const CodeDescriptor &desc, 
           size_t ret_size, bool has_ret_size, VariantID vid, bool check_task_id)
@@ -13844,7 +13509,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* ReplInnerContext::select_inline_variant(TaskOp *child,
+    VariantImpl* ReplicateContext::select_inline_variant(TaskOp *child,
                               const std::vector<PhysicalRegion> &parent_regions,
                               std::deque<InstanceSet> &physical_instances)
     //--------------------------------------------------------------------------
@@ -13871,7 +13536,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceID ReplInnerContext::generate_dynamic_trace_id(void)
+    TraceID ReplicateContext::generate_dynamic_trace_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -13905,7 +13570,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MapperID ReplInnerContext::generate_dynamic_mapper_id(void)
+    MapperID ReplicateContext::generate_dynamic_mapper_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -13939,7 +13604,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionID ReplInnerContext::generate_dynamic_projection_id(void)
+    ProjectionID ReplicateContext::generate_dynamic_projection_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -13974,7 +13639,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingID ReplInnerContext::generate_dynamic_sharding_id(void)
+    ShardingID ReplicateContext::generate_dynamic_sharding_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -14008,7 +13673,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskID ReplInnerContext::generate_dynamic_task_id(void)
+    TaskID ReplicateContext::generate_dynamic_task_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -14042,7 +13707,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReductionOpID ReplInnerContext::generate_dynamic_reduction_id(void)
+    ReductionOpID ReplicateContext::generate_dynamic_reduction_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -14076,7 +13741,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CustomSerdezID ReplInnerContext::generate_dynamic_serdez_id(void)
+    CustomSerdezID ReplicateContext::generate_dynamic_serdez_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
@@ -14110,7 +13775,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::perform_semantic_attach(const char *func, 
+    bool ReplicateContext::perform_semantic_attach(const char *func, 
         unsigned kind, const void *arg, size_t arglen, SemanticTag tag,
         const void *buffer, size_t size, bool is_mutable, bool &global,
         const void *arg2, size_t arg2len)
@@ -14165,7 +13830,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::post_semantic_attach(void)
+    void ReplicateContext::post_semantic_attach(void)
     //--------------------------------------------------------------------------
     {
       if (inside_registration_callback)
@@ -14177,7 +13842,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::hash_future(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_future(Murmur3Hasher &hasher,
                                        const unsigned safe_level,
                                        const Future &future, 
                                        const char *description) const
@@ -14207,7 +13872,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_future_map(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_future_map(Murmur3Hasher &hasher,
                                   const FutureMap &map, const char *description)
     //--------------------------------------------------------------------------
     {
@@ -14217,7 +13882,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_index_space_requirements(
+    /*static*/ void ReplicateContext::hash_index_space_requirements(
           Murmur3Hasher &hasher, const std::vector<IndexSpaceRequirement> &reqs)
     //--------------------------------------------------------------------------
     {
@@ -14232,7 +13897,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_region_requirements(
+    /*static*/ void ReplicateContext::hash_region_requirements(
            Murmur3Hasher &hasher, const std::vector<RegionRequirement> &regions)
     //--------------------------------------------------------------------------
     {
@@ -14246,7 +13911,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_output_requirements(
+    /*static*/ void ReplicateContext::hash_output_requirements(
            Murmur3Hasher &hasher, const std::vector<OutputRequirement> &outputs)
     //--------------------------------------------------------------------------
     {
@@ -14260,7 +13925,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_grants(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_grants(Murmur3Hasher &hasher,
                                                const std::vector<Grant> &grants)
     //--------------------------------------------------------------------------
     {
@@ -14274,7 +13939,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_phase_barriers(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_phase_barriers(Murmur3Hasher &hasher,
                                       const std::vector<PhaseBarrier> &barriers)
     //--------------------------------------------------------------------------
     {
@@ -14293,7 +13958,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_argument(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_argument(Murmur3Hasher &hasher,
     unsigned safe_level, const UntypedBuffer &argument, const char *description)
     //--------------------------------------------------------------------------
     {
@@ -14304,7 +13969,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_predicate(Murmur3Hasher &hasher,
+    /*static*/ void ReplicateContext::hash_predicate(Murmur3Hasher &hasher,
                                  const Predicate &pred, const char *description)
     //--------------------------------------------------------------------------
     {
@@ -14317,7 +13982,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::hash_static_dependences(
+    /*static*/ void ReplicateContext::hash_static_dependences(
         Murmur3Hasher &hasher, const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
@@ -14343,7 +14008,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::hash_task_launcher(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
                   const unsigned safe_level, const TaskLauncher &launcher) const
     //--------------------------------------------------------------------------
     {
@@ -14376,7 +14041,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::hash_index_launcher(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_index_launcher(Murmur3Hasher &hasher,
                    const unsigned safe_level, const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -14420,7 +14085,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::hash_execution_constraints(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_execution_constraints(Murmur3Hasher &hasher,
                                       const ExecutionConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
@@ -14460,7 +14125,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::hash_layout_constraints(Murmur3Hasher &hasher,
+    void ReplicateContext::hash_layout_constraints(Murmur3Hasher &hasher,
                      const LayoutConstraintSet &constraints, bool hash_pointers)
     //--------------------------------------------------------------------------
     {
@@ -14534,7 +14199,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::verify_hash(const uint64_t hash[2],
+    bool ReplicateContext::verify_hash(const uint64_t hash[2],
         const char *description, Provenance *provenance, bool verify_every_call)
     //--------------------------------------------------------------------------
     {
@@ -14571,10 +14236,18 @@ namespace Legion {
             "Specific control replication violation occurred from member %s",
             description);
       return false;
-    } 
+    }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet* ReplInnerContext::create_initial_equivalence_set(
+    /*static*/ void ReplicateContext::help_complete_future(Future &f,
+                               const void *result, size_t result_size, bool own)
+    //--------------------------------------------------------------------------
+    {
+      f.impl->set_local(result, result_size, own);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ReplicateContext::create_initial_equivalence_set(
                                      unsigned idx, const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
@@ -14583,7 +14256,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::receive_created_region_contexts(
+    void ReplicateContext::receive_created_region_contexts(
            const std::vector<RegionNode*> &created_nodes,
            const std::vector<EqKDTree*> &created_trees,
            std::set<RtEvent> &applied_events,
@@ -14671,7 +14344,7 @@ namespace Legion {
 
 #if 0
     //--------------------------------------------------------------------------
-    void ReplInnerContext::receive_replicate_created_region_contexts(
+    void ReplicateContext::receive_replicate_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
            const std::multimap<ShardID,ShardID> &src_to_dst_mapping,
            size_t num_srcs, std::set<RtEvent> &applied_events)
@@ -14733,7 +14406,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::compute_shard_to_shard_mapping(
+    bool ReplicateContext::compute_shard_to_shard_mapping(
                                    const ShardMapping &src_mapping, 
                                    std::multimap<ShardID,ShardID> &result) const
     //--------------------------------------------------------------------------
@@ -14835,7 +14508,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space(const Domain &domain, 
+    IndexSpace ReplicateContext::create_index_space(const Domain &domain, 
                                        TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -14855,7 +14528,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space_replicated(
+    IndexSpace ReplicateContext::create_index_space_replicated(
                  const Domain *domain, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -14928,7 +14601,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_unbound_index_space(TypeTag type_tag,
+    IndexSpace ReplicateContext::create_unbound_index_space(TypeTag type_tag,
                                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -14947,7 +14620,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::increase_pending_index_spaces(unsigned count,
+    void ReplicateContext::increase_pending_index_spaces(unsigned count,
                                                          bool double_next)
     //--------------------------------------------------------------------------
     {
@@ -14985,7 +14658,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space(const Future &future, 
+    IndexSpace ReplicateContext::create_index_space(const Future &future, 
                                        TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15079,7 +14752,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space(
+    IndexSpace ReplicateContext::create_index_space(
                  const std::vector<DomainPoint> &points, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15119,7 +14792,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space(
+    IndexSpace ReplicateContext::create_index_space(
                        const std::vector<Domain> &rects, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15158,7 +14831,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::union_index_spaces(
+    IndexSpace ReplicateContext::union_index_spaces(
                   const std::vector<IndexSpace> &spaces, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15259,7 +14932,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::intersect_index_spaces(
+    IndexSpace ReplicateContext::intersect_index_spaces(
                   const std::vector<IndexSpace> &spaces, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15360,7 +15033,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::subtract_index_spaces(
+    IndexSpace ReplicateContext::subtract_index_spaces(
                       IndexSpace left, IndexSpace right, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15451,7 +15124,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::create_shared_ownership(IndexSpace handle)
+    void ReplicateContext::create_shared_ownership(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -15489,7 +15162,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_index_space(IndexSpace handle,
+    void ReplicateContext::destroy_index_space(IndexSpace handle,
                const bool unordered, const bool recurse, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15589,7 +15262,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::create_shared_ownership(IndexPartition handle)
+    void ReplicateContext::create_shared_ownership(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -15619,7 +15292,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_index_partition(IndexPartition handle,
+    void ReplicateContext::destroy_index_partition(IndexPartition handle,
                const bool unordered, const bool recurse, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -15710,7 +15383,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::increase_pending_partitions(unsigned count,
+    void ReplicateContext::increase_pending_partitions(unsigned count,
                                                        bool double_next)
     //--------------------------------------------------------------------------
     {
@@ -15748,7 +15421,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::create_shard_partition(Operation *op, 
+    bool ReplicateContext::create_shard_partition(Operation *op, 
            IndexPartition &pid, IndexSpace parent, 
            IndexSpace color_space, Provenance *provenance,
            PartitionKind part_kind, LegionColor partition_color,
@@ -15841,7 +15514,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_equal_partition(
+    IndexPartition ReplicateContext::create_equal_partition(
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       size_t granularity,
@@ -15884,7 +15557,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_weights(
+    IndexPartition ReplicateContext::create_partition_by_weights(
                                                 IndexSpace parent,
                                                 const FutureMap &weights, 
                                                 IndexSpace color_space,
@@ -15929,7 +15602,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_union(
+    IndexPartition ReplicateContext::create_partition_by_union(
                                           IndexSpace parent,
                                           IndexPartition handle1,
                                           IndexPartition handle2,
@@ -16023,7 +15696,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_intersection(
+    IndexPartition ReplicateContext::create_partition_by_intersection(
                                               IndexSpace parent,
                                               IndexPartition handle1,
                                               IndexPartition handle2,
@@ -16116,7 +15789,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_intersection(
+    IndexPartition ReplicateContext::create_partition_by_intersection(
                                                 IndexSpace parent,
                                                 IndexPartition partition,
                                                 PartitionKind kind, Color color,
@@ -16190,7 +15863,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_difference(
+    IndexPartition ReplicateContext::create_partition_by_difference(
                                                   IndexSpace parent,
                                                   IndexPartition handle1,
                                                   IndexPartition handle2,
@@ -16273,7 +15946,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color ReplInnerContext::create_cross_product_partitions(
+    Color ReplicateContext::create_cross_product_partitions(
                                               IndexPartition handle1,
                                               IndexPartition handle2,
                                 std::map<IndexSpace,IndexPartition> &handles,
@@ -16434,7 +16107,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::create_association(LogicalRegion domain,
+    void ReplicateContext::create_association(LogicalRegion domain,
                                               LogicalRegion domain_parent,
                                               FieldID domain_fid,
                                               IndexSpace range,
@@ -16492,7 +16165,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_restricted_partition(
+    IndexPartition ReplicateContext::create_restricted_partition(
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               const void *transform,
@@ -16546,7 +16219,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_domain(
+    IndexPartition ReplicateContext::create_partition_by_domain(
                                                 IndexSpace parent,
                                     const std::map<DomainPoint,Domain> &domains,
                                                 IndexSpace color_space,
@@ -16596,7 +16269,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_domain(
+    IndexPartition ReplicateContext::create_partition_by_domain(
                                                     IndexSpace parent,
                                                     const FutureMap &domains,
                                                     IndexSpace color_space,
@@ -16649,7 +16322,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_field(
+    IndexPartition ReplicateContext::create_partition_by_field(
                                               LogicalRegion handle,
                                               LogicalRegion parent_priv,
                                               FieldID fid,
@@ -16729,7 +16402,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_image(
+    IndexPartition ReplicateContext::create_partition_by_image(
                                                     IndexSpace handle,
                                                     LogicalPartition projection,
                                                     LogicalRegion parent,
@@ -16810,7 +16483,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_image_range(
+    IndexPartition ReplicateContext::create_partition_by_image_range(
                                                     IndexSpace handle,
                                                     LogicalPartition projection,
                                                     LogicalRegion parent,
@@ -16891,7 +16564,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_preimage(
+    IndexPartition ReplicateContext::create_partition_by_preimage(
                                                   IndexPartition projection,
                                                   LogicalRegion handle,
                                                   LogicalRegion parent,
@@ -16989,7 +16662,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_partition_by_preimage_range(
+    IndexPartition ReplicateContext::create_partition_by_preimage_range(
                                                   IndexPartition projection,
                                                   LogicalRegion handle,
                                                   LogicalRegion parent,
@@ -17071,7 +16744,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition ReplInnerContext::create_pending_partition(
+    IndexPartition ReplicateContext::create_pending_partition(
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       PartitionKind part_kind,
@@ -17120,7 +16793,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space_union(
+    IndexSpace ReplicateContext::create_index_space_union(
                                                     IndexPartition parent,
                                                     const void *realm_color,
                                                     size_t color_size,
@@ -17160,7 +16833,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space_union(
+    IndexSpace ReplicateContext::create_index_space_union(
                                                       IndexPartition parent,
                                                       const void *realm_color,
                                                       size_t color_size,
@@ -17198,7 +16871,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space_intersection(
+    IndexSpace ReplicateContext::create_index_space_intersection(
                                                     IndexPartition parent,
                                                     const void *realm_color,
                                                     size_t color_size,
@@ -17239,7 +16912,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space_intersection(
+    IndexSpace ReplicateContext::create_index_space_intersection(
                                                     IndexPartition parent,
                                                     const void *realm_color,
                                                     size_t color_size,
@@ -17278,7 +16951,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplInnerContext::create_index_space_difference(
+    IndexSpace ReplicateContext::create_index_space_difference(
                                                     IndexPartition parent,
                                                     const void *realm_color,
                                                     size_t color_size,
@@ -17321,7 +16994,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::verify_partition(IndexPartition pid, 
+    void ReplicateContext::verify_partition(IndexPartition pid, 
                                   PartitionKind kind, const char *function_name)
     //--------------------------------------------------------------------------
     {
@@ -17466,7 +17139,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace ReplInnerContext::create_field_space(Provenance *provenance)
+    FieldSpace ReplicateContext::create_field_space(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -17483,7 +17156,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace ReplInnerContext::create_replicated_field_space(
+    FieldSpace ReplicateContext::create_replicated_field_space(
                                        Provenance *provenance, ShardID *creator)
     //--------------------------------------------------------------------------
     {
@@ -17558,7 +17231,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace ReplInnerContext::create_field_space(
+    FieldSpace ReplicateContext::create_field_space(
                                          const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          CustomSerdezID serdez_id,
@@ -17663,7 +17336,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace ReplInnerContext::create_field_space(
+    FieldSpace ReplicateContext::create_field_space(
                                          const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          CustomSerdezID serdez_id,
@@ -17783,7 +17456,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::increase_pending_field_spaces(unsigned count,
+    void ReplicateContext::increase_pending_field_spaces(unsigned count,
                                                          bool double_next)
     //--------------------------------------------------------------------------
     {
@@ -17819,7 +17492,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::create_shared_ownership(FieldSpace handle)
+    void ReplicateContext::create_shared_ownership(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -17840,7 +17513,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_field_space(FieldSpace handle,
+    void ReplicateContext::destroy_field_space(FieldSpace handle,
                                    const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -17935,7 +17608,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldID ReplInnerContext::allocate_field(FieldSpace space,size_t field_size,
+    FieldID ReplicateContext::allocate_field(FieldSpace space,size_t field_size,
                                              FieldID fid, bool local,
                                              CustomSerdezID serdez_id,
                                              Provenance *provenance)
@@ -18030,7 +17703,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::increase_pending_fields(unsigned count, 
+    void ReplicateContext::increase_pending_fields(unsigned count, 
                                                    bool double_next)
     //--------------------------------------------------------------------------
     {
@@ -18063,7 +17736,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldID ReplInnerContext::allocate_field(FieldSpace space,
+    FieldID ReplicateContext::allocate_field(FieldSpace space,
                                              const Future &field_size,
                                              FieldID fid, bool local,
                                              CustomSerdezID serdez_id,
@@ -18178,7 +17851,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::free_field(FieldAllocatorImpl *allocator, 
+    void ReplicateContext::free_field(FieldAllocatorImpl *allocator, 
     FieldSpace space, FieldID fid, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -18234,7 +17907,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::allocate_fields(FieldSpace space,
+    void ReplicateContext::allocate_fields(FieldSpace space,
                                          const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          bool local, CustomSerdezID serdez_id,
@@ -18339,7 +18012,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::allocate_fields(FieldSpace space,
+    void ReplicateContext::allocate_fields(FieldSpace space,
                                          const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          bool local, CustomSerdezID serdez_id,
@@ -18463,7 +18136,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::free_fields(FieldAllocatorImpl *allocator,
+    void ReplicateContext::free_fields(FieldAllocatorImpl *allocator,
                                        FieldSpace space, 
                                        const std::set<FieldID> &to_free,
                                        const bool unordered,
@@ -18531,7 +18204,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion ReplInnerContext::create_logical_region(
+    LogicalRegion ReplicateContext::create_logical_region(
                                                       IndexSpace index_space,
                                                       FieldSpace field_space,
                                                       const bool task_local,
@@ -18640,7 +18313,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::increase_pending_region_trees(unsigned count,
+    void ReplicateContext::increase_pending_region_trees(unsigned count,
                                                          bool double_next)
     //--------------------------------------------------------------------------
     {
@@ -18676,7 +18349,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::create_shared_ownership(LogicalRegion handle)
+    void ReplicateContext::create_shared_ownership(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -18713,7 +18386,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_logical_region(LogicalRegion handle,
+    void ReplicateContext::destroy_logical_region(LogicalRegion handle,
                                    const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -18802,7 +18475,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::reset_equivalence_sets(LogicalRegion parent,
+    void ReplicateContext::reset_equivalence_sets(LogicalRegion parent,
                           LogicalRegion region, const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
@@ -18845,7 +18518,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocatorImpl* ReplInnerContext::create_field_allocator(
+    FieldAllocatorImpl* ReplicateContext::create_field_allocator(
                                               FieldSpace handle, bool unordered)
     //--------------------------------------------------------------------------
     {
@@ -18928,7 +18601,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_field_allocator(FieldSpaceNode *node,
+    void ReplicateContext::destroy_field_allocator(FieldSpaceNode *node,
                                                    bool from_application)
     //--------------------------------------------------------------------------
     {
@@ -18975,7 +18648,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::initialize_unordered_collective(void)
+    void ReplicateContext::initialize_unordered_collective(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18988,7 +18661,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::finalize_unordered_collective(AutoLock &d_lock)
+    void ReplicateContext::finalize_unordered_collective(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19042,7 +18715,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::insert_unordered_ops(AutoLock &d_lock)
+    void ReplicateContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
       // If we have a trace then we're definitely not inserting operations
@@ -19070,7 +18743,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::progress_unordered_operations(bool end_task)
+    void ReplicateContext::progress_unordered_operations(bool end_task)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(dependence_lock);
@@ -19108,7 +18781,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::execute_task(const TaskLauncher &launcher,
+    Future ReplicateContext::execute_task(const TaskLauncher &launcher,
                                         std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
@@ -19163,7 +18836,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ReplInnerContext::execute_index_space(
+    FutureMap ReplicateContext::execute_index_space(
                                         const IndexTaskLauncher &launcher,
                                         std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
@@ -19233,7 +18906,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::execute_index_space(
+    Future ReplicateContext::execute_index_space(
                                         const IndexTaskLauncher &launcher,
                                         ReductionOpID redop, bool deterministic,
                                         std::vector<OutputRequirement> *outputs)
@@ -19314,7 +18987,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::reduce_future_map(const FutureMap &future_map,
+    Future ReplicateContext::reduce_future_map(const FutureMap &future_map,
                                         ReductionOpID redop, bool deterministic,
                                         MapperID mapper_id, MappingTagID tag,
                                         Provenance *provenance,
@@ -19364,7 +19037,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::increase_pending_distributed_ids(unsigned count,
+    void ReplicateContext::increase_pending_distributed_ids(unsigned count,
                                                             bool double_next)
     //--------------------------------------------------------------------------
     {
@@ -19397,7 +19070,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID ReplInnerContext::get_next_distributed_id(void)
+    DistributedID ReplicateContext::get_next_distributed_id(void)
     //--------------------------------------------------------------------------
     {
       if (pending_distributed_ids.empty())
@@ -19435,7 +19108,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ReplInnerContext::construct_future_map(IndexSpace space,
+    FutureMap ReplicateContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
                                 ShardingID sid, bool implicit, bool internal,
@@ -19543,7 +19216,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ReplInnerContext::construct_future_map(IndexSpace space,
+    FutureMap ReplicateContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,Future> &futures,
                                 Provenance *provenance, bool internal,
                                 bool collective, ShardingID sid, bool implicit,
@@ -19640,7 +19313,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion ReplInnerContext::map_region(const InlineLauncher &launcher)
+    PhysicalRegion ReplicateContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -19722,7 +19395,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReplInnerContext::remap_region(const PhysicalRegion &region,
+    ApEvent ReplicateContext::remap_region(const PhysicalRegion &region,
                                            Provenance *provenance,bool internal)
     //--------------------------------------------------------------------------
     {
@@ -19770,7 +19443,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::fill_fields(const FillLauncher &launcher)
+    void ReplicateContext::fill_fields(const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -19847,7 +19520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::fill_fields(const IndexFillLauncher &launcher)
+    void ReplicateContext::fill_fields(const IndexFillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -19937,7 +19610,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::discard_fields(const DiscardLauncher &launcher)
+    void ReplicateContext::discard_fields(const DiscardLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -19994,7 +19667,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::issue_copy(const CopyLauncher &launcher)
+    void ReplicateContext::issue_copy(const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20072,7 +19745,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void ReplInnerContext::issue_copy(const IndexCopyLauncher &launcher)
+    void ReplicateContext::issue_copy(const IndexCopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20166,7 +19839,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::issue_acquire(const AcquireLauncher &launcher)
+    void ReplicateContext::issue_acquire(const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20232,7 +19905,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::issue_release(const ReleaseLauncher &launcher)
+    void ReplicateContext::issue_release(const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20298,7 +19971,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion ReplInnerContext::attach_resource(
+    PhysicalRegion ReplicateContext::attach_resource(
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -20384,7 +20057,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources ReplInnerContext::attach_resources(
+    ExternalResources ReplicateContext::attach_resources(
                                             const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -20505,7 +20178,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeNode* ReplInnerContext::compute_index_attach_upper_bound(
+    RegionTreeNode* ReplicateContext::compute_index_attach_upper_bound(
       const IndexAttachLauncher &launcher, const std::vector<unsigned> &indexes)
     //--------------------------------------------------------------------------
     {
@@ -20519,7 +20192,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::detach_resource(PhysicalRegion region, 
+    Future ReplicateContext::detach_resource(PhysicalRegion region, 
                  const bool flush, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -20566,7 +20239,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::detach_resources(ExternalResources resources,
+    Future ReplicateContext::detach_resources(ExternalResources resources,
                  const bool flush, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -20617,7 +20290,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ReplInnerContext::execute_must_epoch(
+    FutureMap ReplicateContext::execute_must_epoch(
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -20678,7 +20351,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::issue_timing_measurement(
+    Future ReplicateContext::issue_timing_measurement(
                                                  const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -20715,7 +20388,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::select_tunable_value(
+    Future ReplicateContext::select_tunable_value(
                                                 const TunableLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -20751,7 +20424,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::issue_mapping_fence(Provenance *provenance)
+    Future ReplicateContext::issue_mapping_fence(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20777,7 +20450,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::issue_execution_fence(Provenance *provenance)
+    Future ReplicateContext::issue_execution_fence(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20803,7 +20476,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::begin_trace(TraceID tid, bool logical_only,
+    void ReplicateContext::begin_trace(TraceID tid, bool logical_only,
                         bool static_trace, const std::set<RegionTreeID> *trees,
                         bool deprecated, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -20876,7 +20549,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::end_trace(TraceID tid, bool deprecated,
+    void ReplicateContext::end_trace(TraceID tid, bool deprecated,
                                      Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -20930,7 +20603,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::end_task(const void *res, size_t res_size,bool owned,
+    void ReplicateContext::end_task(const void *res, size_t res_size,bool owned,
                                 PhysicalInstance deferred_result_instance,
                                 FutureFunctor *callback_functor,
                                 const Realm::ExternalInstanceResource *resource,
@@ -20955,7 +20628,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::post_end_task(FutureInstance *instance, 
+    void ReplicateContext::post_end_task(FutureInstance *instance, 
                                          ApEvent effects,
                                          void *metadata, size_t metasize,
                                          FutureFunctor *callback_functor,
@@ -21101,7 +20774,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::add_to_dependence_queue(Operation *op,
+    bool ReplicateContext::add_to_dependence_queue(Operation *op,
                                                  bool unordered, bool outermost)
     //--------------------------------------------------------------------------
     {
@@ -21129,7 +20802,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PredicateImpl* ReplInnerContext::create_predicate_impl(Operation *op)
+    PredicateImpl* ReplicateContext::create_predicate_impl(Operation *op)
     //--------------------------------------------------------------------------
     {
       return new ReplPredicateImpl(op,
@@ -21138,7 +20811,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::CollectiveResult* 
-      ReplInnerContext::find_or_create_collective_view(RegionTreeID tid,
+      ReplicateContext::find_or_create_collective_view(RegionTreeID tid,
           const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
@@ -21172,7 +20845,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionSummary* ReplInnerContext::construct_projection_summary(
+    ProjectionSummary* ReplicateContext::construct_projection_summary(
             Operation *op, unsigned index, const RegionRequirement &req, 
             LogicalState *state, const ProjectionInfo &proj_info) 
     //--------------------------------------------------------------------------
@@ -21243,7 +20916,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::has_interfering_shards(ProjectionSummary *one,
+    bool ReplicateContext::has_interfering_shards(ProjectionSummary *one,
                                                   ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
@@ -21257,7 +20930,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::match_timeouts(std::vector<LogicalUser*> &timeouts, 
+    bool ReplicateContext::match_timeouts(std::vector<LogicalUser*> &timeouts, 
                                           std::vector<LogicalUser*> &to_delete,
                                           TimeoutMatchExchange *&exchange)
     //--------------------------------------------------------------------------
@@ -21281,7 +20954,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Lock ReplInnerContext::create_lock(void)
+    Lock ReplicateContext::create_lock(void)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
@@ -21292,7 +20965,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_lock(Lock l)
+    void ReplicateContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
@@ -21302,7 +20975,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Grant ReplInnerContext::acquire_grant(
+    Grant ReplicateContext::acquire_grant(
                                        const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
@@ -21314,7 +20987,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::release_grant(Grant g)
+    void ReplicateContext::release_grant(Grant g)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
@@ -21324,7 +20997,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier ReplInnerContext::create_phase_barrier(unsigned arrivals)
+    PhaseBarrier ReplicateContext::create_phase_barrier(unsigned arrivals)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -21351,7 +21024,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_phase_barrier(PhaseBarrier pb)
+    void ReplicateContext::destroy_phase_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -21373,7 +21046,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier ReplInnerContext::advance_phase_barrier(PhaseBarrier bar)
+    PhaseBarrier ReplicateContext::advance_phase_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
       // For now we issue a mapping fence whenever we do this because
@@ -21404,7 +21077,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective ReplInnerContext::create_dynamic_collective(
+    DynamicCollective ReplicateContext::create_dynamic_collective(
                                        unsigned arrivals, ReductionOpID redop,
                                        const void *init_value, size_t init_size)
     //--------------------------------------------------------------------------
@@ -21417,7 +21090,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::destroy_dynamic_collective(DynamicCollective dc)
+    void ReplicateContext::destroy_dynamic_collective(DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
@@ -21427,7 +21100,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::arrive_dynamic_collective(DynamicCollective dc,
+    void ReplicateContext::arrive_dynamic_collective(DynamicCollective dc,
                                                     const void *buffer,
                                                     size_t size, unsigned count)
     //--------------------------------------------------------------------------
@@ -21439,7 +21112,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::defer_dynamic_collective_arrival(
+    void ReplicateContext::defer_dynamic_collective_arrival(
                                                          DynamicCollective dc,
                                                          const Future &f,
                                                          unsigned count)
@@ -21452,7 +21125,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplInnerContext::get_dynamic_collective_result(DynamicCollective dc,
+    Future ReplicateContext::get_dynamic_collective_result(DynamicCollective dc,
                                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -21464,7 +21137,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective ReplInnerContext::advance_dynamic_collective( 
+    DynamicCollective ReplicateContext::advance_dynamic_collective( 
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
@@ -21497,10 +21170,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* ReplInnerContext::get_merge_close_op(Operation *op,
+    MergeCloseOp* ReplicateContext::get_merge_close_op(Operation *op,
                                                        RegionTreeNode *node)
 #else
-    MergeCloseOp* ReplInnerContext::get_merge_close_op(void)
+    MergeCloseOp* ReplicateContext::get_merge_close_op(void)
 #endif
     //--------------------------------------------------------------------------
     {
@@ -21528,10 +21201,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
-    RefinementOp* ReplInnerContext::get_refinement_op(Operation *op,
+    RefinementOp* ReplicateContext::get_refinement_op(Operation *op,
                                                       RegionTreeNode *node)
 #else
-    RefinementOp* ReplInnerContext::get_refinement_op(void)
+    RefinementOp* ReplicateContext::get_refinement_op(void)
 #endif
     //--------------------------------------------------------------------------
     {
@@ -21559,14 +21232,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* ReplInnerContext::get_virtual_close_op(void)
+    VirtualCloseOp* ReplicateContext::get_virtual_close_op(void)
     //--------------------------------------------------------------------------
     {
       return runtime->get_available_repl_virtual_close_op();
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::pack_inner_context(Serializer &rez) const
+    void ReplicateContext::pack_task_context(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(did); // pack our distributed ID
@@ -21574,7 +21247,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::pack_remote_context(Serializer &rez,
+    void ReplicateContext::pack_remote_context(Serializer &rez,
                                           AddressSpaceID target, bool replicate)
     //--------------------------------------------------------------------------
     {
@@ -21586,46 +21259,19 @@ namespace Legion {
       rez.serialize(shard_manager->shard_points[owner_shard->shard_id]);
       rez.serialize(shard_manager->shard_domain);
       rez.serialize(shard_manager->did);
-    } 
-
-    //--------------------------------------------------------------------------
-    size_t ReplInnerContext::register_trace_template(
-                                     ShardedPhysicalTemplate *physical_template)
-    //--------------------------------------------------------------------------
-    {
-      size_t index;
-      std::vector<PendingTemplateUpdate> to_apply;
-      {
-        AutoLock r_lock(replication_lock);
-        index = next_physical_template_index++;
-#ifdef DEBUG_LEGION
-        assert(physical_templates.find(index) == physical_templates.end());
-#endif
-        physical_templates[index] = physical_template;
-        // Check to see if we have any pending updates to perform
-        std::map<size_t,std::vector<PendingTemplateUpdate> >::iterator
-          finder = pending_template_updates.find(index);
-        if (finder != pending_template_updates.end())
-        {
-          to_apply.swap(finder->second);
-          pending_template_updates.erase(finder);
-        }
-      }
-      if (!to_apply.empty())
-      {
-        for (std::vector<PendingTemplateUpdate>::const_iterator it = 
-              to_apply.begin(); it != to_apply.end(); it++)
-        {
-          Deserializer derez(it->ptr, it->size);
-          physical_template->handle_trace_update(derez, it->source);
-          free(it->ptr);
-        }
-      }
-      return index;
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::register_rendezvous(ShardRendezvous *rendezvous)
+    void ReplicateContext::handle_collective_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardCollective *collective = find_or_buffer_collective(derez);   
+      if (collective != NULL)
+        collective->handle_collective_message(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_rendezvous(ShardRendezvous *rendezvous)
     //--------------------------------------------------------------------------
     {
       std::vector<std::pair<void*,size_t> > to_handle;
@@ -21664,7 +21310,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_rendezvous_message(Deserializer &derez)
+    void ReplicateContext::handle_rendezvous_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardRendezvous *rendezvous = find_or_buffer_rendezvous(derez);
@@ -21682,7 +21328,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardRendezvous* ReplInnerContext::find_or_buffer_rendezvous(
+    ShardRendezvous* ReplicateContext::find_or_buffer_rendezvous(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -21706,7 +21352,7 @@ namespace Legion {
 
 #if 0
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_disjoint_complete_request(Deserializer &derez)
+    void ReplicateContext::handle_disjoint_complete_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       LogicalRegion handle;
@@ -21753,7 +21399,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::handle_disjoint_complete_response(
+    /*static*/ void ReplicateContext::handle_disjoint_complete_response(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -21801,7 +21447,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplInnerContext::DeferDisjointCompleteResponseArgs::
+    ReplicateContext::DeferDisjointCompleteResponseArgs::
       DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
       AddressSpaceID s, VersionInfo *info, RtUserEvent d, const FieldMask *mask)
       : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
@@ -21812,7 +21458,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::handle_defer_disjoint_complete_response(
+    /*static*/ void ReplicateContext::handle_defer_disjoint_complete_response(
                                              Runtime *runtime, const void *args)
     //--------------------------------------------------------------------------
     {
@@ -21829,7 +21475,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::finalize_disjoint_complete_response(
+    /*static*/ void ReplicateContext::finalize_disjoint_complete_response(
         Runtime *runtime, UniqueID opid, VersionManager *target,
         AddressSpaceID target_space, VersionInfo *info, RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -21885,7 +21531,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_resource_update(Deserializer &derez,
+    void ReplicateContext::handle_resource_update(Deserializer &derez,
                                                   std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
@@ -21992,7 +21638,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_created_region_contexts(Deserializer &derez,
+    void ReplicateContext::handle_created_region_contexts(Deserializer &derez,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -22059,7 +21705,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_trace_update(Deserializer &derez, 
+    void ReplicateContext::handle_trace_update(Deserializer &derez, 
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -22071,7 +21717,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier ReplInnerContext::handle_find_trace_shard_event(
+    ApBarrier ReplicateContext::handle_find_trace_shard_event(
                      size_t template_index, ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
@@ -22094,7 +21740,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier ReplInnerContext::handle_find_trace_shard_frontier(
+    ApBarrier ReplicateContext::handle_find_trace_shard_frontier(
                      size_t template_index, ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
@@ -22117,7 +21763,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::record_intra_space_dependence(size_t context_index,
+    void ReplicateContext::record_intra_space_dependence(size_t context_index,
         const DomainPoint &point, RtEvent point_mapped, ShardID next_shard)
     //--------------------------------------------------------------------------
     {
@@ -22145,7 +21791,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_intra_space_dependence(Deserializer &derez)
+    void ReplicateContext::handle_intra_space_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       std::pair<size_t,DomainPoint> key;
@@ -22180,7 +21826,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::receive_resources(size_t return_index,
+    void ReplicateContext::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -22326,7 +21972,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::receive_replicate_resources(size_t return_index,
+    void ReplicateContext::receive_replicate_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -22418,7 +22064,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::register_region_deletions(ApEvent precondition,
+    void ReplicateContext::register_region_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
                                             std::vector<DeletedRegion> &regions,
                                             std::set<RtEvent> &preconditions,
@@ -22483,7 +22129,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::register_field_deletions(ApEvent precondition,
+    void ReplicateContext::register_field_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
                            std::vector<DeletedField> &fields,
                            std::set<RtEvent> &preconditions,
@@ -22547,7 +22193,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::register_field_space_deletions(ApEvent precondition,
+    void ReplicateContext::register_field_space_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
                                          std::vector<DeletedFieldSpace> &spaces,
                                                std::set<RtEvent> &preconditions,
@@ -22633,7 +22279,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::register_index_space_deletions(ApEvent precondition,
+    void ReplicateContext::register_index_space_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
                                          std::vector<DeletedIndexSpace> &spaces,
                                                std::set<RtEvent> &preconditions,
@@ -22718,7 +22364,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::register_index_partition_deletions(ApEvent precond,
+    void ReplicateContext::register_index_partition_deletions(ApEvent precond,
                            const std::map<Operation*,GenerationID> &dependences,
                                            std::vector<DeletedPartition> &parts,
                                                std::set<RtEvent> &preconditions,
@@ -22801,10 +22447,197 @@ namespace Legion {
           op->execute_dependence_analysis();
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveID ReplicateContext::get_next_collective_index(
+                                      CollectiveIndexLocation loc, bool logical)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock, should only be coming from the creation
+      // of operations directly from the application and therefore
+      // should be deterministic
+      // Count by 2s to avoid conflicts with the collectives from the 
+      // logical depedence analysis stage of the pipeline
+      if (logical)
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        if (!logical_guard_reentrant)
+        {
+          CollectiveCheckReduction::RHS location = loc;
+          // Guard against coming back in here when advancing the barrier
+          logical_guard_reentrant = true;
+          const RtBarrier logical_check_bar = logical_check_barrier.next(this,
+              CollectiveCheckReduction::REDOP, 
+              &CollectiveCheckReduction::IDENTITY,
+              sizeof(CollectiveCheckReduction::IDENTITY));
+          logical_guard_reentrant = false;
+          Runtime::phase_barrier_arrive(logical_check_bar, 1/*count*/,
+                             RtEvent::NO_RT_EVENT, &location, sizeof(location));
+          logical_check_bar.wait();
+          CollectiveCheckReduction::RHS actual_location;
+          bool ready = Runtime::get_barrier_result(logical_check_bar,
+                                     &actual_location, sizeof(actual_location));
+          assert(ready);
+          assert(location == actual_location);
+        }
+#endif
+        const CollectiveID result = next_logical_collective_index;
+        next_logical_collective_index += 2;
+        return result;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        if (!collective_guard_reentrant)
+        {
+          CollectiveCheckReduction::RHS location = loc;
+          // Guard against coming back in here when advancing the barrier
+          collective_guard_reentrant = true;
+          const RtBarrier collective_check_bar = collective_check_barrier.next(
+              this, CollectiveCheckReduction::REDOP, 
+              &CollectiveCheckReduction::IDENTITY,
+              sizeof(CollectiveCheckReduction::IDENTITY));
+          collective_guard_reentrant = false;
+          Runtime::phase_barrier_arrive(collective_check_bar, 1/*count*/,
+                             RtEvent::NO_RT_EVENT, &location, sizeof(location));
+          collective_check_bar.wait();
+          CollectiveCheckReduction::RHS actual_location;
+          bool ready = Runtime::get_barrier_result(collective_check_bar,
+                                     &actual_location, sizeof(actual_location));
+          assert(ready);
+          assert(location == actual_location);
+        }
+#endif
+        const CollectiveID result = next_available_collective_index;
+        next_available_collective_index += 2; 
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_collective(ShardCollective *collective)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<void*,size_t> > to_apply;
+      {
+        AutoLock repl_lock(replication_lock);
+#ifdef DEBUG_LEGION
+        assert(collectives.find(collective->collective_index) == 
+               collectives.end());
+        assert(shard_manager != NULL);
+#endif
+        // If the collectives are empty then we add a reference to the
+        // shard manager to prevent it being collected before we're
+        // done handling all the collectives
+        if (collectives.empty())
+          shard_manager->add_nested_gc_ref(did);
+        collectives[collective->collective_index] = collective;
+        std::map<CollectiveID,std::vector<std::pair<void*,size_t> > >::
+          iterator finder = pending_collective_updates.find(
+                                                collective->collective_index);
+        if (finder != pending_collective_updates.end())
+        {
+          to_apply.swap(finder->second);
+          pending_collective_updates.erase(finder);
+        }
+      }
+      if (!to_apply.empty())
+      {
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              to_apply.begin(); it != to_apply.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          collective->handle_collective_message(derez);
+          free(it->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardCollective* ReplicateContext::find_or_buffer_collective(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveID collective_index;
+      derez.deserialize(collective_index);
+      AutoLock repl_lock(replication_lock);
+      // See if we already have the collective in which case we can just
+      // return it, otherwise we need to buffer the deserializer
+      std::map<CollectiveID,ShardCollective*>::const_iterator finder = 
+        collectives.find(collective_index);
+      if (finder != collectives.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_collective_updates[collective_index].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
     } 
 
     //--------------------------------------------------------------------------
-    ShardedPhysicalTemplate* ReplInnerContext::find_or_buffer_trace_update(
+    void ReplicateContext::unregister_collective(ShardCollective *collective)
+    //--------------------------------------------------------------------------
+    {
+      bool remove_reference = false;
+      {
+        AutoLock repl_lock(replication_lock); 
+        std::map<CollectiveID,ShardCollective*>::iterator finder =
+          collectives.find(collective->collective_index);
+        // Sometimes collectives are not used
+        if (finder != collectives.end())
+        {
+          collectives.erase(finder);
+          // Once we've done all our collectives then we can remove the
+          // reference that we added on the shard manager
+          remove_reference = collectives.empty();
+        }
+      }
+      if (remove_reference && shard_manager->remove_nested_gc_ref(did))
+        delete shard_manager;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplicateContext::register_trace_template(
+                                     ShardedPhysicalTemplate *physical_template)
+    //--------------------------------------------------------------------------
+    {
+      size_t index;
+      std::vector<PendingTemplateUpdate> to_apply;
+      {
+        AutoLock r_lock(replication_lock);
+        index = next_physical_template_index++;
+#ifdef DEBUG_LEGION
+        assert(physical_templates.find(index) == physical_templates.end());
+#endif
+        physical_templates[index] = physical_template;
+        // Check to see if we have any pending updates to perform
+        std::map<size_t,std::vector<PendingTemplateUpdate> >::iterator
+          finder = pending_template_updates.find(index);
+        if (finder != pending_template_updates.end())
+        {
+          to_apply.swap(finder->second);
+          pending_template_updates.erase(finder);
+        }
+      }
+      if (!to_apply.empty())
+      {
+        for (std::vector<PendingTemplateUpdate>::const_iterator it = 
+              to_apply.begin(); it != to_apply.end(); it++)
+        {
+          Deserializer derez(it->ptr, it->size);
+          physical_template->handle_trace_update(derez, it->source);
+          free(it->ptr);
+        }
+      }
+      return index;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate* ReplicateContext::find_or_buffer_trace_update(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -22829,7 +22662,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::unregister_trace_template(size_t index)
+    void ReplicateContext::unregister_trace_template(size_t index)
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(replication_lock);
@@ -22844,7 +22677,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID ReplInnerContext::get_next_equivalence_set_origin(void)
+    ShardID ReplicateContext::get_next_equivalence_set_origin(void)
     //--------------------------------------------------------------------------
     {
       const ShardID result = equivalence_set_allocator_shard++;
@@ -22854,7 +22687,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplInnerContext::compute_equivalence_sets(unsigned req_index,
+    RtEvent ReplicateContext::compute_equivalence_sets(unsigned req_index,
                              const std::vector<EqSetTracker*> &targets,
                              const std::vector<AddressSpaceID> &target_spaces,
                              AddressSpaceID creation_target_space,
@@ -22925,7 +22758,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplInnerContext::record_output_equivalence_set(
+    RtEvent ReplicateContext::record_output_equivalence_set(
         EqSetTracker *source, AddressSpaceID source_space, unsigned req_index,
         EquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -22973,7 +22806,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EqKDTree* ReplInnerContext::create_equivalence_set_kd_tree(
+    EqKDTree* ReplicateContext::create_equivalence_set_kd_tree(
                                                            IndexSpaceNode *node)
     //--------------------------------------------------------------------------
     {
@@ -22984,7 +22817,7 @@ namespace Legion {
 
 #if 0
     //--------------------------------------------------------------------------
-    EquivalenceSet* ReplInnerContext::create_equivalence_set(RegionNode *node,
+    EquivalenceSet* ReplicateContext::create_equivalence_set(RegionNode *node,
         size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
         const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
         unsigned refinement_number, unsigned index, 
@@ -23026,7 +22859,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::refine_equivalence_sets(unsigned req_index,
+    void ReplicateContext::refine_equivalence_sets(unsigned req_index,
                         IndexSpaceNode *node, const FieldMask &refinement_mask,
                         std::vector<RtEvent> &applied_events, bool sharded)
     //--------------------------------------------------------------------------
@@ -23067,7 +22900,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_refine_equivalence_sets(Deserializer &derez)
+    void ReplicateContext::handle_refine_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unsigned req_index;
@@ -23097,7 +22930,7 @@ namespace Legion {
 
 #if 0
     //--------------------------------------------------------------------------
-    void ReplInnerContext::compute_shard_equivalence_sets(EqSetTracker *target,
+    void ReplicateContext::compute_shard_equivalence_sets(EqSetTracker *target,
           AddressSpaceID target_space, IndexSpaceExpression *expr,
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
@@ -23138,7 +22971,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_compute_equivalence_sets(Deserializer &derez)
+    void ReplicateContext::handle_compute_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       size_t num_targets;
@@ -23198,7 +23031,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInnerContext::handle_output_equivalence_set(Deserializer &derez)
+    void ReplicateContext::handle_output_equivalence_set(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       EqSetTracker *source;
@@ -23244,7 +23077,7 @@ namespace Legion {
 
 #if 0
     //--------------------------------------------------------------------------
-    void ReplInnerContext::find_all_disjoint_complete_children(
+    void ReplicateContext::find_all_disjoint_complete_children(
                                        IndexSpaceNode *node,
                                        const std::vector<ShardID> &participants,
                                        std::vector<IndexPartNode*> &children)
@@ -23351,7 +23184,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardedColorMap* ReplInnerContext::find_all_local_children(
+    ShardedColorMap* ReplicateContext::find_all_local_children(
                                       IndexPartNode *node,
                                       const std::vector<ShardID> &participants,
                                       std::vector<ShardID> &child_participants,
@@ -23528,7 +23361,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t ReplInnerContext::count_total_leaves(size_t leaves,
+    size_t ReplicateContext::count_total_leaves(size_t leaves,
                                        const std::vector<ShardID> &participants)
     //--------------------------------------------------------------------------
     {
@@ -23560,7 +23393,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplInnerContext::finalize_disjoint_complete_sets(RegionNode *region, 
+    bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
             const AddressSpaceID source, RtUserEvent ready_event)
     //--------------------------------------------------------------------------
@@ -23596,10 +23429,155 @@ namespace Legion {
         return InnerContext::finalize_disjoint_complete_sets(region, target,
                                     request_mask, opid, source, ready_event);
     }
-#endif 
+#endif
 
     //--------------------------------------------------------------------------
-    ShardID ReplInnerContext::AttachDetachShardingFunctor::shard(
+    bool ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
+                                                        size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_replicate_bar_index < total_shards);
+#endif
+      bool created = false;
+      ValueBroadcast<RtBarrier> 
+        collective(this, next_replicate_bar_index, COLLECTIVE_LOC_83);
+      if (owner_shard->shard_id == next_replicate_bar_index++)
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
+        collective.broadcast(bar);
+        created = true;
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_replicate_bar_index == total_shards)
+       next_replicate_bar_index = 0;
+      return created;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::create_new_replicate_barrier(ApBarrier &bar,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
+                                                        size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_replicate_bar_index < total_shards);
+#endif
+      bool created = false;
+      ValueBroadcast<ApBarrier> 
+        collective(this, next_replicate_bar_index, COLLECTIVE_LOC_84);
+      if (owner_shard->shard_id == next_replicate_bar_index++)
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
+        collective.broadcast(bar);
+        created = true;
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_replicate_bar_index == total_shards)
+        next_replicate_bar_index = 0;
+      return created;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::create_new_logical_barrier(RtBarrier &bar, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
+                                                      size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_logical_bar_index < total_shards);
+#endif
+      bool created = false;
+      const CollectiveID cid =
+        get_next_collective_index(COLLECTIVE_LOC_18, true/*logical*/);
+      ValueBroadcast<RtBarrier> collective(cid, this, next_logical_bar_index);
+      if (owner_shard->shard_id == next_logical_bar_index++)
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
+        collective.broadcast(bar);
+        created = true;
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_logical_bar_index == total_shards)
+        next_logical_bar_index = 0;
+      return created;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::create_new_logical_barrier(ApBarrier &bar, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
+                                                      size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_logical_bar_index < total_shards);
+#endif
+      bool created = false;
+      const CollectiveID cid =
+        get_next_collective_index(COLLECTIVE_LOC_24, true/*logical*/);
+      ValueBroadcast<ApBarrier> collective(cid, this, next_logical_bar_index);
+      if (owner_shard->shard_id == next_logical_bar_index++)
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
+        collective.broadcast(bar);
+        created = true;
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_logical_bar_index == total_shards)
+        next_logical_bar_index = 0;
+      return created;
+    }
+
+    //--------------------------------------------------------------------------
+    const DomainPoint& ReplicateContext::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->shard_points[owner_shard->shard_id];
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ReplicateContext::AttachDetachShardingFunctor::shard(
       const DomainPoint &point, const Domain &domain, const size_t total_shards)
     //--------------------------------------------------------------------------
     {
@@ -23608,7 +23586,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::register_attach_detach_sharding_functor(
+    /*static*/ void ReplicateContext::register_attach_detach_sharding_functor(
                                                                Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -23620,7 +23598,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction* 
-                     ReplInnerContext::get_attach_detach_sharding_function(void)
+                     ReplicateContext::get_attach_detach_sharding_function(void)
     //--------------------------------------------------------------------------
     {
       // See Runtime::get_current_static_sharding_id for how we get this ID
@@ -23629,7 +23607,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* ReplInnerContext::compute_index_attach_launch_spaces(
+    IndexSpaceNode* ReplicateContext::compute_index_attach_launch_spaces(
                        std::vector<size_t> &shard_sizes, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -23699,7 +23677,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplInnerContext::register_universal_sharding_functor(
+    /*static*/ void ReplicateContext::register_universal_sharding_functor(
                                                                Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -23710,7 +23688,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunction* ReplInnerContext::get_universal_sharding_function(void)
+    ShardingFunction* ReplicateContext::get_universal_sharding_function(void)
     //--------------------------------------------------------------------------
     {
       // See Runtime::get_current_static_sharding_id for how we get this ID
@@ -23867,9 +23845,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(DistributedID id, Runtime *rt,
                                  CollectiveMapping *mapping)
-      : TaskContext(rt, NULL, -1, remote_task.regions, 
-                    remote_task.output_regions, id, false, mapping),
-        InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions,
+      : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions,
                      remote_task.output_regions, local_parent_req_indexes,
                      local_virtual_mapped, ApEvent::NO_AP_EVENT, id,
                      false, false, false, mapping),
@@ -24222,9 +24198,8 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      InnerContext *context = static_cast<TaskContext*>(
-          runtime->find_distributed_collectable(
-            context_did))->as_inner_context();
+      InnerContext *context = static_cast<InnerContext*>(
+          runtime->find_distributed_collectable(context_did));
       context->receive_created_region_contexts(created_nodes,
           created_trees, applied_events, 
           src_mapping.empty() ? NULL : &src_mapping, source_shard);
@@ -24287,11 +24262,11 @@ namespace Legion {
       // See if we can find our parent task, if not don't worry about it
       // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
       // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
-      TaskContext *parent = static_cast<TaskContext*>(
+      InnerContext *parent = static_cast<InnerContext*>(
         runtime->weak_find_distributed_collectable(parent_context_did));
       if (parent != NULL)
       {
-        parent_ctx.store(parent->as_inner_context());
+        parent_ctx.store(parent);
         remote_task.parent_task = parent->get_task();
         if (parent->remove_base_resource_ref(RUNTIME_REF))
           delete parent;
@@ -24511,12 +24486,12 @@ namespace Legion {
       derez.deserialize(source);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
-      TaskContext *context = dynamic_cast<TaskContext*>(dc);
+      InnerContext *context = dynamic_cast<InnerContext*>(dc);
       assert(context != NULL);
 #else
-      TaskContext *context = static_cast<TaskContext*>(dc);
+      InnerContext *context = static_cast<InnerContext*>(dc);
 #endif
-      context->as_inner_context()->send_context(source);
+      context->send_context(source);
     }
 
     //--------------------------------------------------------------------------
@@ -24527,12 +24502,9 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      // Note you don't need to call find_or_create_pending_collectable_location
-      // here because find_or_request_inner_context does not return pointers
-      // to buffers before they are allocated. The reason for that is that
-      // some C++ compilers don't seem to do well with in-place allocation
-      // of classes with virtual inheritance in their type hierarchy
-      RemoteContext *context = new RemoteContext(did, runtime);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                          RemoteContext>(did);
+      RemoteContext *context = new(location) RemoteContext(did, runtime);
       context->unpack_remote_context(derez);
       context->register_with_runtime();
     }
@@ -26403,32 +26375,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Replicated Leaf Context 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReplLeafContext::ReplLeafContext(ShardManager *manager, ShardTask *owner, 
-                      int d, const std::vector<RegionRequirement> &reqs,
-                      const std::vector<OutputRequirement> &output_reqs,
-                      bool inline_task)
-      : TaskContext(manager->runtime, owner, d, reqs, output_reqs,
-            LEGION_DISTRIBUTED_HELP_ENCODE(
-            manager->runtime->get_available_distributed_id(), LEAF_CONTEXT_DC),
-            true/*register*/, inline_task, false/*implicit*/),
-        LeafContext(manager->runtime, owner, inline_task),
-        ReplicateContext(manager, owner, d, reqs, output_reqs, did, 
-                         inline_task, false/*implicit*/)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplLeafContext::~ReplLeafContext(void)
-    //--------------------------------------------------------------------------
-    {
     }
 
   };
