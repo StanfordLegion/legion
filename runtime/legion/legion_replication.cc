@@ -9358,7 +9358,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(total_shards > 0);
-      assert(local_constituents > 0);
+      assert((local_constituents > 0) || (remote_constituents > 0));
       assert(shard_points.size() == sorted_points.size());
       assert(shard_points.size() == shard_lookup.size());
 #endif
