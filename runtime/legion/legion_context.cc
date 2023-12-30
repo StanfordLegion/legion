@@ -12466,6 +12466,11 @@ namespace Legion {
         IndexTask *task = runtime->get_available_index_task();
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
+        if (!launch_space.exists())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+            "Illegal execute index space call performed in leaf task %s "
+            "(ID %lld). All inline leaf task index space launches must "
+            "specify a launch index space.", get_task_name(), get_unique_id())
         FutureMap result = task->initialize_task(parent, launcher, 
                                                  launch_space, false/*track*/);
         inline_child_task(task);
@@ -12492,6 +12497,11 @@ namespace Legion {
         IndexTask *task = runtime->get_available_index_task();
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
+        if (!launch_space.exists())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+            "Illegal execute index space call performed in leaf task %s "
+            "(ID %lld). All inline leaf task index space launches must "
+            "specify a launch index space.", get_task_name(), get_unique_id())
         Future result = task->initialize_task(parent, launcher, launch_space, 
                                         redop, deterministic, false/*track*/);
         inline_child_task(task);
@@ -13054,7 +13064,7 @@ namespace Legion {
     void LeafContext::send_back_created_state(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
