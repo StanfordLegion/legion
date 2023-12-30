@@ -4513,8 +4513,8 @@ namespace Legion {
           dynamic_cast<ReplicateContext*>(implicit_context);
         assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(
-            implicit_context->as_replicate_context());
+        ReplicateContext *repl_ctx =
+          static_cast<ReplicateContext*>(implicit_context);
 #endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
@@ -4556,8 +4556,8 @@ namespace Legion {
         dynamic_cast<ReplicateContext*>(implicit_context);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(
-          implicit_context->as_replicate_context());
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(implicit_context);
 #endif
       if (runtime->runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())

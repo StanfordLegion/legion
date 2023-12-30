@@ -1639,8 +1639,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(ctx->as_inner_context());
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       IndexSpaceNode *shard_node = 
@@ -5344,8 +5343,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx =
-        static_cast<ReplicateContext*>(ctx->as_inner_context());
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       IndexSpaceNode *shard_node = 

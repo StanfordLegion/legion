@@ -2767,7 +2767,7 @@ namespace Legion {
         InnerContext *parent_ctx = dynamic_cast<InnerContext*>(owner_ctx);
         assert(parent_ctx != NULL);
 #else
-        InnerContext *paarent_ctx = static_cast<InnerContext*>(owner_ctx);
+        InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
 #endif
         parent_ctx->clone_local_fields(local_field_infos);
         // Get the coordinates for the parent task
