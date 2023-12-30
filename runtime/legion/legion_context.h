@@ -116,7 +116,7 @@ namespace Legion {
                                          size_t return_index) = 0;
       virtual void log_created_requirements(void) = 0;
       virtual void report_leaks_and_duplicates(
-          std::set<RtEvent> &preconditions) = 0;;
+          std::set<RtEvent> &preconditions) = 0;
     public:
       // Interface to operations performed by a context 
       virtual IndexSpace create_index_space(const Domain &bounds,
