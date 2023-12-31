@@ -199,7 +199,7 @@ namespace Legion {
     public:
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
-      bool has_return_resources(void) const;
+      // Delete this function once MustEpochOps are gone
       void return_resources(ResourceTracker *target, size_t return_index,
                             std::set<RtEvent> &preconditions);
       virtual void receive_resources(size_t return_index,
@@ -216,6 +216,7 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions) = 0;
       void pack_resources_return(Serializer &rez, size_t return_index);
+      static void pack_empty_resources(Serializer &rez, size_t return_index);
       static RtEvent unpack_resources_return(Deserializer &derez,
                                              ResourceTracker *target);
     protected:

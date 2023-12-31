@@ -651,19 +651,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool ResourceTracker::has_return_resources(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !(created_regions.empty() && local_regions.empty() && 
-          created_fields.empty() && local_fields.empty() && 
-          created_field_spaces.empty() && created_index_spaces.empty() &&
-          created_index_partitions.empty() && deleted_regions.empty() &&
-          deleted_fields.empty() && deleted_field_spaces.empty() &&
-          latent_field_spaces.empty() && deleted_index_spaces.empty() &&
-          deleted_index_partitions.empty());
-    }
-
-    //--------------------------------------------------------------------------
     void ResourceTracker::return_resources(ResourceTracker *target, 
                           size_t return_index, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -818,6 +805,26 @@ namespace Legion {
           it->serialize(rez);
         deleted_index_partitions.clear();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ResourceTracker::pack_empty_resources(Serializer &rez,
+                                                          size_t return_index)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(return_index);
+      rez.serialize<size_t>(0); // created regions
+      rez.serialize<size_t>(0); // deleted regions
+      rez.serialize<size_t>(0); // created fields
+      rez.serialize<size_t>(0); // deleted fields
+      rez.serialize<size_t>(0); // created field spaces
+      rez.serialize<size_t>(0); // latent field spaces
+      rez.serialize<size_t>(0); // deleted field spaces
+      rez.serialize<size_t>(0); // created index spaces 
+      rez.serialize<size_t>(0); // deleted index spaces
+      rez.serialize<size_t>(0); // created index partitions
+      rez.serialize<size_t>(0); // deleted index partitions
     }
 
     //--------------------------------------------------------------------------
