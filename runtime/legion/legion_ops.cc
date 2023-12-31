@@ -650,21 +650,6 @@ namespace Legion {
       return *this;
     } 
 
-#if 0
-    //--------------------------------------------------------------------------
-    bool ResourceTracker::has_return_resources(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !(created_regions.empty() && local_regions.empty() && 
-          created_fields.empty() && local_fields.empty() && 
-          created_field_spaces.empty() && created_index_spaces.empty() &&
-          created_index_partitions.empty() && deleted_regions.empty() &&
-          deleted_fields.empty() && deleted_field_spaces.empty() &&
-          latent_field_spaces.empty() && deleted_index_spaces.empty() &&
-          deleted_index_partitions.empty());
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void ResourceTracker::return_resources(ResourceTracker *target, 
                           size_t return_index, std::set<RtEvent> &preconditions)

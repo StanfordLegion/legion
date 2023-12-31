@@ -5555,6 +5555,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReplMustEpochOp::has_return_resources(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !(created_regions.empty() && local_regions.empty() && 
+          created_fields.empty() && local_fields.empty() && 
+          created_field_spaces.empty() && created_index_spaces.empty() &&
+          created_index_partitions.empty() && deleted_regions.empty() &&
+          deleted_fields.empty() && deleted_field_spaces.empty() &&
+          latent_field_spaces.empty() && deleted_index_spaces.empty() &&
+          deleted_index_partitions.empty());
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMustEpochOp::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
@@ -5585,6 +5598,8 @@ namespace Legion {
       }
       // Make sure the other shards have received all their returns too
       Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+      if (!has_return_resources())
+        return;
       if (!resource_return_barrier.has_triggered())
       {
         DeferMustEpochReturnResourcesArgs args(this);
