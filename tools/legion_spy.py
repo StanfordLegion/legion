@@ -9196,10 +9196,24 @@ class Task(object):
         return 0
 
     def perform_task_physical_verification(self, perform_checks):
+        # Check to see if this is a leaf with no operations
         if not self.operations:
-            # Should not have any replicants or they should not be control-replicated
-            assert not self.replicants or not self.replicants.control_replicated
-            return True
+            if not self.replicants:
+                return True
+            # If it was replicated we need to look at the replicants
+            elif self.replicants.control_replicated:
+                # Check to make sure that all shards have the same count
+                count = None
+                for shard in self.replicants.shards.values():
+                    if count is None:
+                        count = len(shard.operations) if shard.operations else 0
+                    else:
+                        assert count == (len(shard.operations) if shard.operations else 0) 
+                if count == 0:
+                    return True
+            else:
+                # Not control replicated means they are all leaves
+                return True
         # Depth is a proxy for context 
         depth = self.get_depth()
         assert self.used_instances is None
