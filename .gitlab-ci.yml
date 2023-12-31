@@ -321,12 +321,16 @@ before_script:
         if [[ "$EMBED_GASNET" -eq 1 ]]; then
           if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
             # clone gasnet, but make it read only since we want an embedded build
-            git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            # git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+            mv gasnet-master gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
           fi
         else
-          git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          # git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+          mv gasnet-master gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
             export GASNET_ROOT="$PWD/gasnet/debug"
