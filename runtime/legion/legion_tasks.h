@@ -245,7 +245,7 @@ namespace Legion {
       bool prepare_steal(void);
       void finalize_output_region_trees(void);
     public:
-      void compute_parent_indexes(TaskContext *alt_context = NULL);
+      void compute_parent_indexes(InnerContext *alt_context = NULL);
       void perform_intra_task_alias_analysis(void);
     public:
       // From Memoizable

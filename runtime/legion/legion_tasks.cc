@@ -1896,11 +1896,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::compute_parent_indexes(TaskContext *alt_context/*= NULL*/)
+    void TaskOp::compute_parent_indexes(InnerContext *alt_context/*= NULL*/)
     //--------------------------------------------------------------------------
     {
       parent_req_indexes.resize(get_region_count());
-      TaskContext *use_ctx = (alt_context == NULL) ? parent_ctx : alt_context;
+      InnerContext *use_ctx = (alt_context == NULL) ? parent_ctx : alt_context;
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         int parent_index = 
@@ -6729,7 +6729,7 @@ namespace Legion {
       if (execution_context != NULL)
       {
         rez.serialize<bool>(true);
-        execution_context->pack_resources_return(rez, context_index);
+        execution_context->pack_return_resources(rez, context_index);
       }
       else
         rez.serialize<bool>(false);

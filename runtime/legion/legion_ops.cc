@@ -650,6 +650,7 @@ namespace Legion {
       return *this;
     } 
 
+#if 0
     //--------------------------------------------------------------------------
     bool ResourceTracker::has_return_resources(void) const
     //--------------------------------------------------------------------------
@@ -662,6 +663,7 @@ namespace Legion {
           latent_field_spaces.empty() && deleted_index_spaces.empty() &&
           deleted_index_partitions.empty());
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ResourceTracker::return_resources(ResourceTracker *target, 
@@ -818,6 +820,26 @@ namespace Legion {
           it->serialize(rez);
         deleted_index_partitions.clear();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ResourceTracker::pack_empty_resources(Serializer &rez,
+                                                          size_t return_index)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(return_index);
+      rez.serialize<size_t>(0); // created regions
+      rez.serialize<size_t>(0); // deleted regions
+      rez.serialize<size_t>(0); // created fields
+      rez.serialize<size_t>(0); // deleted fields
+      rez.serialize<size_t>(0); // created field spaces
+      rez.serialize<size_t>(0); // latent field spaces
+      rez.serialize<size_t>(0); // deleted field spaces
+      rez.serialize<size_t>(0); // created index spaces 
+      rez.serialize<size_t>(0); // deleted index spaces
+      rez.serialize<size_t>(0); // created index partitions
+      rez.serialize<size_t>(0); // deleted index partitions
     }
 
     //--------------------------------------------------------------------------
