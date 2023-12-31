@@ -510,6 +510,14 @@ namespace Legion {
       virtual void find_completion_effects(std::vector<ApEvent> &effects,
                                            bool tracing = false);
     public:
+      virtual void perform_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      virtual void convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
+    public:
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
     public:
@@ -951,6 +959,14 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index);
+    public: // Collective stuff for replicated versions of this point task
+      virtual void perform_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      virtual void convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous); 
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -1444,6 +1460,12 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index);
+      void perform_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      void convert_replicate_collective_views(const RendezvousKey &key,
+            std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+
       virtual void finalize_collective_versioning_analysis(unsigned index,
           unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &to_perform);

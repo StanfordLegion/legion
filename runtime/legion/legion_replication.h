@@ -3118,7 +3118,7 @@ namespace Legion {
      * reductions, and exchanges of information between the 
      * variaous shard tasks.
      */
-    class ShardManager : public DistributedCollectable, 
+    class ShardManager : public CollectiveViewCreator<CollectiveHelperOp>,
                          public Mapper::SelectShardingFunctorInput {
     public:
       enum BroadcastMessageKind {
@@ -3179,6 +3179,10 @@ namespace Legion {
       inline ContextID get_first_shard_tree_context(void) const
         { return local_shards.front()->
           get_replicate_context()->get_logical_tree_context(); }
+    public: // From CollectiveHelperOp
+      virtual InnerContext* get_context(void);
+      virtual InnerContext* find_physical_context(unsigned index);
+      virtual size_t get_collective_points(void) const;
     public:
       void distribute_explicit(SingleTask *task, VariantID chosen_variant,
                                std::vector<Processor> &target_processors);
@@ -3192,6 +3196,20 @@ namespace Legion {
           VariantID variant, InnerContext *parent_ctx, SingleTask *source);
       ShardTask* create_shard(ShardID id, Processor target,
           VariantID variant, InnerContext *parent_ctx, Deserializer &derez);
+    public:
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      void finalize_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      void finalize_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
+    public:
 #if 0
       void launch(const std::vector<bool> &virtual_mapped);
       void unpack_shards_and_launch(Deserializer &derez);
@@ -3316,6 +3334,8 @@ namespace Legion {
       void handle_find_or_create_collective_view(Deserializer &derez);
     public:
       static void handle_distribution(Deserializer &derez, Runtime *rt); 
+      static void handle_collective_versioning(Deserializer &derez,Runtime *rt);
+      static void handle_collective_mapping(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);

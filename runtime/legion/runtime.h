@@ -3459,6 +3459,10 @@ namespace Legion {
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_replicate_distribution(AddressSpaceID target, Serializer &rez);
+      void send_replicate_collective_versioning(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_replicate_collective_mapping(AddressSpaceID target,
+                                             Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_execution(AddressSpaceID target,
                                          Serializer &rez);
@@ -3814,6 +3818,8 @@ namespace Legion {
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_replicate_distribution(Deserializer &derez);
+      void handle_replicate_collective_versioning(Deserializer &derez);
+      void handle_replicate_collective_mapping(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
       void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
@@ -6220,6 +6226,10 @@ namespace Legion {
         case SEND_MPI_RANK_EXCHANGE:
           break;
         case SEND_REPLICATE_DISTRIBUTION:
+          break;
+        case SEND_REPLICATE_COLLECTIVE_VERSIONING:
+          break;
+        case SEND_REPLICATE_COLLECTIVE_MAPPING:
           break;
         case SEND_REPLICATE_POST_MAPPED:
           break;

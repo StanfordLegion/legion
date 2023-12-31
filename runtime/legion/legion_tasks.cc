@@ -3586,6 +3586,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::perform_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+      assert(!IS_COLLECTIVE(regions[index]));
+      assert(!std::binary_search(check_collective_regions.begin(),
+            check_collective_regions.end(), index));
+#endif
+      // Bounce it back onto the shard manager to finalize
+      shard_manager->finalize_replicate_collective_versioning(index,
+          parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+      assert(!IS_COLLECTIVE(regions[key.region_index]));
+      assert(!std::binary_search(check_collective_regions.begin(),
+            check_collective_regions.end(), key.region_index));
+#endif
+      shard_manager->finalize_replicate_collective_views(key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
@@ -7981,6 +8014,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::perform_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+#endif
+      if (IS_COLLECTIVE(regions[index]) || std::binary_search(
+            check_collective_regions.begin(), 
+            check_collective_regions.end(), index))
+        slice_owner->perform_replicate_collective_versioning(index,
+            parent_req_index, to_perform);
+      else
+        SingleTask::perform_replicate_collective_versioning(index,
+            parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+#endif
+      if (IS_COLLECTIVE(regions[key.region_index]) || std::binary_search(
+            check_collective_regions.begin(), 
+            check_collective_regions.end(), key.region_index))
+        slice_owner->convert_replicate_collective_views(key, rendezvous);
+      else
+        SingleTask::convert_replicate_collective_views(key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
@@ -8069,6 +8139,10 @@ namespace Legion {
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
+      // If we have any region requirements then they are all collective
+      check_collective_regions.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        check_collective_regions[idx] = idx;
     }
 
     //--------------------------------------------------------------------------
@@ -8092,6 +8166,10 @@ namespace Legion {
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
+      // If we have any region requirements then they are all collective
+      check_collective_regions.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        check_collective_regions[idx] = idx;
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -8424,16 +8502,12 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
-#if 0
       if (runtime->legion_spy_enabled)
         LegionSpy::log_collective_rendezvous(unique_op_id, 
                         requirement_index, analysis_index);
-      return slice_owner->convert_collective_views(requirement_index, 
+      return shard_manager->convert_collective_views(requirement_index,
           analysis_index, region, targets, physical_ctx, analysis_mapping,
           first_local, target_views, collective_arrivals);
-#endif
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8442,12 +8516,8 @@ namespace Legion {
         unsigned parent_req_index)
     //--------------------------------------------------------------------------
     {
-#if 0
-      return slice_owner->perform_collective_versioning_analysis(index,
-          handle, tracker, mask, parent_req_index);
-#endif
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
+      return shard_manager->rendezvous_collective_versioning_analysis(index,
+          handle, tracker, runtime->address_space, mask, parent_req_index);
     }
 
     //--------------------------------------------------------------------------
@@ -13003,6 +13073,31 @@ namespace Legion {
       else
         return index_owner->rendezvous_collective_versioning_analysis(index,
             handle, tracker, runtime->address_space, mask, parent_req_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::perform_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index,
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        MultiTask::rendezvous_collective_versioning_analysis(index,
+            parent_req_index, to_perform);
+      else
+        index_owner->rendezvous_collective_versioning_analysis(index,
+            parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::convert_replicate_collective_views(const RendezvousKey &key,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        MultiTask::rendezvous_collective_mapping(key, rendezvous);
+      else
+        index_owner->rendezvous_collective_mapping(key, rendezvous);
     }
 
     //--------------------------------------------------------------------------

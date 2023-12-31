@@ -970,6 +970,8 @@ namespace Legion {
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
       SEND_REPLICATE_DISTRIBUTION,
+      SEND_REPLICATE_COLLECTIVE_VERSIONING,
+      SEND_REPLICATE_COLLECTIVE_MAPPING,
       SEND_REPLICATE_POST_MAPPED,
       SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
@@ -1287,6 +1289,8 @@ namespace Legion {
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
         "Send Replication Distribution",                              \
+        "Send Replication Collective Versioning",                     \
+        "Send Replication Collective Mapping",                        \
         "Send Replication Post Mapped",                               \
         "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \

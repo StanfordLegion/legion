@@ -13102,6 +13102,16 @@ namespace Legion {
               runtime->handle_replicate_distribution(derez);
               break;
             }
+          case SEND_REPLICATE_COLLECTIVE_VERSIONING:
+            {
+              runtime->handle_replicate_collective_versioning(derez);
+              break;
+            }
+          case SEND_REPLICATE_COLLECTIVE_MAPPING:
+            {
+              runtime->handle_replicate_collective_mapping(derez);
+              break;
+            }
           case SEND_REPLICATE_POST_MAPPED:
             {
               runtime->handle_replicate_post_mapped(derez);
@@ -23495,6 +23505,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_replicate_collective_versioning(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPLICATE_COLLECTIVE_VERSIONING,
+                                           rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_replicate_collective_mapping(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPLICATE_COLLECTIVE_MAPPING,
+                                           rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_replicate_post_mapped(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25844,6 +25872,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_distribution(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_replicate_collective_versioning(Deserializer &derez) 
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_collective_versioning(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_replicate_collective_mapping(Deserializer &derez) 
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_collective_mapping(derez, this);
     }
 
     //--------------------------------------------------------------------------
