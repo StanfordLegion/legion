@@ -2207,7 +2207,6 @@ namespace Legion {
       MustEpochDependenceExchange *dependence_exchange;
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
-      RtBarrier resource_return_barrier;
       RtBarrier concurrent_prebar, concurrent_postbar;
 #ifdef DEBUG_LEGION
     public:
