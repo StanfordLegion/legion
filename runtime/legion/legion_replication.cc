@@ -5240,6 +5240,7 @@ namespace Legion {
       mapping_exchange = NULL;
       dependence_exchange = NULL;
       completion_exchange = NULL;
+      resource_return_barrier = RtBarrier::NO_RT_BARRIER;
       concurrent_prebar = RtBarrier::NO_RT_BARRIER;
       concurrent_postbar = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
@@ -5606,6 +5607,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReplMustEpochOp::has_return_resources(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !(created_regions.empty() && local_regions.empty() && 
+          created_fields.empty() && local_fields.empty() && 
+          created_field_spaces.empty() && created_index_spaces.empty() &&
+          created_index_partitions.empty() && deleted_regions.empty() &&
+          deleted_fields.empty() && deleted_field_spaces.empty() &&
+          latent_field_spaces.empty() && deleted_index_spaces.empty() &&
+          deleted_index_partitions.empty());
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMustEpochOp::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
@@ -5633,6 +5647,18 @@ namespace Legion {
 #endif
         if (--remaining_resource_returns > 0)
           return;
+      }
+      // Make sure the other shards have received all their returns too
+      Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+      if (!has_return_resources())
+        return;
+      if (!resource_return_barrier.has_triggered())
+      {
+        DeferMustEpochReturnResourcesArgs args(this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_DEFERRED_PRIORITY, resource_return_barrier);
+        preconditions.insert(args.done);
+        return;
       }
       // If we get here then we can finally do the return to the parent context
       // because we've received resources from all of our constituent operations
@@ -5824,6 +5850,8 @@ namespace Legion {
         }
       }
       // Trigger this if we're not expecting to see any returns
+      if (remaining_resource_returns == 0)
+        Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
@@ -5850,6 +5878,7 @@ namespace Legion {
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
+      resource_return_barrier = ctx->get_next_resource_return_barrier();
       concurrent_prebar = ctx->get_next_concurrent_precondition_barrier();
       concurrent_postbar = ctx->get_next_concurrent_postcondition_barrier();
     }

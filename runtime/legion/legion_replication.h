@@ -2495,6 +2495,7 @@ namespace Legion {
       Domain get_shard_domain(void) const;
       size_t count_shard_local_points(IndexSpaceNode *launch_domain);
     public:
+      bool has_return_resources(void) const;
       static void handle_defer_return_resources(const void *args);
     protected:
       ShardingID sharding_functor;
@@ -2506,6 +2507,7 @@ namespace Legion {
       MustEpochDependenceExchange *dependence_exchange;
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
+      RtBarrier resource_return_barrier;
       RtBarrier concurrent_prebar, concurrent_postbar;
 #ifdef DEBUG_LEGION
     public:
