@@ -9197,9 +9197,9 @@ class Task(object):
 
     def perform_task_physical_verification(self, perform_checks):
         if not self.operations:
-            if not self.replicants:
-                return True
-            assert self.replicants.control_replicated 
+            # Should not have any replicants or they should not be control-replicated
+            assert not self.replicants or not self.replicants.control_replicated
+            return True
         # Depth is a proxy for context 
         depth = self.get_depth()
         assert self.used_instances is None
