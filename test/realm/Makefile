@@ -70,6 +70,7 @@ TESTS += reservations
 TESTS += multiaffine
 TESTS += machine_config
 TESTS += rect_transform_test
+TESTS += rsrv_acquire_poisoned
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
