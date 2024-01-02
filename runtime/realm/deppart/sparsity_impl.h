@@ -26,9 +26,50 @@
 #include "realm/nodeset.h"
 #include "realm/atomics.h"
 
+#include "realm/event_impl.h"
+
+#include "realm/faults.h"
+
 namespace Realm {
 
   class PartitioningMicroOp;
+
+  /**
+   * SparsityMapRefCounter is an internal object that proxies
+   * referrence counting for sparsity maps including remote node
+   * requests.
+   * */
+  class SparsityMapRefCounter {
+  public:
+    typedef ::realm_id_t id_t;
+    id_t id;
+    SparsityMapRefCounter(::realm_id_t id);
+
+    void add_reference(void);
+    void remove_reference(void);
+
+    struct SparsityMapAddReferenceMessage {
+      id_t id;
+      Event wait_on;
+
+      static void handle_message(NodeID sender, const SparsityMapAddReferenceMessage &msg,
+                                 const void *data, size_t datalen);
+    };
+
+    struct SparsityMapRemoveReferenceMessage {
+      id_t id;
+      Event wait_on;
+
+      static void handle_message(NodeID sender,
+                                 const SparsityMapRemoveReferenceMessage &msg,
+                                 const void *data, size_t datalen);
+    };
+
+    static ActiveMessageHandlerReg<SparsityMapAddReferenceMessage>
+        sparse_untyped_add_reference_message_handler_reg;
+    static ActiveMessageHandlerReg<SparsityMapRemoveReferenceMessage>
+        sparse_untyped_remove_reference_message_handler_reg;
+  };
 
   /**
    * SparsityMapImpl is the actual dynamically allocated object that exists on
@@ -45,6 +86,8 @@ namespace Realm {
 
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
+
+    void destroy(Event wait_on = Event::NO_EVENT);
 
     static SparsityMapImpl<N,T> *lookup(SparsityMap<N,T> sparsity);
 
@@ -105,12 +148,23 @@ namespace Realm {
 				 const void *data, size_t datalen);
     };
 
+    struct SparsityMapDestroyMessage {
+      SparsityMap<N, T> sparsity_map;
+      Event wait_on;
+
+      static void handle_message(NodeID sender,
+                                 const SparsityMapDestroyMessage &msg,
+                                 const void *data, size_t datalen);
+    };
+
   protected:
     void finalize(void);
 
     static ActiveMessageHandlerReg<RemoteSparsityRequest> remote_sparsity_request_reg;
     static ActiveMessageHandlerReg<RemoteSparsityContrib> remote_sparsity_contrib_reg;
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
+    static ActiveMessageHandlerReg<SparsityMapDestroyMessage>
+        sparse_map_destroy_message_handler_reg;
 
     atomic<int> remaining_contributor_count;
     atomic<int> total_piece_count, remaining_piece_count;
@@ -131,13 +185,31 @@ namespace Realm {
     SparsityMapImplWrapper(void);
     ~SparsityMapImplWrapper(void);
 
+    class DeferredDestroy : public EventWaiter {
+     public:
+      void defer(SparsityMapImplWrapper* wrap, Event wait_on);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
+      virtual void print(std::ostream &os) const;
+      virtual Event get_finish_event(void) const;
+      protected:
+      SparsityMapImplWrapper *wrapper;
+    };
+    DeferredDestroy deferred_destroy;
+
     void init(ID _me, unsigned _init_owner);
+    void destroy(void);
+
+    void add_reference(void);
+    void remove_reference(void);
 
     ID me;
     unsigned owner;
     SparsityMapImplWrapper *next_free;
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
+    atomic<int> references;
+
+    Mutex mutex;
 
     // need a type-erased deleter
     typedef void(*Deleter)(void *);
@@ -145,8 +217,6 @@ namespace Realm {
 
     template <int N, typename T>
     SparsityMapImpl<N,T> *get_or_create(SparsityMap<N,T> me);
-
-    void destroy(void);
   };
 
 
@@ -155,3 +225,5 @@ namespace Realm {
 #endif // REALM_DEPPART_SPARSITY_IMPL_H
 
 #include "realm/deppart/sparsity_impl.inl"
+
+

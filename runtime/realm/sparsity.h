@@ -45,6 +45,22 @@ namespace Realm {
   template <int N, typename T> class SparsityMapPublicImpl;
 
   /**
+   * SparsityMapUntyped is a public untyped handle that allows
+   * referrence counting of sparsity maps.
+   * */
+  class REALM_PUBLIC_API SparsityMapUntyped {
+  public:
+    typedef ::realm_id_t id_t;
+    id_t id;
+
+    SparsityMapUntyped() = default;
+    SparsityMapUntyped(::realm_id_t id);
+
+    void add_reference(void);
+    void remove_reference(void);
+  };
+
+  /**
    * \class SparistyMap
    * SparsityMap is the Realm handle that (like all other handles) can be
    * copied/stored whereever and represents a name for a distributed object with
@@ -72,6 +88,10 @@ namespace Realm {
      */
     REALM_CUDA_HD
     bool exists(void) const;
+
+    void destroy(Event wait_on = Event::NO_EVENT);
+    void add_reference(void);
+    void remove_reference(void);
 
     /**
      * Lookup the public implementation object for this sparsity map.
