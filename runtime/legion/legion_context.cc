@@ -24041,12 +24041,14 @@ namespace Legion {
           overhead_profiler->previous_profiling_time;
         overhead_profiler->application_time += diff;
       }
-      // No need to unmap the physical regions, they never had events
-      if (!execution_events.empty())
+      if (Processor::get_executing_processor().exists())
       {
-        const RtEvent wait_on = Runtime::merge_events(execution_events);
-        wait_on.wait();
-      } 
+#ifdef DEBUG_LEGION
+        assert(!effects.exists());
+#endif
+        effects = ApEvent(Processor::get_current_finish_event());
+      }
+      // No need to unmap the physical regions, they never had events
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
           callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
     }

@@ -3954,7 +3954,6 @@ namespace Legion {
                                                    DynamicCollective dc);
     protected:
       mutable LocalLock                            leaf_lock;
-      std::set<RtEvent>                            execution_events;
       size_t                                       inlined_tasks;
     public:
       virtual TaskPriority get_current_priority(void) const;
