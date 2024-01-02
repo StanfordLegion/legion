@@ -1749,6 +1749,11 @@ namespace Legion {
       template<int N, typename T>
       class Tester {
       public:
+        static_assert(N > 0, "Accessor DIM must be positive");
+        static_assert(N <= LEGION_MAX_DIM,
+            "Accessor DIM larger than LEGION_MAX_DIM");
+        static_assert(std::is_integral<T>::value, "must be integral type");
+      public:
         Tester(void) { }
         Tester(const DomainT<N,T> &b) 
           : domain(b) { }
@@ -1759,7 +1764,8 @@ namespace Legion {
                const AffineTransform<M2,N,T> t) 
           : domain(full_rect()), range(b), transform(t)
         { 
-          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
+          static_assert(M2 > 0, "Accessor DIM must be positive");
+          static_assert(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
         }
         template<int M2>
@@ -1767,10 +1773,82 @@ namespace Legion {
                const AffineTransform<M2,N,T> t) 
           : domain(s), range(b), transform(t)
         { 
-          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
+          static_assert(M2 > 0, "Accessor DIM must be positive");
+          static_assert(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
         }
-      public:
+      public: 
+        __CUDA_HD__
+        inline bool contains(const Point<N,T> &point) const
+        {
+          // Check the domain first
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          if (!domain.dense())
+            check_gpu_warning();
+#endif
+          if (!test_point(domain, point))
+            return false;
+          const int range_dim = range.get_dim();
+          if (range_dim > 0)
+          {
+            // We have a transform so need to convert and perform the test
+            switch (range_dim)
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  const DomainT<DIM,T> r = convert_range<DIM>(); \
+                  const AffineTransform<DIM,N,T> t = transform; \
+                  return test_point<DIM>(r, t[point]); \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+            }
+          }
+          return true;
+        }
+        __CUDA_HD__
+        inline bool contains_all(const Rect<N,T> &rect) const
+        {
+          // Check the domain first
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          // Can only test bounds on the GPU and not sparsity maps yet 
+          if (!domain.dense())
+            check_gpu_warning();
+          if (!domain.bounds.contains(rect))
+            return false;
+#else
+          // On the host so we can check sparsity maps too 
+          if (!domain.contains_all(rect))
+            return false;
+#endif
+          const int range_dim = range.get_dim();
+          if (range_dim > 0)
+          {
+            // We have a transform so need to convert and perform the test
+            switch (range_dim)
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  const DomainT<DIM,T> r = convert_range<DIM>(); \
+                  const AffineTransform<DIM,N,T> t = transform; \
+                  for (PointInRectIterator<N,T> itr(rect); itr(); itr++) \
+                    if (!test_point<DIM>(r, t[*itr])) \
+                      return false; \
+                  break; \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+            }
+          }
+          return true;
+        }
+      private:
         static inline DomainT<N,T> intersect_with_rect(
             const DomainT<N,T> &domain, const Rect<N,T> &rect)
         {
@@ -1788,88 +1866,11 @@ namespace Legion {
           }
           return result;
         }
-      public: 
-        __CUDA_HD__
-        inline bool contains(const Point<N,T> &p) const
-        {
-          // Check the domain first
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-          if (!domain.dense())
-            check_gpu_warning();
-#endif
-          if (!test_point(domain, p))
-            return false;
-          const int range_dim = range.get_dim();
-          if (range_dim > 0)
-          {
-            // We have a transform so need to convert and perform the test
-            switch (range_dim)
-            {
-#define DIMFUNC(DIM) \
-              case DIM: \
-                { \
-                  const DomainT<DIM,T> r = convert_range<DIM>(); \
-                  const AffineTransform<DIM,N,T> t = transform; \
-                  return test_point<DIM>(r, t[p]); \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-              default:
-                assert(false);
-            }
-          }
-          return true;
-        }
-        __CUDA_HD__
-        inline bool contains_all(const Rect<N,T> &r) const
-        {
-          // Check the domain first
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-          // Can only test bounds on the GPU and not sparsity maps yet 
-          if (!domain.dense())
-            check_gpu_warning();
-          if (!domain.bounds.contains(r))
-            return false;
-#else
-          // On the host so we can check sparsity maps too 
-          if (!domain.bounds.contains(r))
-            return false;
-          if (!domain.dense())
-          {
-            // If we have a sparsity map we need to check all the points
-            for (PointInRectIterator<N,T> itr(r); itr(); itr++)
-              if (!domain.contains(*itr))
-                return false;
-          }
-#endif
-          const int range_dim = range.get_dim();
-          if (range_dim > 0)
-          {
-            // We have a transform so need to convert and perform the test
-            switch (range_dim)
-            {
-#define DIMFUNC(DIM) \
-              case DIM: \
-                { \
-                  const DomainT<DIM,T> r = convert_range<DIM>(); \
-                  const AffineTransform<DIM,N,T> t = transform; \
-                  for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
-                    if (!test_point<DIM>(r, t[*itr])) \
-                      return false; \
-                  break; \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-              default:
-                assert(false);
-            }
-          }
-          return true;
-        }
-      private:
         __CUDA_HD__
         inline void check_gpu_warning(void) const
         {
+          // We've turned this off for now since most users seems to 
+          // think it is too verbose, but we can renable it if needed
 #if 0
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           bool need_warning = !bounds.dense();
@@ -1902,7 +1903,7 @@ namespace Legion {
 #endif
         }
       private:
-        DomainT<N,T> domain;
+        DomainT<N,T> domain; // always check for inputs
         Domain range; // in case we have a transform
         DomainAffineTransform transform;
       };
