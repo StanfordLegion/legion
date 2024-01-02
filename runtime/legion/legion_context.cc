@@ -47,12 +47,11 @@ namespace Legion {
                              CollectiveMapping *mapping)
       : DistributedCollectable(rt, id, perform_registration, mapping),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
-        next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
-        total_tunable_count(0), inlined_tasks(0), overhead_profiler(NULL), 
-        implicit_profiler(NULL), task_executed(false),
-        has_inline_accessor(false), mutable_priority(false),
-        children_complete_invoked(false), children_commit_invoked(false),
-        inline_task(inline_t), implicit_task(implicit_t)
+        executing_processor(Processor::NO_PROC), inlined_tasks(0),
+        overhead_profiler(NULL), implicit_profiler(NULL), task_executed(false),
+        mutable_priority(false), children_complete_invoked(false),
+        children_commit_invoked(false), inline_task(inline_t),
+        implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
       if (implicit_task && (runtime->profiler != NULL))
@@ -294,480 +293,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(const Domain &bounds, 
-                                       TypeTag type_tag, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this); 
-      return create_index_space_internal(&bounds, type_tag, provenance);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(
-                 const std::vector<DomainPoint> &points, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      switch (points[0].get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            std::vector<Realm::Point<DIM,coord_t> > \
-              realm_points(points.size()); \
-            for (unsigned idx = 0; idx < points.size(); idx++) \
-              realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
-            const DomainT<DIM,coord_t> realm_is( \
-                (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
-            const Domain bounds(realm_is); \
-            return create_index_space_internal(&bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      return IndexSpace::NO_SPACE;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(const std::vector<Domain> &rects,
-                                               Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      switch (rects[0].get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
-            for (unsigned idx = 0; idx < rects.size(); idx++) \
-              realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
-            const DomainT<DIM,coord_t> realm_is( \
-                (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
-            const Domain bounds(realm_is); \
-            return create_index_space_internal(&bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      return IndexSpace::NO_SPACE;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space_internal(const Domain *bounds,
-                                             TypeTag type_tag, Provenance *prov)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), type_tag);
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id, runtime->address_space, 
-            (prov == NULL) ? NULL : prov->human_str());
-      // Will take ownership of provenance if not NULL
-      runtime->forest->create_index_space(handle, bounds, did, prov); 
-      register_index_space_creation(handle);
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_unbound_index_space(TypeTag type_tag,
-                                                       Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      return create_index_space_internal(NULL, type_tag, provenance);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::create_shared_ownership(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      // Check to see if this is a top-level index space, if not then
-      // we shouldn't even be destroying it
-      if (!runtime->forest->is_top_level_index_space(handle))
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
-            "Illegal call to create shared ownership for index space %x in " 
-            "task %s (UID %lld) which is not a top-level index space. Legion "
-            "only permits top-level index spaces to have shared ownership.", 
-            handle.get_id(), get_task_name(), get_unique_id())
-      runtime->create_shared_ownership(handle);
-      AutoLock priv_lock(privilege_lock);
-      std::map<IndexSpace,unsigned>::iterator finder = 
-        created_index_spaces.find(handle);
-      if (finder != created_index_spaces.end())
-        finder->second++;
-      else
-        created_index_spaces[handle] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::union_index_spaces(
-                  const std::vector<IndexSpace> &spaces, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this); 
-      if (spaces.empty())
-        return IndexSpace::NO_SPACE;
-      bool none_exists = true;
-      for (std::vector<IndexSpace>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
-      {
-        if (none_exists && it->exists())
-          none_exists = false;
-        if (spaces[0].get_type_tag() != it->get_type_tag())
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'union_index_spaces' "
-                        "performed in task %s (UID %lld)",
-                        get_task_name(), get_unique_id())
-      }
-      if (none_exists)
-        return IndexSpace::NO_SPACE;
-      const IndexSpace handle(runtime->get_unique_index_space_id(),
-          runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
-      const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_union_space(handle, did, provenance, spaces);
-      register_index_space_creation(handle);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::intersect_index_spaces(
-                  const std::vector<IndexSpace> &spaces, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this); 
-      if (spaces.empty())
-        return IndexSpace::NO_SPACE;
-      bool none_exists = true;
-      for (std::vector<IndexSpace>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
-      {
-        if (none_exists && it->exists())
-          none_exists = false;
-        if (spaces[0].get_type_tag() != it->get_type_tag())
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'intersect_index_spaces' "
-                        "performed in task %s (UID %lld)",
-                        get_task_name(), get_unique_id())
-      }
-      if (none_exists)
-        return IndexSpace::NO_SPACE;
-      const IndexSpace handle(runtime->get_unique_index_space_id(),
-          runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
-      const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_intersection_space(handle, did,provenance,spaces);
-      register_index_space_creation(handle);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::subtract_index_spaces(
-                      IndexSpace left, IndexSpace right, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this); 
-      if (!left.exists())
-        return IndexSpace::NO_SPACE;
-      if (right.exists() && left.get_type_tag() != right.get_type_tag())
-        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'create_difference_spaces' "
-                        "performed in task %s (UID %lld)",
-                        get_task_name(), get_unique_id())
-      const IndexSpace handle(runtime->get_unique_index_space_id(),
-          runtime->get_unique_index_tree_id(), left.get_type_tag());
-      const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_difference_space(handle, did, provenance, 
-                                               left, right);
-      register_index_space_creation(handle);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::create_shared_ownership(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      runtime->create_shared_ownership(handle);
-      AutoLock priv_lock(privilege_lock);
-      std::map<IndexPartition,unsigned>::iterator finder = 
-        created_index_partitions.find(handle);
-      if (finder != created_index_partitions.end())
-        finder->second++;
-      else
-        created_index_partitions[handle] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace TaskContext::create_field_space(Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      FieldSpace space(runtime->get_unique_field_space_id());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_field.debug("Creating field space %x in task %s (ID %lld)", 
-                      space.id, get_task_name(), get_unique_id());
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_space(space.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
-      runtime->forest->create_field_space(space, did, provenance);
-      register_field_space_creation(space);
-      return space;
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace TaskContext::create_field_space(
-                                         const std::vector<size_t> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id,
-                                         Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      FieldSpace space(runtime->get_unique_field_space_id());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_field.debug("Creating field space %x in task %s (ID %lld)", 
-                      space.id, get_task_name(), get_unique_id());
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_space(space.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
-      FieldSpaceNode *node =
-        runtime->forest->create_field_space(space, did, provenance);
-      register_field_space_creation(space);
-      if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
-      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-      {
-        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
-          resulting_fields[idx] = runtime->get_unique_field_id();
-#ifdef DEBUG_LEGION
-        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
-          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-            "Task %s (ID %lld) attempted to allocate a field with "
-            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
-            "bound set in legion_config.h", get_task_name(),
-            get_unique_id(), resulting_fields[idx])
-#endif
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-            sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
-      }
-      node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
-      register_all_field_creations(space, false/*local*/, resulting_fields);
-      return space;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::create_shared_ownership(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      runtime->create_shared_ownership(handle);
-      AutoLock priv_lock(privilege_lock);
-      std::map<FieldSpace,unsigned>::iterator finder = 
-        created_field_spaces.find(handle);
-      if (finder != created_field_spaces.end())
-        finder->second++;
-      else
-        created_field_spaces[handle] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocatorImpl* TaskContext::create_field_allocator(FieldSpace handle,
-                                                            bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      {
-        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
-          field_allocators.find(handle);
-        if (finder != field_allocators.end())
-          return finder->second;
-      }
-      // Didn't find it, so have to make, retake the lock in exclusive mode
-      FieldSpaceNode *node = runtime->forest->get_node(handle);
-      AutoLock priv_lock(privilege_lock);
-      // Check to see if we lost the race
-      std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
-        field_allocators.find(handle);
-      if (finder != field_allocators.end())
-        return finder->second;
-      // Don't have one so make a new one
-      const RtEvent ready = node->create_allocator(runtime->address_space);
-      FieldAllocatorImpl *result = new FieldAllocatorImpl(node, this, ready);
-      // Save it for later
-      field_allocators[handle] = result;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::destroy_field_allocator(FieldSpaceNode *node,
-                                              bool from_application)
-    //--------------------------------------------------------------------------
-    {
-      if (from_application)
-      {
-        AutoRuntimeCall call(this);
-        destroy_field_allocator(node, false/*from application*/);
-        return;
-      }
-      const RtEvent ready = node->destroy_allocator(runtime->address_space);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      AutoLock priv_lock(privilege_lock);
-      std::map<FieldSpace,FieldAllocatorImpl*>::iterator finder = 
-        field_allocators.find(node->handle);
-#ifdef DEBUG_LEGION
-      assert(finder != field_allocators.end());
-#endif
-      field_allocators.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID TaskContext::allocate_field(FieldSpace space, size_t field_size,
-                                        FieldID fid, bool local,
-                                        CustomSerdezID serdez_id,
-                                        Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      if (fid == LEGION_AUTO_GENERATE_ID)
-        fid = runtime->get_unique_field_id();
-#ifdef DEBUG_LEGION
-      else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
-        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-           "Task %s (ID %lld) attempted to allocate a field with ID %d which "
-           "exceeds the LEGION_MAX_APPLICATION_FIELD_ID bound set in "
-           "legion_config.h", get_task_name(), get_unique_id(), fid)
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_creation(space.id, fid, field_size,
-            (provenance == NULL) ? NULL : provenance->human_str());
-      std::set<RtEvent> done_events;
-      if (!local)
-      {
-        const RtEvent precondition = 
-          runtime->forest->allocate_field(space, field_size, fid,
-                                          serdez_id, provenance);
-        if (precondition.exists())
-          done_events.insert(precondition);
-      }
-      else
-        allocate_local_field(space, field_size, fid, 
-                             serdez_id, done_events, provenance);
-      register_field_creation(space, fid, local);
-      if (!done_events.empty())
-      {
-        const RtEvent precondition = Runtime::merge_events(done_events);
-        if (precondition.exists() && !precondition.has_triggered())
-          precondition.wait();
-      }
-      return fid;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::allocate_fields(FieldSpace space,
-                                      const std::vector<size_t> &sizes,
-                                      std::vector<FieldID> &resulting_fields,
-                                      bool local, CustomSerdezID serdez_id,
-                                      Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
-      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-      {
-        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
-          resulting_fields[idx] = runtime->get_unique_field_id();
-#ifdef DEBUG_LEGION
-        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
-          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-            "Task %s (ID %lld) attempted to allocate a field with "
-            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
-            "bound set in legion_config.h", get_task_name(),
-            get_unique_id(), resulting_fields[idx])
-#endif
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-            sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
-      }
-      std::set<RtEvent> done_events;
-      if (!local)
-      {
-        const RtEvent precondition = runtime->forest->allocate_fields(space, 
-                            sizes, resulting_fields, serdez_id, provenance);
-        if (precondition.exists())
-          done_events.insert(precondition);
-      }
-      else
-        allocate_local_fields(space, sizes, resulting_fields,
-                              serdez_id, done_events, provenance);
-      register_all_field_creations(space, local, resulting_fields);
-      if (!done_events.empty())
-      {
-        const RtEvent precondition = Runtime::merge_events(done_events);
-        if (precondition.exists() && !precondition.has_triggered())
-          precondition.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::create_shared_ownership(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      if (!runtime->forest->is_top_level_region(handle))
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
-            "Illegal call to create shared ownership for logical region "
-            "(%x,%x,%x in task %s (UID %lld) which is not a top-level logical "
-            "region. Legion only permits top-level logical regions to have "
-            "shared ownerships.", handle.index_space.id, handle.field_space.id,
-            handle.tree_id, get_task_name(), get_unique_id())
-      runtime->create_shared_ownership(handle);
-      AutoLock priv_lock(privilege_lock);
-      std::map<LogicalRegion,unsigned>::iterator finder = 
-        created_regions.find(handle);
-      if (finder != created_regions.end())
-        finder->second++;
-      else
-        created_regions[handle] = 1;
-    } 
-
-    //--------------------------------------------------------------------------
     void TaskContext::add_output_region(const OutputRequirement &req,
                                         const InstanceSet &instances,
                                         bool global,
@@ -830,681 +355,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned TaskContext::add_created_region(LogicalRegion handle, 
-                                const bool task_local, const bool output_region)
-    //--------------------------------------------------------------------------
-    {
-      // Already hold the lock from the caller
-      if (!task_local && !output_region)
-      {
-        // There's a race here with created region tree contexts coming back
-        // and making these requirements for themselves so we check for
-        // duplications here in that case
-        for (std::map<unsigned,RegionRequirement>::const_iterator it =
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++)
-        {
-          if (it->second.parent == handle)
-            return it->first;
-#ifdef DEBUG_LEGION
-          // shouldn't have anything from the same region tree here
-          assert(it->second.parent.get_tree_id() != handle.get_tree_id());
-#endif
-        }
-      }
-      RegionRequirement new_req(handle, LEGION_READ_WRITE, 
-                                LEGION_EXCLUSIVE, handle);
-      if (output_region)
-        new_req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
-      if (runtime->legion_spy_enabled)
-        TaskOp::log_requirement(get_unique_id(), next_created_index, new_req);
-      // Put a region requirement with no fields in the list of
-      // created requirements, we know we can add any fields for
-      // this field space in the future since we own all privileges
-      created_requirements[next_created_index] = new_req;
-      // Created regions always return privileges that they make
-      returnable_privileges[next_created_index] = !task_local;
-      return next_created_index++;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::log_created_requirements(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-           created_requirements.begin(); it != created_requirements.end(); it++)
-      {
-        // We already logged the requirement when we made it
-        // Skip it if there are no privilege fields
-        if (it->second.privilege_fields.empty())
-          continue;
-        owner_task->log_virtual_mapping(it->first, it->second);
-      }
-    } 
-
-    //--------------------------------------------------------------------------
-    unsigned TaskContext::register_region_creation(LogicalRegion handle,
-                                                   const bool task_local,
-                                                   const bool output_region)
-    //--------------------------------------------------------------------------
-    {
-      // Create a new logical region 
-      // Hold the operation lock when doing this since children could
-      // be returning values from the utility processor
-      AutoLock priv_lock(privilege_lock);
-#ifdef DEBUG_LEGION
-      assert(local_regions.find(handle) == local_regions.end());
-      assert(created_regions.find(handle) == created_regions.end());
-#endif
-      if (task_local)
-      {
-        if (is_leaf_context())
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_CREATION,
-              "Illegal task-local region creation performed in leaf task %s "
-                           "(ID %lld)", get_task_name(), get_unique_id())
-        local_regions[handle] = false/*not deleted*/;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(created_regions.find(handle) == created_regions.end());
-#endif
-        created_regions[handle] = 1;
-      }
-      return add_created_region(handle, task_local, output_region);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_field_creation(FieldSpace handle, 
-                                              FieldID fid, bool local)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-      std::pair<FieldSpace,FieldID> key(handle,fid);
-#ifdef DEBUG_LEGION
-      assert(local_fields.find(key) == local_fields.end());
-      assert(created_fields.find(key) == created_fields.end());
-#endif
-      if (!local)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_fields.find(key) == created_fields.end());
-#endif
-        created_fields.insert(key);
-      }
-      else
-        local_fields[key] = false/*deleted*/;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_all_field_creations(FieldSpace handle,bool local,
-                                             const std::vector<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-      if (local)
-      {
-        for (unsigned idx = 0; idx < fields.size(); idx++)
-        {
-          std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
-#ifdef DEBUG_LEGION
-          assert(local_fields.find(key) == local_fields.end());
-#endif
-          local_fields[key] = false/*deleted*/;
-        }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < fields.size(); idx++)
-        {
-          std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
-#ifdef DEBUG_LEGION
-          assert(created_fields.find(key) == created_fields.end());
-#endif
-          created_fields.insert(key);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_field_space_creation(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-#ifdef DEBUG_LEGION
-      assert(created_field_spaces.find(space) == created_field_spaces.end());
-#endif
-      created_field_spaces[space] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    bool TaskContext::has_created_index_space(IndexSpace space) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-      return (created_index_spaces.find(space) != created_index_spaces.end());
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_index_space_creation(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-#ifdef DEBUG_LEGION
-      // This assertion is not valid anymore because of aliased sharded
-      // index spaces in control replication contexts
-      //assert(created_index_spaces.find(space) == created_index_spaces.end());
-#endif
-      created_index_spaces[space] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_index_partition_creation(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-#ifdef DEBUG_LEGION
-      assert(created_index_partitions.find(handle) == 
-             created_index_partitions.end());
-#endif
-      created_index_partitions[handle] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::report_leaks_and_duplicates(
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      if (!deleted_regions.empty())
-      {
-        for (std::vector<DeletedRegion>::const_iterator it = 
-              deleted_regions.begin(); it != deleted_regions.end(); it++)
-          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
-              "Duplicate deletions were performed for region (%x,%x,%x) "
-              "in task tree rooted by %s (provenance %s)", 
-              it->region.index_space.id, it->region.field_space.id, 
-              it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
-        deleted_regions.clear();
-      }
-      if (!deleted_fields.empty())
-      {
-        for (std::vector<DeletedField>::const_iterator it =
-              deleted_fields.begin(); it != deleted_fields.end(); it++)
-          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
-              "Duplicate deletions were performed on field %d of "
-              "field space %x in task tree rooted by %s (provenance %s)", 
-              it->fid, it->space.id, get_task_name(), 
-              (it->provenance != NULL) ? it->provenance->human_str() :
-              "unknown")
-        deleted_fields.clear();
-      }
-      if (!deleted_field_spaces.empty())
-      {
-        for (std::vector<DeletedFieldSpace>::const_iterator it = 
-              deleted_field_spaces.begin(); it != 
-              deleted_field_spaces.end(); it++)
-          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
-              "Duplicate deletions were performed on field space %x "
-              "in task tree rooted by %s (provenance %s)", it->space.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
-        deleted_field_spaces.clear();
-      }
-      if (!deleted_index_spaces.empty())
-      {
-        for (std::vector<DeletedIndexSpace>::const_iterator it =
-              deleted_index_spaces.begin(); it != 
-              deleted_index_spaces.end(); it++)
-          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
-              "Duplicate deletions were performed on index space %x "
-              "in task tree rooted by %s (provenance %s)", it->space.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
-        deleted_index_spaces.clear();
-      }
-      if (!deleted_index_partitions.empty())
-      {
-        for (std::vector<DeletedPartition>::const_iterator it =
-              deleted_index_partitions.begin(); it !=
-              deleted_index_partitions.end(); it++)
-          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
-              "Duplicate deletions were performed on index partition %x "
-              "in task tree rooted by %s (provenance %s)", it->partition.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
-        deleted_index_partitions.clear();
-      }
-      // Now we go through and delete anything that the user leaked
-      if (!created_regions.empty())
-      {
-        for (std::map<LogicalRegion,unsigned>::const_iterator rit = 
-              created_regions.begin(); rit != created_regions.end(); rit++)
-        {
-          if (runtime->report_leaks)
-            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-                "Logical region (%x,%x,%x) was leaked out of task tree rooted "
-                "by task %s", rit->first.index_space.id, 
-                rit->first.field_space.id, rit->first.tree_id, get_task_name())
-          runtime->forest->destroy_logical_region(rit->first, preconditions);
-          // Remove any latent field spaces and therefore any created fields
-          // since they might not be able to be cleaned up after this since
-          // this region might be holding the last reference to the field space
-          if (!latent_field_spaces.empty())
-          {
-            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-              latent_field_spaces.find(rit->first.get_field_space());
-            if (finder != latent_field_spaces.end())
-            {
-              std::set<LogicalRegion>::iterator latent_finder = 
-                finder->second.find(rit->first);
-#ifdef DEBUG_LEGION
-              assert(latent_finder != finder->second.end());
-#endif
-              finder->second.erase(latent_finder);
-              if (finder->second.empty())
-              {
-                // Now that all the regions using this field space have
-                // been deleted we can clean up all the created_fields
-                for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                      created_fields.begin(); it != 
-                      created_fields.end(); /*nothing*/)
-                {
-                  if (it->first == finder->first)
-                  {
-                    std::set<std::pair<FieldSpace,FieldID> >::iterator 
-                      to_delete = it++;
-                    created_fields.erase(to_delete);
-                  }
-                  else
-                    it++;
-                }
-                latent_field_spaces.erase(finder);
-              }
-            }
-          }
-        }
-        created_regions.clear();
-      }
-      if (!created_fields.empty())
-      {
-        std::map<FieldSpace,FieldAllocatorImpl*> leak_allocators;
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
-              it = created_fields.begin(); it != created_fields.end(); it++)
-        {
-          if (runtime->report_leaks)
-            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-                "Field %d of field space %x was leaked out of task tree rooted "
-                "by task %s", it->second, it->first.id, get_task_name())
-          std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder =
-              leak_allocators.find(it->first);
-          if (finder == leak_allocators.end())
-          {
-            FieldAllocatorImpl *allocator = 
-              create_field_allocator(it->first, true/*unordered*/);
-            allocator->add_reference();
-            leak_allocators[it->first] = allocator;
-            allocator->ready_event.wait();
-          }
-          else
-            finder->second->ready_event.wait();
-          runtime->forest->free_field(it->first, it->second, preconditions);
-        }
-        for (std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator it =
-              leak_allocators.begin(); it != leak_allocators.end(); it++)
-          if (it->second->remove_reference())
-          {
-            it->second->free_from_runtime();
-            delete it->second;
-          }
-        created_fields.clear();
-      }
-      if (!created_field_spaces.empty())
-      {
-        for (std::map<FieldSpace,unsigned>::const_iterator it = 
-              created_field_spaces.begin(); it != 
-              created_field_spaces.end(); it++)
-        {
-          if (runtime->report_leaks)
-            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-                "Field space %x was leaked out of task tree rooted by task %s",
-                it->first.id, get_task_name())
-          runtime->forest->destroy_field_space(it->first, preconditions);
-        }
-        created_field_spaces.clear();
-      }
-      if (!created_index_partitions.empty())
-      {
-        for (std::map<IndexPartition,unsigned>::const_iterator it =
-              created_index_partitions.begin(); it != 
-              created_index_partitions.end(); it++)
-        {
-          if (runtime->report_leaks)
-            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-                "Index partition %x was leaked out of task tree rooted by "
-                "task %s", it->first.id, get_task_name())
-          runtime->forest->destroy_index_partition(it->first, preconditions);
-        }
-        created_index_partitions.clear();
-      }
-      if (!created_index_spaces.empty())
-      {
-        for (std::map<IndexSpace,unsigned>::const_iterator it = 
-              created_index_spaces.begin(); it !=
-              created_index_spaces.end(); it++)
-        {
-          if (runtime->report_leaks)
-            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-                "Index space %x was leaked out of task tree rooted by task %s",
-                it->first.id, get_task_name())
-          runtime->forest->destroy_index_space(it->first, 
-                  runtime->address_space, preconditions);
-        }
-        created_index_spaces.clear();
-      } 
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::analyze_destroy_fields(FieldSpace handle,
-                                             const std::set<FieldID> &to_delete,
-                                    std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes,
-                                    std::vector<FieldID> &global_to_free,
-                                    std::vector<FieldID> &local_to_free,
-                                    std::vector<unsigned> &local_field_indexes,
-                                    std::vector<unsigned> &deletion_indexes)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_leaf_context());
-#endif
-      {
-        // We can't destroy any fields from our original regions because we
-        // were not the ones that made them.
-        AutoLock priv_lock(privilege_lock);
-        // We can actually remove the fields from the data structure now 
-        for (std::set<FieldID>::const_iterator it =
-              to_delete.begin(); it != to_delete.end(); it++)
-        {
-          const std::pair<FieldSpace,FieldID> key(handle, *it);
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-            created_fields.find(key);
-          if (finder == created_fields.end())
-          {
-            std::map<std::pair<FieldSpace,FieldID>,bool>::iterator 
-              local_finder = local_fields.find(key);
-#ifdef DEBUG_LEGION
-            assert(local_finder != local_fields.end());
-            assert(local_finder->second);
-#endif
-            local_fields.erase(local_finder);
-            local_to_free.push_back(*it);
-          }
-          else
-          {
-            created_fields.erase(finder);
-            global_to_free.push_back(*it);
-          }
-        }
-        // Now figure out which region requirements can be destroyed
-        for (std::map<unsigned,RegionRequirement>::iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++)
-        {
-          if (it->second.region.get_field_space() != handle)
-            continue;
-          std::set<FieldID> overlapping_fields;
-          for (std::set<FieldID>::const_iterator fit = to_delete.begin();
-                fit != to_delete.end(); fit++)
-          {
-            std::set<FieldID>::iterator finder = 
-              it->second.privilege_fields.find(*fit);
-            if (finder != it->second.privilege_fields.end())
-            {
-              overlapping_fields.insert(*fit);
-              // Remove this from the created requirements fields
-              it->second.privilege_fields.erase(finder);
-            }
-          }
-          if (overlapping_fields.empty())
-            continue;
-          delete_reqs.resize(delete_reqs.size()+1);
-          RegionRequirement &req = delete_reqs.back();
-          req.region = it->second.region;
-          req.parent = it->second.region;
-          req.privilege = LEGION_READ_WRITE;
-          req.prop = LEGION_EXCLUSIVE;
-          req.privilege_fields.swap(overlapping_fields);
-          req.handle_type = LEGION_SINGULAR_PROJECTION;
-          parent_req_indexes.push_back(it->first);
-          // We need some extra logging for legion spy
-          if (runtime->legion_spy_enabled)
-          {
-            LegionSpy::log_requirement_fields(get_unique_id(),
-                                              it->first, req.privilege_fields);
-            owner_task->log_virtual_mapping(it->first, req);
-          }
-        }
-      }
-      if (!local_to_free.empty())
-        analyze_free_local_fields(handle, local_to_free, local_field_indexes);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::analyze_free_local_fields(FieldSpace handle,
-                                     const std::vector<FieldID> &local_to_free,
-                                     std::vector<unsigned> &local_field_indexes)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be performed on derived classes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::analyze_destroy_logical_region(LogicalRegion handle,
-                                    std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes,
-                                    std::vector<bool> &returnable)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_leaf_context());
-#endif
-      // If we're deleting a field space then we can't be deleting any of the 
-      // original requirements, only requirements that we created
-      if (runtime->legion_spy_enabled)
-      {
-        // We need some extra logging for legion spy
-        std::vector<MappingInstance> instances(1, 
-              Mapping::PhysicalInstance::get_virtual_instance());
-        AutoLock priv_lock(privilege_lock);
-        for (std::map<unsigned,RegionRequirement>::iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++)
-        {
-          // Has to match precisely
-          if (handle.get_tree_id() == it->second.region.get_tree_id())
-          {
-#ifdef DEBUG_LEGION
-            // Should be the same region
-            assert(handle == it->second.region);
-            assert(returnable_privileges.find(it->first) !=
-                    returnable_privileges.end());
-#endif
-            // Do extra logging for legion spy
-            owner_task->log_virtual_mapping(it->first, it->second);
-            // Then do the result of the normal operations
-            delete_reqs.resize(delete_reqs.size()+1);
-            RegionRequirement &req = delete_reqs.back();
-            req.region = it->second.region;
-            req.parent = it->second.region;
-            req.privilege = LEGION_READ_WRITE;
-            req.prop = LEGION_EXCLUSIVE;
-            // Swap the privilege fields so that nothing else tries
-            // to delete those particular fields
-            req.privilege_fields.swap(it->second.privilege_fields);
-            req.handle_type = LEGION_SINGULAR_PROJECTION;
-            req.flags = it->second.flags;
-            parent_req_indexes.push_back(it->first);
-            returnable.push_back(returnable_privileges[it->first]);
-          }
-        }
-        // Remove the region from the created set
-        {
-          std::map<LogicalRegion,unsigned>::iterator finder = 
-            created_regions.find(handle);
-          if (finder == created_regions.end())
-          {
-            std::map<LogicalRegion,bool>::iterator local_finder = 
-              local_regions.find(handle);
-#ifdef DEBUG_LEGION
-            assert(local_finder != local_regions.end());
-            assert(local_finder->second);
-#endif
-            local_regions.erase(local_finder);
-          }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert(finder->second == 0);
-#endif
-            created_regions.erase(finder);
-          }
-        }
-        // Check to see if we have any latent field spaces to clean up
-        if (!latent_field_spaces.empty())
-        {
-          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-            latent_field_spaces.find(handle.get_field_space());
-          if (finder != latent_field_spaces.end())
-          {
-            std::set<LogicalRegion>::iterator region_finder = 
-              finder->second.find(handle);
-#ifdef DEBUG_LEGION
-            assert(region_finder != finder->second.end());
-#endif
-            finder->second.erase(region_finder);
-            if (finder->second.empty())
-            {
-              // Now that all the regions using this field space have
-              // been deleted we can clean up all the created_fields
-              for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                    created_fields.begin(); it != 
-                    created_fields.end(); /*nothing*/)
-              {
-                if (it->first == finder->first)
-                {
-                  std::set<std::pair<FieldSpace,FieldID> >::iterator 
-                    to_delete = it++;
-                  created_fields.erase(to_delete);
-                }
-                else
-                  it++;
-              }
-              latent_field_spaces.erase(finder);
-            }
-          }
-        }
-      }
-      else
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::map<unsigned,RegionRequirement>::iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++)
-        {
-          // Has to match precisely
-          if (handle.get_tree_id() == it->second.region.get_tree_id())
-          {
-#ifdef DEBUG_LEGION
-            // Should be the same region
-            assert(handle == it->second.region);
-            assert(returnable_privileges.find(it->first) !=
-                    returnable_privileges.end());
-#endif
-            delete_reqs.resize(delete_reqs.size()+1);
-            RegionRequirement &req = delete_reqs.back();
-            req.region = it->second.region;
-            req.parent = it->second.region;
-            req.privilege = LEGION_READ_WRITE;
-            req.prop = LEGION_EXCLUSIVE;
-            // Swap the privilege fields so that nothing else tries
-            // to delete those particular fields
-            req.privilege_fields.swap(it->second.privilege_fields);
-            req.handle_type = LEGION_SINGULAR_PROJECTION;
-            parent_req_indexes.push_back(it->first);
-            returnable.push_back(returnable_privileges[it->first]);
-          }
-        }
-        // Remove the region from the created set
-        {
-          std::map<LogicalRegion,unsigned>::iterator finder = 
-            created_regions.find(handle);
-          if (finder == created_regions.end())
-          {
-            std::map<LogicalRegion,bool>::iterator local_finder = 
-              local_regions.find(handle);
-#ifdef DEBUG_LEGION
-            assert(local_finder != local_regions.end());
-            assert(local_finder->second);
-#endif
-            local_regions.erase(local_finder);
-          }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert(finder->second == 0);
-#endif
-            created_regions.erase(finder);
-          }
-        }
-        // Check to see if we have any latent field spaces to clean up
-        if (!latent_field_spaces.empty())
-        {
-          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-            latent_field_spaces.find(handle.get_field_space());
-          if (finder != latent_field_spaces.end())
-          {
-            std::set<LogicalRegion>::iterator region_finder = 
-              finder->second.find(handle);
-#ifdef DEBUG_LEGION
-            assert(region_finder != finder->second.end());
-#endif
-            finder->second.erase(region_finder);
-            if (finder->second.empty())
-            {
-              // Now that all the regions using this field space have
-              // been deleted we can clean up all the created_fields
-              for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                    created_fields.begin(); it != 
-                    created_fields.end(); /*nothing*/)
-              {
-                if (it->first == finder->first)
-                {
-                  std::set<std::pair<FieldSpace,FieldID> >::iterator 
-                    to_delete = it++;
-                  created_fields.erase(to_delete);
-                }
-                else
-                  it++;
-              }
-              latent_field_spaces.erase(finder);
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::remove_deleted_local_fields(FieldSpace space,
-                                          const std::vector<FieldID> &to_remove)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be implemented by derived classes
-      assert(false);
-    } 
-
-    //--------------------------------------------------------------------------
     void TaskContext::raise_poison_exception(void)
     //--------------------------------------------------------------------------
     {
@@ -1552,253 +402,6 @@ namespace Legion {
     {
       variant->record_padded_fields(regions, physical_regions); 
     }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::find_parent_region_req(const RegionRequirement &req,
-                                            bool check_privilege /*= true*/)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_PARENT_REGION_REQ_CALL);
-      // We can check most of our region requirements without the lock
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        const RegionRequirement &our_req = regions[idx];
-        // First check that the regions match
-        if (our_req.region != req.parent)
-          continue;
-        // Next check the privileges
-        if (check_privilege && 
-            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
-          continue;
-        // Finally check that all the fields are contained
-        bool dominated = true;
-        for (std::set<FieldID>::const_iterator it = 
-              req.privilege_fields.begin(); it !=
-              req.privilege_fields.end(); it++)
-        {
-          if (our_req.privilege_fields.find(*it) ==
-              our_req.privilege_fields.end())
-          {
-            dominated = false;
-            break;
-          }
-        }
-        if (!dominated)
-          continue;
-        return int(idx);
-      }
-      const FieldSpace fs = req.parent.get_field_space(); 
-      // The created region requirements have to be checked while holding
-      // the lock since they are subject to mutation by the application
-      // We might also mutate it so we take the lock in exclusive mode
-      AutoLock priv_lock(privilege_lock);
-      for (std::map<unsigned,RegionRequirement>::iterator it = 
-           created_requirements.begin(); it != created_requirements.end(); it++)
-      {
-        RegionRequirement &our_req = it->second;
-        // First check that the regions match
-        if (our_req.region != req.parent)
-          continue;
-        // Next check the privileges
-        if (check_privilege && 
-            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
-          continue;
-#ifdef DEBUG_LEGION
-        assert(returnable_privileges.find(it->first) != 
-                returnable_privileges.end());
-#endif
-        // If this is a returnable privilege requiremnt that means
-        // that we made this region so we always have privileges
-        // on any fields for that region, just add them and be done
-        if (returnable_privileges[it->first])
-        {
-          our_req.privilege_fields.insert(req.privilege_fields.begin(),
-                                          req.privilege_fields.end());
-          return it->first;
-        }
-        // Finally check that all the fields are contained
-        bool dominated = true;
-        for (std::set<FieldID>::const_iterator fit = 
-              req.privilege_fields.begin(); fit !=
-              req.privilege_fields.end(); fit++)
-        {
-          if (our_req.privilege_fields.find(*fit) ==
-              our_req.privilege_fields.end())
-          {
-            // Check to see if this is a field we made
-            // and haven't destroyed yet
-            std::pair<FieldSpace,FieldID> key(fs, *fit);
-            if (created_fields.find(key) != created_fields.end())
-            {
-              // We made it so we can add it to the requirement
-              // and continue on our way
-              our_req.privilege_fields.insert(*fit);
-              continue;
-            }
-            if (local_fields.find(key) != local_fields.end())
-            {
-              // We made it so we can add it to the requirement
-              // and continue on our way
-              our_req.privilege_fields.insert(*fit);
-              continue;
-            }
-            // Otherwise we don't have privileges
-            dominated = false;
-            break;
-          }
-        }
-        if (!dominated)
-          continue;
-        // Include the offset by the number of base requirements
-        return it->first;
-      }
-      // Method of last resort, check to see if we made all the fields
-      // if we did, then we can make a new requirement for all the fields
-      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
-            it != req.privilege_fields.end(); it++)
-      {
-        std::pair<FieldSpace,FieldID> key(fs, *it);
-        // Didn't make it so we don't have privileges anywhere
-        if ((created_fields.find(key) == created_fields.end()) &&
-            (local_fields.find(key) == local_fields.end()))
-          return -1;
-      }
-      // If we get here then we can make a new requirement
-      // which has non-returnable privileges
-      // Get the top level region for the region tree
-      RegionNode *top = runtime->forest->get_tree(req.parent.get_tree_id());
-      const unsigned index = next_created_index++;
-      RegionRequirement &new_req = created_requirements[index];
-      new_req = RegionRequirement(top->handle, LEGION_READ_WRITE, 
-                                  LEGION_EXCLUSIVE, top->handle);
-      if (runtime->legion_spy_enabled)
-        TaskOp::log_requirement(get_unique_id(), index, new_req);
-      // Add our fields
-      new_req.privilege_fields.insert(
-          req.privilege_fields.begin(), req.privilege_fields.end());
-      // This is not a returnable privilege requirement
-      returnable_privileges[index] = false;
-      return index;
-    }
-
-    //--------------------------------------------------------------------------
-    LegionErrorType TaskContext::check_privilege(
-                                         const IndexSpaceRequirement &req) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
-      if (req.verified)
-        return LEGION_NO_ERROR;
-      // Find the parent index space
-      for (std::vector<IndexSpaceRequirement>::const_iterator it = 
-            owner_task->indexes.begin(); it != owner_task->indexes.end(); it++)
-      {
-        // Check to see if we found the requirement in the parent 
-        if (it->handle == req.parent)
-        {
-          // Check that there is a path between the parent and the child
-          std::vector<LegionColor> path;
-          if (!runtime->forest->compute_index_path(req.parent, 
-                                                   req.handle, path))
-            return ERROR_BAD_INDEX_PATH;
-          // Now check that the privileges are less than or equal
-          if (req.privilege & (~(it->privilege)))
-          {
-            return ERROR_BAD_INDEX_PRIVILEGES;  
-          }
-          return LEGION_NO_ERROR;
-        }
-      }
-      // If we didn't find it here, we have to check the added 
-      // index spaces that we have
-      if (has_created_index_space(req.parent))
-      {
-        // Still need to check that there is a path between the two
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_index_path(req.parent, req.handle, path))
-          return ERROR_BAD_INDEX_PATH;
-        // No need to check privileges here since it is a created space
-        // which means that the parent has all privileges.
-        return LEGION_NO_ERROR;
-      }
-      return ERROR_BAD_PARENT_INDEX;
-    }
-
-    //--------------------------------------------------------------------------
-    LegionErrorType TaskContext::check_privilege(const RegionRequirement &req,
-                                                 FieldID &bad_field,
-                                                 int &bad_index,
-                                                 bool skip_privilege) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
-#ifdef DEBUG_LEGION
-      assert(bad_index < 0);
-#endif
-      if (req.flags & LEGION_VERIFIED_FLAG)
-        return LEGION_NO_ERROR;
-      // Copy privilege fields for check
-      std::set<FieldID> privilege_fields(req.privilege_fields);
-      // Try our original region requirements first
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        LegionErrorType et = 
-          check_privilege_internal(req, regions[idx], privilege_fields, 
-                                   bad_field, idx, bad_index, skip_privilege);
-        // No error so we are done
-        if (et == LEGION_NO_ERROR)
-          return et;
-        // Something other than bad parent region is a real error
-        if (et != ERROR_BAD_PARENT_REGION)
-          return et;
-        // Otherwise we just keep going
-      }
-      // If none of that worked, we now get to try the created requirements
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++)
-      {
-        const RegionRequirement &created_req = it->second;
-        LegionErrorType et = 
-          check_privilege_internal(req, created_req, privilege_fields, 
-                      bad_field, it->first, bad_index, skip_privilege);
-        // No error so we are done
-        if (et == LEGION_NO_ERROR)
-          return et;
-        // Something other than bad parent region is a real error
-        if (et != ERROR_BAD_PARENT_REGION)
-          return et;
-        // If we got a BAD_PARENT_REGION, see if this a returnable
-        // privilege in which case we know we have privileges on all fields
-        if (created_req.privilege_fields.empty())
-        {
-          // Still have to check the parent region is right
-          if (req.parent == created_req.region)
-            return LEGION_NO_ERROR;
-        }
-        // Otherwise we just keep going
-      }
-      // Finally see if we created all the fields in which case we know
-      // we have privileges on all their regions
-      const FieldSpace sp = req.parent.get_field_space();
-      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
-            it != req.privilege_fields.end(); it++)
-      {
-        std::pair<FieldSpace,FieldID> key(sp, *it);
-        // If we don't find the field, then we are done
-        if ((created_fields.find(key) == created_fields.end()) &&
-            (local_fields.find(key) == local_fields.end()))
-          return ERROR_BAD_PARENT_REGION;
-      }
-      // Check that the parent is the root of the tree, if not it is bad
-      RegionNode *parent_region = runtime->forest->get_node(req.parent);
-      if (parent_region->parent != NULL)
-        return ERROR_BAD_PARENT_REGION;
-      // Otherwise we have privileges on these fields for all regions
-      // so we are good on privileges
-      return LEGION_NO_ERROR;
-    } 
 
     //--------------------------------------------------------------------------
     LegionErrorType TaskContext::check_privilege_internal(
@@ -1930,21 +533,6 @@ namespace Legion {
       }
       return true;
     }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion TaskContext::find_logical_region(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      if (index < regions.size())
-        return regions[index].region;
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-      std::map<unsigned,RegionRequirement>::const_iterator finder = 
-        created_requirements.find(index);
-#ifdef DEBUG_LEGION
-      assert(finder != created_requirements.end());
-#endif
-      return finder->second.region;
-    } 
 
     //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& TaskContext::begin_task(Processor proc)
@@ -2184,10 +772,10 @@ namespace Legion {
       if (inline_task)
         parent_ctx->decrement_inlined();
       if (release_callback)
-        parent_ctx->add_to_post_task_queue(this, last_registration, effects,
+        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT, effects,
           instance, NULL/*no functor here*/, owned, metadataptr, metadatasize);
       else
-        parent_ctx->add_to_post_task_queue(this, last_registration, effects,
+        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT, effects,
             instance, callback_functor, owned, metadataptr, metadatasize); 
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
@@ -2519,15 +1107,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap TaskContext::predicate_index_task_false(size_t context_index,
-                      const IndexTaskLauncher &launcher, Provenance *provenance)
+        IndexSpace launch_space, const IndexTaskLauncher &launcher,
+        Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       if (launcher.elide_future_return)
         return FutureMap();
       Domain launch_domain = launcher.launch_domain;
-      IndexSpace launch_space = launcher.launch_space;
-      if (!launch_space.exists())
-        launch_space = find_index_launch_space(launch_domain, provenance);
       if (!launch_domain.exists())
         runtime->forest->find_domain(launch_space, launch_domain);
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
@@ -2583,51 +1169,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future TaskContext::predicate_index_task_reduce_false(
-                      const IndexTaskLauncher &launcher, Provenance *provenance)
+        const IndexTaskLauncher &launcher, IndexSpace launch_space,
+        ReductionOpID redop, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       if (launcher.elide_future_return)
         return Future();
-      if (launcher.predicate_false_future.impl != NULL)
-        return launcher.predicate_false_future;
-      // Otherwise check to see if we have a value
+      // If there is an initial value for the reduction use that
+      if (launcher.initial_value.impl != NULL)
+        return launcher.initial_value;
+      // Otherwise set it to the identity value of the reduction operator
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), provenance);
-      const size_t future_size = launcher.predicate_false_result.get_size(); 
-      if (future_size > 0)
-        result->set_local(launcher.predicate_false_result.get_ptr(),
-            future_size, false/*own*/);
-      else
-        result->set_result(ApEvent::NO_AP_EVENT, NULL);
+      const ReductionOp *reduction_op = runtime->get_reduction(redop);
+      result->set_local(&reduction_op->identity, reduction_op->sizeof_rhs);
       return Future(result);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace TaskContext::find_index_launch_space(const Domain &domain,
-                                                    Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Domain,IndexSpace>::const_iterator finder =
-        index_launch_spaces.find(domain);
-      if (finder != index_launch_spaces.end())
-        return finder->second;
-      IndexSpace result;
-      switch (domain.get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            result = create_index_space_internal(&domain, \
-              NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
-            break; \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      index_launch_spaces[domain] = result;
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2717,11 +1273,12 @@ namespace Legion {
           (id == 0)/*register if not remote*/, 
           inline_task, implicit_task, mapping),
         tree_context(rt->allocate_region_tree_context()),
-        full_inner_context(finner),
-        concurrent_context(concurrent), finished_execution(false),
-        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
-        total_children_count(0), executing_children_count(0),
-        executed_children_count(0), total_summary_count(0),
+        full_inner_context(finner), concurrent_context(concurrent), 
+        finished_execution(false), has_inline_accessor(false),
+        next_created_index(reqs.size()), parent_req_indexes(parent_indexes),
+        virtual_mapped(virt_mapped), total_children_count(0),
+        executing_children_count(0), executed_children_count(0),
+        total_summary_count(0), total_tunable_count(0), 
         outstanding_children_count(0),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -2790,6 +1347,9 @@ namespace Legion {
     InnerContext::~InnerContext(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(deletion_counts.empty());
+#endif
       // At this point we can free our region tree context
       runtime->free_region_tree_context(tree_context);
       if (ready_comp_queue.exists())
@@ -4674,6 +3234,288 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::clone_requirement(unsigned idx,RegionRequirement &target)
+    //--------------------------------------------------------------------------
+    {
+      if (idx >= regions.size())
+      {
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<unsigned,RegionRequirement>::const_iterator finder = 
+          created_requirements.find(idx);
+#ifdef DEBUG_LEGION
+        assert(finder != created_requirements.end());
+#endif
+        target = finder->second;
+      }
+      else
+        target = regions[idx];
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    int InnerContext::find_parent_region_req(const RegionRequirement &req,
+                                             bool check_privilege /*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_PARENT_REGION_REQ_CALL);
+      // We can check most of our region requirements without the lock
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        const RegionRequirement &our_req = regions[idx];
+        // First check that the regions match
+        if (our_req.region != req.parent)
+          continue;
+        // Next check the privileges
+        if (check_privilege && 
+            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
+          continue;
+        // Finally check that all the fields are contained
+        bool dominated = true;
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it !=
+              req.privilege_fields.end(); it++)
+        {
+          if (our_req.privilege_fields.find(*it) ==
+              our_req.privilege_fields.end())
+          {
+            dominated = false;
+            break;
+          }
+        }
+        if (!dominated)
+          continue;
+        return int(idx);
+      }
+      const FieldSpace fs = req.parent.get_field_space(); 
+      // The created region requirements have to be checked while holding
+      // the lock since they are subject to mutation by the application
+      // We might also mutate it so we take the lock in exclusive mode
+      AutoLock priv_lock(privilege_lock);
+      for (std::map<unsigned,RegionRequirement>::iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        RegionRequirement &our_req = it->second;
+        // First check that the regions match
+        if (our_req.region != req.parent)
+          continue;
+        // Next check the privileges
+        if (check_privilege && 
+            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
+          continue;
+#ifdef DEBUG_LEGION
+        assert(returnable_privileges.find(it->first) != 
+                returnable_privileges.end());
+#endif
+        // If this is a returnable privilege requiremnt that means
+        // that we made this region so we always have privileges
+        // on any fields for that region, just add them and be done
+        if (returnable_privileges[it->first])
+        {
+          our_req.privilege_fields.insert(req.privilege_fields.begin(),
+                                          req.privilege_fields.end());
+          return it->first;
+        }
+        // Finally check that all the fields are contained
+        bool dominated = true;
+        for (std::set<FieldID>::const_iterator fit = 
+              req.privilege_fields.begin(); fit !=
+              req.privilege_fields.end(); fit++)
+        {
+          if (our_req.privilege_fields.find(*fit) ==
+              our_req.privilege_fields.end())
+          {
+            // Check to see if this is a field we made
+            // and haven't destroyed yet
+            std::pair<FieldSpace,FieldID> key(fs, *fit);
+            if (created_fields.find(key) != created_fields.end())
+            {
+              // We made it so we can add it to the requirement
+              // and continue on our way
+              our_req.privilege_fields.insert(*fit);
+              continue;
+            }
+            if (local_fields.find(key) != local_fields.end())
+            {
+              // We made it so we can add it to the requirement
+              // and continue on our way
+              our_req.privilege_fields.insert(*fit);
+              continue;
+            }
+            // Otherwise we don't have privileges
+            dominated = false;
+            break;
+          }
+        }
+        if (!dominated)
+          continue;
+        // Include the offset by the number of base requirements
+        return it->first;
+      }
+      // Method of last resort, check to see if we made all the fields
+      // if we did, then we can make a new requirement for all the fields
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++)
+      {
+        std::pair<FieldSpace,FieldID> key(fs, *it);
+        // Didn't make it so we don't have privileges anywhere
+        if ((created_fields.find(key) == created_fields.end()) &&
+            (local_fields.find(key) == local_fields.end()))
+          return -1;
+      }
+      // If we get here then we can make a new requirement
+      // which has non-returnable privileges
+      // Get the top level region for the region tree
+      RegionNode *top = runtime->forest->get_tree(req.parent.get_tree_id());
+      const unsigned index = next_created_index++;
+      RegionRequirement &new_req = created_requirements[index];
+      new_req = RegionRequirement(top->handle, LEGION_READ_WRITE, 
+                                  LEGION_EXCLUSIVE, top->handle);
+      if (runtime->legion_spy_enabled)
+        TaskOp::log_requirement(get_unique_id(), index, new_req);
+      // Add our fields
+      new_req.privilege_fields.insert(
+          req.privilege_fields.begin(), req.privilege_fields.end());
+      // This is not a returnable privilege requirement
+      returnable_privileges[index] = false;
+      return index;
+    }
+
+    //--------------------------------------------------------------------------
+    LegionErrorType InnerContext::check_privilege(
+                                         const IndexSpaceRequirement &req) const
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
+      if (req.verified)
+        return LEGION_NO_ERROR;
+      // Find the parent index space
+      for (std::vector<IndexSpaceRequirement>::const_iterator it = 
+            owner_task->indexes.begin(); it != owner_task->indexes.end(); it++)
+      {
+        // Check to see if we found the requirement in the parent 
+        if (it->handle == req.parent)
+        {
+          // Check that there is a path between the parent and the child
+          std::vector<LegionColor> path;
+          if (!runtime->forest->compute_index_path(req.parent, 
+                                                   req.handle, path))
+            return ERROR_BAD_INDEX_PATH;
+          // Now check that the privileges are less than or equal
+          if (req.privilege & (~(it->privilege)))
+          {
+            return ERROR_BAD_INDEX_PRIVILEGES;  
+          }
+          return LEGION_NO_ERROR;
+        }
+      }
+      // If we didn't find it here, we have to check the added 
+      // index spaces that we have
+      if (has_created_index_space(req.parent))
+      {
+        // Still need to check that there is a path between the two
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_index_path(req.parent, req.handle, path))
+          return ERROR_BAD_INDEX_PATH;
+        // No need to check privileges here since it is a created space
+        // which means that the parent has all privileges.
+        return LEGION_NO_ERROR;
+      }
+      return ERROR_BAD_PARENT_INDEX;
+    }
+
+    //--------------------------------------------------------------------------
+    LegionErrorType InnerContext::check_privilege(const RegionRequirement &req,
+                                                  FieldID &bad_field,
+                                                  int &bad_index,
+                                                  bool skip_privilege) const
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
+#ifdef DEBUG_LEGION
+      assert(bad_index < 0);
+#endif
+      if (req.flags & LEGION_VERIFIED_FLAG)
+        return LEGION_NO_ERROR;
+      // Copy privilege fields for check
+      std::set<FieldID> privilege_fields(req.privilege_fields);
+      // Try our original region requirements first
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        LegionErrorType et = 
+          check_privilege_internal(req, regions[idx], privilege_fields, 
+                                   bad_field, idx, bad_index, skip_privilege);
+        // No error so we are done
+        if (et == LEGION_NO_ERROR)
+          return et;
+        // Something other than bad parent region is a real error
+        if (et != ERROR_BAD_PARENT_REGION)
+          return et;
+        // Otherwise we just keep going
+      }
+      // If none of that worked, we now get to try the created requirements
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++)
+      {
+        const RegionRequirement &created_req = it->second;
+        LegionErrorType et = 
+          check_privilege_internal(req, created_req, privilege_fields, 
+                      bad_field, it->first, bad_index, skip_privilege);
+        // No error so we are done
+        if (et == LEGION_NO_ERROR)
+          return et;
+        // Something other than bad parent region is a real error
+        if (et != ERROR_BAD_PARENT_REGION)
+          return et;
+        // If we got a BAD_PARENT_REGION, see if this a returnable
+        // privilege in which case we know we have privileges on all fields
+        if (created_req.privilege_fields.empty())
+        {
+          // Still have to check the parent region is right
+          if (req.parent == created_req.region)
+            return LEGION_NO_ERROR;
+        }
+        // Otherwise we just keep going
+      }
+      // Finally see if we created all the fields in which case we know
+      // we have privileges on all their regions
+      const FieldSpace sp = req.parent.get_field_space();
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++)
+      {
+        std::pair<FieldSpace,FieldID> key(sp, *it);
+        // If we don't find the field, then we are done
+        if ((created_fields.find(key) == created_fields.end()) &&
+            (local_fields.find(key) == local_fields.end()))
+          return ERROR_BAD_PARENT_REGION;
+      }
+      // Check that the parent is the root of the tree, if not it is bad
+      RegionNode *parent_region = runtime->forest->get_node(req.parent);
+      if (parent_region->parent != NULL)
+        return ERROR_BAD_PARENT_REGION;
+      // Otherwise we have privileges on these fields for all regions
+      // so we are good on privileges
+      return LEGION_NO_ERROR;
+    }  
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::find_logical_region(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (index < regions.size())
+        return regions[index].region;
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      std::map<unsigned,RegionRequirement>::const_iterator finder = 
+        created_requirements.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != created_requirements.end());
+#endif
+      return finder->second.region;
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
                               PendingEquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -4951,6 +3793,284 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void InnerContext::return_resources(ResourceTracker *target, 
+                          size_t return_index, std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      if (created_regions.empty() && deleted_regions.empty() && 
+          created_fields.empty() && deleted_fields.empty() &&
+          created_field_spaces.empty() && latent_field_spaces.empty() &&
+          deleted_field_spaces.empty() && created_index_spaces.empty() &&
+          deleted_index_spaces.empty() && created_index_partitions.empty() &&
+          deleted_index_partitions.empty())
+        return;
+      target->receive_resources(return_index, created_regions, deleted_regions,
+          created_fields, deleted_fields, created_field_spaces, 
+          latent_field_spaces, deleted_field_spaces, created_index_spaces,
+          deleted_index_spaces, created_index_partitions, 
+          deleted_index_partitions, preconditions); 
+      created_regions.clear();
+      deleted_regions.clear();
+      created_fields.clear();
+      deleted_fields.clear();
+      created_field_spaces.clear();
+      latent_field_spaces.clear();
+      deleted_field_spaces.clear();
+      created_index_spaces.clear();
+      deleted_index_spaces.clear();
+      created_index_partitions.clear();
+      deleted_index_partitions.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::pack_return_resources(Serializer &rez,
+                                             size_t return_index)
+    //--------------------------------------------------------------------------
+    {
+      pack_resources_return(rez, return_index);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space(const Domain &bounds, 
+                                       TypeTag type_tag, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      return create_index_space_internal(&bounds, type_tag, provenance);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space(
+                 const std::vector<DomainPoint> &points, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      switch (points[0].get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Point<DIM,coord_t> > \
+              realm_points(points.size()); \
+            for (unsigned idx = 0; idx < points.size(); idx++) \
+              realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+            const Domain bounds(realm_is); \
+            return create_index_space_internal(&bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space(
+                       const std::vector<Domain> &rects, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      switch (rects[0].get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+            for (unsigned idx = 0; idx < rects.size(); idx++) \
+              realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+            const Domain bounds(realm_is); \
+            return create_index_space_internal(&bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space_internal(const Domain *bounds,
+                                       TypeTag type_tag, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), type_tag);
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id, runtime->address_space,
+            (provenance == NULL) ? NULL : provenance->human_str());
+      // Will take ownership of provenance if not NULL
+      runtime->forest->create_index_space(handle, bounds, did, provenance); 
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::find_index_launch_space(const Domain &domain,
+                                                     Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Domain,IndexSpace>::const_iterator finder =
+        index_launch_spaces.find(domain);
+      if (finder != index_launch_spaces.end())
+        return finder->second;
+      IndexSpace result;
+      switch (domain.get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            result = create_index_space_internal(&domain, \
+              NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+            break; \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      index_launch_spaces[domain] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_unbound_index_space(TypeTag type_tag,
+                                                       Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return create_index_space_internal(NULL, type_tag, provenance);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      // Check to see if this is a top-level index space, if not then
+      // we shouldn't even be destroying it
+      if (!runtime->forest->is_top_level_index_space(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to create shared ownership for index space %x in " 
+            "task %s (UID %lld) which is not a top-level index space. Legion "
+            "only permits top-level index spaces to have shared ownership.", 
+            handle.get_id(), get_task_name(), get_unique_id())
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<IndexSpace,unsigned>::iterator finder = 
+        created_index_spaces.find(handle);
+      if (finder != created_index_spaces.end())
+        finder->second++;
+      else
+        created_index_spaces[handle] = 1;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::union_index_spaces(
+                  const std::vector<IndexSpace> &spaces, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this); 
+      bool none_exists = true;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+      {
+        if (none_exists && it->exists())
+          none_exists = false;
+        if (spaces[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'union_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        get_task_name(), get_unique_id())
+      }
+      if (none_exists)
+        return IndexSpace::NO_SPACE;
+      const IndexSpace handle(runtime->get_unique_index_space_id(),
+          runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_union_space(handle, did, provenance, spaces);
+      register_index_space_creation(handle);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
+            (provenance == NULL) ? NULL : provenance->human_str());
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::intersect_index_spaces(
+                  const std::vector<IndexSpace> &spaces, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this); 
+      bool none_exists = true;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+      {
+        if (none_exists && it->exists())
+          none_exists = false;
+        if (spaces[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'intersect_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        get_task_name(), get_unique_id())
+      }
+      if (none_exists)
+        return IndexSpace::NO_SPACE;
+      const IndexSpace handle(runtime->get_unique_index_space_id(),
+          runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_intersection_space(handle,did,provenance,spaces);
+      register_index_space_creation(handle);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
+            (provenance == NULL) ? NULL : provenance->human_str());
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::subtract_index_spaces(
+                      IndexSpace left, IndexSpace right, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (!left.exists())
+        return IndexSpace::NO_SPACE;
+      if (right.exists() && left.get_type_tag() != right.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'create_difference_spaces' "
+                        "performed in task %s (UID %lld)",
+                        get_task_name(), get_unique_id())
+      const IndexSpace handle(runtime->get_unique_index_space_id(),
+          runtime->get_unique_index_tree_id(), left.get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_difference_space(handle, did, provenance,
+                                               left, right); 
+      register_index_space_creation(handle);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
+            (provenance == NULL) ? NULL : provenance->human_str());
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space(const Future &future, 
                                        TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -5062,6 +4182,23 @@ namespace Legion {
             "be performed before the end of the execution of the parent task.",
             get_task_name(), get_unique_id())
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<IndexPartition,unsigned>::iterator finder = 
+        created_index_partitions.find(handle);
+      if (finder != created_index_partitions.end())
+        finder->second++;
+      else
+        created_index_partitions[handle] = 1;
     }
 
     //--------------------------------------------------------------------------
@@ -6430,7 +5567,20 @@ namespace Legion {
     FieldSpace InnerContext::create_field_space(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      return TaskContext::create_field_space(provenance);
+      AutoRuntimeCall call(this);
+      FieldSpace space(runtime->get_unique_field_space_id());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_field.debug("Creating field space %x in task %s (ID %lld)", 
+                      space.id, get_task_name(), get_unique_id());
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_field_space(space.id, runtime->address_space,
+            (provenance == NULL) ? NULL : provenance->human_str());
+
+      runtime->forest->create_field_space(space, did, provenance);
+      register_field_space_creation(space);
+      return space;
     }
 
     //--------------------------------------------------------------------------
@@ -6441,8 +5591,41 @@ namespace Legion {
                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      return TaskContext::create_field_space(sizes, resulting_fields,
-                                             serdez_id, provenance);
+      AutoRuntimeCall call(this);
+      FieldSpace space(runtime->get_unique_field_space_id());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_field.debug("Creating field space %x in task %s (ID %lld)", 
+                      space.id, get_task_name(), get_unique_id());
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_field_space(space.id, runtime->address_space,
+            (provenance == NULL) ? NULL : provenance->human_str());
+
+      FieldSpaceNode *node =
+        runtime->forest->create_field_space(space, did, provenance);
+      register_field_space_creation(space);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
+             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+      }
+      node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
+      register_all_field_creations(space, false/*local*/, resulting_fields);
+      return space;
     }
 
     //--------------------------------------------------------------------------
@@ -6453,7 +5636,7 @@ namespace Legion {
                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      const FieldSpace space = TaskContext::create_field_space(provenance);
+      const FieldSpace space = create_field_space(provenance);
       AutoRuntimeCall call(this);
       FieldSpaceNode *node = runtime->forest->get_node(space);
       if (resulting_fields.size() < sizes.size())
@@ -6487,6 +5670,23 @@ namespace Legion {
       register_all_field_creations(space, false/*local*/, resulting_fields);
       add_to_dependence_queue(creator_op);
       return space;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<FieldSpace,unsigned>::iterator finder = 
+        created_field_spaces.find(handle);
+      if (finder != created_field_spaces.end())
+        finder->second++;
+      else
+        created_field_spaces[handle] = 1;
     }
 
     //--------------------------------------------------------------------------
@@ -6571,6 +5771,137 @@ namespace Legion {
             get_task_name(), get_unique_id())
       }
     } 
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl* InnerContext::create_field_allocator(FieldSpace handle,
+                                                             bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      {
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
+          field_allocators.find(handle);
+        if (finder != field_allocators.end())
+          return finder->second;
+      }
+      // Didn't find it, so have to make, retake the lock in exclusive mode
+      FieldSpaceNode *node = runtime->forest->get_node(handle);
+      AutoLock priv_lock(privilege_lock);
+      // Check to see if we lost the race
+      std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
+        field_allocators.find(handle);
+      if (finder != field_allocators.end())
+        return finder->second;
+      // Don't have one so make a new one
+      const RtEvent ready = node->create_allocator(runtime->address_space);
+      FieldAllocatorImpl *result = new FieldAllocatorImpl(node, this, ready);
+      // Save it for later
+      field_allocators[handle] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_field_allocator(FieldSpaceNode *node,
+                                               bool from_application)
+    //--------------------------------------------------------------------------
+    {
+      if (from_application)
+      {
+        AutoRuntimeCall call(this);
+        destroy_field_allocator(node, false/*from application*/);
+        return;
+      }
+      const RtEvent ready = node->destroy_allocator(runtime->address_space);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      AutoLock priv_lock(privilege_lock);
+      std::map<FieldSpace,FieldAllocatorImpl*>::iterator finder = 
+        field_allocators.find(node->handle);
+#ifdef DEBUG_LEGION
+      assert(finder != field_allocators.end());
+#endif
+      field_allocators.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID InnerContext::allocate_field(FieldSpace space, size_t field_size,
+                                        FieldID fid, bool local,
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (fid == LEGION_AUTO_GENERATE_ID)
+        fid = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+      else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
+        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+          "Task %s (ID %lld) attempted to allocate a field with "
+          "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+          "bound set in legion_config.h", get_task_name(), get_unique_id(), fid)
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_field_creation(space.id, fid, field_size,
+            (provenance == NULL) ? NULL : provenance->human_str());
+
+      std::set<RtEvent> done_events;
+      if (local)
+        allocate_local_field(space, field_size, fid, 
+                             serdez_id, done_events, provenance);
+      else
+        runtime->forest->allocate_field(space, field_size, fid,
+                                        serdez_id, provenance);
+      register_field_creation(space, fid, local);
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        wait_on.wait();
+      }
+      return fid;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::allocate_fields(FieldSpace space,
+                                       const std::vector<size_t> &sizes,
+                                       std::vector<FieldID> &resulting_fields,
+                                       bool local, CustomSerdezID serdez_id,
+                                       Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
+             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+      }
+      std::set<RtEvent> done_events;
+      if (local)
+        allocate_local_fields(space, sizes, resulting_fields,
+                              serdez_id, done_events, provenance);
+      else
+        runtime->forest->allocate_fields(space, sizes, resulting_fields,
+                                         serdez_id, provenance);
+      register_all_field_creations(space, local, resulting_fields);
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        wait_on.wait();
+      }
+    }
 
     //--------------------------------------------------------------------------
     FieldID InnerContext::allocate_field(FieldSpace space, 
@@ -6988,6 +6319,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      if (!runtime->forest->is_top_level_region(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to create shared ownership for logical region "
+            "(%x,%x,%x in task %s (UID %lld) which is not a top-level logical "
+            "region. Legion only permits top-level logical regions to have "
+            "shared ownerships.", handle.index_space.id, handle.field_space.id,
+            handle.tree_id, get_task_name(), get_unique_id())
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<LogicalRegion,unsigned>::iterator finder = 
+        created_regions.find(handle);
+      if (finder != created_regions.end())
+        finder->second++;
+      else
+        created_regions[handle] = 1;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::destroy_logical_region(LogicalRegion handle,
                                    const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -7153,6 +6508,651 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned InnerContext::add_created_region(LogicalRegion handle,
+                                          bool task_local, bool output_region)
+    //--------------------------------------------------------------------------
+    {
+      // Already hold the lock from the caller
+      if (!task_local && !output_region)
+      {
+        // There's a race here with created region tree contexts coming back
+        // and making these requirements for themselves so we check for
+        // duplications here in that case
+        for (std::map<unsigned,RegionRequirement>::const_iterator it =
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++)
+        {
+          if (it->second.parent == handle)
+            return it->first;
+#ifdef DEBUG_LEGION
+          // shouldn't have anything from the same region tree here
+          assert(it->second.parent.get_tree_id() != handle.get_tree_id());
+#endif
+        }
+      }
+      RegionRequirement new_req(handle, LEGION_READ_WRITE, 
+                                LEGION_EXCLUSIVE, handle);
+      if (output_region)
+        new_req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
+      if (runtime->legion_spy_enabled)
+        TaskOp::log_requirement(get_unique_id(), next_created_index, new_req);
+      // Put a region requirement with no fields in the list of
+      // created requirements, we know we can add any fields for
+      // this field space in the future since we own all privileges
+      created_requirements[next_created_index] = new_req;
+      // Created regions always return privileges that they make
+      returnable_privileges[next_created_index] = !task_local;
+      return next_created_index++;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::log_created_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        // We already logged the requirement when we made it
+        // Skip it if there are no privilege fields
+        if (it->second.privilege_fields.empty())
+          continue;
+        owner_task->log_virtual_mapping(it->first, it->second);
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    unsigned InnerContext::register_region_creation(LogicalRegion handle,
+                                                    bool task_local,
+                                                    bool output_region)
+    //--------------------------------------------------------------------------
+    {
+      // Create a new logical region 
+      // Hold the operation lock when doing this since children could
+      // be returning values from the utility processor
+      AutoLock priv_lock(privilege_lock);
+#ifdef DEBUG_LEGION
+      assert(local_regions.find(handle) == local_regions.end());
+      assert(created_regions.find(handle) == created_regions.end());
+#endif
+      if (task_local)
+      {
+        if (is_leaf_context())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_CREATION,
+              "Illegal task-local region creation performed in leaf task %s "
+                           "(ID %lld)", get_task_name(), get_unique_id())
+        local_regions[handle] = false/*not deleted*/;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(created_regions.find(handle) == created_regions.end());
+#endif
+        created_regions[handle] = 1;
+      }
+      return add_created_region(handle, task_local, output_region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_field_creation(FieldSpace handle, 
+                                              FieldID fid, bool local)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+      std::pair<FieldSpace,FieldID> key(handle,fid);
+#ifdef DEBUG_LEGION
+      assert(local_fields.find(key) == local_fields.end());
+      assert(created_fields.find(key) == created_fields.end());
+#endif
+      if (!local)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_fields.find(key) == created_fields.end());
+#endif
+        created_fields.insert(key);
+      }
+      else
+        local_fields[key] = false/*deleted*/;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_all_field_creations(FieldSpace handle,
+                                 bool local, const std::vector<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+      if (local)
+      {
+        for (unsigned idx = 0; idx < fields.size(); idx++)
+        {
+          std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
+#ifdef DEBUG_LEGION
+          assert(local_fields.find(key) == local_fields.end());
+#endif
+          local_fields[key] = false/*deleted*/;
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < fields.size(); idx++)
+        {
+          std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
+#ifdef DEBUG_LEGION
+          assert(created_fields.find(key) == created_fields.end());
+#endif
+          created_fields.insert(key);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_field_space_creation(FieldSpace space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+#ifdef DEBUG_LEGION
+      assert(created_field_spaces.find(space) == created_field_spaces.end());
+#endif
+      created_field_spaces[space] = 1;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::has_created_index_space(IndexSpace space) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+      return (created_index_spaces.find(space) != created_index_spaces.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_index_space_creation(IndexSpace space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+#ifdef DEBUG_LEGION
+      assert(created_index_spaces.find(space) == created_index_spaces.end());
+#endif
+      created_index_spaces[space] = 1;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_index_partition_creation(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+#ifdef DEBUG_LEGION
+      assert(created_index_partitions.find(handle) == 
+             created_index_partitions.end());
+#endif
+      created_index_partitions[handle] = 1;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::report_leaks_and_duplicates(
+                                               std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      if (!deleted_regions.empty())
+      {
+        for (std::vector<DeletedRegion>::const_iterator it = 
+              deleted_regions.begin(); it != deleted_regions.end(); it++)
+          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
+              "Duplicate deletions were performed for region (%x,%x,%x) "
+              "in task tree rooted by %s (provenance %s)", 
+              it->region.index_space.id, it->region.field_space.id, 
+              it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
+              it->provenance->human.c_str() : "unknown")
+        deleted_regions.clear();
+      }
+      if (!deleted_fields.empty())
+      {
+        for (std::vector<DeletedField>::const_iterator it =
+              deleted_fields.begin(); it != deleted_fields.end(); it++)
+          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
+              "Duplicate deletions were performed on field %d of "
+              "field space %x in task tree rooted by %s (provenance %s)", 
+              it->fid, it->space.id, get_task_name(), 
+              (it->provenance != NULL) ? it->provenance->human.c_str() :
+              "unknown")
+        deleted_fields.clear();
+      }
+      if (!deleted_field_spaces.empty())
+      {
+        for (std::vector<DeletedFieldSpace>::const_iterator it = 
+              deleted_field_spaces.begin(); it != 
+              deleted_field_spaces.end(); it++)
+          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
+              "Duplicate deletions were performed on field space %x "
+              "in task tree rooted by %s (provenance %s)", it->space.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->human.c_str() : "unknown")
+        deleted_field_spaces.clear();
+      }
+      if (!deleted_index_spaces.empty())
+      {
+        for (std::vector<DeletedIndexSpace>::const_iterator it =
+              deleted_index_spaces.begin(); it != 
+              deleted_index_spaces.end(); it++)
+          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
+              "Duplicate deletions were performed on index space %x "
+              "in task tree rooted by %s (provenance %s)", it->space.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->human.c_str() : "unknown")
+        deleted_index_spaces.clear();
+      }
+      if (!deleted_index_partitions.empty())
+      {
+        for (std::vector<DeletedPartition>::const_iterator it =
+              deleted_index_partitions.begin(); it !=
+              deleted_index_partitions.end(); it++)
+          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
+              "Duplicate deletions were performed on index partition %x "
+              "in task tree rooted by %s (provenance %s)", it->partition.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->human.c_str() : "unknown")
+        deleted_index_partitions.clear();
+      }
+      // Now we go through and delete anything that the user leaked
+      if (!created_regions.empty())
+      {
+        for (std::map<LogicalRegion,unsigned>::const_iterator rit = 
+              created_regions.begin(); rit != created_regions.end(); rit++)
+        {
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Logical region (%x,%x,%x) was leaked out of task tree rooted "
+                "by task %s", rit->first.index_space.id, 
+                rit->first.field_space.id, rit->first.tree_id, get_task_name())
+          runtime->forest->destroy_logical_region(rit->first, preconditions);
+          // Remove any latent field spaces and therefore any created fields
+          // since they might not be able to be cleaned up after this since
+          // this region might be holding the last reference to the field space
+          if (!latent_field_spaces.empty())
+          {
+            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
+              latent_field_spaces.find(rit->first.get_field_space());
+            if (finder != latent_field_spaces.end())
+            {
+              std::set<LogicalRegion>::iterator latent_finder = 
+                finder->second.find(rit->first);
+#ifdef DEBUG_LEGION
+              assert(latent_finder != finder->second.end());
+#endif
+              finder->second.erase(latent_finder);
+              if (finder->second.empty())
+              {
+                // Now that all the regions using this field space have
+                // been deleted we can clean up all the created_fields
+                for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
+                      created_fields.begin(); it != 
+                      created_fields.end(); /*nothing*/)
+                {
+                  if (it->first == finder->first)
+                  {
+                    std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                      to_delete = it++;
+                    created_fields.erase(to_delete);
+                  }
+                  else
+                    it++;
+                }
+                latent_field_spaces.erase(finder);
+              }
+            }
+          }
+        }
+        created_regions.clear();
+      }
+      if (!created_fields.empty())
+      {
+        std::map<FieldSpace,FieldAllocatorImpl*> leak_allocators;
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
+              it = created_fields.begin(); it != created_fields.end(); it++)
+        {
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Field %d of field space %x was leaked out of task tree rooted "
+                "by task %s", it->second, it->first.id, get_task_name())
+          std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder =
+              leak_allocators.find(it->first);
+          if (finder == leak_allocators.end())
+          {
+            FieldAllocatorImpl *allocator =
+              create_field_allocator(it->first, true/*unordered*/);
+            allocator->add_reference();
+            leak_allocators[it->first] = allocator;
+            allocator->ready_event.wait();
+          }
+          else
+            finder->second->ready_event.wait();
+          runtime->forest->free_field(it->first, it->second, preconditions);
+        }
+        for (std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator it =
+              leak_allocators.begin(); it != leak_allocators.end(); it++)
+          if (it->second->remove_reference())
+            delete it->second;
+        created_fields.clear();
+      }
+      if (!created_field_spaces.empty())
+      {
+        for (std::map<FieldSpace,unsigned>::const_iterator it = 
+              created_field_spaces.begin(); it != 
+              created_field_spaces.end(); it++)
+        {
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Field space %x was leaked out of task tree rooted by task %s",
+                it->first.id, get_task_name())
+          runtime->forest->destroy_field_space(it->first, preconditions);
+        }
+        created_field_spaces.clear();
+      }
+      if (!created_index_partitions.empty())
+      {
+        for (std::map<IndexPartition,unsigned>::const_iterator it =
+              created_index_partitions.begin(); it != 
+              created_index_partitions.end(); it++)
+        {
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Index partition %x was leaked out of task tree rooted by "
+                "task %s", it->first.id, get_task_name())
+          runtime->forest->destroy_index_partition(it->first, preconditions);
+        }
+        created_index_partitions.clear();
+      }
+      if (!created_index_spaces.empty())
+      {
+        for (std::map<IndexSpace,unsigned>::const_iterator it = 
+              created_index_spaces.begin(); it !=
+              created_index_spaces.end(); it++)
+        {
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Index space %x was leaked out of task tree rooted by task %s",
+                it->first.id, get_task_name())
+          runtime->forest->destroy_index_space(it->first, 
+                  runtime->address_space, preconditions);
+        }
+        created_index_spaces.clear();
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::analyze_destroy_fields(FieldSpace handle,
+                                             const std::set<FieldID> &to_delete,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<FieldID> &global_to_free,
+                                    std::vector<FieldID> &local_to_free,
+                                    std::vector<unsigned> &local_field_indexes,
+                                    std::vector<unsigned> &deletion_indexes)
+    //--------------------------------------------------------------------------
+    {
+      {
+        // We can't destroy any fields from our original regions because we
+        // were not the ones that made them.
+        AutoLock priv_lock(privilege_lock);
+        // We can actually remove the fields from the data structure now 
+        for (std::set<FieldID>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          const std::pair<FieldSpace,FieldID> key(handle, *it);
+          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+            created_fields.find(key);
+          if (finder == created_fields.end())
+          {
+            std::map<std::pair<FieldSpace,FieldID>,bool>::iterator 
+              local_finder = local_fields.find(key);
+#ifdef DEBUG_LEGION
+            assert(local_finder != local_fields.end());
+            assert(local_finder->second);
+#endif
+            local_fields.erase(local_finder);
+            local_to_free.push_back(*it);
+          }
+          else
+          {
+            created_fields.erase(finder);
+            global_to_free.push_back(*it);
+          }
+        }
+        // Now figure out which region requirements can be destroyed
+        for (std::map<unsigned,RegionRequirement>::iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++)
+        {
+          if (it->second.region.get_field_space() != handle)
+            continue;
+          std::set<FieldID> overlapping_fields;
+          for (std::set<FieldID>::const_iterator fit = to_delete.begin();
+                fit != to_delete.end(); fit++)
+          {
+            std::set<FieldID>::iterator finder = 
+              it->second.privilege_fields.find(*fit);
+            if (finder != it->second.privilege_fields.end())
+            {
+              overlapping_fields.insert(*fit);
+              // Remove this from the created requirements fields
+              it->second.privilege_fields.erase(finder);
+            }
+          }
+          if (overlapping_fields.empty())
+            continue;
+          delete_reqs.resize(delete_reqs.size()+1);
+          RegionRequirement &req = delete_reqs.back();
+          req.region = it->second.region;
+          req.parent = it->second.region;
+          req.privilege = LEGION_READ_WRITE;
+          req.prop = LEGION_EXCLUSIVE;
+          req.privilege_fields.swap(overlapping_fields);
+          req.handle_type = LEGION_SINGULAR_PROJECTION;
+          parent_req_indexes.push_back(it->first);
+          // We need some extra logging for legion spy
+          if (runtime->legion_spy_enabled)
+          {
+            LegionSpy::log_requirement_fields(get_unique_id(),
+                                              it->first, req.privilege_fields);
+            owner_task->log_virtual_mapping(it->first, req);
+          }
+        }
+      }
+      if (!local_to_free.empty())
+        analyze_free_local_fields(handle, local_to_free, local_field_indexes);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::analyze_destroy_logical_region(LogicalRegion handle,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<bool> &returnable)
+    //--------------------------------------------------------------------------
+    {
+      // If we're deleting a field space then we can't be deleting any of the 
+      // original requirements, only requirements that we created
+      if (runtime->legion_spy_enabled)
+      {
+        // We need some extra logging for legion spy
+        std::vector<MappingInstance> instances(1, 
+              Mapping::PhysicalInstance::get_virtual_instance());
+        AutoLock priv_lock(privilege_lock);
+        for (std::map<unsigned,RegionRequirement>::iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++)
+        {
+          // Has to match precisely
+          if (handle.get_tree_id() == it->second.region.get_tree_id())
+          {
+#ifdef DEBUG_LEGION
+            // Should be the same region
+            assert(handle == it->second.region);
+            assert(returnable_privileges.find(it->first) !=
+                    returnable_privileges.end());
+#endif
+            // Do extra logging for legion spy
+            owner_task->log_virtual_mapping(it->first, it->second);
+            // Then do the result of the normal operations
+            delete_reqs.resize(delete_reqs.size()+1);
+            RegionRequirement &req = delete_reqs.back();
+            req.region = it->second.region;
+            req.parent = it->second.region;
+            req.privilege = LEGION_READ_WRITE;
+            req.prop = LEGION_EXCLUSIVE;
+            // Swap the privilege fields so that nothing else tries
+            // to delete those particular fields
+            req.privilege_fields.swap(it->second.privilege_fields);
+            req.handle_type = LEGION_SINGULAR_PROJECTION;
+            req.flags = it->second.flags;
+            parent_req_indexes.push_back(it->first);
+            returnable.push_back(returnable_privileges[it->first]);
+          }
+        }
+        // Remove the region from the created set
+        {
+          std::map<LogicalRegion,unsigned>::iterator finder = 
+            created_regions.find(handle);
+          if (finder == created_regions.end())
+          {
+            std::map<LogicalRegion,bool>::iterator local_finder = 
+              local_regions.find(handle);
+#ifdef DEBUG_LEGION
+            assert(local_finder != local_regions.end());
+            assert(local_finder->second);
+#endif
+            local_regions.erase(local_finder);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second == 0);
+#endif
+            created_regions.erase(finder);
+          }
+        }
+        // Check to see if we have any latent field spaces to clean up
+        if (!latent_field_spaces.empty())
+        {
+          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
+            latent_field_spaces.find(handle.get_field_space());
+          if (finder != latent_field_spaces.end())
+          {
+            std::set<LogicalRegion>::iterator region_finder = 
+              finder->second.find(handle);
+#ifdef DEBUG_LEGION
+            assert(region_finder != finder->second.end());
+#endif
+            finder->second.erase(region_finder);
+            if (finder->second.empty())
+            {
+              // Now that all the regions using this field space have
+              // been deleted we can clean up all the created_fields
+              for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
+                    created_fields.begin(); it != 
+                    created_fields.end(); /*nothing*/)
+              {
+                if (it->first == finder->first)
+                {
+                  std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                    to_delete = it++;
+                  created_fields.erase(to_delete);
+                }
+                else
+                  it++;
+              }
+              latent_field_spaces.erase(finder);
+            }
+          }
+        }
+      }
+      else
+      {
+        AutoLock priv_lock(privilege_lock);
+        for (std::map<unsigned,RegionRequirement>::iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++)
+        {
+          // Has to match precisely
+          if (handle.get_tree_id() == it->second.region.get_tree_id())
+          {
+#ifdef DEBUG_LEGION
+            // Should be the same region
+            assert(handle == it->second.region);
+            assert(returnable_privileges.find(it->first) !=
+                    returnable_privileges.end());
+#endif
+            delete_reqs.resize(delete_reqs.size()+1);
+            RegionRequirement &req = delete_reqs.back();
+            req.region = it->second.region;
+            req.parent = it->second.region;
+            req.privilege = LEGION_READ_WRITE;
+            req.prop = LEGION_EXCLUSIVE;
+            // Swap the privilege fields so that nothing else tries
+            // to delete those particular fields
+            req.privilege_fields.swap(it->second.privilege_fields);
+            req.handle_type = LEGION_SINGULAR_PROJECTION;
+            parent_req_indexes.push_back(it->first);
+            returnable.push_back(returnable_privileges[it->first]);
+          }
+        }
+        // Remove the region from the created set
+        {
+          std::map<LogicalRegion,unsigned>::iterator finder = 
+            created_regions.find(handle);
+          if (finder == created_regions.end())
+          {
+            std::map<LogicalRegion,bool>::iterator local_finder = 
+              local_regions.find(handle);
+#ifdef DEBUG_LEGION
+            assert(local_finder != local_regions.end());
+            assert(local_finder->second);
+#endif
+            local_regions.erase(local_finder);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second == 0);
+#endif
+            created_regions.erase(finder);
+          }
+        }
+        // Check to see if we have any latent field spaces to clean up
+        if (!latent_field_spaces.empty())
+        {
+          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
+            latent_field_spaces.find(handle.get_field_space());
+          if (finder != latent_field_spaces.end())
+          {
+            std::set<LogicalRegion>::iterator region_finder = 
+              finder->second.find(handle);
+#ifdef DEBUG_LEGION
+            assert(region_finder != finder->second.end());
+#endif
+            finder->second.erase(region_finder);
+            if (finder->second.empty())
+            {
+              // Now that all the regions using this field space have
+              // been deleted we can clean up all the created_fields
+              for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
+                    created_fields.begin(); it != 
+                    created_fields.end(); /*nothing*/)
+              {
+                if (it->first == finder->first)
+                {
+                  std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                    to_delete = it++;
+                  created_fields.erase(to_delete);
+                }
+                else
+                  it++;
+              }
+              latent_field_spaces.erase(finder);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::add_physical_region(const RegionRequirement &req,
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances)
@@ -7247,14 +7247,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         return FutureMap();
       }
-      // Quick out for predicate false
-      if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(total_children_count++, launcher,
-                                          provenance);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain,
-                                               provenance);
+        launch_space = 
+          find_index_launch_space(launcher.launch_domain, provenance);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+        return predicate_index_task_false(total_children_count++, launch_space,
+                                          launcher, provenance);
       IndexTask *task = runtime->get_available_index_task();
       FutureMap result = task->initialize_task(this,
                                                launcher,
@@ -7311,13 +7311,14 @@ namespace Legion {
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
       }
-      // Quick out for predicate false
-      if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_reduce_false(launcher, provenance);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain,
                                                provenance);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+        return predicate_index_task_reduce_false(launcher, launch_space,
+                                                 redop, provenance);
       IndexTask *task = runtime->get_available_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
                                             provenance, redop, deterministic,
@@ -11581,43 +11582,6 @@ namespace Legion {
       return false;
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    void InnerContext::report_leaks_and_duplicates(std::set<RtEvent> &preconds)
-    //--------------------------------------------------------------------------
-    {
-      // If we have any leaked regions, we need to invalidate their contexts
-      // before we do anything else, make sure this is done before we start
-      // removing valid references
-      if (!created_regions.empty())
-      {
-        for (std::map<LogicalRegion,unsigned>::const_iterator cit =
-              created_regions.begin(); cit != created_regions.end(); cit++)
-        {
-          // Find the created requirement so we know what index it is
-          for (std::map<unsigned,RegionRequirement>::const_iterator it =
-                created_requirements.begin(); it != 
-                created_requirements.end(); it++)
-          {
-            if (cit->first != it->second.parent)
-            {
-#ifdef DEBUG_LEGION
-              assert(cit->first.get_tree_id() != 
-                  it->second.parent.get_tree_id());
-#endif
-              continue;
-            }
-            // Found it so we can perform the invalidation
-            invalidate_region_tree_context(cit->first, it->first, preconds);
-            break;
-          }
-        }
-      }
-      // Now we can do the base call
-      TaskContext::report_leaks_and_duplicates(preconds);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void InnerContext::convert_individual_views(
                                    const std::vector<PhysicalManager*> &sources,
@@ -14236,14 +14200,6 @@ namespace Legion {
             "Specific control replication violation occurred from member %s",
             description);
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::help_complete_future(Future &f,
-                               const void *result, size_t result_size, bool own)
-    //--------------------------------------------------------------------------
-    {
-      f.impl->set_local(result, result_size, own);
     }
 
     //--------------------------------------------------------------------------
@@ -18870,14 +18826,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         return FutureMap();
       }
-      // Quick out for predicate false
-      if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(total_children_count++, 
-                                          launcher, provenance);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain,
                                                provenance);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+        return predicate_index_task_false(total_children_count++, 
+                                          launch_space, launcher, provenance);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
       FutureMap result = task->initialize_task(this,
                                                launcher,
@@ -18938,10 +18894,7 @@ namespace Legion {
         if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
-      }
-      // Quick out for predicate false
-      if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_reduce_false(launcher, provenance);
+      } 
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -18962,6 +18915,10 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain,
                                                provenance);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+        return predicate_index_task_reduce_false(launcher, launch_space,
+                                                 redop, provenance);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
                                             provenance, redop, deterministic,
@@ -23650,7 +23607,7 @@ namespace Legion {
       {
         const Domain domain =
           Rect<2>(Point<2>(0,0),Point<2>(shard_sizes.size()-1,upper_bound-1));
-        handle = TaskContext::create_index_space(domain,
+        handle = InnerContext::create_index_space(domain,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
       }
       else
@@ -23666,7 +23623,7 @@ namespace Legion {
           offset += shard_sizes[idx];
         }
         const Domain domain = Realm::IndexSpace<2,coord_t>(rects);
-        handle = TaskContext::create_index_space(domain,
+        handle = InnerContext::create_index_space(domain,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
       }
       IndexSpaceNode *node = runtime->forest->get_node(handle);
@@ -24535,26 +24492,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::receive_resources(size_t return_index,
-              std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<DeletedRegion> &deleted_regs,
-              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<DeletedField> &deleted_fids,
-              std::map<FieldSpace,unsigned> &created_fs,
-              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<DeletedFieldSpace> &deleted_fs,
-              std::map<IndexSpace,unsigned> &created_is,
-              std::vector<DeletedIndexSpace> &deleted_is,
-              std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<DeletedPartition> &deleted_partitions,
-              std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ContextID LeafContext::get_logical_tree_context(void) const
     //--------------------------------------------------------------------------
     {
@@ -24694,143 +24631,161 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::return_resources(ResourceTracker *target, 
+                                       size_t return_index,
+                                       std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::pack_return_resources(Serializer &rez, 
+                                            size_t return_index)
+    //--------------------------------------------------------------------------
+    {
+      ResourceTracker::pack_empty_resources(rez, return_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::log_created_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::report_leaks_and_duplicates(
+                                               std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(const Domain &bounds, 
+                                       TypeTag type_tag, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(
+                 const std::vector<DomainPoint> &points, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(const std::vector<Domain> &rects,
+                                               Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag,
                                                Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-        "Illegal index space from future creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+        "Illegal index space creation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
       return IndexSpace::NO_SPACE;
     } 
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_unbound_index_space(TypeTag tag,
+                                                       Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal unbound index space creation performed in leaf task %s "
+        "(ID %lld)", get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space create shared ownership performed in leaf task "
+        "%s (ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::union_index_spaces(
+                  const std::vector<IndexSpace> &spaces, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal union index spaces performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::intersect_index_spaces(
+                  const std::vector<IndexSpace> &spaces, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal intersect index spaces performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::subtract_index_spaces(
+                      IndexSpace left, IndexSpace right, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal subtract index spaces performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
+    }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_space(IndexSpace handle, 
                const bool unordered, const bool recurse, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      // Check to see if this is a top-level index space, if not then
-      // we shouldn't even be destroying it
-      if (!runtime->forest->is_top_level_index_space(handle))
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy index space %x in task %s (UID %lld) "
-            "which is not a top-level index space. Legion only permits "
-            "top-level index spaces to be destroyed.", handle.get_id(),
-            get_task_name(), get_unique_id())
-      // Check to see if this is one that we should be allowed to destory
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<IndexSpace,unsigned>::iterator finder = 
-          created_index_spaces.find(handle);
-        if (finder != created_index_spaces.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second > 0);
-#endif
-          if (--finder->second == 0)
-            created_index_spaces.erase(finder);
-          else
-            return;
-        }
-        else
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy index space %x in task %s (UID %lld) "
-            "which is not the task that made the index space or one of its "
-            "ancestor tasks. Index space deletions must be lexicographically "
-            "scoped by the task tree.", handle.get_id(), 
-            get_task_name(), get_unique_id())
-#ifdef DEBUG_LEGION
-      log_index.debug("Destroying index space %x in task %s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id());
-#endif
-      std::set<RtEvent> preconditions;
-      runtime->forest->destroy_index_space(handle,
-            runtime->address_space, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space destruction performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
     } 
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index partition create shared ownership performed in leaf "
+        "task %s (ID %lld)", get_task_name(), get_unique_id())
+    }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle,
                const bool unordered, const bool recurse, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      // Check to see if this is one that we should be allowed to destory
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<IndexPartition,unsigned>::iterator finder = 
-          created_index_partitions.find(handle);
-        if (finder != created_index_partitions.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second > 0);
-#endif
-          if (--finder->second == 0)
-          {
-            created_index_partitions.erase(finder);
-            if (recurse)
-            {
-              // Remove any other partitions that this partition dominates
-              for (std::map<IndexPartition,unsigned>::iterator it = 
-                    created_index_partitions.begin(); it !=
-                    created_index_partitions.end(); /*nothing*/)
-              {
-                if ((handle.get_tree_id() == it->first.get_tree_id()) &&
-                    runtime->forest->is_dominated_tree_only(it->first, handle))
-                {
-#ifdef DEBUG_LEGION
-                  assert(it->second > 0);
-#endif
-                  if (--it->second == 0)
-                  {
-                    std::map<IndexPartition,unsigned>::iterator 
-                      to_delete = it++;
-                    created_index_partitions.erase(to_delete);
-                  }
-                  else
-                    it++;
-                }
-                else
-                  it++;
-              }
-            }
-          }
-          else
-            return;
-        }
-        else
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy index partition %x in task %s (UID %lld) "
-            "which is not the task that made the index space or one of its "
-            "ancestor tasks. Index space deletions must be lexicographically "
-            "scoped by the task tree.", handle.get_id(), 
-            get_task_name(), get_unique_id())
-#ifdef DEBUG_LEGION
-      log_index.debug("Destroying index partition %x in task %s (ID %lld)",
-                      handle.id, get_task_name(), get_unique_id());
-#endif
-      std::set<RtEvent> preconditions;
-      runtime->forest->destroy_index_partition(handle, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index partition destruction performed in leaf task %s "
+        "(ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25202,16 +25157,49 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id,
+                                         Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     FieldSpace LeafContext::create_field_space(const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          CustomSerdezID serdez_id,
                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
-       "Illegal deferred field allocations performed in leaf task %s (ID %lld)",
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space creation performed in leaf task %s (ID %lld)",
        get_task_name(), get_unique_id())
       return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal field space create shared ownership performed in leaf task "
+        "%s (ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25219,44 +25207,56 @@ namespace Legion {
                                    const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      // Check to see if this is one that we should be allowed to destory
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<FieldSpace,unsigned>::iterator finder = 
-          created_field_spaces.find(handle);
-        if (finder != created_field_spaces.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second > 0);
-#endif
-          if (--finder->second == 0)
-            created_field_spaces.erase(finder);
-          else
-            return;
-        }
-        else
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy field space %x in task %s (UID %lld) "
-            "which is not the task that made the field space or one of its "
-            "ancestor tasks. Field space deletions must be lexicographically "
-            "scoped by the task tree.", handle.get_id(), 
-            get_task_name(), get_unique_id())
-#ifdef DEBUG_LEGION
-      log_field.debug("Destroying field space %x in task %s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id());
-#endif
-      std::set<RtEvent> preconditions;
-      runtime->forest->destroy_field_space(handle, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field space destruction performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl* LeafContext::create_field_allocator(FieldSpace handle,
+                                                            bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocator creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_field_allocator(FieldSpaceNode *node,
+                                              bool from_application)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocator destruction performed in leaf task %s "
+       "(ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID LeafContext::allocate_field(FieldSpace space, size_t field_size,
+                                        FieldID fid, bool local,
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::allocate_fields(FieldSpace space,
+                                      const std::vector<size_t> &sizes,
+                                      std::vector<FieldID> &resulting_fields,
+                                      bool local, CustomSerdezID serdez_id,
+                                      Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field allocations performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25265,40 +25265,9 @@ namespace Legion {
                                  Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        const std::pair<FieldSpace,FieldID> key(space, fid);
-        std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-          created_fields.find(key);
-        if (finder != created_fields.end())
-          created_fields.erase(finder);
-        else // No need to check for local fields since we can't make them
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to deallocate field %d in field space %x in task %s "
-            "(UID %lld) which is not the task that allocated the field "
-            "or one of its ancestor tasks. Field deallocations must be " 
-            "lexicographically scoped by the task tree.", fid, space.id,
-            get_task_name(), get_unique_id())
-      // If the allocator is not ready we need to wait for it here
-      if (allocator->ready_event.exists() && 
-          !allocator->ready_event.has_triggered())
-        allocator->ready_event.wait();
-      // Free the indexes first and immediately
-      std::vector<FieldID> to_free(1,fid);
-      runtime->forest->free_field_indexes(space, to_free, RtEvent::NO_RT_EVENT);
-      // We can free this field immediately
-      std::set<RtEvent> preconditions;
-      runtime->forest->free_field(space, fid, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field free performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25308,49 +25277,9 @@ namespace Legion {
                                   const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      long bad_fid = -1;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<FieldID>::const_iterator it = 
-              to_free.begin(); it != to_free.end(); it++)
-        {
-          const std::pair<FieldSpace,FieldID> key(space, *it);
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-            created_fields.find(key);
-          if (finder == created_fields.end())
-          {
-            // No need to check for local fields since we know
-            // that leaf tasks are not allowed to make them
-            bad_fid = *it;
-            break;
-          }
-          else
-            created_fields.erase(finder);
-        }
-      }
-      if (bad_fid != -1)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to deallocate field %ld in field space %x in task %s "
-            "(UID %lld) which is not the task that allocated the field "
-            "or one of its ancestor tasks. Field deallocations must be " 
-            "lexicographically scoped by the task tree.", bad_fid, space.id,
-            get_task_name(), get_unique_id())
-      // If the allocator is not ready we need to wait for it here
-      if (allocator->ready_event.exists() && 
-          !allocator->ready_event.has_triggered())
-        allocator->ready_event.wait();
-      // Free the indexes first and immediately
-      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
-      runtime->forest->free_field_indexes(space,field_vec,RtEvent::NO_RT_EVENT);
-      // We can free these fields immediately
-      std::set<RtEvent> preconditions;
-      runtime->forest->free_fields(space, field_vec, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal field free performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25414,27 +25343,19 @@ namespace Legion {
                                                      const bool output_region)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      RegionTreeID tid = runtime->get_unique_region_tree_id();
-      LogicalRegion region(tid, index_space, field_space);
-#ifdef DEBUG_LEGION
-      log_region.debug("Creating logical region in task %s (ID %lld) with "
-                       "index space %x and field space %x in new tree %d",
-                       get_task_name(), get_unique_id(), 
-                       index_space.id, field_space.id, tid);
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_region(index_space.id, field_space.id, tid,
-            runtime->address_space, 
-            (provenance == NULL) ? NULL : provenance->human_str());
-      const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_logical_region(region, did, provenance);
-      // Register the creation of a top-level region with the context
-      register_region_creation(region, task_local, output_region);
-      // Don't bother making any equivalence sets yet, we'll do that
-      // in the end_task call when we know about only the regions
-      // that have survived the execution of the task
-      return region;
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal logical region creation performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal logical region create shared ownership performed in leaf task "
+        "%s (ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25442,57 +25363,9 @@ namespace Legion {
                                    const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      if (!handle.exists())
-        return;
-      // Check to see if this is a top-level logical region, if not then
-      // we shouldn't even be destroying it
-      if (!runtime->forest->is_top_level_region(handle))
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy logical region (%x,%x,%x in task %s "
-            "(UID %lld) which is not a top-level logical region. Legion only "
-            "permits top-level logical regions to be destroyed.", 
-            handle.index_space.id, handle.field_space.id, handle.tree_id,
-            get_task_name(), get_unique_id())
-      // Check to see if this is one that we should be allowed to destory
-      bool has_created = true;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<LogicalRegion,unsigned>::iterator finder = 
-          created_regions.find(handle);
-        if (finder != created_regions.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second > 0);
-#endif
-          if (--finder->second == 0)
-            created_regions.erase(finder);
-          else
-            return;
-        }
-        else
-          has_created = false;
-      }
-      if (!has_created)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
-            "Illegal call to destroy logical region (%x,%x,%x) in task %s "
-            "(UID %lld) which is not the task that made the logical region "
-            "or one of its ancestor tasks. Logical region deletions must be " 
-            "lexicographically scoped by the task tree.", handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
-            get_task_name(), get_unique_id())
-#ifdef DEBUG_LEGION
-      log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
-                       handle.index_space.id, handle.field_space.id, 
-                       get_task_name(), get_unique_id());
-#endif
-      std::set<RtEvent> preconditions;
-      runtime->forest->destroy_logical_region(handle, preconditions);
-      if (!preconditions.empty())
-      {
-        AutoLock l_lock(leaf_lock);
-        execution_events.insert(preconditions.begin(), preconditions.end());
-      }
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+       "Illegal logical region deletion performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -25578,15 +25451,17 @@ namespace Legion {
       AutoProvenance provenance(launcher.provenance);
       if (!launcher.must_parallelism && launcher.enable_inlining)
       {
+        IndexSpace launch_space = launcher.launch_space;
+        if (!launch_space.exists())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+            "Illegal execute index space call performed in leaf task %s "
+            "(ID %lld). All inline leaf task index space launches must "
+            "specify a launch index space.", get_task_name(), get_unique_id())
         if (launcher.predicate == Predicate::FALSE_PRED)
-          return predicate_index_task_false(++inlined_tasks,
+          return predicate_index_task_false(++inlined_tasks, launch_space,
                                             launcher, provenance);
         IndexTask *task = runtime->get_available_index_task();
         InnerContext *parent = owner_task->get_context();
-        IndexSpace launch_space = launcher.launch_space;
-        if (!launch_space.exists())
-          launch_space = find_index_launch_space(launcher.launch_domain,
-                                                 provenance);
         FutureMap result = task->initialize_task(parent, launcher, launch_space,
                                            provenance, false/*track*/, outputs);
         inline_child_task(task);
@@ -25610,15 +25485,18 @@ namespace Legion {
       AutoProvenance provenance(launcher.provenance);
       if (!launcher.must_parallelism && launcher.enable_inlining)
       {
-        if (launcher.predicate == Predicate::FALSE_PRED)
-          return predicate_index_task_reduce_false(launcher, provenance);
-        IndexTask *task = runtime->get_available_index_task();
-        InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
-          launch_space = find_index_launch_space(launcher.launch_domain,
-                                                 provenance);
-        Future result = task->initialize_task(parent, launcher, launch_space, 
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+            "Illegal execute index space call performed in leaf task %s "
+            "(ID %lld). All inline leaf task index space launches must "
+            "specify a launch index space.", get_task_name(), get_unique_id())
+        if (launcher.predicate == Predicate::FALSE_PRED)
+          return predicate_index_task_reduce_false(launcher, launch_space,
+                                                   redop, provenance);
+        IndexTask *task = runtime->get_available_index_task();
+        InnerContext *parent = owner_task->get_context();
+        Future result = task->initialize_task(parent, launcher, launch_space,
                     provenance, redop, deterministic, false/*track*/, outputs);
         inline_child_task(task);
         return result;
@@ -26204,14 +26082,6 @@ namespace Legion {
         const long long diff = current - 
           overhead_profiler->previous_profiling_time;
         overhead_profiler->application_time += diff;
-      }
-      if (!index_launch_spaces.empty())
-      {
-        for (std::map<Domain,IndexSpace>::const_iterator it = 
-              index_launch_spaces.begin(); it != 
-              index_launch_spaces.end(); it++)
-          destroy_index_space(it->second, false/*unordered*/,
-                              true/*recurse*/, NULL/*provenance*/);
       }
       // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())

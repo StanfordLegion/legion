@@ -4738,13 +4738,14 @@ namespace Legion {
                                        const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,int>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color, provenance);
     }
@@ -4758,13 +4759,14 @@ namespace Legion {
                                     const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,size_t>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color, provenance);
     }
