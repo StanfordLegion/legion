@@ -46,7 +46,7 @@ namespace Realm {
     SparsityMapRefCounter(::realm_id_t id);
 
     void add_reference(void);
-    void remove_reference(void);
+    void remove_references(int count);
 
     struct SparsityMapAddReferenceMessage {
       id_t id;
@@ -56,19 +56,20 @@ namespace Realm {
                                  const void *data, size_t datalen);
     };
 
-    struct SparsityMapRemoveReferenceMessage {
+    struct SparsityMapRemoveReferencesMessage {
       id_t id;
       Event wait_on;
+      int count;
 
       static void handle_message(NodeID sender,
-                                 const SparsityMapRemoveReferenceMessage &msg,
+                                 const SparsityMapRemoveReferencesMessage &msg,
                                  const void *data, size_t datalen);
     };
 
     static ActiveMessageHandlerReg<SparsityMapAddReferenceMessage>
         sparse_untyped_add_reference_message_handler_reg;
-    static ActiveMessageHandlerReg<SparsityMapRemoveReferenceMessage>
-        sparse_untyped_remove_reference_message_handler_reg;
+    static ActiveMessageHandlerReg<SparsityMapRemoveReferencesMessage>
+        sparse_untyped_remove_references_message_handler_reg;
   };
 
   /**
@@ -200,7 +201,7 @@ namespace Realm {
     void destroy(void);
 
     void add_reference(void);
-    void remove_reference(void);
+    void remove_references(int count);
 
     ID me;
     unsigned owner;

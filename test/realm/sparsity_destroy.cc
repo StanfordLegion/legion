@@ -37,8 +37,9 @@ void node_task_0(const void *args, size_t arglen, const void *userdata,
   TaskArgs &task_args = *(TaskArgs *)args;
   // add remote reference
   task_args.sparsity_map.add_reference();
+  task_args.sparsity_map.add_reference();
   // remove remote reference
-  task_args.sparsity_map.remove_reference();
+  task_args.sparsity_map.remove_references(2);
   // deferred remote destroy
   task_args.sparsity_map.destroy(task_args.wait_on);
 }

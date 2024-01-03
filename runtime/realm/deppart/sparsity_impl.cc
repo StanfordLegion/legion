@@ -56,18 +56,19 @@ namespace Realm {
     }
   }
 
-  void SparsityMapRefCounter::remove_reference(void)
+  void SparsityMapRefCounter::remove_references(int count)
   {
     if(!get_runtime())
       return;
     if(ID(*this).is_sparsity()) {
       NodeID owner = ID(*this).sparsity_creator_node();
       if(owner == Network::my_node_id) {
-        get_runtime()->get_sparsity_impl(*this)->remove_reference();
+        get_runtime()->get_sparsity_impl(*this)->remove_references(count);
       } else {
-        ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferenceMessage>
+        ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
             amsg(owner);
         amsg->id = id;
+        amsg->count = count;
         amsg.commit();
       }
     }
@@ -83,13 +84,13 @@ namespace Realm {
     }
   }
 
-  void SparsityMapRefCounter::SparsityMapRemoveReferenceMessage::handle_message(
-      NodeID sender, const SparsityMapRemoveReferenceMessage &msg, const void *data,
+  void SparsityMapRefCounter::SparsityMapRemoveReferencesMessage::handle_message(
+      NodeID sender, const SparsityMapRemoveReferencesMessage &msg, const void *data,
       size_t datalen)
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
     if(wrapper) {
-      wrapper->remove_reference();
+      wrapper->remove_references(msg.count);
     }
   }
 
@@ -116,7 +117,7 @@ namespace Realm {
         wrapper->deferred_destroy.defer(wrapper, wait_on);
       }
     } else {
-      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferenceMessage>
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
           amsg(owner);
       amsg->id = id;
       amsg->wait_on = wait_on;
@@ -130,8 +131,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::remove_reference() {
-    SparsityMapRefCounter(id).remove_reference();
+  void SparsityMap<N, T>::remove_references(int count) {
+    SparsityMapRefCounter(id).remove_references(count);
   }
 
   // if 'always_create' is false and the points/rects completely fill their
@@ -218,7 +219,7 @@ namespace Realm {
     owner = _init_owner;
   }
 
-  void SparsityMapImplWrapper::destroy(void) { remove_reference(); }
+  void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
 
   void SparsityMapImplWrapper::add_reference(void)
   {
@@ -228,14 +229,14 @@ namespace Realm {
     references.fetch_add(1);
   }
 
-  void SparsityMapImplWrapper::remove_reference(void)
+  void SparsityMapImplWrapper::remove_references(int count)
   {
     AutoLock<> al(mutex);
     if(map_impl.load() == 0)
       return;
 
     if(references.load() > 0) {
-      references.fetch_sub(1);
+      references.fetch_sub(std::min(references.load(), count));
     }
 
     if(references.load() == 0) {
@@ -1746,8 +1747,8 @@ namespace Realm {
       SparsityMapRefCounter::sparse_untyped_add_reference_message_handler_reg;
 
   /*static*/ ActiveMessageHandlerReg<
-      typename SparsityMapRefCounter::SparsityMapRemoveReferenceMessage>
-      SparsityMapRefCounter::sparse_untyped_remove_reference_message_handler_reg;
+      typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+      SparsityMapRefCounter::sparse_untyped_remove_references_message_handler_reg;
 
   ////////////////////////////////////////////////////////////////////////
   //

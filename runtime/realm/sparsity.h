@@ -73,9 +73,23 @@ namespace Realm {
     REALM_CUDA_HD
     bool exists(void) const;
 
+    /**
+     * Destroy the sparsity map.
+     * @param wait_on a precondition event
+     */
     void destroy(Event wait_on = Event::NO_EVENT);
+
+
+    /**
+     * Add one reference to the sparsity map.
+     */
     void add_reference(void);
-    void remove_reference(void);
+
+    /**
+     * Remove references from the sparsity map.
+     * @param count a number of references to remove
+     */
+    void remove_references(int count = 1);
 
     /**
      * Lookup the public implementation object for this sparsity map.
