@@ -38,7 +38,7 @@ TEST_F(TransferIteratorTest, Destroy)
   sparsity_map.destroy();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
-  EXPECT_TRUE(impl->is_valid());
+  EXPECT_FALSE(impl->is_valid());
 }
 
 TEST_F(TransferIteratorTest, DoubleDestroy)
@@ -48,7 +48,7 @@ TEST_F(TransferIteratorTest, DoubleDestroy)
   sparsity_map.destroy();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
-  EXPECT_TRUE(impl->is_valid());
+  EXPECT_FALSE(impl->is_valid());
 }
 
 TEST_F(TransferIteratorTest, RemoveReference)
@@ -97,17 +97,6 @@ TEST_F(TransferIteratorTest, DestroyWithDoubleReference)
   sparsity_map.add_reference();
   sparsity_map.add_reference();
   sparsity_map.destroy();
-  auto *impl = sparsity_map.impl();
-  EXPECT_NE(impl, nullptr);
-  EXPECT_TRUE(impl->is_valid());
-}
-
-TEST_F(TransferIteratorTest, DestroyUntyped)
-{
-  SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  SparsityMapUntyped untyped(sparsity_map.id);
-  untyped.add_reference();
-  untyped.remove_reference();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
   EXPECT_FALSE(impl->is_valid());

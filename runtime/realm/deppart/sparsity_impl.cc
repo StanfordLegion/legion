@@ -33,24 +33,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class SparsityMapReUntyped
-
-  SparsityMapUntyped::SparsityMapUntyped(::realm_id_t _id)
-    : id(_id)
-  {}
-
-  void SparsityMapUntyped::add_reference()
-  {
-    SparsityMapRefCounter(id).add_reference();
-  }
-
-  void SparsityMapUntyped::remove_reference()
-  {
-    SparsityMapRefCounter(id).remove_reference();
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class SparsityMapRefCounter
 
   SparsityMapRefCounter::SparsityMapRefCounter(::realm_id_t _id)
@@ -249,44 +231,39 @@ namespace Realm {
     owner = _init_owner;
   }
 
-  void SparsityMapImplWrapper::destroy(void) {
-    if (map_impl.load() == 0) {
-      assert(references.load() == 0);
+  void SparsityMapImplWrapper::destroy(void)
+  {
+    AutoLock<> al(mutex);
+    if(map_impl.load() == 0) {
       return;
     }
 
-    if (references.load() > 0) {
-      remove_reference();
-    }
+#ifdef REALM_SPARSITY_DELETES
+    (*map_deleter)(map_impl.load());
+
+    NodeID owner_node = ID(me).sparsity_creator_node();
+    assert(owner_node == Network::my_node_id);
+
+    // TODO(apryakhin): TSAN complains here.
+    get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
+
+    map_impl.store(0);
+    type_tag.store(0);
+#endif
   }
 
   void SparsityMapImplWrapper::add_reference(void) {
-    AutoLock<> al(mutex);
     references.fetch_add(1);
   }
 
-  void SparsityMapImplWrapper::remove_reference(void) {
-    AutoLock<> al(mutex);
-    if (references.load() > 0) {
+  void SparsityMapImplWrapper::remove_reference(void)
+  {
+    if(references.load() > 0) {
       references.fetch_sub(1);
     }
 
-    if (references.load() == 0) {
-#ifdef REALM_SPARSITY_DELETES
-      (*map_deleter)(map_impl.load());
-
-      // TODO(apryakhin): Direct call on destroy here should also be
-      // forwarded to the creator node.
-      NodeID owner_node = ID(me).sparsity_creator_node();
-      assert(owner_node == Network::my_node_id);
-
-      // TODO(apryakhin): TSAN complains here.
-      get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(
-          this);
-
-      map_impl.store(0);
-      type_tag.store(0);
-#endif
+    if(references.load() == 0) {
+      destroy();
     }
   }
 
