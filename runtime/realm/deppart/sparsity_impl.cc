@@ -78,7 +78,6 @@ namespace Realm {
       size_t datalen)
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
-    // TODO(apryakhin):report if not found
     if(wrapper) {
       wrapper->add_reference();
     }
@@ -89,7 +88,6 @@ namespace Realm {
       size_t datalen)
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
-    // TODO(apryakhin):report if not found
     if(wrapper) {
       wrapper->remove_reference();
     }
@@ -162,7 +160,6 @@ namespace Realm {
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
-
     impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
@@ -191,7 +188,6 @@ namespace Realm {
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
-
     impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
@@ -212,15 +208,6 @@ namespace Realm {
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void) {
     if (map_impl.load() != 0) {
-
-#ifdef REALM_SPARSITY_DELETES
-      if (references.load() <= 0) {
-        log_dpops.warning()
-            << "WARNING! SparsityMapImplWrapper::~SparsityMapImplWrapper: "
-            << me << " has zero refences but not deleted";
-      }
-#endif
-
       (*map_deleter)(map_impl.load());
     }
   }
@@ -330,6 +317,7 @@ namespace Realm {
       return static_cast<SparsityMapImpl<N,T> *>(impl);
     }
   }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -926,6 +914,7 @@ namespace Realm {
 
     return e;
   }
+
 
   // methods used in the population of a sparsity map
 
@@ -1833,5 +1822,3 @@ namespace Realm {
   FOREACH_NT(DOIT)
 
 }; // namespace Realm
-
-
