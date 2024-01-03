@@ -79,11 +79,10 @@ namespace Legion {
          << "proc_id:ProcID:" << sizeof(ProcID)   << delim
          << "kind:ProcKind:"  << sizeof(ProcKind) << delim
 #ifdef LEGION_USE_CUDA
-         //<< "cuda_device_info:CudaDeviceInfo:"  << sizeof(Realm::Cuda::CudaDeviceInfo)
-         << "uuid:array"             <<  sizeof(uint8_t) << delim
-         << "name:string"            << "-1"             << delim
-         << "driver_version:int"     << sizeof(int)      << delim
-         << "compute_capability:int" << sizeof(int)
+         << "uuid:string:"            << "-1"         << delim
+         << "name:string:"            << "-1"         << delim
+         << "driver_version:int:"     << sizeof(int)  << delim
+         << "compute_capability:int:" << sizeof(int)
 #endif
          << "}" << std::endl;
 
@@ -97,8 +96,8 @@ namespace Legion {
          << "node_id:unsigned:"   << sizeof(unsigned) << delim
          << "num_nodes:unsigned:" << sizeof(unsigned) << delim
          << "hostname:string:"    << "-1"             << delim
-         << "hostid::uint64_t"    << sizeof(uint64_t) << delim
-         << "processid::uint32_t" << sizeof(uint32_t)
+         << "host_id:unsigned long long:" << sizeof(unsigned long long) << delim
+         << "process_id:unsigned:" << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "CalibrationErr {"
@@ -527,8 +526,7 @@ namespace Legion {
 		sizeof(machine_desc.node_id));
       lp_fwrite(f, (char*)&(machine_desc.num_nodes),
 		sizeof(machine_desc.num_nodes));
-      lp_fwrite(f, (char*)&(machine_desc.process_info.hostname),
-                sizeof(machine_desc.process_info.hostname));
+      lp_fwrite(f, machine_desc.process_info.hostname, strlen(machine_desc.process_info.hostname) + 1);
       lp_fwrite(f, (char*)&(machine_desc.process_info.hostid),
                 sizeof(machine_desc.process_info.hostid));
       lp_fwrite(f, (char*)&(machine_desc.process_info.processid),
@@ -1138,8 +1136,13 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
 #ifdef LEGION_USE_CUDA
-      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.uuid), sizeof(proc_desc.cuda_device_info.uuid));
-      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.name), sizeof(proc_desc.cuda_device_info.name));
+      char uuid_str[proc_desc.cuda_device_info.UUID_SIZE];
+      for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
+        sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
+      }
+
+      lp_fwrite(f, uuid_str, strlen(uuid_str) + 1);
+      lp_fwrite(f, proc_desc.cuda_device_info.name, strlen(proc_desc.cuda_device_info.name) + 1);
       lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.driver_version),
                       sizeof(proc_desc.cuda_device_info.driver_version));
       lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.compute_capability),
@@ -1950,14 +1953,7 @@ namespace Legion {
           sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
         }
 
-        /*std::ostringstream convert;
-        for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
-          convert << ((int)proc_desc.cuda_device_info.uuid[i]  & 0xFF);
-        }
-
-        std::string uuid_string = convert.str();*/
         log_prof.print("Prof CUDA Proc Desc %s %s %d %d",
-                      //uuid_string.c_str(), proc_desc.cuda_device_info.name,
                       uuid_str, proc_desc.cuda_device_info.name,
                       proc_desc.cuda_device_info.driver_version,
                       proc_desc.cuda_device_info.compute_capability);
