@@ -41,6 +41,19 @@ TEST_F(TransferIteratorTest, Destroy)
   EXPECT_FALSE(impl->is_valid());
 }
 
+TEST_F(TransferIteratorTest, DestroyWithEvent)
+{
+  SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
+  UserEvent event = UserEvent::create_user_event();
+  sparsity_map.destroy(event);
+  auto *impl = sparsity_map.impl();
+  EXPECT_NE(impl, nullptr);
+  EXPECT_TRUE(impl->is_valid());
+  event.trigger();
+  event.wait();
+  EXPECT_FALSE(impl->is_valid());
+}
+
 TEST_F(TransferIteratorTest, DoubleDestroy)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
