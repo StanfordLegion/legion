@@ -218,39 +218,39 @@ namespace Realm {
     owner = _init_owner;
   }
 
-  void SparsityMapImplWrapper::destroy(void)
+  void SparsityMapImplWrapper::destroy(void) { remove_reference(); }
+
+  void SparsityMapImplWrapper::add_reference(void)
   {
     AutoLock<> al(mutex);
-    if(map_impl.load() == 0) {
+    if(map_impl.load() == 0)
       return;
-    }
-
-#ifdef REALM_SPARSITY_DELETES
-    (*map_deleter)(map_impl.load());
-
-    NodeID owner_node = ID(me).sparsity_creator_node();
-    assert(owner_node == Network::my_node_id);
-
-    // TODO(apryakhin): TSAN complains here.
-    get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
-
-    map_impl.store(0);
-    type_tag.store(0);
-#endif
-  }
-
-  void SparsityMapImplWrapper::add_reference(void) {
     references.fetch_add(1);
   }
 
   void SparsityMapImplWrapper::remove_reference(void)
   {
+    AutoLock<> al(mutex);
+    if(map_impl.load() == 0)
+      return;
+
     if(references.load() > 0) {
       references.fetch_sub(1);
     }
 
     if(references.load() == 0) {
-      destroy();
+#ifdef REALM_SPARSITY_DELETES
+      (*map_deleter)(map_impl.load());
+
+      NodeID owner_node = ID(me).sparsity_creator_node();
+      assert(owner_node == Network::my_node_id);
+
+      // TODO(apryakhin): TSAN complains here.
+      get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
+
+      map_impl.store(0);
+      type_tag.store(0);
+#endif
     }
   }
 

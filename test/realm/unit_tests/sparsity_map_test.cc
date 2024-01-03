@@ -112,6 +112,6 @@ TEST_F(TransferIteratorTest, DestroyWithDoubleReference)
   sparsity_map.destroy();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
-  EXPECT_FALSE(impl->is_valid());
+  EXPECT_TRUE(impl->is_valid());
 }
 
