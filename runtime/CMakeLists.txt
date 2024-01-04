@@ -29,7 +29,6 @@ list(APPEND REALM_SRC
   realm/realm_c.h
   realm/transfer/lowlevel_disk.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
-  realm/transfer/address_list.h                 realm/transfer/address_list.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
