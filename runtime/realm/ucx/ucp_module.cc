@@ -24,12 +24,6 @@
 #include "realm/ucx/ucp_module.h"
 #include "realm/ucx/ucp_internal.h"
 
-#include <ucp/api/ucp_version.h>
-#define REALM_UCP_API_VERSION_MIN UCP_VERSION(1, 14)
-#if UCP_API_VERSION < REALM_UCP_API_VERSION_MIN
-#error The UCX network module requires UCX 1.14.0 or above
-#endif
-
 #ifdef REALM_UCX_MODULE_DYNAMIC
 REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::UCPModule);
 #endif
@@ -215,6 +209,12 @@ err_del_mod:
       const void *val_in, void *vals_out, size_t bytes)
   {
     internal->gather(root, val_in, vals_out, bytes);
+  }
+
+  void UCPModule::allgatherv(const char *val_in, size_t bytes,
+                             std::vector<char> &vals_out, std::vector<size_t> &lengths)
+  {
+    internal->allgatherv(val_in, bytes, vals_out, lengths);
   }
 
   size_t UCPModule::sample_messages_received_count(void)

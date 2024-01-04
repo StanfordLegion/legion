@@ -112,12 +112,6 @@ foreach(test IN LISTS REALM_TESTS)
   endif()
 endforeach()
 
-# scatter uses C++11 lambdas
-#target_compile_features(scatter PUBLIC cxx_std_11)
-set_target_properties(scatter PROPERTIES CXX_STANDARD 11
-                                         CXX_STANDARD_REQUIRED YES
-                                         CXX_EXTENSIONS NO)
-
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)

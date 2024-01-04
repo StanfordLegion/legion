@@ -34,11 +34,12 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 enable_testing()
-
 foreach(test IN LISTS REALM_TESTS)
-  add_executable(${test} ${test}.cc)
-  target_link_libraries(${test} Legion::Realm GTest::gtest_main)
-  target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-  include(GoogleTest)
-  gtest_discover_tests(${test})
+  add_executable(realm_tests ${test}.cc)
 endforeach()
+
+target_link_libraries(realm_tests Legion::RealmTests GTest::gtest_main)
+target_compile_options(realm_tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+include(GoogleTest)
+gtest_discover_tests(realm_tests)
+

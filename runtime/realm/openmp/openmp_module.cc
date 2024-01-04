@@ -220,7 +220,8 @@ namespace Realm {
       openmp_api_force_linkage();
 #endif
 
-      OpenMPModuleConfig *config = dynamic_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
+      OpenMPModuleConfig *config =
+          checked_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
@@ -235,8 +236,9 @@ namespace Realm {
       }
 
 #ifdef REALM_OPENMP_SYSTEM_RUNTIME
-      if(m->cfg_num_openmp_cpus > 1) {
-	log_omp.fatal() << "system omp runtime limited to 1 proc - " << m->cfg_num_openmp_cpus << " requested";
+      if(m->config->cfg_num_openmp_cpus > 1) {
+        log_omp.fatal() << "system omp runtime limited to 1 proc - "
+                        << m->config->cfg_num_openmp_cpus << " requested";
         abort();
       }
 #endif

@@ -2130,7 +2130,10 @@ namespace Realm {
 
       unsigned int num_blocks = 0, num_threads = 0;
       assert(copy_info.extents[0] <= CUDA_MAX_FIELD_BYTES);
-      copy_info.tile_size = sqrt(func_info.occ_num_threads);
+
+      size_t chunks = copy_info.extents[0] / elem_size;
+      copy_info.tile_size = static_cast<size_t>(
+          static_cast<size_t>(std::sqrt(func_info.occ_num_threads) / chunks) * chunks);
       size_t shared_mem_bytes =
           (copy_info.tile_size * (copy_info.tile_size + 1)) * copy_info.extents[0];
 
@@ -4345,7 +4348,8 @@ namespace Realm {
     {
       CudaModule *m = new CudaModule(runtime);
 
-      CudaModuleConfig *config = dynamic_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
+      CudaModuleConfig *config =
+          checked_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());

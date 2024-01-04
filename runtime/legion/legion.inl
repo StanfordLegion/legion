@@ -18351,6 +18351,51 @@ namespace Legion {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::initialize_constraints(bool column_major, 
+                          bool soa, const std::vector<FieldID> &fields,
+                          const std::map<FieldID,size_t> *alignments /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      const int dims = handle.get_index_space().get_dim();
+      std::vector<DimensionKind> dim_order(dims+1);
+      // Field dimension first for AOS
+      dim_order[soa ? dims : 0] = LEGION_DIM_F;
+      if (column_major)
+      {
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+(soa ? 0 : 1)] = (DimensionKind)(LEGION_DIM_X + idx); 
+      }
+      else
+      {
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+(soa ? 0 : 1)] = 
+            (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
+      }
+      constraints.add_constraint(
+          OrderingConstraint(dim_order, false/*contiguous*/));
+      if (alignments != NULL)
+        for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
+             it != alignments->end(); it++)
+          constraints.add_constraint(
+              AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+    }
+
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_file(const char *name,
                                             const std::vector<FieldID> &fields,
@@ -18363,6 +18408,8 @@ namespace Legion {
       file_name = name;
       mode = m;
       file_fields = fields;
+      initialize_constraints(true/*column major*/, true/*soa*/, fields);
+      privilege_fields.insert(fields.begin(), fields.end());
     }
 
     //--------------------------------------------------------------------------
@@ -18377,6 +18424,13 @@ namespace Legion {
       file_name = name;
       mode = m;
       field_files = field_map;
+      std::vector<FieldID> fields;
+      fields.reserve(field_map.size());
+      for (std::map<FieldID,const char*>::const_iterator it =
+            field_map.begin(); it != field_map.end(); it++)
+        fields.push_back(it->first);
+      initialize_constraints(true/*column major*/, true/*soa*/, fields);
+      privilege_fields.insert(fields.begin(), fields.end());
     }
 
     //--------------------------------------------------------------------------
@@ -18394,27 +18448,7 @@ namespace Legion {
         constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-      const int dims = handle.get_index_space().get_dim();
-      std::vector<DimensionKind> dim_order(dims+1);
-      // Field dimension first for AOS
-      dim_order[0] = LEGION_DIM_F;
-      if (column_major)
-      {
-        for (int idx = 0; idx < dims; idx++)
-          dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + idx); 
-      }
-      else
-      {
-        for (int idx = 0; idx < dims; idx++)
-          dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
-      }
-      constraints.add_constraint(
-          OrderingConstraint(dim_order, false/*contiguous*/));
-      if (alignments != NULL)
-        for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
-             it != alignments->end(); it++)
-          constraints.add_constraint(
-              AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+      initialize_constraints(column_major, false/*soa*/, fields, alignments);
       privilege_fields.insert(fields.begin(), fields.end());
     }
     
@@ -18433,20 +18467,33 @@ namespace Legion {
         constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
-      const int dims = handle.get_index_space().get_dim();
+      initialize_constraints(column_major, true/*soa*/, fields, alignments);
+      privilege_fields.insert(fields.begin(), fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::initialize_constraints(bool column_major, 
+                          bool soa, const std::vector<FieldID> &fields,
+                          const std::map<FieldID,size_t> *alignments /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      const int dims = parent.get_index_space().get_dim();
       std::vector<DimensionKind> dim_order(dims+1);
+      // Field dimension first for AOS
+      dim_order[soa ? dims : 0] = LEGION_DIM_F;
       if (column_major)
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx] = (DimensionKind)(LEGION_DIM_X + idx); 
+          dim_order[idx+(soa ? 0 : 1)] = (DimensionKind)(LEGION_DIM_X + idx); 
       }
       else
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
+          dim_order[idx+(soa ? 0 : 1)] = 
+            (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
       }
-      // Field dimension last for SOA 
-      dim_order[dims] = LEGION_DIM_F;
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
       if (alignments != NULL)
@@ -18454,7 +18501,15 @@ namespace Legion {
              it != alignments->end(); it++)
           constraints.add_constraint(
               AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
-      privilege_fields.insert(fields.begin(), fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::add_external_resource(LogicalRegion handle,
+                                const Realm::ExternalInstanceResource *resource)
+    //--------------------------------------------------------------------------
+    {
+      handles.push_back(handle);
+      external_resources.push_back(resource);
     }
 
     //--------------------------------------------------------------------------
@@ -18468,7 +18523,11 @@ namespace Legion {
       assert(resource == LEGION_EXTERNAL_POSIX_FILE);
 #endif
       if (handles.empty())
+      {
         mode = m;
+        initialize_constraints(true/*column major*/, true/*soa*/, fields);
+        privilege_fields.insert(fields.begin(), fields.end());
+      }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       else
@@ -18502,7 +18561,16 @@ namespace Legion {
       assert(resource == LEGION_EXTERNAL_HDF5_FILE);
 #endif
       if (handles.empty())
+      {
         mode = m;
+        std::vector<FieldID> fields;
+        fields.reserve(field_map.size());
+        for (std::map<FieldID,const char*>::const_iterator it =
+              field_map.begin(); it != field_map.end(); it++)
+          fields.push_back(it->first);
+        initialize_constraints(true/*column major*/, true/*soa*/, fields);
+        privilege_fields.insert(fields.begin(), fields.end());
+      }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       else
@@ -18538,29 +18606,7 @@ namespace Legion {
 #endif
       if (handles.empty())
       {
-        constraints.add_constraint(
-            FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-        const int dims = handle.get_index_space().get_dim();
-        std::vector<DimensionKind> dim_order(dims+1);
-        // Field dimension first for AOS
-        dim_order[0] = LEGION_DIM_F;
-        if (column_major)
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + idx); 
-        }
-        else
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
-        }
-        constraints.add_constraint(
-            OrderingConstraint(dim_order, false/*contiguous*/));
-        if (alignments != NULL)
-          for (std::map<FieldID,size_t>::const_iterator it =
-                alignments->begin(); it != alignments->end(); it++)
-            constraints.add_constraint(
-                AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+        initialize_constraints(column_major, false/*soa*/, fields, alignments);
         privilege_fields.insert(fields.begin(), fields.end());
       }
 #ifdef DEBUG_LEGION
@@ -18620,29 +18666,7 @@ namespace Legion {
 #endif
       if (handles.empty())
       {
-        constraints.add_constraint(
-            FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
-        const int dims = handle.get_index_space().get_dim();
-        std::vector<DimensionKind> dim_order(dims+1);
-        if (column_major)
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx] = (DimensionKind)(LEGION_DIM_X + idx); 
-        }
-        else
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
-        }
-        // Field dimension last for SOA 
-        dim_order[dims] = LEGION_DIM_F;
-        constraints.add_constraint(
-            OrderingConstraint(dim_order, false/*contiguous*/));
-        if (alignments != NULL)
-          for (std::map<FieldID,size_t>::const_iterator it =
-                alignments->begin(); it != alignments->end(); it++)
-            constraints.add_constraint(
-                AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+        initialize_constraints(column_major, true/*soa*/, fields, alignments); 
         privilege_fields.insert(fields.begin(), fields.end());
       }
 #ifdef DEBUG_LEGION
@@ -18689,6 +18713,16 @@ namespace Legion {
       handles.push_back(handle);
       pointers.emplace_back(PointerConstraint(mem, uintptr_t(base)));
     }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     //--------------------------------------------------------------------------
     inline void PredicateLauncher::add_predicate(const Predicate &pred)

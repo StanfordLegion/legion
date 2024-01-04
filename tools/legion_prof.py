@@ -396,7 +396,6 @@ class PathRange(object):
         return "(" + str(self.start) + "," + str(self.stop) + ")"
 
 class Dependencies(ABC):
-    __slots__: List = []
     _abstract_slots = [
         'deps', 'path', 'visited'
     ]
@@ -424,7 +423,6 @@ class Dependencies(ABC):
         pass
 
 class HasDependencies(Dependencies):
-    __slots__: List = []
     _abstract_slots = Dependencies._abstract_slots + ['initiation_op', 'initiation']
     def __init__(self) -> None:
         Dependencies.__init__(self)
@@ -455,7 +453,6 @@ class HasDependencies(Dependencies):
             assert 0, "Type is: " + str(type(self)) + ", is not HasDependencies."
 
 class HasInitiationDependencies(Dependencies):
-    __slots__: List = []
     _abstract_slots = Dependencies._abstract_slots + ['initiation_op', 'initiation']
     
     def __init__(self, 
@@ -519,7 +516,6 @@ class HasInitiationDependencies(Dependencies):
         return self.initiation_op.get_color()
 
 class HasNoDependencies(Dependencies):
-    __slots__: List = []
     _abstract_slots = Dependencies._abstract_slots
     def __init__(self) -> None:
         Dependencies.__init__(self)
@@ -541,7 +537,6 @@ class HasNoDependencies(Dependencies):
         pass
 
 class TimeRange(ABC):
-    __slots__: List = []
     _abstract_slots = ['create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
 
     @typecheck
@@ -1168,7 +1163,6 @@ class WaitInterval(object):
         self.end = end
 
 class HasWaiters(ABC):
-    __slots__: List = []
     _abstract_slots = ['wait_intervals']
 
     def __init__(self) -> None:
@@ -2129,58 +2123,79 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     def add_copy_inst_info(self, copy_inst_info: CopyInstInfo
     ) -> None:
         self.copy_inst_infos.append(copy_inst_info)
-
-    def add_channel(self, state: "State") -> None:
+        
+    def split_by_channel(self, state: "State") -> None:
         # sanity check
         assert self.chan is None
         assert self.copy_kind is None
-        isindrect = False
-        for copy_inst_info in self.copy_inst_infos:
-            # this is the copy inst info for points of a indirect copy (meta copy)
+        
+        # Assumptions:
+        #
+        #  1. A given Copy will always be entirely direct or entirely indirect.
+        #
+        #  2. A direct copy can have multiple CopyInstInfos with different
+        #     src/dst memories/instances.
+        #
+        #  3. An indirect copy will have exactly one indirect field. However
+        #     it might have multiple direct fields, and those direct fields could
+        #     have different src/dst memories/instances.
+
+        # Find the indirect field (if any). There is always at most one.
+        indirect: Optional[CopyInstInfo] = None
+        indirect_idx: Optional[int] = None
+        for idx, copy_inst_info in enumerate(self.copy_inst_infos):
             if copy_inst_info.indirect:
-                # gather (src points)
-                if copy_inst_info.dst == None:
-                    assert copy_inst_info.src is not None
-                    self.copy_kind = CopyKind.Gather
-                # scatter (dst points)
-                elif copy_inst_info.src == None:
-                    assert copy_inst_info.dst is not None
-                    self.copy_kind = CopyKind.Scatter
-                # gather with scatter
-                else:
-                    self.copy_kind = CopyKind.GatherScatter
-                    assert 0, "unimplemented"
-                isindrect = True
+                indirect = copy_inst_info
+                indirect_idx = idx
                 break
-        if isindrect == False:
-            # sanity check
-            assert len(self.copy_inst_infos) >= 1
-            chan_src = self.copy_inst_infos[0].src
-            chan_dst = self.copy_inst_infos[0].dst
-            for copy_inst_info in self.copy_inst_infos:
-                assert (copy_inst_info.src == chan_src) and (copy_inst_info.dst == chan_dst)
-            self.copy_kind = CopyKind.Copy
-            channel = state.find_or_create_copy_channel(chan_src, chan_dst)
-            channel.add_copy(self)
-        else:
-            # sanity check
-            assert len(self.copy_inst_infos) >= 2
-            if self.copy_kind == CopyKind.Gather:
-                chan_dst = self.copy_inst_infos[1].dst
-                # sanity check
-                for copy_inst_info in self.copy_inst_infos[1:]:
-                    assert copy_inst_info.dst == chan_dst
-                channel = state.find_or_create_gather_channel(chan_dst)
-                channel.add_copy(self)
-            elif self.copy_kind == CopyKind.Scatter:
-                chan_src = self.copy_inst_infos[1].src
-                # sanity check
-                for copy_inst_info in self.copy_inst_infos[1:]:
-                    assert copy_inst_info.src == chan_src
-                channel = state.find_or_create_scatter_channel(chan_src)
-                channel.add_copy(self)
-            else:
+        if indirect_idx is not None:
+            self.copy_inst_infos.pop(indirect_idx)
+        
+        # Figure out which side we're indirect on, if any.
+        indirect_src = False
+        if (indirect is not None) and (indirect.src is not None):
+            indirect_src = True
+        indirect_dst = False
+        if (indirect is not None) and (indirect.dst is not None):
+            indirect_dst = True
+
+        def src_dst_tuple(copy_inst_info: CopyInstInfo) -> Tuple[Union[bool, Optional[Memory]], Union[bool, Optional[Memory]]]:
+            src = True if indirect_src else copy_inst_info.src
+            dst = True if indirect_dst else copy_inst_info.dst
+            return (src, dst)
+            
+        src_dst_set = set(map(src_dst_tuple, self.copy_inst_infos))
+        groups = [[copy_inst_info for copy_inst_info in self.copy_inst_infos if src_dst_tuple(copy_inst_info) == src_dst] for src_dst in src_dst_set]
+        for group in groups:
+            info = group[0]
+            channel = None
+            if (indirect_src == True) and (indirect_dst == False):
+                copy_kind = CopyKind.Gather
+                channel = state.find_or_create_gather_channel(info.dst)
+            elif (indirect_src == False) and (indirect_dst == True):
+                copy_kind = CopyKind.Scatter
+                channel = state.find_or_create_scatter_channel(info.src)
+            elif (indirect_src == True) and (indirect_dst == True):
+                copy_kind = CopyKind.GatherScatter
                 assert 0, "unimplemented"
+            else:
+                copy_kind = CopyKind.Copy
+                channel = state.find_or_create_copy_channel(info.src, info.dst)
+            assert channel is not None
+                
+            # Hack: currently we just always force the indirect field to go
+            # first, which matches the current Legion implementation, but is
+            # not guaranteed
+            if indirect:
+                group.insert(0, indirect)
+            new_copy = Copy(self.initiation_op, self.size, 
+                            self.create, self.ready, 
+                            self.start, self.stop, 
+                            self.fevent)
+            new_copy.copy_kind = copy_kind
+            new_copy.copy_inst_infos = group
+            channel.add_copy(new_copy)
+            state.prof_uid_map[new_copy.prof_uid] = new_copy
 
     @typecheck
     def get_color(self) -> str:
@@ -2405,6 +2420,10 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
     def __repr__(self) -> str:
         assert self.part_op in dep_part_kinds
         return dep_part_kinds[self.part_op]
+
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        assert 0
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=type(None), level=int,
@@ -4398,17 +4417,25 @@ class State(object):
     #   add the channel info into Copy and then add copy into Channel
     @typecheck
     def add_copy_to_channel(self) -> None:
-        for copy in self.copy_map.values():
+        ordered_copy_map = OrderedDict(sorted(self.copy_map.items()))
+        for copy in ordered_copy_map.values():
             if len(copy.copy_inst_infos) > 0:
-                copy.add_channel(self)
+                copy.split_by_channel(self)
+                del self.prof_uid_map[copy.prof_uid]
+        # disable the copy_map because we may create new copies
+        self.copy_map.clear()
  
     # called after all fills are parsed
     #   add the channel info into Fill and then add fill into Channel
     @typecheck
     def add_fill_to_channel(self) -> None:
+        ordered_fill_map = OrderedDict(sorted(self.fill_map.items()))
         for fill in self.fill_map.values():
             if len(fill.fill_inst_infos) > 0:
                 fill.add_channel(self)
+        # even though we do not create new fills, let's still disable
+        # the fill_map to make it consist with copy_map
+        self.fill_map.clear()
 
     @typecheck
     def trim_time_ranges(self, start: int, stop: int) -> None:
@@ -5237,11 +5264,10 @@ class State(object):
             if len(operation.operation_inst_infos) > 0:
                 operation.link_instance(self.instances)
 
-        for copy in self.copy_map.values():
-            copy.link_instance(self.instances)
-
-        for fill in self.fill_map.values():
-            fill.link_instance(self.instances)
+        for chan in self.channels.values():
+            if chan.channel_kind == ChanKind.Copy or chan.channel_kind == ChanKind.Fill or chan.channel_kind == ChanKind.Gather or chan.channel_kind == ChanKind.Scatter:
+                for copy in chan.copies:
+                    copy.link_instance(self.instances)
 
     @typecheck
     def filter_output(self) -> None:
@@ -5664,6 +5690,11 @@ def build_state() -> Optional[State]:
             # data
             assert isinstance(deserializer, serializer.LegionProfASCIIDeserializer)
             deserializer.search_for_spy_data(file_name)
+        # once all logs are parsed, let's figure out the channel for fill
+        state.add_fill_to_channel()
+
+        # once all logs are parsed, let's figure out the channel for copy
+        state.add_copy_to_channel()
 
     if not has_matches:
         print('No matches found! Exiting...')
@@ -5679,11 +5710,11 @@ def build_state() -> Optional[State]:
         print("Warning: This run only involved %d nodes, but only %d log files were used. If --verbose is enabled, subsequent warnings may not indicate a true error." % (state.num_nodes, len(state.visible_nodes)))
         all_logs = False
 
-    # once all logs are parsed, let's figure out the channel for fill
-    state.add_fill_to_channel()
+    # # once all logs are parsed, let's figure out the channel for fill
+    # state.add_fill_to_channel()
 
-    # once all logs are parsed, let's figure out the channel for copy
-    state.add_copy_to_channel()
+    # # once all logs are parsed, let's figure out the channel for copy
+    # state.add_copy_to_channel()
 
     # See if we need to trim out any boxes before we build the profile
     if (start_trim > 0) or (stop_trim > 0):
