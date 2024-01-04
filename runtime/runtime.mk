@@ -987,7 +987,6 @@ MAPPER_SRC	?=
 REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
     $(LG_RT_DIR)/realm/bgwork.cc \
     $(LG_RT_DIR)/realm/transfer/transfer.cc \
-    $(LG_RT_DIR)/realm/transfer/address_list.cc \
     $(LG_RT_DIR)/realm/transfer/channel.cc \
     $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
     $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
