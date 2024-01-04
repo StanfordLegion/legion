@@ -10337,7 +10337,9 @@ namespace Legion {
 #endif
         if (deterministic_redop)
         {
-          for (unsigned idx = 0; idx < points; idx++)
+          size_t num_futures;
+          derez.deserialize(num_futures);
+          for (unsigned idx = 0; idx < num_futures; idx++)
           {
             DomainPoint point;
             derez.deserialize(point);
@@ -10354,22 +10356,28 @@ namespace Legion {
           {
             size_t reduc_size;
             derez.deserialize(reduc_size);
-            const void *reduc_ptr = derez.get_current_pointer();
-            FutureInstance instance(reduc_ptr, reduc_size, false/*eager*/,
-                true/*external*/, false/*own allocation*/);
-            fold_reduction_future(&instance, ApEvent::NO_AP_EVENT);
-            // Advance the pointer on the deserializer
-            derez.advance_pointer(reduc_size);
+            if (reduc_size > 0)
+            {
+              const void *reduc_ptr = derez.get_current_pointer();
+              FutureInstance instance(reduc_ptr, reduc_size, false/*eager*/,
+                  true/*external*/, false/*own allocation*/);
+              fold_reduction_future(&instance, ApEvent::NO_AP_EVENT);
+              // Advance the pointer on the deserializer
+              derez.advance_pointer(reduc_size);
+            }
           }
           else
           {
             DomainPoint point;
             derez.deserialize(point);
-            FutureInstance *instance = FutureInstance::unpack_instance(derez);
-            ApEvent effects;
-            if (!instance->is_meta_visible)
-              derez.deserialize(effects);
-            reduce_future(point, instance, effects);
+            if (point.get_dim() > 0)
+            {
+              FutureInstance *instance = FutureInstance::unpack_instance(derez);
+              ApEvent effects;
+              if (!instance->is_meta_visible)
+                derez.deserialize(effects);
+              reduce_future(point, instance, effects);
+            }
           }
         }
         size_t metasize;
@@ -12087,9 +12095,13 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(reduction_instance == NULL);
-          assert(temporary_futures.size() == points.size());
+          // Might have no temporary futures if this task was predicated
+          // and the predicate resolved to false
+          assert((temporary_futures.size() == points.size()) || 
+              temporary_futures.empty());
           assert(reduction_fold_effects.empty());
 #endif
+          rez.serialize<size_t>(temporary_futures.size());
           for (std::map<DomainPoint,
                 std::pair<FutureInstance*,ApEvent> >::const_iterator it =
                temporary_futures.begin(); it != temporary_futures.end(); it++)
@@ -12110,15 +12122,21 @@ namespace Legion {
 #endif
             // Easy case just for serdez, we just pack up the local buffer
             rez.serialize(serdez_redop_state_size);
-            rez.serialize(serdez_redop_state, serdez_redop_state_size);
+            if (serdez_redop_state_size > 0)
+              rez.serialize(serdez_redop_state, serdez_redop_state_size);
           }
           else
           {
 #ifdef DEBUG_LEGION
-            assert(reduction_instance != NULL);
+            // We might not have a reduction instance if this task was
+            // predicated and ended up predicating false
+            assert((reduction_instance != NULL) || false_guard.exists());
+            assert((reduction_instance != NULL) == 
+                (reduction_instance_point.get_dim() > 0));
 #endif
             rez.serialize(reduction_instance_point);
-            if (!reduction_instance.load()->pack_instance(rez, 
+            if ((reduction_instance != NULL) &&
+                !reduction_instance.load()->pack_instance(rez, 
                   reduction_instance_precondition, true/*pack ownership*/))
               rez.serialize(reduction_instance_precondition);
           }
