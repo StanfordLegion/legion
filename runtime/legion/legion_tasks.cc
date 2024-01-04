@@ -10373,7 +10373,9 @@ namespace Legion {
 #endif
         if (deterministic_redop)
         {
-          for (unsigned idx = 0; idx < points; idx++)
+          size_t num_futures;
+          derez.deserialize(num_futures);
+          for (unsigned idx = 0; idx < num_futures; idx++)
           {
             DomainPoint point;
             derez.deserialize(point);
@@ -10388,20 +10390,27 @@ namespace Legion {
           {
             size_t reduc_size;
             derez.deserialize(reduc_size);
-            const void *reduc_ptr = derez.get_current_pointer();
-            FutureInstance instance(reduc_ptr, reduc_size, ApEvent::NO_AP_EVENT,
-               runtime,false/*eager*/,true/*external*/,false/*own allocation*/);
-            fold_reduction_future(&instance, reduction_effects, false/*excl*/);
-            // Advance the pointer on the deserializer
-            derez.advance_pointer(reduc_size);
+            if (reduc_size > 0)
+            {
+              const void *reduc_ptr = derez.get_current_pointer();
+              FutureInstance instance(reduc_ptr, reduc_size, 
+                  ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
+                  true/*external*/, false/*own allocation*/);
+              fold_reduction_future(&instance, reduction_effects,false/*excl*/);
+              // Advance the pointer on the deserializer
+              derez.advance_pointer(reduc_size);
+            }
           }
           else
           {
             DomainPoint point;
             derez.deserialize(point);
-            FutureInstance *instance = 
-              FutureInstance::unpack_instance(derez, runtime); 
-            reduce_future(point, instance);
+            if (point.get_dim() > 0)
+            {
+              FutureInstance *instance = 
+                FutureInstance::unpack_instance(derez, runtime); 
+              reduce_future(point, instance);
+            }
           }
         }
         size_t metasize;
@@ -12110,9 +12119,13 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(reduction_instance == NULL);
-          assert(temporary_futures.size() == points.size());
+          // Might have no temporary futures if this task was predicated
+          // and the predicate resolved to false
+          assert((temporary_futures.size() == points.size()) || 
+              temporary_futures.empty());
           assert(reduction_effects.empty());
 #endif
+          rez.serialize<size_t>(temporary_futures.size());
           for (std::map<DomainPoint,FutureInstance*>::const_iterator it =
                temporary_futures.begin(); it != temporary_futures.end(); it++)
           {
@@ -12130,25 +12143,33 @@ namespace Legion {
 #endif
             // Easy case just for serdez, we just pack up the local buffer
             rez.serialize(serdez_redop_state_size);
-            rez.serialize(serdez_redop_state, serdez_redop_state_size);
+            if (serdez_redop_state_size > 0)
+              rez.serialize(serdez_redop_state, serdez_redop_state_size);
           }
           else
           {
 #ifdef DEBUG_LEGION
-            assert(reduction_instance != NULL);
+            // We might not have a reduction instance if this task was
+            // predicated and ended up predicating false
+            assert((reduction_instance != NULL) || false_guard.exists());
+            assert((reduction_instance != NULL) == 
+                (reduction_instance_point.get_dim() > 0));
 #endif
             rez.serialize(reduction_instance_point);
-            // No need for the lock here as we should have all points and
-            // all their result so no more mutations of reduction_effects
-            if (!reduction_effects.empty())
+            if (reduction_instance != NULL)
             {
-              ApEvent completion_precondition = 
-                Runtime::merge_events(NULL, reduction_effects);
-              reduction_instance->pack_instance(rez, true/*pack ownership*/,
-                              true/*other ready*/, completion_precondition);
+              // No need for the lock here as we should have all points and
+              // all their result so no more mutations of reduction_effects
+              if (!reduction_effects.empty())
+              {
+                ApEvent completion_precondition = 
+                  Runtime::merge_events(NULL, reduction_effects);
+                reduction_instance->pack_instance(rez, true/*pack ownership*/,
+                                true/*other ready*/, completion_precondition);
+              }
+              else
+                reduction_instance->pack_instance(rez, true/*pack ownership*/);
             }
-            else
-              reduction_instance->pack_instance(rez, true/*pack ownership*/);
           }
         }
         if (reduction_metadata != NULL)
