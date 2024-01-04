@@ -2409,6 +2409,7 @@ pub struct State {
     max_dim: i32,
     pub num_nodes: u32,
     pub zero_time: TimestampDelta,
+    pub calibration_err: i64,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
     pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
@@ -3392,7 +3393,10 @@ fn process_record(
         Record::ZeroTime { zero_time } => {
             state.zero_time = TimestampDelta(*zero_time);
         }
-        Record::ProcDesc { proc_id, kind } => {
+        Record::CalibrationErr { calibration_err } => {
+                state.calibration_err = *calibration_err;
+        }
+        Record::ProcDesc { proc_id, kind, .. } => {
             let kind = match ProcKind::try_from(*kind) {
                 Ok(x) => x,
                 Err(_) => panic!("bad processor kind"),
