@@ -153,8 +153,7 @@ namespace Realm {
       SparsityMap<N, T> sparsity_map;
       Event wait_on;
 
-      static void handle_message(NodeID sender,
-                                 const SparsityMapDestroyMessage &msg,
+      static void handle_message(NodeID sender, const SparsityMapDestroyMessage &msg,
                                  const void *data, size_t datalen);
     };
 
@@ -187,12 +186,13 @@ namespace Realm {
     ~SparsityMapImplWrapper(void);
 
     class DeferredDestroy : public EventWaiter {
-     public:
-      void defer(SparsityMapImplWrapper* wrap, Event wait_on);
+    public:
+      void defer(SparsityMapImplWrapper *wrap, Event wait_on);
       virtual void event_triggered(bool poisoned, TimeLimit work_until);
       virtual void print(std::ostream &os) const;
       virtual Event get_finish_event(void) const;
-      protected:
+
+    protected:
       SparsityMapImplWrapper *wrapper;
     };
     DeferredDestroy deferred_destroy;

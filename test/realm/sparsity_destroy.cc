@@ -21,8 +21,9 @@ using namespace Realm;
 
 Logger log_app("app");
 
-enum {
-  MAIN_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
+enum
+{
+  MAIN_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   NODE_TASK_0,
 };
 
@@ -32,8 +33,9 @@ struct TaskArgs {
   Event wait_on;
 };
 
-void node_task_0(const void *args, size_t arglen, const void *userdata,
-               size_t userlen, Processor p) {
+void node_task_0(const void *args, size_t arglen, const void *userdata, size_t userlen,
+                 Processor p)
+{
   TaskArgs &task_args = *(TaskArgs *)args;
   // add remote reference
   task_args.sparsity_map.add_reference();
@@ -44,8 +46,9 @@ void node_task_0(const void *args, size_t arglen, const void *userdata,
   task_args.sparsity_map.destroy(task_args.wait_on);
 }
 
-void main_task(const void *args, size_t arglen, const void *userdata,
-               size_t userlen, Processor p) {
+void main_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
+               Processor p)
+{
   std::vector<Rect<1>> rects;
   rects.push_back(Rect<1>(Point<1>(0), Point<1>(50000)));
   rects.push_back(Rect<1>(Point<1>(50008), Point<1>(50008 * 2)));
@@ -54,9 +57,10 @@ void main_task(const void *args, size_t arglen, const void *userdata,
 
   Machine machine = Machine::get_machine();
   std::vector<Memory> memories;
-  for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin(); it; ++it) {
+  for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin(); it;
+      ++it) {
     Memory m = *it;
-    if (m.kind() != Memory::SYSTEM_MEM)
+    if(m.kind() != Memory::SYSTEM_MEM)
       continue;
     memories.push_back(m);
   }
@@ -82,7 +86,6 @@ void main_task(const void *args, size_t arglen, const void *userdata,
       Event e = proc.spawn(NODE_TASK_0, &args, sizeof(args));
       events.push_back(e);
     }
-
   }
 
   done.trigger();
@@ -108,16 +111,17 @@ void main_task(const void *args, size_t arglen, const void *userdata,
   Runtime::get_runtime().shutdown(Processor::get_current_finish_event(), errors ? 1 : 0);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
   Runtime rt;
 
   rt.init(&argc, &argv);
 
   rt.register_task(MAIN_TASK, main_task);
 
-  Processor::register_task_by_kind(
-      Processor::LOC_PROC, false /*!global*/, NODE_TASK_0,
-      CodeDescriptor(node_task_0), ProfilingRequestSet(), 0, 0)
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, NODE_TASK_0,
+                                   CodeDescriptor(node_task_0), ProfilingRequestSet(), 0,
+                                   0)
       .wait();
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
