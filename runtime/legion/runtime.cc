@@ -3133,10 +3133,9 @@ namespace Legion {
           if (target_space != implicit_runtime->address_space)
           {
 #ifdef DEBUG_LEGION
-            assert(freefunc != NULL);
             assert(instance.exists());
-            assert(freeproc.exists());
-            assert(freeproc.address_space() == target_space);
+            assert(!freeproc.exists() || 
+                freeproc.address_space() == target_space);
 #endif
             // Send the message to the remote node to do the free
             Serializer rez;
@@ -3709,12 +3708,18 @@ namespace Legion {
       derez.deserialize(freeproc);
       void (*freefunc)(const Realm::ExternalInstanceResource&);
       derez.deserialize(freefunc);
+      if (freefunc == NULL)
+        freefunc = free_host_memory;
       PhysicalInstance instance;
       derez.deserialize(instance);
       const RtEvent use_event(instance.fetch_metadata(freeproc));
       FreeExternalArgs args(NULL/*no resource*/, freefunc, instance);
-      runtime->issue_application_processor_task(args,
-                  LG_THROUGHPUT_WORK_PRIORITY, freeproc, use_event);
+      if (freeproc.exists())
+        runtime->issue_application_processor_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, freeproc, use_event);
+      else
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, use_event);
     }
 
     //--------------------------------------------------------------------------
