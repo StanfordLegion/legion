@@ -821,8 +821,12 @@ namespace Legion {
               mapper->get_mapper_name(), get_task_name(), get_unique_id())
           options.replicate = false;
         }
-        // Reduction-only privileges are not currently supported for tasks
-        // that are going to be replicated
+        // We allow replication of tasks with reduction privileges, but
+        // not if they are also part of a collective region requirement
+        // because we don't know how to make a collective view that is
+        // replicated for all the shards of the repdlicated task, but then
+        // an all-reduce view across the points of the index space task
+        // launch that are operating collectively
         for (unsigned idx = 0; idx < logical_regions.size(); idx++)
         {
           if (!IS_REDUCE(logical_regions[idx]))
@@ -831,9 +835,9 @@ namespace Legion {
               "Mapper %s requested to replicate task %s (UID %lld) with "
               "reduction privilege on region requirement %d in "
               "'select_task_options'. Legion does not currently support "
-              "replication of tasks with reduction privileges. You can "
-              "request support for this feature by emailing the Legion "
-              "developers list or opening a github issue. The mapper "
+              "replication of tasks with reduction privileges. "
+              "You can request support for this feature by emailing the "
+              "Legion developers list or opening a github issue. The mapper "
               "call to replicate_task is being elided.",
               mapper->get_mapper_name(), get_task_name(), get_unique_id(), idx)
           options.replicate = false;
@@ -2762,21 +2766,6 @@ namespace Legion {
       // owner then we also know there is only one valid choice
       if (must_epoch_owner == NULL)
       {
-        if (input.shard_processor.exists())
-        {
-          // This is a replicated task, the mapper isn't allowed to 
-          // mutate the target_processors from the shard processor
-          if ((output.target_procs.size() != 1) ||
-              (output.target_procs.front() != input.shard_processor))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Mapper %s provided invalid target_processors from call to "
-                "'map_task' for replicated task %s (UID %lld). Replicated "
-                "tasks are only permitted to have one target processor and "
-                "it must be exactly 'input.shard_procesor' as that is where "
-                "this replicated copy of the task has been assigned to run "
-                "by this same mapper.", mapper->get_mapper_name(),
-                get_task_name(), get_unique_id())
-        }
         if (output.target_procs.empty())
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_OUTPUT_TARGET,
@@ -2963,20 +2952,6 @@ namespace Legion {
         if (!profiling_reported.exists())
           profiling_reported = Runtime::create_rt_user_event();
       }
-      // If task is replicated make sure the mapper kept the right variant
-      if (input.shard_processor.exists() &&
-          (output.chosen_variant != input.shard_variant))
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. Mapper specified an invalid task variant "
-                      "of ID %d for replicated task %s (ID %lld), which "
-                      "differs from the specified 'input.shard_variant' %d "
-                      "previously chosen by the mapper in 'replicate_task'. "
-                      "The mapper is required to maintain the previously "
-                      "selected variant in the output 'map_task'.",
-                      "map_task", mapper->get_mapper_name(),
-                      output.chosen_variant, get_task_name(),
-                      get_unique_id(), input.shard_variant)
       // See whether the mapper picked a variant or a generator
       VariantImpl *variant_impl = NULL;
       if (output.chosen_variant > 0)
@@ -8355,6 +8330,30 @@ namespace Legion {
                                              MustEpochOp *must_epoch_owner)
     //--------------------------------------------------------------------------
     {
+      // This is a replicated task, the mapper isn't allowed to 
+      // mutate the target_processors from the shard processor
+      if ((output.target_procs.size() != 1) ||
+          (output.target_procs.front() != input.shard_processor))
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Mapper %s provided invalid target_processors from call to "
+            "'map_task' for replicated task %s (UID %lld). Replicated "
+            "tasks are only permitted to have one target processor and "
+            "it must be exactly 'input.shard_procesor' as that is where "
+            "this replicated copy of the task has been assigned to run "
+            "by this same mapper.", mapper->get_mapper_name(),
+            get_task_name(), get_unique_id())
+      if (output.chosen_variant != input.shard_variant)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper specified an invalid task variant "
+                      "of ID %d for replicated task %s (ID %lld), which "
+                      "differs from the specified 'input.shard_variant' %d "
+                      "previously chosen by the mapper in 'replicate_task'. "
+                      "The mapper is required to maintain the previously "
+                      "selected variant in the output 'map_task'.",
+                      "map_task", mapper->get_mapper_name(),
+                      output.chosen_variant, get_task_name(),
+                      get_unique_id(), input.shard_variant)
       SingleTask::finalize_map_task_output(input, output, must_epoch_owner);
       if (!is_leaf() && !regions.empty() && !runtime->unsafe_mapper)
       {
