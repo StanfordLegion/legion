@@ -22,7 +22,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
-  transfer_utils_test
+  transfer_utils_test.cc
  )
 
 include(FetchContent)
@@ -34,7 +34,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 enable_testing()
-add_executable(realm_tests ${test})
+add_executable(realm_tests ${REALM_TESTS})
 
 target_link_libraries(realm_tests Legion::RealmTests GTest::gtest_main ${CMAKE_DL_LIBS})
 target_compile_options(realm_tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
