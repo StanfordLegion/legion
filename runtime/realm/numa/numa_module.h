@@ -29,6 +29,8 @@ namespace Realm {
     protected:
       NumaModuleConfig(void);
 
+      bool discover_resource(void);
+
     public:
       virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
 
@@ -38,6 +40,10 @@ namespace Realm {
       int cfg_num_numa_cpus = 0;
       bool cfg_pin_memory = false;
       size_t cfg_stack_size = 2 << 20;
+
+      // resources
+      bool resource_discovered = false;
+      bool res_numa_available = false;
     };
 
     // our interface to the rest of the runtime
