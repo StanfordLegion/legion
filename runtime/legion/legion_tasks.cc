@@ -10143,43 +10143,43 @@ namespace Legion {
                   (reduction_instance == reduction_instances.front()));
 #endif
           // First finish applying any deterministic reductions
-          if (serdez_redop_fns == NULL)
+          if (deterministic_redop)
           {
-            if (deterministic_redop)
+            // Fold any temporary future for deterministic reduction
+            for (std::map<DomainPoint,
+                  std::pair<FutureInstance*,ApEvent> >::iterator it =
+                  temporary_futures.begin(); it != 
+                  temporary_futures.end(); /*nothing*/)
             {
-              // Fold any temporary future for deterministic reduction
-              for (std::map<DomainPoint,
-                    std::pair<FutureInstance*,ApEvent> >::iterator it =
-                    temporary_futures.begin(); it != 
-                    temporary_futures.end(); /*nothing*/)
+              if (fold_reduction_future(it->second.first, it->second.second))
               {
-                if (fold_reduction_future(it->second.first, it->second.second))
-                {
-                  delete it->second.first;
-                  std::map<DomainPoint,
-                    std::pair<FutureInstance*,ApEvent> >::iterator
-                      to_delete = it++;
-                  temporary_futures.erase(to_delete);
-                }
-                else
-                  it++;
+                delete it->second.first;
+                std::map<DomainPoint,
+                  std::pair<FutureInstance*,ApEvent> >::iterator
+                    to_delete = it++;
+                temporary_futures.erase(to_delete);
               }
-            }
-            else
-            {
-              // Merge any reduction fold events back into the 
-              // reduction_instance_precondition to know when the
-              // reduction instance is safe to use
-              // Note all these events dominate the reduction fold precondition
-              // so there is no need to include and we can just overwrite it
-              if (!reduction_fold_effects.empty())
-              {
-                reduction_instance_precondition =
-                  Runtime::merge_events(NULL, reduction_fold_effects);
-                reduction_fold_effects.clear();
-              }
+              else
+                it++;
             }
           }
+          else if (serdez_redop_fns == NULL)
+          {
+            // Merge any reduction fold events back into the 
+            // reduction_instance_precondition to know when the
+            // reduction instance is safe to use
+            // Note all these events dominate the reduction fold precondition
+            // so there is no need to include and we can just overwrite it
+            if (!reduction_fold_effects.empty())
+            {
+              reduction_instance_precondition =
+                Runtime::merge_events(NULL, reduction_fold_effects);
+              reduction_fold_effects.clear();
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(reduction_fold_effects.empty());
+#endif
           // Finish the index task reduction
           finish_index_task_reduction();
         }
@@ -10204,15 +10204,15 @@ namespace Legion {
         assert(!serdez_redop_targets.empty());
 #endif
         reduction_instances.reserve(serdez_redop_targets.size());
-        int runtime_visible = -1;
+        int runtime_visible_index = -1;
         for (std::vector<Memory>::const_iterator it =
               serdez_redop_targets.begin(); it !=
               serdez_redop_targets.end(); it++)
         {
-          if ((runtime_visible== -1) && 
+          if ((runtime_visible_index == -1) && 
               ((*it) == runtime->runtime_system_memory))
           {
-            runtime_visible = reduction_instances.size();
+            runtime_visible_index = reduction_instances.size();
             reduction_instances.push_back(
                 FutureInstance::create_local(serdez_redop_state, 
                   serdez_redop_state_size, false/*own*/));
@@ -10225,17 +10225,17 @@ namespace Legion {
                   serdez_redop_state_size, false/*eager*/));
           }
         }
-        if (runtime_visible == -1)
+        if (runtime_visible_index < 0)
         {
-          runtime_visible = reduction_instances.size();
+          runtime_visible_index = reduction_instances.size();
           reduction_instances.push_back(
                 FutureInstance::create_local(serdez_redop_state, 
                   serdez_redop_state_size, false/*own*/));
         }
         // Make sure the instance with the data is at the front
-        if (runtime_visible > 0)
+        if (runtime_visible_index > 0)
           std::swap(reduction_instances.front(),
-              reduction_instances[runtime_visible]);
+              reduction_instances[runtime_visible_index]);
         reduction_instance = reduction_instances.front();
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen
