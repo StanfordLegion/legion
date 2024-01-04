@@ -3210,6 +3210,8 @@ namespace Legion {
           const CollectiveViewCreatorBase::RendezvousKey &key,
           std::map<LogicalRegion,
             CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
+      void rendezvous_check_virtual_mappings(ShardID shard,
+          MapperManager *mapper, const std::vector<bool> &virtual_mappings);
     public:
 #if 0
       void launch(const std::vector<bool> &virtual_mapped);
@@ -3337,6 +3339,7 @@ namespace Legion {
       static void handle_distribution(Deserializer &derez, Runtime *rt); 
       static void handle_collective_versioning(Deserializer &derez,Runtime *rt);
       static void handle_collective_mapping(Deserializer &derez, Runtime *rt);
+      static void handle_virtual_rendezvous(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
@@ -3479,6 +3482,14 @@ namespace Legion {
       std::map<std::pair<size_t,size_t>,ShardLocalData> shard_local_data;
     protected:
       AttachDeduplication *attach_deduplication;
+    protected:
+      struct VirtualMappingRendezvous {
+        std::vector<bool> virtual_mappings;
+        MapperManager *mapper;
+        ShardID shard;
+        unsigned remaining_arrivals;
+      };
+      VirtualMappingRendezvous *virtual_mapping_rendezvous;
     };
 
   }; // namespace Internal

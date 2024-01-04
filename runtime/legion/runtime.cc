@@ -13112,6 +13112,11 @@ namespace Legion {
               runtime->handle_replicate_collective_mapping(derez);
               break;
             }
+          case SEND_REPLICATE_VIRTUAL_RENDEZVOUS:
+            {
+              runtime->handle_replicate_virtual_rendezvous(derez);
+              break;
+            }
           case SEND_REPLICATE_POST_MAPPED:
             {
               runtime->handle_replicate_post_mapped(derez);
@@ -23523,6 +23528,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_replicate_rendezvous_virtual_mappings(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
+                                           rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_replicate_post_mapped(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25886,6 +25900,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_collective_mapping(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_replicate_virtual_rendezvous(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_virtual_rendezvous(derez, this);
     }
 
     //--------------------------------------------------------------------------

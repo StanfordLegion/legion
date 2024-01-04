@@ -3463,6 +3463,8 @@ namespace Legion {
                                                 Serializer &rez);
       void send_replicate_collective_mapping(AddressSpaceID target,
                                              Serializer &rez);
+      void send_replicate_rendezvous_virtual_mappings(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_execution(AddressSpaceID target,
                                          Serializer &rez);
@@ -3820,6 +3822,7 @@ namespace Legion {
       void handle_replicate_distribution(Deserializer &derez);
       void handle_replicate_collective_versioning(Deserializer &derez);
       void handle_replicate_collective_mapping(Deserializer &derez);
+      void handle_replicate_virtual_rendezvous(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
       void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
@@ -6230,6 +6233,8 @@ namespace Legion {
         case SEND_REPLICATE_COLLECTIVE_VERSIONING:
           break;
         case SEND_REPLICATE_COLLECTIVE_MAPPING:
+          break;
+        case SEND_REPLICATE_VIRTUAL_RENDEZVOUS:
           break;
         case SEND_REPLICATE_POST_MAPPED:
           break;

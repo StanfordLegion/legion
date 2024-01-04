@@ -416,9 +416,9 @@ namespace Legion {
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
                                              Mapper::MapTaskOutput &output,
                                              MustEpochOp *must_epoch_owner);
-      void finalize_map_task_output(Mapper::MapTaskInput &input,
-                                    Mapper::MapTaskOutput &output,
-                                    MustEpochOp *must_epoch_owner);
+      virtual void finalize_map_task_output(Mapper::MapTaskInput &input,
+                                            Mapper::MapTaskOutput &output,
+                                            MustEpochOp *must_epoch_owner);
       void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     protected:
       void prepare_output_instance(unsigned index,
@@ -1036,6 +1036,9 @@ namespace Legion {
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
                                              Mapper::MapTaskOutput &output,
                                              MustEpochOp *must_epoch_owner);
+      virtual void finalize_map_task_output(Mapper::MapTaskInput &input,
+                                            Mapper::MapTaskOutput &output,
+                                            MustEpochOp *must_epoch_owner);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:

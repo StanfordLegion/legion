@@ -9366,7 +9366,7 @@ namespace Legion {
         trigger_remote_complete(0), trigger_local_commit(0),
         trigger_remote_commit(0), semantic_attach_counter(0),
         local_future_result(NULL), shard_task_barrier(bar),
-        attach_deduplication(NULL)
+        attach_deduplication(NULL), virtual_mapping_rendezvous(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9682,6 +9682,96 @@ namespace Legion {
       // Dispatch back to the base class
       CollectiveViewCreator<CollectiveHelperOp>::construct_collective_mapping(
           key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::rendezvous_check_virtual_mappings(ShardID shard,
+        MapperManager *mapper, const std::vector<bool> &virtual_mappings)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!virtual_mappings.empty());
+#endif
+      AutoLock m_lock(manager_lock);
+      if (virtual_mapping_rendezvous == NULL)
+      {
+        virtual_mapping_rendezvous = new VirtualMappingRendezvous();
+        virtual_mapping_rendezvous->virtual_mappings = virtual_mappings;
+        virtual_mapping_rendezvous->mapper = mapper;
+        virtual_mapping_rendezvous->shard = shard;
+        virtual_mapping_rendezvous->remaining_arrivals = 
+          local_constituents + (is_owner() ? 0 : 1);
+        // Send it off to any children we might have
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            pack_global_ref(children.size());
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+            {
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(shard);
+                rez.serialize<size_t>(virtual_mappings.size());
+                for (unsigned idx = 0; idx < virtual_mappings.size(); idx++)
+                  rez.serialize<bool>(virtual_mappings[idx]);
+              }
+              runtime->send_replicate_rendezvous_virtual_mappings(*it, rez);
+            }
+          }
+        }
+      }
+      else
+      {
+        const std::vector<bool> &previous_mappings = 
+          virtual_mapping_rendezvous->virtual_mappings;
+#ifdef DEBUG_LEGION
+        assert(previous_mappings.size() == virtual_mappings.size());
+#endif
+        // Check to see if they are the same
+        int bad_index = -1;
+        for (unsigned idx = 0; idx < virtual_mappings.size(); idx++)
+        {
+          if (previous_mappings[idx] == virtual_mappings[idx])
+            continue;
+          bad_index = idx;
+          break;
+        }
+        if (bad_index >= 0)
+        {
+          if (mapper == NULL)
+            mapper = virtual_mapping_rendezvous->mapper;
+#ifdef DEBUG_LEGION
+          assert(mapper != NULL);
+#endif
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s provided different virtual mapping outputs for "
+              "region requirement %d of shards %d and %d of replicated "
+              "task %s. All shards of a replicated task must either provide "
+              "concrete instances for a particular region requirement or all "
+              "shards must decide to virtual map the region requirement. "
+              "Mixed virtual and concrete instances are not allowed.",
+              mapper->get_mapper_name(), bad_index,
+              (shard < virtual_mapping_rendezvous->shard) ? shard :
+                virtual_mapping_rendezvous->shard,
+              (shard < virtual_mapping_rendezvous->shard) ?
+                virtual_mapping_rendezvous->shard : shard,
+              local_shards.back()->get_task_name())
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(virtual_mapping_rendezvous->remaining_arrivals > 0);
+#endif
+      if (--virtual_mapping_rendezvous->remaining_arrivals == 0)
+      {
+        delete virtual_mapping_rendezvous;
+        virtual_mapping_rendezvous = NULL;
+      }
     }
 
 #if 0
@@ -11951,6 +12041,31 @@ namespace Legion {
 
       ShardManager *manager = runtime->find_shard_manager(did);
       manager->rendezvous_collective_mapping(key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_virtual_rendezvous(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      ShardID shard;
+      derez.deserialize(shard);
+      size_t num_mappings;
+      derez.deserialize(num_mappings);
+      std::vector<bool> virtual_mappings(num_mappings);
+      for (unsigned idx = 0; idx < num_mappings; idx++)
+      {
+        bool virtual_mapping;
+        derez.deserialize(virtual_mapping);
+        virtual_mappings[idx] = virtual_mapping;
+      }
+
+      ShardManager *manager = runtime->find_shard_manager(did);
+      manager->rendezvous_check_virtual_mappings(shard, NULL, virtual_mappings);
+      manager->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

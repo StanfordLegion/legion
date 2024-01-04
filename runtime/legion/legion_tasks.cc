@@ -8350,6 +8350,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::finalize_map_task_output(Mapper::MapTaskInput &input,
+                                             Mapper::MapTaskOutput &output,
+                                             MustEpochOp *must_epoch_owner)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::finalize_map_task_output(input, output, must_epoch_owner);
+      if (!is_leaf() && !regions.empty() && !runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper != NULL);
+        assert(regions.size() == virtual_mapped.size());
+#endif
+        // If this is not a leaf shard then check that all the shards agree
+        // on which regions are going to be virtually mapped and which aren't
+        shard_manager->rendezvous_check_virtual_mappings(shard_id, mapper,
+                                                         virtual_mapped);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     TaskOp::TaskKind ShardTask::get_task_kind(void) const
     //--------------------------------------------------------------------------
     {

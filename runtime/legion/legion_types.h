@@ -972,6 +972,7 @@ namespace Legion {
       SEND_REPLICATE_DISTRIBUTION,
       SEND_REPLICATE_COLLECTIVE_VERSIONING,
       SEND_REPLICATE_COLLECTIVE_MAPPING,
+      SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
       SEND_REPLICATE_POST_MAPPED,
       SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
@@ -1291,6 +1292,7 @@ namespace Legion {
         "Send Replication Distribution",                              \
         "Send Replication Collective Versioning",                     \
         "Send Replication Collective Mapping",                        \
+        "Send Replication Virtual Mapping Rendezvous",                \
         "Send Replication Post Mapped",                               \
         "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
