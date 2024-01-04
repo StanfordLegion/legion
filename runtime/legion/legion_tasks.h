@@ -683,7 +683,7 @@ namespace Legion {
       const SerdezRedopFns *serdez_redop_fns;
       std::atomic<FutureInstance*> reduction_instance;
       ApEvent reduction_instance_precondition;
-      std::vector<ApEvent> reduction_effects;
+      std::vector<ApEvent> reduction_fold_effects;
       // Only for handling serdez reductions
       void *serdez_redop_state;
       size_t serdez_redop_state_size;

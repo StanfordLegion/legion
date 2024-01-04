@@ -1357,20 +1357,12 @@ namespace Legion {
         assert(!reduction_instances.empty());
         assert(reduction_instance == reduction_instances.front());
 #endif
-        ApEvent local_precondition = reduction_instance_precondition;
-        if (!reduction_effects.empty())
-        {
-          if (reduction_instance_precondition.exists())
-            reduction_effects.push_back(reduction_instance_precondition);
-          local_precondition = Runtime::merge_events(NULL, reduction_effects);
-          reduction_effects.clear();
-        }
         RtEvent collective_done;
         if (all_reduce_collective == NULL)
         {
           reduction_collective->async_reduce(reduction_instance, 
-                                             local_precondition);
-          local_precondition = broadcast_collective->finished;
+                                             reduction_instance_precondition);
+          reduction_instance_precondition = broadcast_collective->finished;
           if (broadcast_collective->is_origin())
             collective_done = reduction_collective->get_done_event();
           else
@@ -1380,9 +1372,7 @@ namespace Legion {
         }
         else
           collective_done = all_reduce_collective->async_reduce(
-                          reduction_instance, local_precondition);
-        if (local_precondition.exists())
-          reduction_effects.push_back(local_precondition);
+                          reduction_instance, reduction_instance_precondition);
         // No need to do anything with the output local precondition
         // We already added it to the complete_effects when we made
         // the collective at the beginning
@@ -10341,27 +10331,28 @@ namespace Legion {
       {
         FutureInstance *result = local_future_result;
         local_future_result = NULL;
+        ApEvent shard_effects;
         if (!execution_effects.empty())
-          effects = Runtime::merge_events(NULL, execution_effects);
+          shard_effects = Runtime::merge_events(NULL, execution_effects);
         if (original_task == NULL)
         {
           Serializer rez;
           rez.serialize(did);
           if (result != NULL)
-            result->pack_instance(rez, true/*ownership*/);
+            result->pack_instance(rez, shard_effects, true/*ownership*/);
           else
             rez.serialize<size_t>(0);
           rez.serialize(metasize);
           if (metasize > 0)
             rez.serialize(metadata, metasize);
-          rez.serialize(effects);
+          rez.serialize(shard_effects);
           runtime->send_replicate_post_execution(owner_space, rez);
           if (result != NULL)
             delete result;
         }
         else
         {
-          original_task->record_inner_termination(effects);
+          original_task->record_inner_termination(shard_effects);
           original_task->handle_post_execution(result, metadata, 
               metasize, NULL/*functor*/, Processor::NO_PROC, 
               false/*own functor*/);
@@ -10369,7 +10360,7 @@ namespace Legion {
           metadata = NULL;
         }
       }
-      if (inst != NULL)
+      if ((inst != NULL) && !inst->defer_deletion(effects))
         delete inst;
       if (metadata != NULL)
         free(metadata);
@@ -12482,9 +12473,8 @@ namespace Legion {
       rez.serialize(local_shard);
       if (pack_shadow)
       {
-        if (!shadow_instance->pack_instance(rez, false/*pack ownership*/,
-              !shadow_ready.exists() || 
-              shadow_ready.has_triggered_faultignorant()))
+        if (!shadow_instance->pack_instance(rez, shadow_ready,
+                                            false/*pack ownership*/))
         {
           rez.serialize(shadow_ready);
           ApUserEvent reduction_done = Runtime::create_ap_user_event(NULL);
@@ -12494,9 +12484,8 @@ namespace Legion {
       }
       else
       {
-        if (!instance->pack_instance(rez, false/*pack ownership*/, 
-              !instance_ready.exists() ||
-              instance_ready.has_triggered_faultignorant()))
+        if (!instance->pack_instance(rez, instance_ready,
+                                     false/*pack ownership*/))
         {
           rez.serialize(instance_ready);
           ApUserEvent reduction_done = Runtime::create_ap_user_event(NULL);
@@ -12703,8 +12692,7 @@ namespace Legion {
     void FutureBroadcastCollective::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      if (!instance->pack_instance(rez, false/*pack ownership*/,
-            !write_event.exists() || write_event.has_triggered_faultignorant()))
+      if (!instance->pack_instance(rez, write_event, false/*pack ownership*/))
       {
         rez.serialize(write_event); 
         ApUserEvent remote_read_done = Runtime::create_ap_user_event(NULL);
@@ -12819,8 +12807,7 @@ namespace Legion {
       if (!pending_reductions.empty())
         perform_reductions();
       rez.serialize(local_shard);
-      if (!instance->pack_instance(rez, false/*pack ownership*/,
-            !ready.exists() || ready.has_triggered_faultignorant()))
+      if (!instance->pack_instance(rez, ready, false/*pack ownership*/))
         rez.serialize(ready);
       // Note there is no need to track the remote reads here since we know
       // that the result is going come back to these instances in the

@@ -2854,8 +2854,8 @@ namespace Legion {
             assert(finder != instances.end());
 #endif
             // Don't allow this to be packed by value
-            finder->second.instance->pack_instance(rez, true/*move ownership*/,
-                false/*allow by value*/);
+            finder->second.instance->pack_instance(rez, ApEvent::NO_AP_EVENT,
+                true/*move ownership*/, false/*allow by value*/);
             rez.serialize(finder->second.ready_event);
             rez.serialize<size_t>(finder->second.read_events.size());
             for (std::vector<ApEvent>::const_iterator it =
@@ -2874,7 +2874,8 @@ namespace Legion {
           // Pack our local visible copy by value so that the subscriber
           // will have it's own local copy of the data
           FutureInstanceTracker &tracker = instances[local_visible_memory];
-          if (!tracker.instance->pack_instance(rez, false/*move ownership*/))
+          if (!tracker.instance->pack_instance(rez, tracker.ready_event,
+                                               false/*move ownership*/))
           {
             // Couldn't pack this by value so we need to pack up events
             rez.serialize(tracker.ready_event);
@@ -3552,14 +3553,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureInstance::pack_instance(Serializer &rez, bool pack_ownership,
-                                       bool allow_by_value)
+    bool FutureInstance::pack_instance(Serializer &rez, ApEvent ready_event,
+        bool pack_ownership, bool allow_value)
     //--------------------------------------------------------------------------
     {
       rez.serialize(size);
       // Check to see if we can just pass this future instance by value
-      if (allow_by_value && is_meta_visible && 
-          (size <= LEGION_MAX_RETURN_SIZE))
+      if (allow_value && is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE) &&
+          (!ready_event.exists() || ready_event.has_triggered_faultignorant()))
       {
         // We can just pass this future by value because we can
         // see it here, it's tiny, and it's ready to be read
@@ -13928,7 +13929,8 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(target);
-          result->pack_instance(rez, true/*pack ownership*/);
+          result->pack_instance(rez, ApEvent::NO_AP_EVENT,
+              true/*pack ownership*/, false/*allow by value*/);
           rez.serialize(done);
         }
         send_create_future_instance_response(source, rez);

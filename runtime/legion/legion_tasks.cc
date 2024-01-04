@@ -5147,7 +5147,7 @@ namespace Legion {
       future_map = FutureMap();
       if (reduction_instance != NULL)
         delete reduction_instance.load();
-      reduction_effects.clear();
+      reduction_fold_effects.clear();
       if (serdez_redop_state != NULL)
         free(serdez_redop_state);
       if (reduction_metadata != NULL)
@@ -5686,7 +5686,7 @@ namespace Legion {
           if (done.exists())
           {
             AutoLock o_lock(op_lock);
-            reduction_effects.push_back(done);
+            reduction_fold_effects.push_back(done);
             return false;
           }
           else
@@ -9448,13 +9448,13 @@ namespace Legion {
       if (serdez_redop_fns == NULL) 
       {
         reduction_instances.reserve(target_mems.size());
-        int runtime_visible = -1;
+        int runtime_visible_index = -1;
         for (std::vector<Memory>::const_iterator it =
               target_mems.begin(); it != target_mems.end(); it++)
         {
-          if ((runtime_visible < 0) &&
+          if ((runtime_visible_index < 0) &&
               FutureInstance::check_meta_visible(*it))
-            runtime_visible = reduction_instances.size();
+            runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = runtime->find_memory_manager(*it);
           reduction_instances.push_back(
               manager->create_future_instance(this, unique_op_id,
@@ -9464,17 +9464,19 @@ namespace Legion {
         // reduction value we always want the reduction instance to
         // be somewhere meta visible for performance reasons, so we
         // make a meta-visible instance if we don't have one
-        if ((runtime_visible < 0) &&
+        if ((runtime_visible_index < 0) &&
             (reduction_op->sizeof_rhs <= LEGION_MAX_RETURN_SIZE))
         {
-          runtime_visible = reduction_instances.size();
+          runtime_visible_index = reduction_instances.size();
+          MemoryManager *manager = 
+            runtime->find_memory_manager(runtime->runtime_system_memory);
           reduction_instances.push_back(
-              FutureInstance::create_local(&reduction_op->identity,
-                reduction_op->sizeof_rhs, false/*own*/));
+              manager->create_future_instance(this, unique_op_id,
+                reduction_op->sizeof_rhs, false/*eager*/));
         }
-        if (runtime_visible > 0)
+        if (runtime_visible_index > 0)
           std::swap(reduction_instances.front(), 
-              reduction_instances[runtime_visible]);
+              reduction_instances[runtime_visible_index]);
 #ifdef DEBUG_LEGION
         assert(reduction_instance == NULL);
 #endif
@@ -9615,22 +9617,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!reduction_instances.empty());
           assert(reduction_instance == reduction_instances.front());
+          assert(reduction_fold_effects.empty());
 #endif
-          // Complete the event for the first future instance 
-          ApEvent reduction_ready;
-          if (!reduction_effects.empty())
-          {
-            reduction_ready = Runtime::merge_events(NULL, reduction_effects);
-            reduction_effects.clear();
-          }
-          else
-            reduction_ready = reduction_instance_precondition;
           // Now do the copy out from the reduction_instance to any other
           // target futures that we have, we'll do this with a broadcast tree
           if (reduction_instances.size() > 1)
           {
             std::vector<ApEvent> reduction_instances_ready(
-                reduction_instances.size(), reduction_ready);
+                reduction_instances.size(), reduction_instance_precondition);
             // Do the copy from 0 to 1 first
             reduction_instances_ready[1] = reduction_instances[1]->copy_from(
                 reduction_instance, this, reduction_instances_ready[0]);
@@ -9650,7 +9644,7 @@ namespace Legion {
             record_completion_effects(reduction_instances_ready);
           }
           else
-            record_completion_effect(reduction_ready);
+            record_completion_effect(reduction_instance_precondition);
           reduction_future.impl->set_results(get_completion_event(),
               reduction_instances, reduction_metadata, reduction_metasize);
           // Clear this since we no longer own the buffer
@@ -10149,23 +10143,41 @@ namespace Legion {
                   (reduction_instance == reduction_instances.front()));
 #endif
           // First finish applying any deterministic reductions
-          if (deterministic_redop && !temporary_futures.empty())
+          if (serdez_redop_fns == NULL)
           {
-            for (std::map<DomainPoint,
-                  std::pair<FutureInstance*,ApEvent> >::iterator it =
-                  temporary_futures.begin(); it != 
-                  temporary_futures.end(); /*nothing*/)
+            if (deterministic_redop)
             {
-              if (fold_reduction_future(it->second.first, it->second.second))
+              // Fold any temporary future for deterministic reduction
+              for (std::map<DomainPoint,
+                    std::pair<FutureInstance*,ApEvent> >::iterator it =
+                    temporary_futures.begin(); it != 
+                    temporary_futures.end(); /*nothing*/)
               {
-                delete it->second.first;
-                std::map<DomainPoint,
-                  std::pair<FutureInstance*,ApEvent> >::iterator
-                    to_delete = it++;
-                temporary_futures.erase(to_delete);
+                if (fold_reduction_future(it->second.first, it->second.second))
+                {
+                  delete it->second.first;
+                  std::map<DomainPoint,
+                    std::pair<FutureInstance*,ApEvent> >::iterator
+                      to_delete = it++;
+                  temporary_futures.erase(to_delete);
+                }
+                else
+                  it++;
               }
-              else
-                it++;
+            }
+            else
+            {
+              // Merge any reduction fold events back into the 
+              // reduction_instance_precondition to know when the
+              // reduction instance is safe to use
+              // Note all these events dominate the reduction fold precondition
+              // so there is no need to include and we can just overwrite it
+              if (!reduction_fold_effects.empty())
+              {
+                reduction_instance_precondition =
+                  Runtime::merge_events(NULL, reduction_fold_effects);
+                reduction_fold_effects.clear();
+              }
             }
           }
           // Finish the index task reduction
@@ -10331,7 +10343,8 @@ namespace Legion {
             derez.deserialize(point);
             FutureInstance *instance = FutureInstance::unpack_instance(derez);
             ApEvent effects;
-            derez.deserialize(effects);
+            if (!instance->is_meta_visible)
+              derez.deserialize(effects);
             reduce_future(point, instance, effects);
           }
         }
@@ -10354,7 +10367,8 @@ namespace Legion {
             derez.deserialize(point);
             FutureInstance *instance = FutureInstance::unpack_instance(derez);
             ApEvent effects;
-            derez.deserialize(effects);
+            if (!instance->is_meta_visible)
+              derez.deserialize(effects);
             reduce_future(point, instance, effects);
           }
         }
@@ -12074,15 +12088,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(reduction_instance == NULL);
           assert(temporary_futures.size() == points.size());
-          assert(reduction_effects.empty());
+          assert(reduction_fold_effects.empty());
 #endif
           for (std::map<DomainPoint,
                 std::pair<FutureInstance*,ApEvent> >::const_iterator it =
                temporary_futures.begin(); it != temporary_futures.end(); it++)
           {
             rez.serialize(it->first);
-            it->second.first->pack_instance(rez, true/*pack ownership*/);
-            rez.serialize(it->second.second);
+            if (!it->second.first->pack_instance(rez, it->second.second,
+                                                true/*pack ownership*/))
+              rez.serialize(it->second.second);
           }
         }
         else
@@ -12091,7 +12106,7 @@ namespace Legion {
           {
 #ifdef DEBUG_LEGION
             assert(reduction_instance == NULL);
-            assert(reduction_effects.empty());
+            assert(reduction_fold_effects.empty());
 #endif
             // Easy case just for serdez, we just pack up the local buffer
             rez.serialize(serdez_redop_state_size);
@@ -12103,9 +12118,9 @@ namespace Legion {
             assert(reduction_instance != NULL);
 #endif
             rez.serialize(reduction_instance_point);
-            reduction_instance.load()->pack_instance(rez,
-                                  true/*pack ownership*/);
-            rez.serialize(reduction_instance_precondition);
+            if (!reduction_instance.load()->pack_instance(rez, 
+                  reduction_instance_precondition, true/*pack ownership*/))
+              rez.serialize(reduction_instance_precondition);
           }
         }
         if (reduction_metadata != NULL)

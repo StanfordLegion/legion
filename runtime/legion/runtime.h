@@ -603,8 +603,11 @@ namespace Legion {
       bool defer_deletion(ApEvent precondition);
     public:
       bool can_pack_by_value(void) const;
-      bool pack_instance(Serializer &rez, bool pack_ownership, 
-                         bool allow_by_value = true);
+      // You only need to check the return value if you set pack_ownership=false
+      // as that is when the you need to make sure the instance isn't deleted
+      // remotely, whereas in all other cases it is safe to delete locally
+      bool pack_instance(Serializer &rez, ApEvent ready_event,
+          bool pack_ownership, bool allow_by_value = true); 
       static FutureInstance* unpack_instance(Deserializer &derez);
     public:
       static bool check_meta_visible(Memory memory);
