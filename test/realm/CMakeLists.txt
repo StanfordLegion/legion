@@ -52,6 +52,7 @@ list(APPEND REALM_TESTS
   reservations
   multiaffine
   machine_config
+  rsrv_acquire_poisoned
   )
 
 if(Legion_USE_CUDA)
