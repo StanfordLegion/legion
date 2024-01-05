@@ -8782,7 +8782,7 @@ class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'used_instances', 'virtual_indexes', 'processor', 
                  'priority', 'premappings', 'postmappings', 'tunables', 
-                 'operation_indexes', 'variant', 'replicants', 'shard']
+                 'operation_indexes', 'variant', 'replicants', 'shard', 'original']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -8804,6 +8804,7 @@ class Task(object):
         self.variant = None
         self.replicants = None
         self.shard = None
+        self.original = None
 
     def __str__(self):
         if self.op is None:
@@ -8860,6 +8861,7 @@ class Task(object):
     def set_shard(self, shard, original):
         assert not self.shard
         self.shard = shard
+        self.original = original
         self.op.set_context(original.op.context)
 
     def add_premapping(self, index):
@@ -9181,7 +9183,7 @@ class Task(object):
                         else:
                             assert self.shard is not None # Control replicated task
                             for fid,inst in iteritems(mappings):
-                                self.op.context.used_instances.add((inst,fid))
+                                self.original.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
         # If we get here this is a created privilege flowing back
@@ -9722,7 +9724,7 @@ class Future(object):
                         if self.logical_creator.context.shard is not None:
                             # Control-replicated case
                             offset = self.logical_creator.context.operations.index(self.logical_creator)
-                            for shard in self.logical_creator.context.op.context.replicants.shards.values():
+                            for shard in self.logical_creator.context.original.replicants.shards.values():
                                 shard_op = shard.operations[offset]
                                 if shard_op.points and self.point in shard_op.points:
                                     self.physical_creators.add(shard_op.get_point_task(self.point).op)
@@ -9736,7 +9738,7 @@ class Future(object):
                         if self.logical_creator.context.shard is not None:
                             # Control-replicated case
                             offset = self.logical_creator.context.operations.index(self.logical_creator)
-                            for shard in self.logical_creator.context.op.context.replicants.shards.values():
+                            for shard in self.logical_creator.context.original.replicants.shards.values():
                                 if shard.operations[offset].points:
                                     for point in shard.operations[offset].points.values():
                                         self.physical_creators.add(point.op)
