@@ -554,17 +554,14 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize, 
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
+      virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
       bool is_task_local_instance(PhysicalInstance instance);
       LgEvent escape_task_local_instance(PhysicalInstance instance);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
-      FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
-      void begin_misspeculation(void);
-      void end_misspeculation(FutureInstance *instance,
-                              const void *metadata, size_t metasize);
+      virtual void handle_mispredication(void);
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l) = 0;
@@ -886,9 +883,9 @@ namespace Legion {
       };
       struct PostTaskArgs {
       public:
-        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w, ApEvent e,
+        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w,
             FutureInstance *i, void *m, size_t s, FutureFunctor *f, bool o)
-          : context(ctx), index(x), effects(e), wait_on(w), instance(i), 
+          : context(ctx), index(x), wait_on(w), instance(i), 
             metadata(m), metasize(s), functor(f), own_functor(o) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
@@ -896,7 +893,6 @@ namespace Legion {
       public:
         TaskContext *context;
         size_t index;
-        ApEvent effects;
         RtEvent wait_on;
         FutureInstance *instance;
         void *metadata;
@@ -1631,7 +1627,6 @@ namespace Legion {
                                            bool outermost = true);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                  ApEvent effects,
                                   FutureInstance *instance,
                                   FutureFunctor *callback_functor,
                                   bool own_callback_functor,
@@ -1806,10 +1801,11 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
+      virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
+      virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
@@ -2997,7 +2993,7 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
+      virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
@@ -4100,7 +4096,7 @@ namespace Legion {
                       void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
-      virtual void post_end_task(FutureInstance *instance, ApEvent effects,
+      virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
@@ -4128,7 +4124,6 @@ namespace Legion {
                                                    DynamicCollective dc);
     protected:
       mutable LocalLock                            leaf_lock;
-      std::set<RtEvent>                            execution_events;
       size_t                                       inlined_tasks;
     public:
       virtual TaskPriority get_current_priority(void) const;

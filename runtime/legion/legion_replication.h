@@ -268,6 +268,12 @@ namespace Legion {
      * in advance of actual execution.
      */
     class FutureAllReduceCollective : public AllGatherCollective<false> {
+    protected:
+      struct PendingReduction {
+        FutureInstance *instance;
+        ApEvent precondition;
+        ApUserEvent postcondition;
+      };
     public:
       FutureAllReduceCollective(Operation *op, CollectiveIndexLocation loc, 
           ReplicateContext *ctx, ReductionOpID redop_id,
@@ -281,26 +287,26 @@ namespace Legion {
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
       virtual void elide_collective(void);
     public:
       void set_shadow_instance(FutureInstance *shadow);
       RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);
     protected:
-      ApEvent perform_reductions(const std::map<ShardID,FutureInstance*> &pend);
+      ApEvent perform_reductions(const std::map<ShardID,PendingReduction> &red);
       void create_shadow_instance(void);
-      void finalize(void);
     public:
       Operation *const op;
       const ReductionOp *const redop;
       const ReductionOpID redop_id;
     protected:
-      const ApUserEvent finished;
-      std::map<int,std::map<ShardID,FutureInstance*> > pending_reductions;
+      const ApUserEvent finished; 
+      std::map<int,std::map<ShardID,PendingReduction> > pending_reductions;
       FutureInstance *instance;
       FutureInstance *shadow_instance;
       ApEvent instance_ready;
       ApEvent shadow_ready;
-      int last_stage_sends;
+      std::vector<ApEvent> shadow_reads;
       int current_stage;
       bool pack_shadow;
     };
@@ -324,7 +330,7 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
       virtual void elide_collective(void);
-      virtual RtEvent post_broadcast(void) { return postcondition; }
+      virtual RtEvent post_broadcast(void);
     public:
       RtEvent async_broadcast(FutureInstance *instance, 
           ApEvent precondition = ApEvent::NO_AP_EVENT,
@@ -334,6 +340,8 @@ namespace Legion {
       const ApUserEvent finished;
     protected:
       FutureInstance *instance;
+      ApEvent write_event;
+      mutable std::vector<ApEvent> read_events;
       RtEvent postcondition;
     };
 
@@ -371,7 +379,7 @@ namespace Legion {
     protected:
       FutureInstance *instance;
       mutable ApEvent ready;
-      std::map<ShardID,FutureInstance*> pending_reductions;
+      std::map<ShardID,std::pair<FutureInstance*,ApEvent> > pending_reductions;
     };
 
     /**
@@ -2587,7 +2595,7 @@ namespace Legion {
       virtual void populate_sources(void);
       virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void all_reduce_serdez(void);
-      virtual RtEvent all_reduce_redop(void);
+      virtual ApEvent all_reduce_redop(RtEvent &executed);
     protected:
       BufferExchange *serdez_redop_collective;
       FutureAllReduceCollective *all_reduce_collective;
