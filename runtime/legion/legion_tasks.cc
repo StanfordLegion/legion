@@ -8118,6 +8118,11 @@ namespace Legion {
       check_collective_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         check_collective_regions[idx] = idx;
+      if (runtime->legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(unique_op_id, idx, logical_regions[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8145,6 +8150,11 @@ namespace Legion {
       check_collective_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         check_collective_regions[idx] = idx;
+      if (runtime->legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(unique_op_id, idx, logical_regions[idx]);
+      }
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
