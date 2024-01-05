@@ -304,7 +304,9 @@ namespace Realm {
     Rect<N,T> bounds;
     SparsityMap<N,T> sparsity;
 
+    REALM_CUDA_HD
     IndexSpace(void);  // results in an empty index space
+    REALM_CUDA_HD
     IndexSpace(const Rect<N,T>& _bounds);
     IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
@@ -328,6 +330,7 @@ namespace Realm {
      * Construct a guaranteed-empty index space.
      * \return an empty index space.
      */
+    REALM_CUDA_HD
     static IndexSpace<N,T> make_empty(void);
     ///@}
 
@@ -346,6 +349,7 @@ namespace Realm {
      * (may be imprecise due to lazy loading of sparsity data).
      * \return true if the index space is empty.
      */
+    REALM_CUDA_HD
     bool empty(void) const;
     ///@}
 

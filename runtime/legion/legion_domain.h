@@ -268,6 +268,8 @@ namespace Legion {
     __CUDA_HD__
     Domain(const Domain& other);
     __CUDA_HD__
+    Domain(Domain &&other) noexcept;
+    __CUDA_HD__
     Domain(const DomainPoint &lo, const DomainPoint &hi);
 
     template<int DIM, typename T> __CUDA_HD__
@@ -278,6 +280,8 @@ namespace Legion {
 
     __CUDA_HD__
     Domain& operator=(const Domain& other);
+    __CUDA_HD__
+    Domain& operator=(Domain &&other) noexcept;
     template<int DIM, typename T> __CUDA_HD__
     Domain& operator=(const Rect<DIM,T> &other);
     template<int DIM, typename T> __CUDA_HD__

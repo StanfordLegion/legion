@@ -194,7 +194,7 @@ namespace Legion {
                               IndexSpace left, IndexSpace right,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
-      RtEvent create_pending_partition(TaskContext *ctx,
+      RtEvent create_pending_partition(InnerContext *ctx,
                                        IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
@@ -205,7 +205,7 @@ namespace Legion {
                                        ApEvent partition_ready,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT,
                                        std::set<RtEvent> *applied = NULL);
-      void create_pending_cross_product(TaskContext *ctx,
+      void create_pending_cross_product(InnerContext *ctx,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
@@ -2303,19 +2303,11 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual size_t get_coordinate_size(bool range) const = 0;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-				   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode,
-                                   ApEvent &ready_event) = 0;
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event) = 0;
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                 const std::vector<FieldID> &field_ids,
+                                 const std::vector<size_t> &field_sizes,
+                                 const std::vector<std::string> &field_files,
+                                 const OrderingConstraint &dimension_order) = 0;
     public:
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper) = 0;
@@ -2538,19 +2530,11 @@ namespace Legion {
                                       ApEvent instances_ready);
       virtual size_t get_coordinate_size(bool range) const;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                   const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode, 
-                                   ApEvent &ready_event);
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event);
+                                   const std::vector<std::string> &field_files,
+                                   const OrderingConstraint &dimension_order);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -3411,7 +3395,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceRef create_external_instance(
+      InstanceRef create_external_instance(const std::set<FieldID> &priv_fields,
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
       PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 

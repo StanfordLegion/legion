@@ -57,7 +57,9 @@ namespace Realm {
     int num_threads;
     CoreReservation *core_rsrv;
     OpenMPContextManager ctxmgr;
-#ifndef REALM_OPENMP_SYSTEM_RUNTIME
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+    bool omp_threads_mapped;
+#else
     ThreadPool *pool;
 #endif
   };

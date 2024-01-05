@@ -136,8 +136,6 @@ namespace Legion {
     public:
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
-      void return_resources(ResourceTracker *target, size_t return_index,
-                            std::set<RtEvent> &preconditions);
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
               std::vector<DeletedRegion> &deleted_regions,
@@ -152,6 +150,7 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions) = 0;
       void pack_resources_return(Serializer &rez, size_t return_index);
+      static void pack_empty_resources(Serializer &rez, size_t return_index);
       static RtEvent unpack_resources_return(Deserializer &derez,
                                              ResourceTracker *target);
     protected:
@@ -384,7 +383,7 @@ namespace Legion {
       void complete_point_projection(void);
       bool prepare_steal(void);
     public:
-      void compute_parent_indexes(TaskContext *alt_context = NULL);
+      void compute_parent_indexes(InnerContext *alt_context = NULL);
       void perform_intra_task_alias_analysis(bool is_tracing,
           LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
     public:

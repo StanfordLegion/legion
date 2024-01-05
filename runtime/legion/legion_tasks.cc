@@ -543,36 +543,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    } 
-
-    //--------------------------------------------------------------------------
-    void ResourceTracker::return_resources(ResourceTracker *target, 
-                          size_t return_index, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      if (created_regions.empty() && deleted_regions.empty() && 
-          created_fields.empty() && deleted_fields.empty() &&
-          created_field_spaces.empty() && latent_field_spaces.empty() &&
-          deleted_field_spaces.empty() && created_index_spaces.empty() &&
-          deleted_index_spaces.empty() && created_index_partitions.empty() &&
-          deleted_index_partitions.empty())
-        return;
-      target->receive_resources(return_index, created_regions, deleted_regions,
-          created_fields, deleted_fields, created_field_spaces, 
-          latent_field_spaces, deleted_field_spaces, created_index_spaces,
-          deleted_index_spaces, created_index_partitions, 
-          deleted_index_partitions, preconditions); 
-      created_regions.clear();
-      deleted_regions.clear();
-      created_fields.clear();
-      deleted_fields.clear();
-      created_field_spaces.clear();
-      latent_field_spaces.clear();
-      deleted_field_spaces.clear();
-      created_index_spaces.clear();
-      deleted_index_spaces.clear();
-      created_index_partitions.clear();
-      deleted_index_partitions.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -700,6 +670,26 @@ namespace Legion {
           it->serialize(rez);
         deleted_index_partitions.clear();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ResourceTracker::pack_empty_resources(Serializer &rez,
+                                                          size_t return_index)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(return_index);
+      rez.serialize<size_t>(0); // created regions
+      rez.serialize<size_t>(0); // deleted regions
+      rez.serialize<size_t>(0); // created fields
+      rez.serialize<size_t>(0); // deleted fields
+      rez.serialize<size_t>(0); // created field spaces
+      rez.serialize<size_t>(0); // latent field spaces
+      rez.serialize<size_t>(0); // deleted field spaces
+      rez.serialize<size_t>(0); // created index spaces 
+      rez.serialize<size_t>(0); // deleted index spaces
+      rez.serialize<size_t>(0); // created index partitions
+      rez.serialize<size_t>(0); // deleted index partitions
     }
 
     //--------------------------------------------------------------------------
@@ -2648,11 +2638,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::compute_parent_indexes(TaskContext *alt_context/*= NULL*/)
+    void TaskOp::compute_parent_indexes(InnerContext *alt_context/*= NULL*/)
     //--------------------------------------------------------------------------
     {
       parent_req_indexes.resize(regions.size());
-      TaskContext *use_ctx = (alt_context == NULL) ? parent_ctx : alt_context;
+      InnerContext *use_ctx = (alt_context == NULL) ? parent_ctx : alt_context;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         int parent_index = use_ctx->find_parent_region_req(regions[idx]);
@@ -6590,14 +6580,13 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      if (execution_context->has_created_requirements())
-        execution_context->send_back_created_state(target); 
+      execution_context->send_back_created_state(target); 
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      execution_context->pack_resources_return(rez, context_index);
+      execution_context->pack_return_resources(rez, context_index);
       if (!is_origin_mapped())
         rez.serialize(task_effects_complete);
     }
@@ -7309,8 +7298,7 @@ namespace Legion {
     void PointTask::send_back_created_state(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (execution_context->has_created_requirements())
-        execution_context->send_back_created_state(target);
+      execution_context->send_back_created_state(target);
     } 
 
     //--------------------------------------------------------------------------

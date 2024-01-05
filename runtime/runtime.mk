@@ -365,6 +365,11 @@ ifeq ($(strip $(USE_OPENMP)),1)
   ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
     REALM_CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
   endif
+  USE_OPENMP_SYSTEM_RUNTIME ?= 0
+  ifeq ($(strip $(USE_OPENMP_SYSTEM_RUNTIME)),1)
+    REALM_CC_FLAGS += -DREALM_OPENMP_SYSTEM_RUNTIME
+    LD_FLAGS += -fopenmp
+  endif
 endif
 
 USE_PYTHON ?= 0
@@ -688,6 +693,13 @@ NVCC_FLAGS += -gencode arch=compute_$(lastword $(GPU_ARCH))$(COMMA)code=compute_
 endif
 
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
+
+# cuhook lib
+ifeq ($(shell uname -s),Darwin)
+SLIB_REALM_CUHOOK := librealm_cuhook.dylib
+else
+SLIB_REALM_CUHOOK := librealm_cuhook.so
+endif
 endif
 
 # Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
@@ -963,6 +975,7 @@ GEN_GPU_SRC	?=
 CUDA_SRC	+= $(GEN_GPU_SRC)
 HIP_SRC         += $(GEN_GPU_SRC)
 REALM_SRC	?=
+REALM_CUHOOK_CUDA_SRC	?=
 LEGION_SRC	?=
 REALM_CUDA_DIR  ?=
 REALM_CUDA_SRC  ?=
@@ -1035,9 +1048,11 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/ucx/ucp_module.cc \
 endif
 endif
 ifeq ($(strip $(USE_OPENMP)),1)
-REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
-		   $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
-		   $(LG_RT_DIR)/realm/openmp/openmp_api.cc
+REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc
+ifeq ($(strip $(USE_OPENMP_SYSTEM_RUNTIME)),0)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
+               $(LG_RT_DIR)/realm/openmp/openmp_api.cc
+endif
 endif
 REALM_SRC 	+= $(LG_RT_DIR)/realm/procset/procset_module.cc
 ifeq ($(strip $(USE_PYTHON)),1)
@@ -1055,6 +1070,7 @@ REALM_CUDA_SRC := $(REALM_CUDA_DIR)/cuda_memcpy.cu
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
 endif
+REALM_CUHOOK_SRC += $(LG_RT_DIR)/realm/cuda/cuda_hook.cc
 endif
 ifeq ($(strip $(USE_HIP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/hip/hip_module.cc \
@@ -1279,6 +1295,7 @@ MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
 ifeq ($(strip $(USE_CUDA)),1)
 APP_OBJS	+= $(CUDA_SRC:.cu=.cu.o)
 LEGION_OBJS 	+= $(LEGION_CUDA_SRC:.cu=.cu.o)
+REALM_CUHOOK_OBJS := $(REALM_CUHOOK_SRC:.cc=.cc.o)
 endif
 
 # Only compile the hip objects if we need to 
@@ -1310,7 +1327,7 @@ ifndef NO_BUILD_RULES
 # Provide an all unless the user asks us not to
 ifndef NO_BUILD_ALL
 .PHONY: all
-all: $(OUTFILE)
+all: $(OUTFILE) $(SLIB_REALM_CUHOOK)
 endif
 # Provide support for installing legion with the make build system
 .PHONY: install COPY_FILES_AFTER_BUILD
@@ -1421,6 +1438,17 @@ endif
 $(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 
+ifeq ($(strip $(USE_CUDA)),1)
+$(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	# $(NVCC) --compiler-options '-fPIC' -o $<.d -M -MT $@ $< $(NVCC_FLAGS) $(INC_FLAGS)
+	# $(NVCC) --compiler-options '-fPIC' -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
+	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
+
+$(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
+	rm -f $@
+	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+endif
+
 ifneq ($(USE_PGI),1)
 $(LG_RT_DIR)/legion/region_tree_%.cc.o : $(LG_RT_DIR)/legion/region_tree_tmpl.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) $(patsubst %,-DINST_N2=%,$(word 2,$(subst _, ,$*))) $(LEGION_DEFCHECK)
@@ -1491,7 +1519,7 @@ endif
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)

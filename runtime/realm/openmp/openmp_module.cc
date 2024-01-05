@@ -49,16 +49,16 @@ namespace Realm {
   // class LocalOpenMPProcessor
 
   LocalOpenMPProcessor::LocalOpenMPProcessor(Processor _me, int _numa_node,
-					     int _num_threads,
-					     bool _fake_cpukind,
-					     CoreReservationSet& crs,
-					     size_t _stack_size,
-					     bool _force_kthreads)
-    : LocalTaskProcessor(_me, (_fake_cpukind ? Processor::LOC_PROC :
-			                       Processor::OMP_PROC))
+                                             int _num_threads, bool _fake_cpukind,
+                                             CoreReservationSet &crs, size_t _stack_size,
+                                             bool _force_kthreads)
+    : LocalTaskProcessor(_me, (_fake_cpukind ? Processor::LOC_PROC : Processor::OMP_PROC))
     , numa_node(_numa_node)
     , num_threads(_num_threads)
     , ctxmgr(this)
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+    , omp_threads_mapped(false)
+#endif
   {
     // master runs in a user threads if possible
     {
@@ -135,10 +135,34 @@ namespace Realm {
     // this must be set on the right thread
     omp_set_num_threads(proc->num_threads);
 
+    bool affinity_result = true;
+    if(!proc->omp_threads_mapped) {
+      log_omp.info() << "Trying to bind proc " << proc->me << " onto core resv:["
+                     << (*proc->core_rsrv) << "]";
+    }
+
     // make sure all of our workers know who we are
     #pragma omp parallel
     {
       ThreadLocal::current_processor = proc->me;
+
+      if(!proc->omp_threads_mapped) {
+        int omp_tid = omp_get_thread_num();
+        bool local_affinity_result = proc->core_rsrv->set_affinity(omp_tid, omp_tid);
+        // Let's gather the result of setaffinity of each omp thread
+        int num_threads = omp_get_num_threads();
+#pragma omp for reduction(&& : affinity_result) schedule(static, 1)
+        for(int i = 0; i < num_threads; i++)
+          affinity_result = local_affinity_result && affinity_result;
+      }
+    }
+    if(!proc->omp_threads_mapped) {
+      if(!affinity_result) {
+        log_omp.warning(
+            "OMP Proc %llx failed setaffinity, which will lead to low performance.",
+            proc->me.id);
+      }
+      proc->omp_threads_mapped = true;
     }
 #else
     proc->pool->associate_as_master();
@@ -220,7 +244,8 @@ namespace Realm {
       openmp_api_force_linkage();
 #endif
 
-      OpenMPModuleConfig *config = dynamic_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
+      OpenMPModuleConfig *config =
+          checked_cast<OpenMPModuleConfig *>(runtime->get_module_config("openmp"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
@@ -233,13 +258,6 @@ namespace Realm {
 	delete m;
 	return 0;
       }
-
-#ifdef REALM_OPENMP_SYSTEM_RUNTIME
-      if(m->cfg_num_openmp_cpus > 1) {
-	log_omp.fatal() << "system omp runtime limited to 1 proc - " << m->cfg_num_openmp_cpus << " requested";
-        abort();
-      }
-#endif
 
       // get number/sizes of NUMA nodes -
       //   disable (with a warning) numa binding if support not found

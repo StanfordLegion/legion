@@ -35,7 +35,6 @@ namespace Realm {
 
     protected:
       int cfg_num_python_cpus = 0;
-      bool cfg_use_numa = false;
       size_t cfg_stack_size = 2 << 20;
 #ifdef REALM_USE_OPENMP
       int cfg_pyomp_threads = 0;
@@ -86,8 +85,6 @@ namespace Realm {
       static std::vector<std::string> extra_import_modules;
 
       PythonModuleConfig *config;
-
-      std::set<int> active_numa_domains;
     };
 
   }; // namespace Python

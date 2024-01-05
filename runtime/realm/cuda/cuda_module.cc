@@ -14,8 +14,8 @@
  */
 
 #include "realm/cuda/cuda_module.h"
-#include "realm/cuda/cuda_internal.h"
 #include "realm/cuda/cuda_access.h"
+#include "realm/cuda/cuda_internal.h"
 #include "realm/cuda/cuda_memcpy.h"
 
 #include "realm/tasks.h"
@@ -54,6 +54,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -121,6 +122,23 @@ namespace Realm {
 
     NVML_APIS(DEFINE_FNPTR);
 #undef DEFINE_FNPTR
+
+    // function pointers for cuda hook
+    typedef void (*PFN_cuhook_register_callback)(void);
+    typedef void (*PFN_cuhook_start_task)(GPUProcessor *gpu_proc);
+    typedef void (*PFN_cuhook_end_task)(CUstream current_task_stream);
+
+    static PFN_cuhook_register_callback cuhook_register_callback_fnptr = nullptr;
+    static PFN_cuhook_start_task cuhook_start_task_fnptr = nullptr;
+    static PFN_cuhook_end_task cuhook_end_task_fnptr = nullptr;
+    static bool cuhook_enabled = false;
+
+    namespace ThreadLocal {
+      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
+      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
+      static REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams = 0;
+      static REALM_THREAD_LOCAL int context_sync_required = 0;
+    }; // namespace ThreadLocal
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1503,13 +1521,6 @@ namespace Realm {
     {
     }
 
-    namespace ThreadLocal {
-      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
-      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
-      static REALM_THREAD_LOCAL int context_sync_required = 0;
-    };
-
 #ifdef REALM_USE_CUDART_HIJACK
     // this flag will be set on the first call into any of the hijack code in
     //  cudart_hijack.cc
@@ -1532,6 +1543,11 @@ namespace Realm {
       // TODO: either eliminate these asserts or do TLS swapping when using user threads
       assert(ThreadLocal::current_gpu_proc == 0);
       ThreadLocal::current_gpu_proc = gpu_proc;
+
+      // start record cuda calls if cuda book is enabled
+      if(cuhook_enabled) {
+        cuhook_start_task_fnptr(ThreadLocal::current_gpu_proc);
+      }
 
       // push the CUDA context for this GPU onto this thread
       gpu_proc->gpu->push_context();
@@ -1621,6 +1637,13 @@ namespace Realm {
 
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
+
+      // cuda stream sanity check and clear cuda hook calls
+      // we only check against the current_gpu_stream because it is impossible to launch
+      // tasks onto other realm gpu streams
+      if(cuhook_enabled) {
+        cuhook_end_task_fnptr(ThreadLocal::current_gpu_stream->get_stream());
+      }
 
       assert(ThreadLocal::current_gpu_proc == gpu_proc);
       ThreadLocal::current_gpu_proc = 0;
@@ -2093,6 +2116,35 @@ namespace Realm {
 
       CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
                                                  num_threads, 1, 1, 0,
+                                                 stream->get_stream(), args, NULL));
+    }
+    void GPU::launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                      size_t elem_size, GPUStream *stream)
+    {
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+      size_t num_elems = copy_info.extents[1] * copy_info.extents[2];
+      assert((1ULL << log_elem_size) <= elem_size);
+
+      GPUFuncInfo &func_info = transpose_kernels[log_elem_size];
+
+      unsigned int num_blocks = 0, num_threads = 0;
+      assert(copy_info.extents[0] <= CUDA_MAX_FIELD_BYTES);
+
+      size_t chunks = copy_info.extents[0] / elem_size;
+      copy_info.tile_size = static_cast<size_t>(
+          static_cast<size_t>(std::sqrt(func_info.occ_num_threads) / chunks) * chunks);
+      size_t shared_mem_bytes =
+          (copy_info.tile_size * (copy_info.tile_size + 1)) * copy_info.extents[0];
+
+      num_threads = copy_info.tile_size * copy_info.tile_size;
+      num_blocks =
+          std::min(static_cast<unsigned int>((num_elems + num_threads - 1) / num_threads),
+                   static_cast<unsigned int>(func_info.occ_num_blocks));
+
+      void *args[] = {&copy_info};
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(func_info.func, num_blocks, 1, 1,
+                                                 num_threads, 1, 1, shared_mem_bytes,
                                                  stream->get_stream(), args, NULL));
     }
 
@@ -3378,59 +3430,58 @@ namespace Realm {
         CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
                                                         device_module, name));
 
-        // We use MaxActiveBlocksPerMultiprocessor here since we have a static
-        // tile size here based on the size of the static shared memory
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+        auto blocksize_to_sharedmem = [](int block_size) -> size_t {
+          int tile_size = sqrt(block_size);
+          return static_cast<size_t>(tile_size * (tile_size + 1) * CUDA_MAX_FIELD_BYTES);
+        };
 
-        func_info.occ_num_blocks *=
-            numSMs; // Fill up the GPU with the number of blocks if possible
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
+            &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func,
+            blocksize_to_sharedmem, 0, 0));
+
+        // func_info.occ_num_blocks *=
+        //  numSMs; // Fill up the GPU with the number of blocks if possible
         transpose_kernels[log_bit_sz] = func_info;
 
         for(unsigned int d = 1; d <= CUDA_MAX_DIM; d++) {
-          std::snprintf(name, sizeof(name), "memcpy_affine_batch%uD_%u", d,
-                        bit_sz);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          std::snprintf(name, sizeof(name), "memcpy_affine_batch%uD_%u", d, bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
           // Here, we don't have a constraint on the block size, so allow
           // the driver to decide the best combination we can launch
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
           batch_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "fill_affine_large%uD_%u", d,
-                        bit_sz);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          std::snprintf(name, sizeof(name), "fill_affine_large%uD_%u", d, bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
           // Here, we don't have a constraint on the block size, so allow
           // the driver to decide the best combination we can launch
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
           fill_affine_large_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "fill_affine_batch%uD_%u", d,
-                        bit_sz);
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          std::snprintf(name, sizeof(name), "fill_affine_batch%uD_%u", d, bit_sz);
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
           // Here, we don't have a constraint on the block size, so allow
           // the driver to decide the best combination we can launch
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
           batch_fill_affine_kernels[d - 1][log_bit_sz] = func_info;
 
-          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d,
-                        bit_sz);
+          std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u", d, bit_sz);
 
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func,
-                                                          device_module, name));
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&func_info.func, device_module,
+                                                          name));
 
           CHECK_CU(CUDA_DRIVER_FNPTR(cuOccupancyMaxPotentialBlockSize)(
-              &func_info.occ_num_blocks, &func_info.occ_num_threads,
-              func_info.func, 0, 0, 0));
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0, 0,
+              0));
 
           indirect_copy_kernels[d - 1][log_bit_sz] = func_info;
         }
@@ -4016,7 +4067,9 @@ namespace Realm {
       config_map.insert({"dynfb_max_size", &cfg_dynfb_max_size});
       config_map.insert({"task_streams", &cfg_task_streams});
       config_map.insert({"d2d_streams", &cfg_d2d_streams});
-      res_fbmem_sizes.push_back(0);
+
+      resource_map.insert({"gpu", &res_num_gpus});
+      resource_map.insert({"fbmem", &res_min_fbmem_size});
     }
 
     bool CudaModuleConfig::discover_resource(void)
@@ -4039,44 +4092,11 @@ namespace Realm {
           CHECK_CU(
               CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&res_fbmem_sizes[i], device));
         }
-        resource_discovered = true;
-      }
-      return resource_discovered;
-    }
-
-    bool CudaModuleConfig::get_resource(const std::string name,
-                                        int &value) const {
-      if (!resource_discovered) {
-        log_gpu.error("Module %s can not detect the int resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
-      }
-      if (name == "gpu") {
-        value = res_num_gpus;
-        return true;
-      } else {
-        log_gpu.error("Module %s does not have the int resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
-      }
-    }
-
-    bool CudaModuleConfig::get_resource(const std::string name,
-                                        size_t &value) const {
-      if (!resource_discovered) {
-        log_gpu.error("Module %s can not detect the size_t resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
-      }
-      if (name == "fbmem") {
-        value =
+        res_min_fbmem_size =
             *std::min_element(res_fbmem_sizes.begin(), res_fbmem_sizes.end());
-        return true;
-      } else {
-        log_gpu.error("Module %s does not have the size_t resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
+        resource_discover_finished = true;
       }
+      return resource_discover_finished;
     }
 
     void CudaModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
@@ -4156,6 +4176,10 @@ namespace Realm {
       delete_container_contents(gpu_info);
       assert(cuda_module_singleton == this);
       cuda_module_singleton = 0;
+      cuhook_register_callback_fnptr = nullptr;
+      cuhook_start_task_fnptr = nullptr;
+      cuhook_end_task_fnptr = nullptr;
+      cuhook_enabled = false;
       delete rh_listener;
     }
 
@@ -4293,7 +4317,8 @@ namespace Realm {
     {
       CudaModule *m = new CudaModule(runtime);
 
-      CudaModuleConfig *config = dynamic_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
+      CudaModuleConfig *config =
+          checked_cast<CudaModuleConfig *>(runtime->get_module_config("cuda"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
@@ -4341,9 +4366,11 @@ namespace Realm {
                 CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&info->totalGlobalMem, info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetUuid)(&info->uuid, info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device));
+                &info->major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+                info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
-                &info->minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device));
+                &info->minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
+                info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
                 &info->pci_busid, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
@@ -4713,6 +4740,16 @@ namespace Realm {
       // make sure we hear about any changes to the size of the replicated
       //  heap
       runtime->repl_heap.add_listener(rh_listener);
+
+      cuhook_register_callback_fnptr =
+          (PFN_cuhook_register_callback)dlsym(NULL, "cuhook_register_callback");
+      cuhook_start_task_fnptr = (PFN_cuhook_start_task)dlsym(NULL, "cuhook_start_task");
+      cuhook_end_task_fnptr = (PFN_cuhook_end_task)dlsym(NULL, "cuhook_end_task");
+      if(cuhook_register_callback_fnptr && cuhook_start_task_fnptr &&
+         cuhook_end_task_fnptr) {
+        cuhook_register_callback_fnptr();
+        cuhook_enabled = true;
+      }
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -5138,6 +5175,59 @@ namespace Realm {
       ThreadLocal::context_sync_required = (is_required ? 1 : 0);
     }
 
+    static void CUDA_CB event_trigger_callback(void *userData) {
+      UserEvent realm_event;
+      realm_event.id = reinterpret_cast<Realm::Event::id_t>(userData);
+      realm_event.trigger();
+    }
+
+    Event CudaModule::make_realm_event(CUevent_st *cuda_event)
+    {
+      CUresult res = CUDA_DRIVER_FNPTR(cuEventQuery)(cuda_event);
+      if(res == CUDA_SUCCESS) {
+        // This CUDA event is already completed, no need to create a new event.
+        return Event::NO_EVENT;
+      } else if(res != CUDA_ERROR_NOT_READY) {
+        CHECK_CU(res);
+      }
+      UserEvent realm_event = UserEvent::create_user_event();
+      bool free_stream = false;
+      CUstream cuda_stream = 0;
+      if(ThreadLocal::current_gpu_stream != nullptr) {
+        cuda_stream = ThreadLocal::current_gpu_stream->get_stream();
+      } else {
+        // Create a temporary stream to push the signaling onto.  This will ensure there's
+        // no direct dependency on the signaling other than the event
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamCreate)(&cuda_stream, CU_STREAM_NON_BLOCKING));
+        free_stream = true;
+      }
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(cuda_stream, cuda_event,
+                                                    CU_EVENT_WAIT_DEFAULT));
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchHostFunc)(
+          cuda_stream, event_trigger_callback, reinterpret_cast<void *>(realm_event.id)));
+      if(free_stream) {
+        CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamDestroy)(cuda_stream));
+      }
+      
+      return realm_event;
+    }
+
+    Event CudaModule::make_realm_event(CUstream_st *cuda_stream)
+    {
+      CUresult res = CUDA_DRIVER_FNPTR(cuStreamQuery)(cuda_stream);
+      if (res == CUDA_SUCCESS) {
+        // This CUDA stream is already completed, no need to create a new event.
+        return Event::NO_EVENT;
+      }
+      else if (res != CUDA_ERROR_NOT_READY) {
+        CHECK_CU(res);
+      }
+      UserEvent realm_event = UserEvent::create_user_event();
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchHostFunc)(
+          cuda_stream, event_trigger_callback,
+          reinterpret_cast<void *>(realm_event.id)));
+      return realm_event;
+    }
 
 #ifdef REALM_USE_CUDART_HIJACK
     ////////////////////////////////////////////////////////////////////////

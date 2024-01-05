@@ -605,8 +605,6 @@ namespace Realm {
     Network::max_node_id = gasnet_nodes() - 1;
     Network::all_peers.add_range(0, gasnet_nodes() - 1);
     Network::all_peers.remove(gasnet_mynode());
-    // TODO: do an all gather on the hostname to discover the shared peers.
-    Network::shared_peers = Network::all_peers;
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];
@@ -620,6 +618,24 @@ namespace Realm {
     return new GASNet1Module;
   }
 
+  void GASNet1Module::get_shared_peers(NodeSet &shared_peers)
+  {
+    std::vector<gasnet_nodeinfo_t> node_info_table(gasnet_nodes());
+    gasnet_getNodeInfo(node_info_table.data(), node_info_table.size());
+    gex_Rank_t my_host = node_info_table[Network::my_node_id].host;
+    int rank_id = 0;
+    for(gasnet_nodeinfo_t &node_info : node_info_table) {
+      if((rank_id != Network::my_node_id) && (node_info.host == my_host)) {
+        shared_peers.add(rank_id);
+      }
+      rank_id++;
+    }
+    if(shared_peers.empty()) {
+      // if gasnet can't return any shared peers (like if the PSHM feature is disabled),
+      // then just assume all_peers are shareable
+      shared_peers = Network::all_peers;
+    }
+  }
   // actual parsing of the command line should wait until here if at all
   //  possible
   void GASNet1Module::parse_command_line(RuntimeImpl *runtime,
@@ -746,6 +762,35 @@ namespace Realm {
     gasnet_coll_gather(GASNET_TEAM_ALL, root,
 		       vals_out, const_cast<void *>(val_in), bytes,
 		       GASNET_COLL_FLAGS);
+  }
+
+  void GASNet1Module::allgatherv(const char *val_in, size_t bytes,
+                                 std::vector<char> &vals_out,
+                                 std::vector<size_t> &lengths)
+  {
+    lengths.resize(Network::max_node_id + 1);
+
+    // Collect all the sizes of the buffers
+    gasnet_coll_gather_all(GASNET_TEAM_ALL, lengths.data(), &bytes, sizeof(bytes),
+                           GASNET_COLL_FLAGS);
+
+    // Set up the receive buffer and describe the final buffer layout
+    size_t total = 0;
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    for(size_t idx = 0; idx < sizes.size(); idx++) {
+      sizes[idx] = static_cast<int>(lengths[idx]);
+      total += lengths[idx];
+    }
+    vals_out.resize(total);
+
+    // Now perform the emulated all_gatherv by having each rank in turn broadcast their
+    // data, each of which gets placed in a specific offset within the buffer
+    char *buffer = vals_out.data();
+    for(int rank = 0; rank < (Network::max_node_id + 1); rank++) {
+      broadcast(rank, val_in, buffer, sizes[rank]);
+      buffer += sizes[rank];
+    }
   }
 
   size_t GASNet1Module::sample_messages_received_count(void)

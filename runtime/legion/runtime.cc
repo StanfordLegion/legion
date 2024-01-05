@@ -80,14 +80,14 @@ namespace Legion {
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
     thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 
-    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
-    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
-    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
-    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
-    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
-    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
-    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
-    const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
+    const LgEvent LgEvent::NO_LG_EVENT = {};
+    const ApEvent ApEvent::NO_AP_EVENT = {};
+    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = {};
+    const ApBarrier ApBarrier::NO_AP_BARRIER = {};
+    const RtEvent RtEvent::NO_RT_EVENT = {};
+    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = {};
+    const RtBarrier RtBarrier::NO_RT_BARRIER = {};
+    const PredEvent PredEvent::NO_PRED_EVENT = {};
 
     //--------------------------------------------------------------------------
     void LgEvent::begin_context_wait(Context ctx) const
@@ -962,12 +962,8 @@ namespace Legion {
         // We know futures can never flow up the task tree so the
         // only way they have the same depth is if they are from 
         // the same parent context
-        TaskContext *context = consumer_op->get_context();
-        const int consumer_depth = context->get_depth();
-#ifdef DEBUG_LEGION
-        assert(consumer_depth >= producer_depth);
-#endif
-        if (consumer_depth == producer_depth)
+        TaskContext *consumer_context = consumer_op->get_context();
+        if (consumer_context == context)
         {
           consumer_op->register_dependence(producer_op, op_gen);
 #ifdef LEGION_SPY
@@ -975,6 +971,39 @@ namespace Legion {
               context->get_unique_id(), producer_uid, 0,
               consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
 #endif
+        }
+        else
+        {
+          // Check that the consumer is contained within the task
+          // sub-tree of the producer task
+          std::vector<std::pair<size_t,DomainPoint> > prod_coords, con_coords;
+          context->compute_task_tree_coordinates(prod_coords);
+          consumer_context->compute_task_tree_coordinates(con_coords);
+          bool contained = (prod_coords.size() <= con_coords.size());
+          if (contained)
+          {
+            for (unsigned idx = 0; idx < prod_coords.size(); idx++)
+            {
+              if (prod_coords[idx] == con_coords[idx])
+                continue;
+              contained = false;
+              break;
+            }
+          }
+          if (!contained)
+          {
+            Provenance *provenance = consumer_op->get_provenance();
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_FUTURE_USE,
+                "Illegal use of future produced in context %s (UID %lld) "
+                "but consumed in context %s (UID %lld) by operation %s "
+                "(UID %lld) launched from %s. Futures are only permitted "
+                "to be used in the task sub-tree rooted by the context "
+                "that produced the future.", context->get_task_name(),
+                context->get_unique_id(), consumer_context->get_task_name(), 
+                consumer_context->get_unique_id(),
+                consumer_op->get_logging_name(),
+                consumer_op->get_unique_op_id(), provenance->human.c_str())
+          }
         }
       }
 #ifdef DEBUG_LEGION
@@ -2241,7 +2270,7 @@ namespace Legion {
         case LEGION_WRITE_ONLY:
         case LEGION_WRITE_DISCARD:
           {
-            if (!(LEGION_WRITE_DISCARD & req.privilege))
+            if (!(LEGION_WRITE_ONLY & req.privilege))
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating write-discard field accessor "
                             "without write privileges on field %d in task %s",
@@ -11158,6 +11187,7 @@ namespace Legion {
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
+        no_transitive_reduction(config.no_transitive_reduction),
         replay_on_cpus(config.replay_on_cpus),
         verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
@@ -11208,7 +11238,11 @@ namespace Legion {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_constraint_id((unique == 0) ? runtime_stride : unique),
+        unique_constraint_id(LEGION_MAX_APPLICATION_LAYOUT_ID + 
+            (((LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride) <= unique) ?
+             (runtime_stride - 
+              ((LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride) - unique)) :
+             (unique - (LEGION_MAX_APPLICATION_LAYOUT_ID % runtime_stride)))),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
@@ -11228,6 +11262,9 @@ namespace Legion {
         unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((unique_constraint_id % runtime_stride) == unique);
+#endif
       if (LEGION_MAX_NUM_NODES <= address_space)
         REPORT_LEGION_ERROR(ERROR_MAXIMUM_NODES_EXCEEDED,
             "Maximum number of nodes exceeded. Detected node %d but "
@@ -11369,6 +11406,7 @@ namespace Legion {
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
+        no_transitive_reduction(rhs.no_transitive_reduction),
         replay_on_cpus(rhs.replay_on_cpus),
         verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
@@ -11754,7 +11792,12 @@ namespace Legion {
         while (!redop_table.empty())
         {
           ReductionOpTable::iterator it = redop_table.begin();
-          delete it->second;
+          // Free ReductionOp *'s with free, not delete!
+          static_assert(
+            std::is_trivially_destructible<typename std::decay<decltype(*(it->second))>::type>::value,
+            "ReducionOp must be trivially destructible"
+          );
+          free(it->second);
           redop_table.erase(it);
         }
       }
@@ -11817,14 +11860,15 @@ namespace Legion {
       if (!pending_constraints.empty())
       {
         // Update the next available constraint
-        LayoutConstraintID largest = 0;
+        unsigned already_used = 0;
         // Now do the registrations
         std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
-          largest = it->first;
+          if (LEGION_MAX_APPLICATION_LAYOUT_ID < it->first)
+            already_used++;
           // Figure out the distributed ID that we expect and then
           // check against what we expect on the owner node. This
           // is slightly brittle, but we'll always catch it when
@@ -11862,13 +11906,17 @@ namespace Legion {
           }
           register_layout(it->second, it->first, expected_did);
         }
-        // Round largest up to the next biggest multiple of the total spaces
-        // so that the new unique constraint id still maps to this node
-        size_t remainder = largest % total_address_spaces;
-        if (remainder != 0)
-          largest += (total_address_spaces - remainder);
         // Update all the next unique constraint IDs
-        unique_constraint_id += largest;
+        if (already_used > 0)
+        {
+          // Round this up to the nearest number of nodes
+          unsigned remainder = already_used % total_address_spaces;
+          if (remainder == 0)
+            unique_constraint_id += already_used;
+          else
+            unique_constraint_id += 
+              (already_used + total_address_spaces - remainder);
+        }
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
@@ -22024,25 +22072,30 @@ namespace Legion {
       if (layout_id == LEGION_AUTO_GENERATE_ID)
       {
         // Find the first available layout ID
-        layout_id = 1;
-        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
-              const_iterator it = pending_constraints.begin(); 
-              it != pending_constraints.end(); it++)
+        if (!pending_constraints.empty())
         {
-          if (layout_id != it->first)
-          {
-            // We've found a free one, so we can use it
-            break;
-          }
+          std::map<LayoutConstraintID,
+            LayoutConstraintRegistrar>::const_reverse_iterator finder = 
+              pending_constraints.crbegin();
+          if (finder->first <= LEGION_MAX_APPLICATION_LAYOUT_ID)
+            layout_id = LEGION_MAX_APPLICATION_LAYOUT_ID + 1;
           else
-            layout_id++;
+            layout_id = finder->first + 1;
         }
+        else
+          layout_id = LEGION_MAX_APPLICATION_LAYOUT_ID + 1;
       }
       else
       {
         if (layout_id == 0)
           REPORT_LEGION_ERROR(ERROR_RESERVED_CONSTRAINT_ID, 
-                        "Illegal use of reserved constraint ID 0");
+                        "Illegal use of reserved constraint ID 0")
+        else if (LEGION_MAX_APPLICATION_LAYOUT_ID < layout_id)
+          REPORT_LEGION_ERROR(ERROR_RESERVED_CONSTRAINT_ID,
+              "Illegal application-provided layout constraint ID %ld "
+              "which exceeds the LEGION_MAX_APPLICATION_LAYOUT_ID of %d "
+              "configured in legion_config.h.", layout_id,
+              LEGION_MAX_APPLICATION_LAYOUT_ID)
         // Check to make sure it is not already used
         std::map<LayoutConstraintID,LayoutConstraintRegistrar>::const_iterator
           finder = pending_constraints.find(layout_id);
@@ -22433,6 +22486,8 @@ namespace Legion {
                          config.no_trace_optimization, !filter)
         .add_option_bool("-lg:no_fence_elision",
                          config.no_fence_elision, !filter)
+        .add_option_bool("-lg:no_transitive_reduction",
+                         config.no_transitive_reduction, !filter)
         .add_option_bool("-lg:replay_on_cpus",
                          config.replay_on_cpus, !filter)
         .add_option_bool("-lg:disjointness",
