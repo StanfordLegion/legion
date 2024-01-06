@@ -379,7 +379,8 @@ namespace Legion {
       bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source, 
-                       bool can_fail = false);
+                       bool can_fail = false, 
+                       size_t known_upper_bound_size = SIZE_MAX);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       RtEvent request_runtime_instance(Operation *op, bool eager);
       const void *find_runtime_buffer(TaskContext *ctx, size_t &expected_size);
