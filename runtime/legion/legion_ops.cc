@@ -2189,6 +2189,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      if (effects.empty())
+        return;
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(!completed);
+#endif
+      for (std::vector<ApEvent>::const_iterator it =
+            effects.begin(); it != effects.end(); it++)
+        if (it->exists())
+          completion_effects.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::find_completion_effects(std::set<ApEvent> &effects, 
                                             bool tracing)
     //--------------------------------------------------------------------------
@@ -9534,6 +9551,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointCopyOp::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
     const DomainPoint& PointCopyOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
@@ -10159,7 +10184,7 @@ namespace Legion {
               // in case we have to make an instance as part of it
               FutureImpl *impl = futures[0].impl;
               const RtEvent mapped = 
-                impl->request_internal_buffer(this, false/*eager*/);
+                impl->request_runtime_instance(this, false/*eager*/);
               if (mapped.exists())
                 complete_mapping(mapped);
               else
@@ -10185,7 +10210,7 @@ namespace Legion {
               {
                 FutureImpl *impl = futures[idx].impl;
                 const RtEvent mapped =
-                  impl->request_internal_buffer(this,false/*eager*/);
+                  impl->request_runtime_instance(this,false/*eager*/);
                 if (mapped.exists())
                   mapped_events.push_back(mapped);
                 const RtEvent subscribed = impl->subscribe();
@@ -10234,7 +10259,7 @@ namespace Legion {
             FutureImpl *impl = futures[0].impl;
             size_t future_size = 0;
             const Domain *domain = static_cast<const Domain*>(
-                impl->find_internal_buffer(parent_ctx, future_size));
+                impl->find_runtime_buffer(parent_ctx, future_size));
             if (future_size != sizeof(Domain))
               REPORT_LEGION_ERROR(ERROR_CREATION_FUTURE_TYPE_MISMATCH,
                   "Future for index space creation in task %s (UID %lld) does "
@@ -10253,7 +10278,7 @@ namespace Legion {
               FutureImpl *impl = futures[idx].impl;
               size_t future_size = 0;
               const size_t *field_size = static_cast<const size_t*>(
-                      impl->find_internal_buffer(parent_ctx, future_size));
+                      impl->find_runtime_buffer(parent_ctx, future_size));
               if (future_size != sizeof(size_t))
                 REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
                     "Size of future passed into dynamic field allocation for "
@@ -14572,7 +14597,7 @@ namespace Legion {
       if (to_predicate)
       {
         complete_mapping(
-            future.impl->request_internal_buffer(this, false/*eager*/));
+            future.impl->request_runtime_instance(this, false/*eager*/));
         const RtEvent ready = future.impl->subscribe();
         if (ready.exists() && !ready.has_triggered())
           parent_ctx->add_to_trigger_execution_queue(this, ready);
@@ -14602,8 +14627,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!ready.exists());
 #endif
-        FutureInstance *result = FutureInstance::create_local(&value,
-                                  sizeof(value), false/*own*/, runtime);
+        FutureInstance *result = 
+          FutureInstance::create_local(&value, sizeof(value), false/*own*/);
         future.impl->set_result(ApEvent::NO_AP_EVENT, result);
       }
       else
@@ -16669,7 +16694,7 @@ namespace Legion {
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent mapped =
-          it->second->request_internal_buffer(this, false/*eager*/);
+          it->second->request_runtime_instance(this, false/*eager*/);
         if (mapped.exists())
           mapped_events.insert(mapped);
         const RtEvent ready = it->second->subscribe();
@@ -18703,6 +18728,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointDepPartOp::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
     size_t PointDepPartOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
@@ -19191,7 +19224,7 @@ namespace Legion {
 #endif
         // This will make sure we have a mapping locally
         const RtEvent buffer_ready = 
-          future.impl->request_internal_buffer(this, false/*eager*/);
+          future.impl->request_runtime_instance(this, false/*eager*/);
         if (buffer_ready.exists())
           map_applied_conditions.insert(buffer_ready);
       }
@@ -19238,7 +19271,7 @@ namespace Legion {
 #endif
         size_t value_size = 0;
         const void *value = 
-          future.impl->find_internal_buffer(parent_ctx, value_size);
+          future.impl->find_runtime_buffer(parent_ctx, value_size);
         if (fill_view->set_value(value, value_size))
           delete fill_view;
       }
@@ -19715,7 +19748,7 @@ namespace Legion {
 #endif
         // This will make sure we have a mapping locally
         const RtEvent buffer_ready = 
-          future.impl->request_internal_buffer(this, false/*eager*/);
+          future.impl->request_runtime_instance(this, false/*eager*/);
         if (buffer_ready.exists())
           mapped_preconditions.push_back(buffer_ready);
       }
@@ -20190,6 +20223,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PointFillOp::record_completion_effects(
                                                const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
       owner->record_completion_effects(effects);
@@ -21990,6 +22031,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointAttachOp::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
     size_t PointAttachOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
@@ -22816,6 +22865,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointDetachOp::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
     size_t PointDetachOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
@@ -23123,6 +23180,8 @@ namespace Legion {
         free(arg);
       result = Future();
       futures.clear();
+      if (instance != NULL)
+        delete instance;
       if (freeop)
         runtime->free_tunable_op(this);
     }
@@ -23161,7 +23220,7 @@ namespace Legion {
         MemoryManager *manager = 
           runtime->find_memory_manager(runtime->runtime_system_memory);
         instance = manager->create_future_instance(this, unique_op_id,
-            get_completion_event(), return_type_size, false/*eager*/);
+                                      return_type_size, false/*eager*/);
         complete_mapping();
       }
       std::set<ApEvent> pre_events;
@@ -23218,11 +23277,17 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
               return_type_size)
         // Copy the result into the instance
-        FutureInstance local(output.value, output.size, ApEvent::NO_AP_EVENT,
-            runtime, false/*eager*/, true/*external*/, output.take_ownership);
-        const ApEvent done = instance->copy_from(&local, this);
+        FutureInstance *local = 
+            new FutureInstance(output.value, output.size, false/*eager*/,
+                true/*external*/, output.take_ownership);
+        const ApEvent done = 
+          instance->copy_from(local, this, ApEvent::NO_AP_EVENT);
         if (done.exists())
           record_completion_effect(done);
+        result.impl->set_result(done, instance);
+        // Future takes ownership of instance, so save local to instance
+        // so we can reclaim it when it is safe to do so
+        instance = local;
       }
       else
       {
@@ -23311,6 +23376,7 @@ namespace Legion {
       future_result_size = 0;
       serdez_redop_buffer = NULL;
       serdez_upper_bound = SIZE_MAX;
+      serdez_redop_instance = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -23325,6 +23391,8 @@ namespace Legion {
       targets.clear();
       if (serdez_redop_buffer != NULL)
         free(serdez_redop_buffer);
+      if (serdez_redop_instance != NULL)
+        delete serdez_redop_instance;
       if (freeop)
         runtime->free_all_reduce_op(this);
     }
@@ -23357,8 +23425,8 @@ namespace Legion {
                                      FutureImpl *future)
     //--------------------------------------------------------------------------
     {
-      const RtEvent ready = future->request_internal_buffer(this,
-                                                            false/*eager*/);
+      const RtEvent ready =
+        future->request_runtime_instance(this, false/*eager*/);
       if (ready.exists() && !ready.has_triggered())
         preconditions.push_back(ready);
     }
@@ -23400,7 +23468,7 @@ namespace Legion {
       if (impl == NULL)
         return;
       size_t src_size = 0;
-      const void *source = impl->find_internal_buffer(parent_ctx, src_size);
+      const void *source = impl->find_runtime_buffer(parent_ctx, src_size);
       (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer,
                                      future_result_size, source);
       if (runtime->legion_spy_enabled)
@@ -23426,29 +23494,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent AllReduceOp::finalize_serdez_targets(RtEvent &protect)
+    ApEvent AllReduceOp::finalize_serdez_targets(void)
     //--------------------------------------------------------------------------
     {
       // Now that we've got the output instances we copy the result to
       // each of the targets, we're done when the copies are done
       // create an external instance for the current allocation
-      FutureInstance source(serdez_redop_buffer, future_result_size,
-          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/,
-          false/*own allocation*/);
+      FutureInstance *serdez_redop_instance = 
+        new FutureInstance(serdez_redop_buffer, future_result_size,
+          false/*eager*/, true/*external*/, false/*own allocation*/);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
       {
-        ApEvent done = (*it)->copy_from(&source, this);
+        ApEvent done = 
+          (*it)->copy_from(serdez_redop_instance, this, ApEvent::NO_AP_EVENT);
         if (done.exists())
           done_events.push_back(done);
       }
       if (!done_events.empty())
-      {
-        const ApEvent done = Runtime::merge_events(NULL, done_events);
-        protect = Runtime::protect_event(done);
-        return done;
-      }
+        return Runtime::merge_events(NULL, done_events);
       else
         return ApEvent::NO_AP_EVENT;
     }
@@ -23525,10 +23590,10 @@ namespace Legion {
     void AllReduceOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      RtEvent executed;
       ApEvent done;
+      RtEvent executed;
       if (serdez_redop_fns == NULL)
-        executed = all_reduce_redop();
+        done = all_reduce_redop(executed);
       else if (serdez_upper_bound < SIZE_MAX)
       {
         all_reduce_serdez();
@@ -23546,16 +23611,12 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
               redop_id, future_result_size)
         }
-        done = finalize_serdez_targets(executed);
-        if (done.exists())
-          record_completion_effect(done);
+        done = finalize_serdez_targets();
       }
       else
-      {
-        done = finalize_serdez_targets(executed);
-        if (done.exists())
-          record_completion_effect(done);
-      }
+        done = finalize_serdez_targets();
+      if (done.exists())
+        record_completion_effect(done);
       result.impl->set_results(done, targets);
       complete_operation(executed);
     }
@@ -23626,14 +23687,32 @@ namespace Legion {
       const size_t result_size = 
         ((serdez_redop_fns == NULL) || (serdez_upper_bound == SIZE_MAX)) ?
         future_result_size : serdez_upper_bound;
+      int runtime_visible = -1;
       for (std::vector<Memory>::const_iterator it =
             target_mems.begin(); it != target_mems.end(); it++)
       {
+        if ((runtime_visible < 0) &&
+            FutureInstance::check_meta_visible(*it))
+          runtime_visible = targets.size();
         MemoryManager *manager = runtime->find_memory_manager(*it);
         FutureInstance *instance = manager->create_future_instance(this, 
-          unique_op_id, get_completion_event(), result_size, false/*eager*/);
+            unique_op_id, result_size, false/*eager*/);
         targets.push_back(instance);
       }
+      // This is an important optimization: if we're doing a small
+      // reduction value we always want the reduction instance to
+      // be somewhere meta visible for performance reasons, so we
+      // make a meta-visible instance if we don't have one
+      if ((runtime_visible < 0) && (serdez_redop_fns == NULL) &&
+          (redop->sizeof_rhs <= LEGION_MAX_RETURN_SIZE))
+      {
+        runtime_visible = targets.size();
+        targets.push_back(
+            FutureInstance::create_local(&redop->identity,
+              redop->sizeof_rhs, false/*own*/));
+      }
+      if (runtime_visible > 0)
+        std::swap(targets.front(), targets[runtime_visible]);
     }
 
     //--------------------------------------------------------------------------
@@ -23644,31 +23723,26 @@ namespace Legion {
       {
         FutureImpl *init = initial_value.impl;
         if (init != NULL)
-          return target->copy_from(
-            init->get_canonical_instance(),
-            this,
-            init->get_ready_event(false));
+          return init->copy_to(target, this);
       }
       return target->initialize(redop, this);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent AllReduceOp::all_reduce_redop(void)
+    ApEvent AllReduceOp::all_reduce_redop(RtEvent &executed)
     //--------------------------------------------------------------------------
     {
       std::vector<ApEvent> preconditions(targets.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
         preconditions[idx] = init_redop_target(targets[idx]);
-      }
-      std::set<ApEvent> postconditions;
+      std::vector<ApEvent> postconditions;
       if (deterministic)
       {
         for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
               sources.begin(); it != sources.end(); it++)
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
-            preconditions[idx] = it->second->reduce_from_canonical(targets[idx],
+            preconditions[idx] = it->second->reduce_to(targets[idx],
                 this, redop_id, redop, true/*exclusive*/, preconditions[idx]);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_future_use(unique_op_id, it->second->did);
@@ -23676,7 +23750,7 @@ namespace Legion {
         for (std::vector<ApEvent>::const_iterator it =
               preconditions.begin(); it != preconditions.end(); it++)
           if (it->exists())
-            postconditions.insert(*it);
+            postconditions.push_back(*it);
       }
       else
       {
@@ -23685,19 +23759,19 @@ namespace Legion {
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const ApEvent done = it->second->reduce_from_canonical(targets[idx],
+            const ApEvent done = it->second->reduce_to(targets[idx],
                 this, redop_id, redop, false/*exclusive*/, preconditions[idx]);
             if (done.exists())
-              postconditions.insert(done);
+              postconditions.push_back(done);
           }
           if (runtime->legion_spy_enabled)
             LegionSpy::log_future_use(unique_op_id, it->second->did);
         }
       }
-      RtEvent completion_precondition;
       if (!postconditions.empty())
-        record_completion_effects(postconditions);
-      return RtEvent::NO_RT_EVENT;
+        return Runtime::merge_events(NULL, postconditions);
+      else
+        return ApEvent::NO_AP_EVENT;
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -23945,6 +24019,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteOp::record_completion_effects(const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called without map applied events
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::record_completion_effects(
+                                            const std::vector<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
       // should never be called without map applied events

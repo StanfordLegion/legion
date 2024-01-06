@@ -3896,7 +3896,7 @@ namespace Legion {
           FutureImpl *future = finder->second;
           size_t future_size = 0;
           const Domain *domain = static_cast<const Domain*>(
-              future->find_internal_buffer(op->get_context(), future_size));
+              future->find_runtime_buffer(op->get_context(), future_size));
           if (future_size != sizeof(Domain))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                 "An invalid future size was found in a partition by domain "
@@ -3965,7 +3965,7 @@ namespace Legion {
           FutureImpl *future = finder->second;
           size_t future_size = 0;
           const void *data =
-            future->find_internal_buffer(op->get_context(), future_size);
+            future->find_runtime_buffer(op->get_context(), future_size);
           if (future_size == sizeof(int))
           {
             if (weights.empty())

@@ -170,8 +170,8 @@ namespace Legion {
         {
           const Realm::ExternalMemoryResource resource(
               reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
-          instance = new FutureInstance(value, size, ApEvent::NO_AP_EVENT,
-              runtime, true/*own allocation*/, resource.clone(), 
+          instance = new FutureInstance(value, size,
+              true/*own allocation*/, resource.clone(), 
               FutureInstance::free_host_memory, executing_processor);
         }
         else
@@ -192,7 +192,7 @@ namespace Legion {
       Future result(new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), provenance));
       FutureInstance *instance = new FutureInstance(buffer, size,
-          ApEvent::NO_AP_EVENT, runtime, owned, resource.clone(), freefunc);
+          owned, resource.clone(), freefunc);
       result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
       return result;
     }
@@ -647,15 +647,7 @@ namespace Legion {
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
       if (!output_regions.empty())
-        finalize_output_regions();
-      const bool internal_task = Processor::get_executing_processor().exists();
-      if (internal_task)
-      {
-#ifdef DEBUG_LEGION
-        assert(!effects.exists());
-#endif
-        effects = ApEvent(Processor::get_current_finish_event());
-      }
+        finalize_output_regions(); 
       // See if we need to pull the data in from a callback in the case
       // where we are going to be doing a reduction immediately, if we
       // are then we're going to overwrite 'owned' so save it to callback_owned
@@ -686,24 +678,38 @@ namespace Legion {
 #endif
         // escape this task local instance
         LgEvent unique = escape_task_local_instance(deferred_result_instance);
-        instance = new FutureInstance(res, res_size, effects, runtime,
-            true/*eager*/, false/*external*/, true/*own alloc*/,
+        instance = new FutureInstance(res, res_size, true/*eager*/,
+            false/*external*/, true/*own alloc*/,
             unique, deferred_result_instance);
       }
       else if (resource != NULL)
       {
         if (!owned)
         {
-          FutureInstance source(res, res_size, effects, runtime,
-             false/*own allocation*/, resource->clone(), 
-             freefunc, executing_processor);
-          instance = copy_to_future_inst(
-              runtime->runtime_system_memory, &source);
+          void *buffer = malloc(res_size);
+          instance = new FutureInstance(buffer, res_size, false/*eager*/,
+              true/*external*/, true/*own allocation*/);
+          if (!FutureInstance::check_meta_visible(resource->suggested_memory()))
+          {
+            FutureInstance source(res, res_size, false/*own allocation*/,
+                resource->clone(), freefunc, executing_processor);
+            effects = instance->copy_from(&source, owner_task, effects);
+            // Need to wait for the copy to be done before returning
+            if (effects.exists())
+              effects.wait_faultignorant();
+          }
+          else
+          {
+            // We can do a simple memory copy here but we need to wait
+            // for the results to be ready first before returning
+            if (effects.exists())
+              effects.wait_faultignorant();
+            memcpy(buffer, res, res_size);
+          }
         }
         else
-          instance = new FutureInstance(res, res_size, effects, runtime, 
-              true/*own allocation*/, resource->clone(), 
-              freefunc, executing_processor);
+          instance = new FutureInstance(res, res_size, true/*own allocation*/,
+              resource->clone(), freefunc, executing_processor);
       }
       else if (res_size > 0)
       {
@@ -714,20 +720,20 @@ namespace Legion {
         {
           const Realm::ExternalMemoryResource resource(
               reinterpret_cast<uintptr_t>(res), res_size, true/*read only*/);
-          instance = new FutureInstance(res, res_size, effects,
-              runtime, true/*own allocation*/, resource.clone(),
-              FutureInstance::free_host_memory, executing_processor);
+          instance = new FutureInstance(res, res_size, true/*own allocation*/,
+              resource.clone(), FutureInstance::free_host_memory,
+              executing_processor);
         }
         else
         {
-          // Wait for any effects for immediate values if necessary
-          if (!internal_task && effects.exists())
+          // Wait for any effects for immediate values this is
+          // not a Realm task (e.g. an implicit task) because
+          // we can't track sub-effects on them so we need to 
+          // trust that the effects the user is giving us are correct
+          if (effects.exists() && 
+              !Processor::get_executing_processor().exists())
             effects.wait_faultignorant();
           instance = copy_to_future_inst(res, res_size);
-          // Since we don't own the buffer, we need to wait for the copy
-          // to be done before we can safely return
-          if (instance->ready_event.exists())
-            instance->ready_event.wait_faultignorant();
         }
       }
       // If we did an eager callback, restore whether we own it now
@@ -772,10 +778,10 @@ namespace Legion {
       if (inline_task)
         parent_ctx->decrement_inlined();
       if (release_callback)
-        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT, effects,
+        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT,
           instance, NULL/*no functor here*/, owned, metadataptr, metadatasize);
       else
-        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT, effects,
+        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT,
             instance, callback_functor, owned, metadataptr, metadatasize); 
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
@@ -797,62 +803,23 @@ namespace Legion {
                                                      size_t size)
     //--------------------------------------------------------------------------
     {
-      // See if we need to make an eager instance for this or not
+      // Make a simple memory copy here now
       if (size > LEGION_MAX_RETURN_SIZE)
       {
-        // create an eager instance in the chosen memory
-        Memory memory = runtime->runtime_system_memory;
-        MemoryManager *manager = runtime->find_memory_manager(memory);
-        const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
-        FutureInstance *instance = manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), ready, size, true/*eager*/);
-        // create an external instance for the current allocation
-        const Realm::ExternalMemoryResource resource(
-            reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
-        FutureInstance source(value, size, ApEvent::NO_AP_EVENT, runtime,
-          false/*eager*/, true/*external allocation*/, false/*own allocation*/);
-        // issue the copy between them
-        Runtime::trigger_event(NULL, ready, 
-            instance->copy_from(&source, owner_task));
-        return instance;
-      }
-      else
-      {
-        // Make a simple memory copy here now
-        void *buffer = malloc(size);
-        memcpy(buffer, value, size);
-        return new FutureInstance(buffer, size, ApEvent::NO_AP_EVENT,
-            runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    FutureInstance* TaskContext::copy_to_future_inst(Memory memory,
-                                                     FutureInstance *source)
-    //--------------------------------------------------------------------------
-    {
-      // See if we need to make an eager instance for this or not
-      if ((source->size > LEGION_MAX_RETURN_SIZE) || !source->is_meta_visible ||
-          !FutureInstance::check_meta_visible(runtime, memory))
-      {
-        // create an eager instance in the chosen memory
-        MemoryManager *manager = runtime->find_memory_manager(memory);
-        const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+        MemoryManager *manager = 
+          runtime->find_memory_manager(runtime->runtime_system_memory);
         FutureInstance *instance = 
           manager->create_future_instance(owner_task,
-            owner_task->get_unique_op_id(), ready, source->size, true/*eager*/);
-        // issue the copy between them
-        Runtime::trigger_event(NULL, ready, 
-            instance->copy_from(source, owner_task));
+            owner_task->get_unique_op_id(), size, true/*eager*/);
+        memcpy(const_cast<void*>(instance->get_data()), value, size);
         return instance;
       }
       else
       {
-        // Make a simple memory copy here now
-        void *buffer = malloc(source->size);
-        memcpy(buffer, source->get_data(), source->size);
-        return new FutureInstance(buffer, source->size, ApEvent::NO_AP_EVENT,
-            runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
+        void *buffer = malloc(size);
+        memcpy(buffer, value, size);
+        return new FutureInstance(buffer, size, false/*eager*/,
+            true/*external*/, true/*own allocation*/);
       }
     }
 
@@ -879,44 +846,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::begin_misspeculation(void)
+    void TaskContext::handle_mispredication(void)
     //--------------------------------------------------------------------------
     {
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
       owner_task->get_context()->decrement_pending(owner_task);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::end_misspeculation(FutureInstance *instance,
-                                         const void *metadata, size_t metasize)
-    //--------------------------------------------------------------------------
-    {
-      // Grab some information before doing the next step in case it
-      // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
       assert(owner_task != NULL);
-      const TaskID owner_task_id = owner_task->task_id;
-#endif
-      Runtime *runtime_ptr = runtime;
-      // Call post end task
-      if (metadata != NULL)
-      {
-        // Make a copy of the metadata
-        void *metacopy = malloc(metasize);
-        memcpy(metacopy, metadata, metasize);
-        post_end_task(instance, ApEvent::NO_AP_EVENT, metacopy, metasize,
-                      NULL/*functor*/, false/*owner*/);
-      }
-      else
-        post_end_task(instance, ApEvent::NO_AP_EVENT, NULL/*metadata*/,
-                      0/*metasize*/, NULL/*functor*/, false/*owner*/);
-#ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+      runtime->decrement_total_outstanding_tasks(owner_task->task_id, 
                                                      false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+      runtime->decrement_total_outstanding_tasks();
 #endif
+      owner_task->complete_execution();
+      owner_task->trigger_children_complete();
+      owner_task->trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -1122,30 +1067,13 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
-        FutureInstance *canonical = 
-          launcher.predicate_false_future.impl->get_canonical_instance();
-        if (canonical != NULL)
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
-          const Memory target = runtime->find_local_memory(executing_processor,
-                                                      canonical->memory.kind());
-          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(ApEvent::NO_AP_EVENT, 
-                copy_to_future_inst(target, canonical));
-          }
+          Future f = result->get_future(itr.p, true/*internal*/);
+          f.impl->set_result(launcher.predicate_false_future.impl, owner_task);
         }
-        else
-        {
-          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
-          }
-        }
-        return FutureMap(result);
       }
-      if (launcher.predicate_false_result.get_size() == 0)
+      else if (launcher.predicate_false_result.get_size() == 0)
       {
         // Just initialize all the futures
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -9272,7 +9200,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                              ApEvent effects,
                                               FutureInstance *instance,
                                               FutureFunctor *callback_functor,
                                               bool own_callback_functor,
@@ -9299,7 +9226,7 @@ namespace Legion {
           add_base_resource_ref(META_TASK_REF);
         }
         post_task_queue.push_back(PostTaskArgs(ctx, task_index, wait_on, 
-              effects, instance, metadatacopy, metadatasize, callback_functor,
+              instance, metadatacopy, metadatasize, callback_functor,
               own_callback_functor));
         // If we've already got a completion queue then use it
         if (post_task_comp_queue.exists())
@@ -9456,7 +9383,7 @@ namespace Legion {
               to_perform.begin(); it != to_perform.end(); it++)
         {
           implicit_provenance = it->context->get_unique_id();
-          it->context->post_end_task(it->instance, it->effects, it->metadata,
+          it->context->post_end_task(it->instance, it->metadata,
                                      it->metasize, it->functor,it->own_functor);
         }
       }
@@ -9683,7 +9610,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         ReorderBufferEntry &entry = find_rob_entry(op);
@@ -9701,7 +9628,7 @@ namespace Legion {
           needs_trigger = true;
           children_complete_invoked = true;
 #ifdef LEGION_SPY
-          child_completion_events.insert(
+          child_completion_events.insert(child_completion_events.end(),
               cummulative_child_completion_events.begin(),
               cummulative_child_completion_events.end());
           cummulative_child_completion_events.clear();
@@ -9736,10 +9663,15 @@ namespace Legion {
       if (needs_trigger)
       {
         if (!child_completion_events.empty())
-          owner_task->trigger_children_complete(
+        {
+          if (realm_done_event.exists())
+            child_completion_events.push_back(realm_done_event);
+          owner_task->record_inner_termination(
             Runtime::merge_events(NULL, child_completion_events));
+        }
         else
-          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+          owner_task->record_inner_termination(realm_done_event);
+        owner_task->trigger_children_complete();
       }
     }
 
@@ -12345,7 +12277,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If we have mutable priority we need to save our realm done event
-      if (mutable_priority)
+      if (Processor::get_executing_processor().exists())
         realm_done_event = ApEvent(Processor::get_current_finish_event());
       // Now do the base begin task routine
       return TaskContext::begin_task(proc);
@@ -12361,6 +12293,16 @@ namespace Legion {
                                 ApEvent effects)
     //--------------------------------------------------------------------------
     {
+      if (realm_done_event.exists())
+      {
+        // Case of a normal task
+#ifdef DEBUG_LEGION
+        assert(!effects.exists());
+#endif
+        effects = realm_done_event;
+      }
+      else // implicit task
+        realm_done_event = effects;
       // See if we have any local regions or fields that need to be deallocated
       std::vector<LogicalRegion> local_regions_to_delete;
       std::map<FieldSpace,std::set<FieldID> > local_fields_to_delete;
@@ -12523,7 +12465,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::post_end_task(FutureInstance *instance, ApEvent effects,
+    void InnerContext::post_end_task(FutureInstance *instance,
                                      void *metadata, size_t metasize,
                                      FutureFunctor *callback_functor,
                                      bool own_callback_functor)
@@ -12532,7 +12474,7 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_post_execution(instance, effects, metadata, metasize, 
+      owner_task->handle_post_execution(instance, metadata, metasize, 
           callback_functor, executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
@@ -12541,8 +12483,8 @@ namespace Legion {
       // are done executing
       bool need_complete = false;
       bool need_commit = false;
-      std::set<RtEvent> preconditions;
-      std::set<ApEvent> child_completion_events;
+      std::vector<RtEvent> preconditions;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         // Only need to do this for executing and executed children
@@ -12550,12 +12492,12 @@ namespace Legion {
         for (std::deque<ReorderBufferEntry>::const_iterator it =
               reorder_buffer.begin(); it != reorder_buffer.end(); it++)
           if ((it->stage == EXECUTING_STAGE) || (it->stage == EXECUTED_STAGE))
-            preconditions.insert(it->operation->get_mapped_event());
+            preconditions.push_back(it->operation->get_mapped_event());
         // Also include the current mapping fence event, note that if there were
         // no mapping fences we might still have a real event here corresponding
         // to when the context was initialized for virtual mappings
         if (current_mapping_fence_event.exists())
-          preconditions.insert(current_mapping_fence_event);
+          preconditions.push_back(current_mapping_fence_event);
 #ifdef DEBUG_LEGION
         assert(!task_executed);
 #endif
@@ -12569,7 +12511,7 @@ namespace Legion {
             need_complete = true;
             children_complete_invoked = true;
 #ifdef LEGION_SPY
-            child_completion_events.insert(
+            child_completion_events.insert(child_completion_events.end(),
                 cummulative_child_completion_events.begin(),
                 cummulative_child_completion_events.end());
             cummulative_child_completion_events.clear();
@@ -12599,13 +12541,27 @@ namespace Legion {
       if (need_complete)
       {
         if (!child_completion_events.empty())
-          owner_task->trigger_children_complete(
+        {
+          if (realm_done_event.exists())
+            child_completion_events.push_back(realm_done_event);
+          owner_task->record_inner_termination(
               Runtime::merge_events(NULL, child_completion_events));
+        }
         else
-          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+          owner_task->record_inner_termination(realm_done_event);
+        owner_task->trigger_children_complete();
       }
       if (need_commit)
         owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::handle_mispredication(void)
+    //--------------------------------------------------------------------------
+    {
+      owner_task->handle_post_mapped();
+      owner_task->record_inner_termination(ApEvent::NO_AP_EVENT);
+      TaskContext::handle_mispredication();
     }
 
     //--------------------------------------------------------------------------
@@ -20586,7 +20542,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::post_end_task(FutureInstance *instance, 
-                                         ApEvent effects,
                                          void *metadata, size_t metasize,
                                          FutureFunctor *callback_functor,
                                          bool own_callback_functor)
@@ -20621,7 +20576,7 @@ namespace Legion {
       // Grab this now before the context might be deleted
       const ShardID local_shard = owner_shard->shard_id;
       // Do the base call
-      InnerContext::post_end_task(instance, effects, metadata, metasize,
+      InnerContext::post_end_task(instance, metadata, metasize,
                                   callback_functor, own_callback_functor);
       // Then delete all the pending collectives that we had
       while (!release_index_spaces.empty())
@@ -24523,7 +24478,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock leaf(leaf_lock);
-      if (!children_complete_invoked)
+      if (task_executed && !children_complete_invoked)
       {
         children_complete_invoked = true;
         return true;
@@ -24536,7 +24491,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock leaf(leaf_lock);
-      if (!children_commit_invoked)
+      if (task_executed && !children_commit_invoked)
       {
         children_commit_invoked = true;
         return true;
@@ -25822,7 +25777,7 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
-      f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      f.impl->request_runtime_instance(owner_task, true/*eager*/);
       const RtEvent ready = f.impl->subscribe(); 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
@@ -26083,18 +26038,20 @@ namespace Legion {
           overhead_profiler->previous_profiling_time;
         overhead_profiler->application_time += diff;
       }
-      // No need to unmap the physical regions, they never had events
-      if (!execution_events.empty())
+      if (Processor::get_executing_processor().exists())
       {
-        const RtEvent wait_on = Runtime::merge_events(execution_events);
-        wait_on.wait();
-      } 
+#ifdef DEBUG_LEGION
+        assert(!effects.exists());
+#endif
+        effects = ApEvent(Processor::get_current_finish_event());
+      }
+      // No need to unmap the physical regions, they never had events
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
           callback_functor,resource,freefunc,metadataptr,metadatasize,effects);
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::post_end_task(FutureInstance *instance, ApEvent effects,
+    void LeafContext::post_end_task(FutureInstance *instance,
                                     void *metadata, size_t metasize,
                                     FutureFunctor *callback_functor,
                                     bool own_callback_functor)
@@ -26103,7 +26060,7 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_post_execution(instance, effects, metadata, metasize,
+      owner_task->handle_post_execution(instance, metadata, metasize,
           callback_functor, executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;
@@ -26127,7 +26084,7 @@ namespace Legion {
         }
       } 
       if (need_complete)
-        owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+        owner_task->trigger_children_complete();
       if (need_commit)
         owner_task->trigger_children_committed();
     }

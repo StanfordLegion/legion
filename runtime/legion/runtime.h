@@ -299,20 +299,28 @@ namespace Legion {
       public:
         PendingInstance(void)
           : instance(NULL), op(NULL), uid(0), eager(false) { }
-        PendingInstance(FutureInstance *i, ApUserEvent r)
-          : instance(i), op(NULL), uid(0), inst_ready(r), eager(false) { }
-        PendingInstance(Operation *o, UniqueID id, ApUserEvent r, 
-                        RtUserEvent a, bool e)
-          : instance(NULL), op(o), uid(id), inst_ready(r),
-            alloc_ready(a), eager(e) { }
+        PendingInstance(FutureInstance *i)
+          : instance(i), op(NULL), uid(0), eager(false) { }
+        PendingInstance(Operation *o, UniqueID id, RtUserEvent a, bool e)
+          : instance(NULL), op(o), uid(id), alloc_ready(a), eager(e) { }
       public:
         FutureInstance *instance;
         Operation *op;
         UniqueID uid;
-        ApUserEvent inst_ready;
         RtUserEvent alloc_ready;
-        std::set<AddressSpaceID> remote_requests;
+        ApUserEvent inst_ready;
+        std::set<AddressSpaceID> can_fail_remote_requests;
         bool eager;
+      };
+      struct FutureInstanceTracker {
+      public:
+        FutureInstanceTracker(void) : instance(NULL) { }
+        FutureInstanceTracker(FutureInstance *inst, ApEvent ready)
+          : instance(inst), ready_event(ready) { }
+      public:
+        FutureInstance *const instance;
+        const ApEvent ready_event;
+        std::vector<ApEvent> read_events;
       };
     public:
       // This constructor provides the complete size and effects event
@@ -326,15 +334,12 @@ namespace Legion {
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
                  DistributedID did, Operation *op, GenerationID gen,
                  size_t op_ctx_index, const DomainPoint &op_point,
-#ifdef LEGION_SPY
-                 UniqueID op_uid,
-#endif
-                 int op_depth, Provenance *provenance,
+                 UniqueID op_uid, int op_depth, Provenance *provenance,
                  CollectiveMapping *mapping = NULL);
-      FutureImpl(const FutureImpl &rhs);
+      FutureImpl(const FutureImpl &rhs) = delete;
       virtual ~FutureImpl(void);
     public:
-      FutureImpl& operator=(const FutureImpl &rhs);
+      FutureImpl& operator=(const FutureImpl &rhs) = delete;
     public:
       // Finalize the future before everything shuts down
       void prepare_for_shutdown(void);
@@ -355,7 +360,7 @@ namespace Legion {
                              bool silence_warnings, const char *warning_string);
       void report_incompatible_accessor(const char *accessor_kind,
                                         PhysicalInstance instance);
-      bool find_or_create_application_instance(Memory target, UniqueID uid);
+#if 0
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,
                        ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT,
@@ -370,6 +375,20 @@ namespace Legion {
                           const ReductionOpID redop_id,
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
+#else
+      bool find_or_create_application_instance(Memory target, UniqueID uid);
+      RtEvent request_application_instance(Memory target, SingleTask *task,
+                       UniqueID uid, AddressSpaceID source, 
+                       bool can_fail = false, 
+                       size_t known_upper_bound_size = SIZE_MAX);
+      ApEvent find_application_instance_ready(Memory target, SingleTask *task);
+      RtEvent request_runtime_instance(Operation *op, bool eager);
+      const void *find_runtime_buffer(TaskContext *ctx, size_t &expected_size);
+      ApEvent copy_to(FutureInstance *target, Operation *op);
+      ApEvent reduce_to(FutureInstance *target, AllReduceOp *op,
+                        const ReductionOpID redop_id, const ReductionOp *redop,
+                        bool exclusive, ApEvent precondition);
+#endif
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
@@ -389,13 +408,13 @@ namespace Legion {
                       void *metadata = NULL, size_t metasize = 0);
       void set_result(ApEvent complete, FutureFunctor *callback_functor,
                       bool own, Processor functor_proc);
+      void set_result(FutureImpl *previous, Operation *op);
       // This is the same as above but for data that we know is visible
       // in the system memory and should always make a local FutureInstance
       // and for which we know that there is no completion effects
       void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
-      void unpack_result(Deserializer &derez);
-      void unpack_instances(Deserializer &derez);
+      void unpack_future_result(Deserializer &derez);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
@@ -408,10 +427,7 @@ namespace Legion {
       void pack_future(Serializer &rez, AddressSpaceID target);
       static Future unpack_future(Runtime *runtime, 
           Deserializer &derez, Operation *op = NULL, GenerationID op_gen = 0,
-#ifdef LEGION_SPY
-          UniqueID op_uid = 0,
-#endif
-          int op_depth = 0);
+          UniqueID op_uid = 0, int op_depth = 0);
     public:
       virtual void notify_local(void);
     public:
@@ -422,9 +438,10 @@ namespace Legion {
       void finish_set_future(ApEvent complete); // must be holding lock
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
-                        UniqueID op_uid, bool eager, bool need_lock = true,
-                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
-                        FutureInstance *existing = NULL);
+                        UniqueID op_uid, bool eager, ApEvent &inst_ready,
+                        bool need_lock = true, FutureInstance *existing = NULL);
+      Memory find_best_source(Memory target) const;
+      void notify_allocation_failure(Memory target);
       void mark_sampled(void);
       void broadcast_result(void); // must be holding lock
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
@@ -433,7 +450,7 @@ namespace Legion {
       void perform_callback(void);
       void perform_broadcast(void);
       // must be holding lock
-      void pack_future_result(Serializer &rez) const;
+      void pack_future_result(Serializer &rez, AddressSpaceID target);
     public:
       RtEvent record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
@@ -458,9 +475,7 @@ namespace Legion {
       const GenerationID op_gen;
       // The depth of the context in which this was made
       const int producer_depth;
-#ifdef LEGION_SPY
       const UniqueID producer_uid;
-#endif
       const size_t producer_context_index;
       const DomainPoint producer_point;
       Provenance *const provenance;
@@ -469,9 +484,9 @@ namespace Legion {
       RtUserEvent subscription_event;
       AddressSpaceID result_set_space;
       // On the owner node, keep track of the registered waiters
-      std::set<AddressSpaceID> subscribers;
-      std::map<Memory,FutureInstance*> instances;
-      FutureInstance *canonical_instance;
+      std::set<AddressSpaceID> subscribers; 
+      std::map<Memory,FutureInstanceTracker> instances;
+      Memory local_visible_memory;
     private:
       void *metadata;
       size_t metasize;
@@ -486,11 +501,10 @@ namespace Legion {
       // this future are actually complete
       ApEvent future_complete;
     private:
-      // Instances that need to be made once canonical instance is set
+      // Instances that need to be made once we set the future
       std::map<Memory,PendingInstance> pending_instances;
-      // Requests to create instances on remote nodes
-      // First event is the mapped event, second is ready event
-      std::map<Memory,std::pair<RtUserEvent,ApUserEvent> > pending_requests;
+      // Events representing when remote instances have been allocated
+      std::map<Memory,RtUserEvent> remote_instance_allocations;
     private:
       Processor callback_proc;
       FutureFunctor *callback_functor;
@@ -529,6 +543,17 @@ namespace Legion {
      */
     class FutureInstance {
     public:
+      struct DeferDeleteFutureInstanceArgs :
+        public LgTaskArgs<DeferDeleteFutureInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID;
+      public:
+        DeferDeleteFutureInstanceArgs(FutureInstance *inst)
+          : LgTaskArgs<DeferDeleteFutureInstanceArgs>(implicit_provenance),
+            instance(inst) { }
+      public:
+        FutureInstance *const instance;
+      };
       struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
       public:
         static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
@@ -542,24 +567,20 @@ namespace Legion {
         const PhysicalInstance instance;
       };
     public:
-      FutureInstance(const void *data, size_t size,
-                     ApEvent ready_event, Runtime *runtime, bool eager, 
+      FutureInstance(const void *data, size_t size, bool eager, 
                      bool external, bool own_allocation = true,
                      LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      Processor free_proc = Processor::NO_PROC,
-                     RtEvent use_event = RtEvent::NO_RT_EVENT,
-                     ApUserEvent remote_read = ApUserEvent::NO_AP_USER_EVENT);
-      FutureInstance(const void *data, size_t size,
-                     ApEvent ready_event, Runtime *runtime, bool own,
+                     RtEvent use_event = RtEvent::NO_RT_EVENT);
+      FutureInstance(const void *data, size_t size, bool own,
                      const Realm::ExternalInstanceResource *allocation,
                      void (*freefunc)(
                        const Realm::ExternalInstanceResource&) = NULL,
                      Processor free_proc = Processor::NO_PROC,
                      LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
-                     RtEvent use_event = RtEvent::NO_RT_EVENT,
-                     ApUserEvent remote_read = ApUserEvent::NO_AP_USER_EVENT);
+                     RtEvent use_event = RtEvent::NO_RT_EVENT);
       FutureInstance(const FutureInstance &rhs) = delete;
       ~FutureInstance(void);
     public:
@@ -567,44 +588,39 @@ namespace Legion {
     public:
       ApEvent initialize(const ReductionOp *redop, Operation *op);
       ApEvent copy_from(FutureInstance *source, Operation *op,
-                        ApEvent precondition = ApEvent::NO_AP_EVENT,
-                        bool check_source_ready = true);
+                        ApEvent precondition);
       ApEvent reduce_from(FutureInstance *source, Operation *op,
                           const ReductionOpID redop_id,
                           const ReductionOp *redop, bool exclusive,
-                          ApEvent precondition = ApEvent::NO_AP_EVENT);
-      void record_read_event(ApEvent read_event);
+                          ApEvent precondition);
     public:
       // This method can be called concurrently from different threads
       const void* get_data(void);
-      bool is_ready(bool check_ready_event = true) const;
-      ApEvent get_ready(bool check_ready_event = true) const;
-      ApEvent collapse_reads(void);
       // This method will return an instance that represents the
       // data for this future instance of a given size, if the needed size
       // does not match the base size then a fresh instance will be returned
       // which will be the responsibility of the caller to destroy
       PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
+      bool defer_deletion(ApEvent precondition);
     public:
       bool can_pack_by_value(void) const;
-      bool pack_instance(Serializer &rez, bool pack_ownership, 
-                         bool other_ready = false,
-                         ApEvent ready = ApEvent::NO_AP_EVENT);
-      static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
+      // You only need to check the return value if you set pack_ownership=false
+      // as that is when the you need to make sure the instance isn't deleted
+      // remotely, whereas in all other cases it is safe to delete locally
+      bool pack_instance(Serializer &rez, ApEvent ready_event,
+          bool pack_ownership, bool allow_by_value = true); 
+      static FutureInstance* unpack_instance(Deserializer &derez);
     public:
-      static bool check_meta_visible(Runtime *runtime, Memory memory,
-                                     bool has_freefunc = false);
+      static bool check_meta_visible(Memory memory);
       static FutureInstance* create_local(const void *value, size_t size, 
-                                          bool own, Runtime *runtime);
+                                          bool own);
       static void handle_free_external(Deserializer &derez, Runtime *runtime);
       static void handle_free_external(const void *args);
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
-    public:
-      Runtime *const runtime;
+      static void handle_defer_deletion(const void *args);
     public:
       const size_t size;
       const Memory memory;
-      const ApEvent ready_event;
       const Realm::ExternalInstanceResource *const resource;
       void (*const freefunc)(const Realm::ExternalInstanceResource&);
       const Processor freeproc;
@@ -621,11 +637,6 @@ namespace Legion {
       RtEvent use_event;
       // Unique event to identiy the instance for profiling
       LgEvent unique_event;
-      // Events for operations reading from this instance
-      std::vector<ApEvent> read_events;
-      // If we don't own our instance then we have an event to trigger
-      // when all our read events are done
-      ApUserEvent remote_reads_done;
       // Whether we own this instance
       // Note if we own the allocation then we must own the instance as well
       // We can own the instance without owning the allocation in the case
@@ -1589,7 +1600,7 @@ namespace Legion {
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     GCPriority priority);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
-                                  ApEvent ready_event, size_t size, bool eager);
+                                             size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, 
                                 RtEvent free_event, bool eager);
     public:
@@ -4010,9 +4021,7 @@ namespace Legion {
                                         Provenance *provenance,
                                         Operation *op = NULL,
                                         GenerationID op_gen = 0, 
-#ifdef LEGION_SPY
                                         UniqueID op_uid = 0,
-#endif
                                         int op_depth = 0,
                                         CollectiveMapping *mapping = NULL);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
