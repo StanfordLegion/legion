@@ -6789,7 +6789,8 @@ namespace Legion {
         }
         else
         {
-          if ((instance != NULL) && (instance->size > 0))
+          if ((instance != NULL) && (instance->size > 0) && 
+              (shard_manager == NULL))
             check_future_return_bounds(instance);
           result.impl->set_result(single_task_termination, instance,
                                   metadata, metasize);
