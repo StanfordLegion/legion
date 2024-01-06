@@ -1179,7 +1179,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FutureImpl::request_application_instance(Memory target,
-      SingleTask *task, UniqueID task_uid, AddressSpaceID source, bool can_fail)
+      SingleTask *task, UniqueID task_uid, AddressSpaceID source, 
+      bool can_fail, size_t known_upper_bound_size)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1237,15 +1238,17 @@ namespace Legion {
             {
               // See if we have a size yet that we can use to try
               // to make the allocation, if not we'll need to wait
-              if (future_size_set)
+              if (future_size_set || (known_upper_bound_size < SIZE_MAX))
               {
                 // Try to make the instance now
-                if (future_size > 0)
+                const size_t pending_size =
+                  future_size_set ? future_size : known_upper_bound_size;
+                if (pending_size > 0)
                 {
                   MemoryManager *manager = runtime->find_memory_manager(target);
                   FutureInstance *instance = manager->create_future_instance(
                       can_fail ? NULL : task, task_uid, 
-                       future_size, false/*eager*/);
+                       pending_size, false/*eager*/);
                   if (instance == NULL)
                   {
                     if (source != runtime->address_space)

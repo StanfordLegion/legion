@@ -3467,7 +3467,7 @@ namespace Legion {
             bounds = future_bounds_sizes[idx];
           const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(memory, this,
-                unique_op_id, memory.address_space(), bounds);
+               unique_op_id, memory.address_space(), false/*can fail*/, bounds);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }
