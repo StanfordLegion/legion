@@ -1066,7 +1066,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
 					     unsigned long long start,
-					     unsigned long long stop)
+					     unsigned long long stop,
+                                             LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
       prof_task_infos.emplace_back(ProfTaskInfo());
@@ -1075,6 +1076,7 @@ namespace Legion {
       info.op_id = op_id;
       info.start = start;
       info.stop = stop;
+      info.finish_event = finish_event;
       owner->update_footprint(sizeof(ProfTaskInfo), this);
     }
 #endif
@@ -2514,9 +2516,10 @@ namespace Legion {
 #ifdef LEGION_PROF_SELF_PROFILE
       long long t_stop = Realm::Clock::current_time_in_nanoseconds();
       const Processor p = Realm::Processor::get_executing_processor();
+      const LgEvent finish_event(Processor::get_current_finish_event());
       thread_local_profiling_instance->process_proc_desc(p);
       thread_local_profiling_instance->record_proftask(p, info->op_id, 
-                                                       t_start, t_stop);
+                                       t_start, t_stop, finish_event);
 #endif
 #ifdef DEBUG_LEGION
       decrement_total_outstanding_requests(info->kind);

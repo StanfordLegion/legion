@@ -125,7 +125,7 @@ pub enum Record {
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
-    ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp },
+    ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, fevent: EventID  },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
@@ -915,6 +915,7 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
         Record::ProfTaskInfo {
@@ -922,6 +923,7 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             op_id,
             start,
             stop,
+            fevent,
         },
     ))
 }

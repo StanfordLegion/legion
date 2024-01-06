@@ -1111,6 +1111,7 @@ namespace Legion {
       MAPPER_GET_INDEX_SUBSPACE_CALL,
       MAPPER_GET_INDEX_SPACE_DOMAIN_CALL,
       MAPPER_GET_INDEX_PARTITION_CS_CALL,
+      MAPPER_GET_INDEX_PARTITION_CS_NAME_CALL,
       MAPPER_GET_INDEX_SPACE_PARTITION_COLORS_CALL,
       MAPPER_IS_INDEX_PARTITION_DISJOINT_CALL,
       MAPPER_IS_INDEX_PARTITION_COMPLETE_CALL,
@@ -1332,6 +1333,7 @@ namespace Legion {
       "MapperRuntime::get_index_subspace",                            \
       "MapperRuntime::get_index_space_domain",                        \
       "MapperRuntime::get_index_partition_color_space",               \
+      "MapperRuntime::get_index_partition_color_space_name",          \
       "MapperRuntime::get_index_space_parition_colors",               \
       "MapperRuntime::is_index_partition_disjoint",                   \
       "MapperRuntime::is_index_partition_complete",                   \

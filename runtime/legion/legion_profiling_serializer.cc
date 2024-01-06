@@ -425,7 +425,8 @@ namespace Legion {
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
          << "op_id:UniqueID:"         << sizeof(UniqueID)    << delim
          << "start:timestamp_t:"      << sizeof(timestamp_t) << delim
-         << "stop:timestamp_t:"       << sizeof(timestamp_t)
+         << "stop:timestamp_t:"       << sizeof(timestamp_t) << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 #endif
 
@@ -1143,6 +1144,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proftask_info.op_id), sizeof(proftask_info.op_id));
       lp_fwrite(f, (char*)&(proftask_info.start), sizeof(proftask_info.start));
       lp_fwrite(f, (char*)&(proftask_info.stop),  sizeof(proftask_info.stop));
+      lp_fwrite(f, (char*)&(proftask_info.finish_event),
+                                            sizeof(proftask_info.finish_event));
     }
 #endif
 
@@ -1914,9 +1917,10 @@ namespace Legion {
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu",
+      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu " IDFMT,
                      proftask_info.proc_id, proftask_info.op_id, 
-                     proftask_info.start, proftask_info.stop);
+                     proftask_info.start, proftask_info.stop,
+                     proftask_info.finish_event.id);
     }
 #endif
 

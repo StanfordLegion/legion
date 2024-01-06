@@ -3066,7 +3066,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexSpace result = runtime->get_index_partition_color_space_name(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CS_NAME_CALL);
       return result;
     }
 

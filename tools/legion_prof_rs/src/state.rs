@@ -311,6 +311,7 @@ pub struct ProcEntry {
     pub initiation_op: Option<OpID>,
     pub kind: ProcEntryKind,
     pub time_range: TimeRange,
+    pub fevent: EventID,
     pub waiters: Waiters,
 }
 
@@ -321,6 +322,7 @@ impl ProcEntry {
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
+        fevent: EventID,
     ) -> Self {
         ProcEntry {
             base,
@@ -328,6 +330,7 @@ impl ProcEntry {
             initiation_op,
             kind,
             time_range,
+            fevent,
             waiters: Waiters::new(),
         }
     }
@@ -459,6 +462,7 @@ pub struct Proc {
     entries: BTreeMap<ProfUID, ProcEntry>,
     tasks: BTreeMap<OpID, ProfUID>,
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
+    fevents: BTreeMap<EventID, ProfUID>,
     pub max_levels: u32,
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
@@ -474,6 +478,7 @@ impl Proc {
             entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
+            fevents: BTreeMap::new(),
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
@@ -489,13 +494,20 @@ impl Proc {
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
+        fevent: EventID,
         op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
         prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
+        add_fevent: bool,
     ) -> &mut ProcEntry {
         if let Some(op_id) = op {
             op_prof_uid.insert(op_id, base.prof_uid);
         }
         prof_uid_proc.insert(base.prof_uid, self.proc_id);
+        if add_fevent {
+            // We should only see an event once
+            assert!(!self.fevents.contains_key(&fevent));
+            self.fevents.insert(fevent, base.prof_uid);
+        }
         match kind {
             ProcEntryKind::Task(_, _) => {
                 self.tasks.insert(op.unwrap(), base.prof_uid);
@@ -511,7 +523,7 @@ impl Proc {
         }
         self.entries
             .entry(base.prof_uid)
-            .or_insert_with(|| ProcEntry::new(base, op, initiation_op, kind, time_range))
+            .or_insert_with(|| ProcEntry::new(base, op, initiation_op, kind, time_range, fevent))
     }
 
     pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
@@ -595,6 +607,81 @@ impl Proc {
                     std::u64::MAX - wait.end.0,
                 ));
                 util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
+            }
+        }
+
+        // Before we sort things, we need to rearrange the waiters from
+        // any tasks into the appropriate runtime calls and make the runtime
+        // calls appear as waiters in the original tasks
+        let mut subcalls = BTreeMap::new();
+        for (uid, entry) in self.entries.iter() {
+            match entry.kind {
+                ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
+                    let task_uid = self.fevents.get(&entry.fevent).unwrap();
+                    if !subcalls.contains_key(task_uid) {
+                        subcalls.insert(*task_uid, Vec::with_capacity(1));
+                    }
+                    let call_start = entry.time_range.start.unwrap();
+                    let call_stop = entry.time_range.stop.unwrap();
+                    assert!(call_start <= call_stop);
+                    subcalls.get_mut(&task_uid).unwrap().push((*uid,call_start,call_stop));
+                }
+                _ => { }
+            }
+        }
+        if !subcalls.is_empty() {
+            for (task_uid, calls) in subcalls.iter_mut() {
+                // Remove the old entry from the map to keep the borrow checker happy
+                let mut task_entry = self.entries.remove(&task_uid).unwrap();
+                // Sort subcalls by their size from smallest to largest
+                calls.sort_by_key(|a| a.2-a.1);
+                // Push waits into the smallest subcall we can find
+                let mut to_remove = Vec::new();
+                for idx in 0..task_entry.waiters.wait_intervals.len() {
+                    let wait = &task_entry.waiters.wait_intervals[idx];
+                    //let wait = task_entry.waiters.wait_intervals.get(idx).unwrap();
+                    // Find the smallest containing call
+                    for (call_uid,call_start,call_stop) in calls.iter() {
+                        if (*call_start <= wait.start) && (wait.end <= *call_stop) {
+                            let call_entry = self.entries.get_mut(call_uid).unwrap();
+                            call_entry.waiters.wait_intervals.push(
+                                WaitInterval::new(wait.start, wait.ready, wait.end));
+                            to_remove.push(idx);
+                            break;
+                        } else {
+                            // Should not be partially overlapping
+                            assert!((wait.end <= *call_start) || (*call_stop <= wait.start));
+                        }
+                    }
+                }
+                // Remove any waits that we moved into a call
+                for idx in to_remove {
+                    task_entry.waiters.wait_intervals.remove(idx);
+                }
+                // For each subcall find the next largest subcall that dominates
+                // it and add a wait for it, if one isn't found then we add the
+                // wait to the task for that subcall
+                for idx1 in 0..calls.len() {
+                    let found = false;
+                    let (_,call_start,call_stop) = calls.get(idx1).unwrap();
+                    for idx2 in idx1+1..calls.len() {
+                        let (next_uid,next_start,next_stop) = calls.get(idx2).unwrap();
+                        if (next_start <= call_start) && (call_stop <= next_stop) {
+                            let next_entry = self.entries.get_mut(&next_uid).unwrap();
+                            next_entry.waiters.wait_intervals.push(
+                                WaitInterval::new(*call_start, *call_stop, *call_stop));
+                        } else {
+                            // Should not be partially overlapping
+                            assert!((call_stop <= next_start) || (next_stop <= call_start));
+                        }
+                    }
+                    if !found {
+                        task_entry.waiters.wait_intervals.push(
+                            WaitInterval::new(*call_start, *call_stop, *call_stop));
+                    }
+                }
+                // Finally add the task entry back in now that we're done mutating it
+                self.entries.insert(*task_uid, task_entry);
             }
         }
 
@@ -2374,7 +2461,7 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
-        _fevent: EventID,
+        fevent: EventID,
     ) -> &mut ProcEntry {
         // Hack: we have to do this in two places, because we don't know what
         // order the logger calls are going to come in. If the operation gets
@@ -2389,8 +2476,10 @@ impl State {
             parent_id,
             ProcEntryKind::Task(task_id, variant_id),
             time_range,
+            fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
+            true,
         )
     }
 
@@ -2411,7 +2500,7 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
-        _fevent: EventID,
+        fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
@@ -2423,8 +2512,10 @@ impl State {
             Some(op_id),
             ProcEntryKind::MetaTask(variant_id),
             time_range,
+            fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
+            true,
         )
     }
 
@@ -2441,7 +2532,7 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
-        _fevent: EventID,
+        fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
@@ -2452,8 +2543,10 @@ impl State {
             if op_id.0 > 0 { Some(op_id) } else { None },
             ProcEntryKind::MapperCall(kind),
             time_range,
+            fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
+            false,
         )
     }
 
@@ -2462,7 +2555,7 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-        _fevent: EventID,
+        fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
@@ -2472,8 +2565,10 @@ impl State {
             None,
             ProcEntryKind::RuntimeCall(kind),
             time_range,
+            fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
+            false,
         )
     }
 
@@ -2482,6 +2577,7 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
+        fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
@@ -2491,8 +2587,10 @@ impl State {
             Some(op_id),
             ProcEntryKind::ProfTask,
             time_range,
+            fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
+            true,
         )
     }
 
@@ -3689,11 +3787,11 @@ fn process_record(
             assert!(state.mapper_call_kinds.contains_key(kind));
             assert!(*start <= *stop);
             // For now we'll only add very expensive mapper calls (more than 100 us)
-            if *stop - *start >= Timestamp::from_us(100) {
+            //if *stop - *start >= Timestamp::from_us(100) {
                 let time_range = TimeRange::new_start(*start, *stop);
                 state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
                 state.update_last_time(*stop);
-            };
+            //};
         }
         Record::RuntimeCallInfo {
             kind,
@@ -3712,9 +3810,10 @@ fn process_record(
             op_id,
             start,
             stop,
+            fevent,
         } => {
             let time_range = TimeRange::new_start(*start, *stop);
-            state.create_prof_task(*proc_id, *op_id, time_range);
+            state.create_prof_task(*proc_id, *op_id, time_range, *fevent);
             state.update_last_time(*stop);
         }
     }

@@ -4037,7 +4037,7 @@ class State(object):
     # ProfTaskInfo
     @typecheck
     def log_proftask_info(self, proc_id: int, op_id: int, 
-                          start: int, stop: int
+                          start: int, stop: int, fevent: int
     ) -> None:
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations

@@ -394,6 +394,7 @@ namespace Legion {
         ProcID proc_id;
         UniqueID op_id;
         timestamp_t start, stop;
+        LgEvent finish_event;
       };
 #endif
       struct ProfilingInfo : public ProfilingResponseBase {
@@ -508,7 +509,7 @@ namespace Legion {
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
-                           timestamp_t stop);
+                           timestamp_t stop, LgEvent finish_event);
 #endif
     public:
       void dump_state(LegionProfSerializer *serializer);
