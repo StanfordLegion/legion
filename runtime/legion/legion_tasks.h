@@ -234,7 +234,7 @@ namespace Legion {
       void complete_point_projection(void);
       bool prepare_steal(void);
     public:
-      void compute_parent_indexes(TaskContext *alt_context = NULL);
+      void compute_parent_indexes(InnerContext *alt_context = NULL);
       void perform_intra_task_alias_analysis(bool is_tracing,
           LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
     public:
@@ -349,13 +349,13 @@ namespace Legion {
      */
     class SingleTask : public TaskOp {
     public:
-      struct MisspeculationTaskArgs :
-        public LgTaskArgs<MisspeculationTaskArgs> {
+      struct MispredicationTaskArgs :
+        public LgTaskArgs<MispredicationTaskArgs> {
       public:
-        static const LgTaskID TASK_ID = LG_MISSPECULATE_TASK_ID;
+        static const LgTaskID TASK_ID = LG_MISPREDICATION_TASK_ID;
       public:
-        MisspeculationTaskArgs(SingleTask *t)
-          : LgTaskArgs<MisspeculationTaskArgs>(t->get_unique_op_id()),
+        MispredicationTaskArgs(SingleTask *t)
+          : LgTaskArgs<MispredicationTaskArgs>(t->get_unique_op_id()),
             task(t) { }
       public:
         SingleTask *const task;
@@ -497,14 +497,12 @@ namespace Legion {
                     const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
-      virtual void handle_misspeculation(void) = 0;
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+      virtual void handle_mispredication(void) = 0;
     public:
       virtual void pre_launch_collective_kernel(void) = 0;
       virtual void post_launch_collective_kernel(void) = 0;
@@ -521,7 +519,7 @@ namespace Legion {
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager, 
           uint64_t lamport_clock, bool poisoned) = 0;
-      void trigger_children_complete(ApEvent all_children_complete);
+      void record_inner_termination(ApEvent termination_event);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
@@ -557,9 +555,6 @@ namespace Legion {
       // It does NOT encapsulate the 'effects_complete' of this task
       // Only the actual operation completion event captures that
       ApUserEvent                           single_task_termination;
-      // On remote nodes this event encompasses all the task_completion_effects
-      // including the single_task_termination
-      ApEvent                               remote_completion_event;
       // An event describing the fence event for concurrent execution
       ApEvent                               concurrent_fence_event;
       // Event recording when all "effects" are complete
@@ -673,7 +668,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
       virtual void reduce_future(const DomainPoint &point,
-                                 FutureInstance *instance) = 0;
+                                 FutureInstance *instance, ApEvent effects) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -687,8 +682,7 @@ namespace Legion {
                              std::set<RtEvent> &ready_events);
     public:
       // Return true if it is safe to delete the future
-      bool fold_reduction_future(FutureInstance *instance, 
-          std::vector<ApEvent> &applied_effects, bool exclusive);
+      bool fold_reduction_future(FutureInstance *instance, ApEvent effects);
     protected:
       std::list<SliceTask*> slices;
       bool sliced;
@@ -706,9 +700,9 @@ namespace Legion {
       std::vector<OutputOptions> output_region_options;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
-      FutureInstance *reduction_instance;
-      ApEvent reduction_inst_precondition;
-      std::vector<ApEvent> reduction_effects;
+      std::atomic<FutureInstance*> reduction_instance;
+      ApEvent reduction_instance_precondition;
+      std::vector<ApEvent> reduction_fold_effects;
       // Only for handling serdez reductions
       void *serdez_redop_state;
       size_t serdez_redop_state_size;
@@ -716,7 +710,8 @@ namespace Legion {
       void *reduction_metadata;
       size_t reduction_metasize;
       // Temporary storage for future results
-      std::map<DomainPoint,FutureInstance*> temporary_futures;
+      std::map<DomainPoint,
+        std::pair<FutureInstance*,ApEvent> > temporary_futures;
       // used for detecting cases where we've already mapped a mutli task
       // on the same node but moved it to a different processor
       bool first_mapping;
@@ -811,14 +806,12 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(bool deferral, 
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
-      virtual void handle_misspeculation(void);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_mispredication(void);
       virtual void prepare_map_must_epoch(void);
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -839,6 +832,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
     protected:
       void pack_remote_complete(Serializer &rez, RtEvent precondition);
       void pack_remote_commit(Serializer &rez);
@@ -934,14 +929,12 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
-      virtual void handle_misspeculation(void);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_mispredication(void);
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager,
           uint64_t lamport_clock, bool poisoned);
@@ -978,6 +971,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
     public: 
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
@@ -1058,14 +1053,12 @@ namespace Legion {
               const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_post_execution(FutureInstance *instance,
-                                 ApEvent effects,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor); 
-      virtual void handle_post_mapped(bool deferral,
-                          RtEvent pre = RtEvent::NO_RT_EVENT);
-      virtual void handle_misspeculation(void);
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_mispredication(void);
     public:
       virtual void concurrent_allreduce(ProcessorManager *manager,
           uint64_t lamport_clock, bool poisoned);
@@ -1219,7 +1212,7 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
     public:
       virtual void reduce_future(const DomainPoint &point, 
-                                 FutureInstance *instance);
+                                 FutureInstance *instance, ApEvent effects);
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
@@ -1295,7 +1288,6 @@ namespace Legion {
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
-      std::vector<ApUserEvent> reduction_instances_ready;
       std::vector<Memory> serdez_redop_targets;
     protected:
       std::set<RtEvent> map_applied_conditions;
@@ -1384,7 +1376,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
       virtual void reduce_future(const DomainPoint &point,
-                                 FutureInstance *instance);
+                                 FutureInstance *instance, ApEvent effects);
       void handle_future(ApEvent complete, const DomainPoint &point,
                          FutureInstance *instance, void *metadata, 
                          size_t metasize, FutureFunctor *functor,
@@ -1394,8 +1386,7 @@ namespace Legion {
       PointTask* clone_as_point_task(const DomainPoint &point,
                                      bool inline_task);
       size_t enumerate_points(bool inline_task);
-      FutureInstance* get_predicate_false_result(Processor point_proc,
-                              const void *&metadata, size_t &metasize);
+      void set_predicate_false_result(const DomainPoint &point);
     public:
       void check_target_processors(void) const;
       void update_target_processor(void);
@@ -1410,10 +1401,12 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual void record_completion_effects(
+                                          const std::vector<ApEvent> &effects);
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_point_mapped(RtEvent child_mapped, ApEvent child_complete,
+      void record_point_mapped(RtEvent child_mapped,
           std::map<PhysicalManager*,unsigned> &child_acquired);
       void record_point_complete(RtEvent child_complete);
       void record_point_committed(RtEvent commit_precondition =

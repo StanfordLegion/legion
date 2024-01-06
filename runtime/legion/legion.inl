@@ -1765,131 +1765,130 @@ namespace Legion {
       template<int N, typename T>
       class Tester {
       public:
-        Tester(void) : M(0) { }
-        Tester(const DomainT<N,T> b) 
-          : bounds(b), M(N), has_source(false), 
-            has_transform(false) { }
-        Tester(const DomainT<N,T> b, const Rect<N,T> s)
-          : bounds(b), source(s), M(N), has_source(true), 
-            has_transform(false) { }
+        static_assert(N > 0, "Accessor DIM must be positive");
+        static_assert(N <= LEGION_MAX_DIM,
+            "Accessor DIM larger than LEGION_MAX_DIM");
+        static_assert(std::is_integral<T>::value, "must be integral type");
+      public:
+        Tester(void) { }
+        Tester(const DomainT<N,T> &b) 
+          : domain(b) { }
+        Tester(const DomainT<N,T> &b, const Rect<N,T> s)
+          : domain(intersect_with_rect(b,s)) { }
         template<int M2>
         Tester(const DomainT<M2,T> b,
                const AffineTransform<M2,N,T> t) 
-          : bounds(b), transform(t), M(M2), has_source(false), 
-            has_transform(!t.is_identity())
+          : domain(full_rect()), range(b), transform(t)
         { 
-          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
+          static_assert(M2 > 0, "Accessor DIM must be positive");
+          static_assert(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
         }
         template<int M2>
         Tester(const DomainT<M2,T> b, const Rect<N,T> s,
                const AffineTransform<M2,N,T> t) 
-          : bounds(b), transform(t), source(s), M(M2), has_source(true), 
-            has_transform(!t.is_identity())
+          : domain(s), range(b), transform(t)
         { 
-          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
+          static_assert(M2 > 0, "Accessor DIM must be positive");
+          static_assert(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
         }
-      public:
+      public: 
         __CUDA_HD__
-        inline bool contains(const Point<N,T> &p) const
+        inline bool contains(const Point<N,T> &point) const
         {
-          if (has_source && !source.contains(p))
-            return false;
+          // Check the domain first
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-          check_gpu_warning();
-          // Note that in CUDA this function is likely being inlined
-          // everywhere and we can't afford to instantiate templates
-          // for every single dimension so do things untyped
-          if (!has_transform)
-          {
-            // This is imprecise because we can't see the 
-            // Realm index space on the GPU
-            const Rect<N,T> b = bounds.bounds<N,T>();
-            return b.contains(p);
-          }
-          else
-            return bounds.contains_bounds_only(transform[DomainPoint(p)]);
-#else
-          if (!has_transform)
-          {
-            const DomainT<N,T> b = bounds;
-            return b.contains(p);
-          }
-          switch (M)
-          {
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const DomainT<DIM,T> b = bounds; \
-                const AffineTransform<DIM,N,T> t = transform; \
-                return b.contains(t[p]); \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
-          return false;
+          if (!domain.dense())
+            check_gpu_warning();
 #endif
+          if (!test_point(domain, point))
+            return false;
+          const int range_dim = range.get_dim();
+          if (range_dim > 0)
+          {
+            // We have a transform so need to convert and perform the test
+            switch (range_dim)
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  const DomainT<DIM,T> r = convert_range<DIM>(); \
+                  const AffineTransform<DIM,N,T> t = transform; \
+                  return test_point<DIM>(r, t[point]); \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+            }
+          }
+          return true;
         }
         __CUDA_HD__
-        inline bool contains_all(const Rect<N,T> &r) const
+        inline bool contains_all(const Rect<N,T> &rect) const
         {
-          if (has_source && !source.contains(r))
-            return false;
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-          check_gpu_warning();
-          // Note that in CUDA this function is likely being inlined
-          // everywhere and we can't afford to instantiate templates
-          // for every single dimension so do things untyped
-          if (has_transform)
-          {
-            if (r.empty()) return true;
-            for (PointInRectIterator<N,T> itr(r); itr(); itr++)
-              if (!bounds.contains_bounds_only(transform[DomainPoint(*itr)]))
-                return false;
+          if (rect.empty())
             return true;
-          }
-          else
-          {
-            // This is imprecise because we can't see the 
-            // Realm index space on the GPU
-            const Rect<N,T> b = bounds.bounds<N,T>();
-            return b.contains(r);
-          }
+          // Check the domain first
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          // Can only test bounds on the GPU and not sparsity maps yet 
+          if (!domain.dense())
+            check_gpu_warning();
+          if (!domain.bounds.contains(rect))
+            return false;
 #else
-          if (!has_transform)
-          {
-            const DomainT<N,T> b = bounds;
-            return b.contains_all(r);
-          }
-          if (r.empty()) return true;
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const DomainT<DIM,T> b = bounds; \
-                const AffineTransform<DIM,N,T> t = transform; \
-                for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
-                  if (!b.contains(t[*itr])) \
-                    return false; \
-                return true; \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
-          return false;
+          // On the host so we can check sparsity maps too 
+          if (!domain.contains_all(rect))
+            return false;
 #endif
+          const int range_dim = range.get_dim();
+          if (range_dim > 0)
+          {
+            // We have a transform so need to convert and perform the test
+            switch (range_dim)
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  const DomainT<DIM,T> r = convert_range<DIM>(); \
+                  const AffineTransform<DIM,N,T> t = transform; \
+                  for (PointInRectIterator<N,T> itr(rect); itr(); itr++) \
+                    if (!test_point<DIM>(r, t[*itr])) \
+                      return false; \
+                  break; \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+            }
+          }
+          return true;
         }
       private:
+        static inline DomainT<N,T> intersect_with_rect(
+            const DomainT<N,T> &domain, const Rect<N,T> &rect)
+        {
+          DomainT<N,T> result = domain;
+          result.bounds = domain.bounds.intersection(rect);
+          return result;
+        }
+        static inline DomainT<N,T> full_rect(void)
+        {
+          DomainT<N,T> result = DomainT<N,T>::make_empty();
+          for (int d = 0; d < N; d++)
+          {
+            result.bounds.lo[d] = std::numeric_limits<T>::min;
+            result.bounds.hi[d] = std::numeric_limits<T>::max;
+          }
+          return result;
+        }
         __CUDA_HD__
         inline void check_gpu_warning(void) const
         {
+          // We've turned this off for now since most users seems to 
+          // think it is too verbose, but we can renable it if needed
 #if 0
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           bool need_warning = !bounds.dense();
@@ -1898,13 +1897,33 @@ namespace Legion {
 #endif
 #endif
         }
+        template<int M> __CUDA_HD__
+        inline DomainT<M,T> convert_range(void) const
+        {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          // Can't see sparsity maps on the GPU
+          const DomainT<M,T> result(range.bounds<M,T>());
+#else
+          const DomainT<M,T> result = range;          
+#endif
+          return result;
+        }
+        template<int M> __CUDA_HD__
+        static inline bool test_point(const DomainT<M,T> &domain, 
+                                      const Point<M,T> &point)
+        {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          // Can only test bounds on the GPU and not sparsity maps yet 
+          return domain.bounds.contains(point);
+#else
+          // Can test sparsity maps on the host
+          return domain.contains(point);
+#endif
+        }
       private:
-        Domain bounds;
+        DomainT<N,T> domain; // always check for inputs
+        Domain range; // in case we have a transform
         DomainAffineTransform transform;
-        Rect<N,T> source;
-        int M;
-        bool has_source;
-        bool has_transform;
       };
     };
 
@@ -18795,6 +18814,51 @@ namespace Legion {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::initialize_constraints(bool column_major, 
+                          bool soa, const std::vector<FieldID> &fields,
+                          const std::map<FieldID,size_t> *alignments /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      const int dims = handle.get_index_space().get_dim();
+      std::vector<DimensionKind> dim_order(dims+1);
+      // Field dimension first for AOS
+      dim_order[soa ? dims : 0] = LEGION_DIM_F;
+      if (column_major)
+      {
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+(soa ? 0 : 1)] = (DimensionKind)(LEGION_DIM_X + idx); 
+      }
+      else
+      {
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+(soa ? 0 : 1)] = 
+            (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
+      }
+      constraints.add_constraint(
+          OrderingConstraint(dim_order, false/*contiguous*/));
+      if (alignments != NULL)
+        for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
+             it != alignments->end(); it++)
+          constraints.add_constraint(
+              AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+    }
+
     //--------------------------------------------------------------------------
     inline void DiscardLauncher::add_field(FieldID f)
     //--------------------------------------------------------------------------
@@ -18814,6 +18878,8 @@ namespace Legion {
       file_name = name;
       mode = m;
       file_fields = fields;
+      initialize_constraints(true/*column major*/, true/*soa*/, fields);
+      privilege_fields.insert(fields.begin(), fields.end());
     }
 
     //--------------------------------------------------------------------------
@@ -18828,6 +18894,13 @@ namespace Legion {
       file_name = name;
       mode = m;
       field_files = field_map;
+      std::vector<FieldID> fields;
+      fields.reserve(field_map.size());
+      for (std::map<FieldID,const char*>::const_iterator it =
+            field_map.begin(); it != field_map.end(); it++)
+        fields.push_back(it->first);
+      initialize_constraints(true/*column major*/, true/*soa*/, fields);
+      privilege_fields.insert(fields.begin(), fields.end());
     }
 
     //--------------------------------------------------------------------------
@@ -18845,27 +18918,7 @@ namespace Legion {
         constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-      const int dims = handle.get_index_space().get_dim();
-      std::vector<DimensionKind> dim_order(dims+1);
-      // Field dimension first for AOS
-      dim_order[0] = LEGION_DIM_F;
-      if (column_major)
-      {
-        for (int idx = 0; idx < dims; idx++)
-          dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + idx); 
-      }
-      else
-      {
-        for (int idx = 0; idx < dims; idx++)
-          dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
-      }
-      constraints.add_constraint(
-          OrderingConstraint(dim_order, false/*contiguous*/));
-      if (alignments != NULL)
-        for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
-             it != alignments->end(); it++)
-          constraints.add_constraint(
-              AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+      initialize_constraints(column_major, false/*soa*/, fields, alignments);
       privilege_fields.insert(fields.begin(), fields.end());
     }
     
@@ -18884,20 +18937,33 @@ namespace Legion {
         constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
-      const int dims = handle.get_index_space().get_dim();
+      initialize_constraints(column_major, true/*soa*/, fields, alignments);
+      privilege_fields.insert(fields.begin(), fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::initialize_constraints(bool column_major, 
+                          bool soa, const std::vector<FieldID> &fields,
+                          const std::map<FieldID,size_t> *alignments /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      const int dims = parent.get_index_space().get_dim();
       std::vector<DimensionKind> dim_order(dims+1);
+      // Field dimension first for AOS
+      dim_order[soa ? dims : 0] = LEGION_DIM_F;
       if (column_major)
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx] = (DimensionKind)(LEGION_DIM_X + idx); 
+          dim_order[idx+(soa ? 0 : 1)] = (DimensionKind)(LEGION_DIM_X + idx); 
       }
       else
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
+          dim_order[idx+(soa ? 0 : 1)] = 
+            (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
       }
-      // Field dimension last for SOA 
-      dim_order[dims] = LEGION_DIM_F;
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
       if (alignments != NULL)
@@ -18905,7 +18971,15 @@ namespace Legion {
              it != alignments->end(); it++)
           constraints.add_constraint(
               AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
-      privilege_fields.insert(fields.begin(), fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::add_external_resource(LogicalRegion handle,
+                                const Realm::ExternalInstanceResource *resource)
+    //--------------------------------------------------------------------------
+    {
+      handles.push_back(handle);
+      external_resources.push_back(resource);
     }
 
     //--------------------------------------------------------------------------
@@ -18919,7 +18993,11 @@ namespace Legion {
       assert(resource == LEGION_EXTERNAL_POSIX_FILE);
 #endif
       if (handles.empty())
+      {
         mode = m;
+        initialize_constraints(true/*column major*/, true/*soa*/, fields);
+        privilege_fields.insert(fields.begin(), fields.end());
+      }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       else
@@ -18953,7 +19031,16 @@ namespace Legion {
       assert(resource == LEGION_EXTERNAL_HDF5_FILE);
 #endif
       if (handles.empty())
+      {
         mode = m;
+        std::vector<FieldID> fields;
+        fields.reserve(field_map.size());
+        for (std::map<FieldID,const char*>::const_iterator it =
+              field_map.begin(); it != field_map.end(); it++)
+          fields.push_back(it->first);
+        initialize_constraints(true/*column major*/, true/*soa*/, fields);
+        privilege_fields.insert(fields.begin(), fields.end());
+      }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       else
@@ -18989,29 +19076,7 @@ namespace Legion {
 #endif
       if (handles.empty())
       {
-        constraints.add_constraint(
-            FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-        const int dims = handle.get_index_space().get_dim();
-        std::vector<DimensionKind> dim_order(dims+1);
-        // Field dimension first for AOS
-        dim_order[0] = LEGION_DIM_F;
-        if (column_major)
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + idx); 
-        }
-        else
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
-        }
-        constraints.add_constraint(
-            OrderingConstraint(dim_order, false/*contiguous*/));
-        if (alignments != NULL)
-          for (std::map<FieldID,size_t>::const_iterator it =
-                alignments->begin(); it != alignments->end(); it++)
-            constraints.add_constraint(
-                AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+        initialize_constraints(column_major, false/*soa*/, fields, alignments);
         privilege_fields.insert(fields.begin(), fields.end());
       }
 #ifdef DEBUG_LEGION
@@ -19071,29 +19136,7 @@ namespace Legion {
 #endif
       if (handles.empty())
       {
-        constraints.add_constraint(
-            FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
-        const int dims = handle.get_index_space().get_dim();
-        std::vector<DimensionKind> dim_order(dims+1);
-        if (column_major)
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx] = (DimensionKind)(LEGION_DIM_X + idx); 
-        }
-        else
-        {
-          for (int idx = 0; idx < dims; idx++)
-            dim_order[idx] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
-        }
-        // Field dimension last for SOA 
-        dim_order[dims] = LEGION_DIM_F;
-        constraints.add_constraint(
-            OrderingConstraint(dim_order, false/*contiguous*/));
-        if (alignments != NULL)
-          for (std::map<FieldID,size_t>::const_iterator it =
-                alignments->begin(); it != alignments->end(); it++)
-            constraints.add_constraint(
-                AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+        initialize_constraints(column_major, true/*soa*/, fields, alignments); 
         privilege_fields.insert(fields.begin(), fields.end());
       }
 #ifdef DEBUG_LEGION
@@ -19140,6 +19183,16 @@ namespace Legion {
       handles.push_back(handle);
       pointers.emplace_back(PointerConstraint(mem, uintptr_t(base)));
     }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     //--------------------------------------------------------------------------
     inline void PredicateLauncher::add_predicate(const Predicate &pred)
@@ -19634,7 +19687,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline PieceIteratorT<DIM,T>::PieceIteratorT(PieceIteratorT &&rhs)
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(PieceIteratorT &&rhs) noexcept
       : PieceIterator(rhs), current_rect(rhs.current_rect)
     //--------------------------------------------------------------------------
     {
@@ -19665,7 +19718,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
-                                                           PieceIteratorT &&rhs)
+                                                  PieceIteratorT &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       PieceIterator::operator=(rhs);
@@ -21547,6 +21600,70 @@ namespace Legion {
       unsigned r = static_cast<unsigned>(right);
       l ^= r;
       return left = static_cast<PrivilegeMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator~(CoherenceProperty p)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(~unsigned(p));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator|(CoherenceProperty left, 
+                                       CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(unsigned(left) | unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator&(CoherenceProperty left,
+                                       CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(unsigned(left) & unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator^(CoherenceProperty left,
+                                       CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(unsigned(left) ^ unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator|=(CoherenceProperty &left,
+                                        CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l |= r;
+      return left = static_cast<CoherenceProperty>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator&=(CoherenceProperty &left,
+                                        CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l &= r;
+      return left = static_cast<CoherenceProperty>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator^=(CoherenceProperty &left,
+                                        CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l ^= r;
+      return left = static_cast<CoherenceProperty>(l);
     }
 
     //--------------------------------------------------------------------------

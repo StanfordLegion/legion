@@ -488,7 +488,7 @@ namespace Legion {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
-      FieldAllocator(FieldAllocator &&allocator);
+      FieldAllocator(FieldAllocator &&allocator) noexcept;
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -496,7 +496,7 @@ namespace Legion {
       FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
-      FieldAllocator& operator=(FieldAllocator &&allocator);
+      FieldAllocator& operator=(FieldAllocator &&allocator) noexcept;
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
       inline bool exists(void) const { return (impl != NULL); }
@@ -631,6 +631,8 @@ namespace Legion {
         : args(const_cast<void*>(arg)), arglen(argsize) { }
       UntypedBuffer(const UntypedBuffer &rhs)
         : args(rhs.args), arglen(rhs.arglen) { }
+      UntypedBuffer(UntypedBuffer &&rhs) noexcept
+        : args(rhs.args), arglen(rhs.arglen) { }
     public:
       inline size_t get_size(void) const { return arglen; }
       inline void*  get_ptr(void) const { return args; }
@@ -640,6 +642,8 @@ namespace Legion {
       inline bool operator<(const UntypedBuffer &arg) const
         { return (args < arg.args) && (arglen < arg.arglen); }
       inline UntypedBuffer& operator=(const UntypedBuffer &rhs)
+        { args = rhs.args; arglen = rhs.arglen; return *this; }
+      inline UntypedBuffer& operator=(UntypedBuffer &&rhs) noexcept
         { args = rhs.args; arglen = rhs.arglen; return *this; }
     private:
       void *args;
@@ -664,12 +668,12 @@ namespace Legion {
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
-      ArgumentMap(ArgumentMap &&rhs);
+      ArgumentMap(ArgumentMap &&rhs) noexcept;
       ~ArgumentMap(void);
     public:
       ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
-      ArgumentMap& operator=(ArgumentMap &&rhs);
+      ArgumentMap& operator=(ArgumentMap &&rhs) noexcept;
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
       inline bool operator<(const ArgumentMap &rhs) const
@@ -759,7 +763,7 @@ namespace Legion {
     public:
       Predicate(void);
       Predicate(const Predicate &p);
-      Predicate(Predicate &&p);
+      Predicate(Predicate &&p) noexcept;
       explicit Predicate(bool value);
       ~Predicate(void);
     protected:
@@ -769,7 +773,7 @@ namespace Legion {
       explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
-      Predicate& operator=(Predicate &&p);
+      Predicate& operator=(Predicate &&p) noexcept;
       inline bool operator==(const Predicate &p) const;
       inline bool operator<(const Predicate &p) const;
       inline bool operator!=(const Predicate &p) const;
@@ -1286,7 +1290,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
-      Future(Future &&f);
+      Future(Future &&f) noexcept;
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -1301,7 +1305,7 @@ namespace Legion {
       inline bool operator<(const Future &f) const
         { return impl < f.impl; }
       Future& operator=(const Future &f);
-      Future& operator=(Future &&f);
+      Future& operator=(Future &&f) noexcept;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1488,7 +1492,7 @@ namespace Legion {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
-      FutureMap(FutureMap &&map);
+      FutureMap(FutureMap &&map) noexcept;
       ~FutureMap(void);
     private:
       Internal::FutureMapImpl *impl;
@@ -1505,7 +1509,7 @@ namespace Legion {
       inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
-      FutureMap& operator=(FutureMap &&f);
+      FutureMap& operator=(FutureMap &&f) noexcept;
     public:
       /**
        * Block until we can return the result for the
@@ -2284,7 +2288,18 @@ namespace Legion {
      * This can include attaching files or arrays from inter-operating
      * programs. We provide a generic attach launcher than can handle
      * all kinds of attachments. Each attach launcher should be used
-     * for attaching only one kind of resource.
+     * for attaching only one kind of resource. Resources are described
+     * using Realm::ExternalInstanceResource descriptors (interface can
+     * be found in realm/instance.h). There are many different kinds
+     * of external instance resource descriptors including:
+     * - Realm::ExternalMemoryResource for host pointers (realm/instance.h)
+     * - Realm::ExternalFileResource for POSIX files (realm/instance.h)
+     * - Realm::ExternalCudaMemoryResource for CUDA pointers (realm/cuda/cuda_access.h)
+     * - Realm::ExternalHipMemoryResource for HIP pointers (realm/hip/hip_access.h)
+     * - Realm::ExternalHDF5Resource for HDF5 files (realm/hdf5/hdf5_access.h)
+     * ...
+     * Please explore the Realm code base for all the different kinds of
+     * external resources that you can attach to logical regions.
      * @see Runtime
      */
     struct AttachLauncher {
@@ -2293,27 +2308,44 @@ namespace Legion {
                      LogicalRegion handle, LogicalRegion parent,
                      const bool restricted = true,
                      const bool mapped = true);
+      // Declared here to avoid superfluous compiler warnings
+      // Can be remove after deprecated members are removed
+      ~AttachLauncher(void);
     public:
+      inline void initialize_constraints(bool column_major, bool soa,
+                             const std::vector<FieldID> &fields,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalFileResource instead")
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
                               LegionFileMode mode);
+      LEGION_DEPRECATED("Use Realm::ExternalHDF5Resource instead")
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_aos(void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_soa(void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
-                             const std::map<FieldID,size_t> *alignments = NULL);
+                             const std::map<FieldID,size_t> *alignments = NULL); 
     public:
       ExternalResource                              resource;
-      LogicalRegion                                 handle;
       LogicalRegion                                 parent;
+      LogicalRegion                                 handle;
+      std::set<FieldID>                             privilege_fields;
+    public:
+      // This will be cloned each time you perform an attach with this launcher
+      const Realm::ExternalInstanceResource*        external_resource;
+    public:
+      LayoutConstraintSet                           constraints;
+    public:
       // Whether this instance will be restricted when attached
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
@@ -2335,14 +2367,14 @@ namespace Legion {
       std::string                                   provenance;
     public:
       // Data for files
+      LEGION_DEPRECATED("file_name is deprecated, use external_resource")
       const char                                    *file_name;
+      LEGION_DEPRECATED("mode is deprecated, use external_resource")
       LegionFileMode                                mode;
+      LEGION_DEPRECATED("file_fields is deprecated, use external_resource")
       std::vector<FieldID>                          file_fields; // normal files
-      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
-    public:
-      // Data for external instances
-      LayoutConstraintSet                           constraints;
-      std::set<FieldID>                             privilege_fields;
+      // This member must still be populated if you're attaching to an HDF5 file
+      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files 
     public:
       // Optional footprint of the instance in memory in bytes
       size_t                                        footprint;
@@ -2356,29 +2388,45 @@ namespace Legion {
      * \struct IndexAttachLauncher
      * An index attach launcher allows the application to attach
      * many external resources concurrently to different subregions
-     * of a common region tree.
+     * of a common region tree. For more information regarding what
+     * kinds of external resources can be attached please see the
+     * documentation for AttachLauncher.
+     * @see AttachLauncher
+     * @see Runtime
      */
     struct IndexAttachLauncher {
     public:
       IndexAttachLauncher(ExternalResource resource, 
                           LogicalRegion parent,
                           const bool restricted = true);
+      // Declared here to avoid superfluous compiler warnings
+      // Can be remove after deprecated members are removed
+      ~IndexAttachLauncher(void);
     public:
+      inline void initialize_constraints(bool column_major, bool soa,
+                             const std::vector<FieldID> &fields,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      inline void add_external_resource(LogicalRegion handle,
+                              const Realm::ExternalInstanceResource *resource);
+      LEGION_DEPRECATED("Use Realm::ExternalFileResource instead")
       inline void attach_file(LogicalRegion handle,
                               const char *file_name,
                               const std::vector<FieldID> &fields,
                               LegionFileMode mode);
+      LEGION_DEPRECATED("Use Realm::ExternalHDF5Resource instead")
       inline void attach_hdf5(LogicalRegion handle,
                               const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_aos(LogicalRegion handle, 
                              void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_soa(LogicalRegion handle,
                              void *base, bool column_major,
                              const std::vector<FieldID> &fields,
@@ -2386,8 +2434,16 @@ namespace Legion {
                              const std::map<FieldID,size_t> *alignments = NULL);
     public:
       ExternalResource                              resource;
-      std::vector<LogicalRegion>                    handles;
       LogicalRegion                                 parent;
+      std::set<FieldID>                             privilege_fields;
+      std::vector<LogicalRegion>                    handles;
+      // This is the vector external resource objects that are going to 
+      // attached to the vector of logical region handles
+      // These will be cloned each time you perform an attach with this launcher
+      std::vector<const Realm::ExternalInstanceResource*> external_resources;
+    public:
+      LayoutConstraintSet                           constraints;
+    public:
       // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
       // Whether the runtime should check for duplicate resources across 
@@ -2399,18 +2455,22 @@ namespace Legion {
       std::string                                   provenance;
     public:
       // Data for files
+      LEGION_DEPRECATED("mode is deprecated, use external_resources")
       LegionFileMode                                mode;
+      LEGION_DEPRECATED("file_names is deprecated, use external_resources")
       std::vector<const char*>                      file_names;
+      LEGION_DEPRECATED("file_fields is deprecated, use external_resources")
       std::vector<FieldID>                          file_fields; // normal files
+      // This data structure must still be filled in for using HDF5 files
       std::map<FieldID,
         std::vector</*file name*/const char*> >     field_files; // hdf5 files
     public:
       // Data for external instances
-      LayoutConstraintSet                           constraints;
-      std::vector<PointerConstraint>                pointers; 
-      std::set<FieldID>                             privilege_fields;
+      LEGION_DEPRECATED("pointers is deprecated, use external_resources")
+      std::vector<PointerConstraint>                pointers;  
     public:
       // Optional footprint of the instance in memory in bytes
+      // You only need to fill this in when using depcreated fields
       std::vector<size_t>                           footprint;
     public:
       // Inform the runtime about any static dependences
@@ -2593,7 +2653,7 @@ namespace Legion {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
-      PhysicalRegion(PhysicalRegion &&rhs);
+      PhysicalRegion(PhysicalRegion &&rhs) noexcept;
       ~PhysicalRegion(void);
     private:
       Internal::PhysicalRegionImpl *impl;
@@ -2602,7 +2662,7 @@ namespace Legion {
       explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
-      PhysicalRegion& operator=(PhysicalRegion &&rhs);
+      PhysicalRegion& operator=(PhysicalRegion &&rhs) noexcept;
       inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const PhysicalRegion &reg) const
         { return (impl == reg.impl); }
@@ -2767,7 +2827,7 @@ namespace Legion {
     public:
       ExternalResources(void);
       ExternalResources(const ExternalResources &rhs);
-      ExternalResources(ExternalResources &&rhs);
+      ExternalResources(ExternalResources &&rhs) noexcept;
       ~ExternalResources(void);
     private:
       Internal::ExternalResourcesImpl *impl;
@@ -2776,7 +2836,7 @@ namespace Legion {
       explicit ExternalResources(Internal::ExternalResourcesImpl *impl);
     public:
       ExternalResources& operator=(const ExternalResources &rhs);
-      ExternalResources& operator=(ExternalResources &&rhs);
+      ExternalResources& operator=(ExternalResources &&rhs) noexcept;
       inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const ExternalResources &reg) const
         { return (impl == reg.impl); }
@@ -3622,7 +3682,7 @@ namespace Legion {
     public:
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
-      PieceIterator(PieceIterator &&rhs);
+      PieceIterator(PieceIterator &&rhs) noexcept;
       PieceIterator(const PhysicalRegion &region, FieldID fid,
                     bool privilege_only = true,
                     bool silence_warnings = false,
@@ -3630,7 +3690,7 @@ namespace Legion {
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
-      PieceIterator& operator=(PieceIterator &&rhs);
+      PieceIterator& operator=(PieceIterator &&rhs) noexcept;
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -3665,14 +3725,14 @@ namespace Legion {
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
-      PieceIteratorT(PieceIteratorT &&rhs);
+      PieceIteratorT(PieceIteratorT &&rhs) noexcept;
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
                      bool privilege_only,
                      bool silence_warnings = false,
                      const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
-      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs);
+      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs) noexcept;
     public:
       inline bool step(void);
       inline const Rect<DIM,COORD_T>& operator*(void) const;
@@ -10546,4 +10606,3 @@ namespace Legion {
 #endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 // EOF
-

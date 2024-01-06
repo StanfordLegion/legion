@@ -27,12 +27,25 @@
 
 #include "realm/ucx/ucp_internal.h"
 #include "realm/ucx/ucp_utils.h"
+#include "realm/ucx/ucp_dyn_load.h"
+
+#include <ucp/api/ucp.h>
+#include <ucp/api/ucp_version.h>
+#define REALM_UCP_API_VERSION_MIN_STR "1.14.0"
+#define REALM_UCP_API_VERSION_MIN UCP_VERSION(1, 14)
+#if UCP_API_VERSION < REALM_UCP_API_VERSION_MIN
+#error The UCX network module requires UCX 1.14.0 or above
+#endif
 
 #include <cstring>
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+
+#ifdef REALM_UCX_DYNAMIC_LOAD
+#include <dlfcn.h>
+#endif
 
 namespace Realm {
 
@@ -55,6 +68,12 @@ namespace UCP {
   static constexpr size_t   ZCOPY_THRESH_HOST = (2 << 10); // 2K
 #ifdef REALM_USE_CUDA
   static constexpr size_t   ZCOPY_THRESH_DEV  = 0;
+#endif
+
+#ifdef REALM_UCX_DYNAMIC_LOAD
+  #define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
+  UCP_APIS(DEFINE_FNPTR);
+  #undef DEFINE_FNPTR
 #endif
 
   namespace ThreadLocal {
@@ -381,7 +400,7 @@ namespace UCP {
       WorkerInfo wi;
       wi.worker    = get_rx_worker(&context, priority);
       wi.dev_index = -1; // implying host context by default
-      status = ucp_worker_get_address(wi.worker->get_ucp_worker(),
+      status = UCP_FNPTR(ucp_worker_get_address)(wi.worker->get_ucp_worker(),
           &wi.addr, &wi.addrlen);
       CHKERR_JUMP(status != UCS_OK, "ucp_worker_get_address failed", log_ucp, err);
 #ifdef REALM_USE_CUDA
@@ -464,7 +483,8 @@ namespace UCP {
 
 out:
     for (auto &wi : self_rx_workers_info) {
-      ucp_worker_release_address(wi.worker->get_ucp_worker(), wi.addr);
+      UCP_FNPTR(ucp_worker_release_address)(
+          wi.worker->get_ucp_worker(), wi.addr);
     }
     return ret;
 
@@ -792,12 +812,6 @@ err:
     Network::all_peers.add_range(0, boot_handle.pg_size - 1);
     Network::all_peers.remove(boot_handle.pg_rank);
 
-    for(int i = 0; i < boot_handle.num_shared_ranks; i++) {
-      if (boot_handle.shared_ranks[i] != boot_handle.pg_rank) {
-        Network::shared_peers.add(boot_handle.shared_ranks[i]);
-      }
-    }
-
     initialized_boot = true;
     log_ucp.info() << "bootstrapped UCP network module";
 
@@ -807,9 +821,56 @@ err:
     return false;
   }
 
+#ifdef REALM_UCX_DYNAMIC_LOAD
+  bool UCPInternal::resolve_ucp_api_fnptrs()
+  {
+    log_ucp.info() << "dynamically loading libucp.so.0";
+
+    libucp = dlopen("libucp.so.0", RTLD_NOW);
+    if(!libucp) {
+      log_ucp.warning() << "could not open libucp.so.0: " << strerror(errno);
+      return false;
+    }
+
+#define STRINGIFY(s) #s
+#define UCP_GET_FNPTR(name)                                     \
+  do {                                                          \
+    void *sym = dlsym(libucp, STRINGIFY(name));                 \
+    if (!sym) {                                                 \
+      log_ucp.warning() << "symbol '" STRINGIFY(name)           \
+      "' missing from libucp.so!";                              \
+      return false;                                             \
+    } else {                                                    \
+      name##_fnptr = reinterpret_cast<decltype(&name)>(sym);    \
+    }                                                           \
+  } while (0)
+
+    UCP_APIS(UCP_GET_FNPTR);
+
+#undef UCP_GET_FNPTR
+#undef STRINGIFY
+
+    return true;
+  }
+#endif
+
   bool UCPInternal::init(const Config& _config)
   {
     config = _config;
+
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    if (!resolve_ucp_api_fnptrs()) {
+      goto err;
+    }
+#endif
+
+    unsigned major, minor, rel;
+    UCP_FNPTR(ucp_get_version)(&major, &minor, &rel);
+    if (UCP_VERSION(major, minor) < REALM_UCP_API_VERSION_MIN) {
+      log_ucp.warning() << "The UCX network module requires UCX "
+        REALM_UCP_API_VERSION_MIN_STR " or above";
+      goto err_version;
+    }
 
     // RealmCallbackArgs mpool
     rcba_mp = new MPool("rcba_mp", config.mpool_leakcheck,
@@ -817,6 +878,13 @@ err:
 
     return true;
     // most of initialization happens after attach()
+
+err_version:
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    dlclose(libucp);
+err:
+#endif
+    return false;
   }
 
   void UCPInternal::finalize()
@@ -835,6 +903,13 @@ err:
 
       initialized_ucp = false;
     }
+
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    // finalize is called, so init must have been successfull,
+    // so libucp cannot be nullptr.
+    assert(libucp);
+    dlclose(libucp);
+#endif
 
     int rc = bootstrap_finalize(&boot_handle);
     if (rc != 0) {
@@ -1108,7 +1183,7 @@ err:
 
       memcpy(req->am_rndv_recv.header, header, header_size);
 
-      status_ptr = ucp_am_recv_data_nbx(worker->get_ucp_worker(),
+      status_ptr = UCP_FNPTR(ucp_am_recv_data_nbx)(worker->get_ucp_worker(),
           data_desc, req->am_rndv_recv.payload,
           req->am_rndv_recv.payload_size, &param);
 
@@ -1225,7 +1300,7 @@ err:
     Cuda::AutoGPUContext agc(context->gpu);
 #endif
 
-    status = ucp_rkey_pack(context->get_ucp_context(),
+    status = UCP_FNPTR(ucp_rkey_pack)(context->get_ucp_context(),
         mem_h, &rkey_buf, &rkey_buf_size);
     CHKERR_JUMP(status != UCS_OK, "ucp_rkey_pack failed", log_ucp, err);
 
@@ -1248,12 +1323,12 @@ err:
     segment->add_rdma_info(module, rdma_info,
         sizeof(*rdma_info) + rkey_buf_size);
     free(rdma_info);
-    ucp_rkey_buffer_release(rkey_buf);
+    UCP_FNPTR(ucp_rkey_buffer_release)(rkey_buf);
 
     return true;
 
 err_rkey_rel:
-    ucp_rkey_buffer_release(rkey_buf);
+    UCP_FNPTR(ucp_rkey_buffer_release)(rkey_buf);
 err:
     return false;
   }
@@ -1305,7 +1380,7 @@ err:
 #endif
     if (!ok) {
       log_ucp.fatal() << "failed to initialized ucp contexts";
-      return;
+      abort();
     }
 
     // Try to register allocation requests first
@@ -1389,7 +1464,7 @@ err:
     // Set address and add RDMA info for allocated segments
     context = get_context_host();
     mem_attr.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS;
-    status = ucp_mem_query(alloc_mem_h, &mem_attr);
+    status = UCP_FNPTR(ucp_mem_query)(alloc_mem_h, &mem_attr);
     assert(status == UCS_OK);
     alloc_base = reinterpret_cast<uintptr_t>(mem_attr.address);
     offset     = 0;
@@ -1452,6 +1527,14 @@ err:
     log_ucp.info() << "unmapped attached segments";
   }
 
+  void UCPInternal::get_shared_peers(Realm::NodeSet &shared_peers)
+  {
+    for(int i = 0; i < boot_handle.num_shared_ranks; i++) {
+      if(boot_handle.shared_ranks[i] != boot_handle.pg_rank) {
+        shared_peers.add(boot_handle.shared_ranks[i]);
+      }
+    }
+  }
   void UCPInternal::barrier()
   {
     int rc;
@@ -1484,6 +1567,38 @@ err:
     rc = boot_handle.gather(val_in, vals_out, bytes, root, &boot_handle);
     if (rc != 0) {
       log_ucp.error() << "UCP gather failed";
+    }
+  }
+
+  void UCPInternal::allgatherv(const char *val_in, size_t bytes,
+                               std::vector<char> &vals_out, std::vector<size_t> &lengths)
+  {
+    int rc = 0;
+    lengths.resize(Network::max_node_id + 1);
+    // Retrieve the sizes of the buffers
+    rc = boot_handle.allgather(&bytes, lengths.data(), sizeof(bytes), &boot_handle);
+    if(rc != 0) {
+      log_ucp.error() << "UCP all gather failed";
+    }
+    // Set up the receive buffer and describe the final buffer layout
+    size_t total = lengths[0];
+    std::vector<int> offsets(Network::max_node_id + 1);
+    std::vector<int> sizes(Network::max_node_id + 1);
+
+    offsets[0] = 0;
+    sizes[0] = lengths[0];
+    for(size_t i = 1; i < offsets.size(); i++) {
+      sizes[i] = static_cast<int>(lengths[i]);
+      offsets[i] = offsets[i - 1] + static_cast<int>(lengths[i]);
+      total += lengths[i];
+    }
+    vals_out.resize(total);
+
+    // Perform the allgatherv!
+    rc = boot_handle.allgatherv(val_in, vals_out.data(), sizes.data(), offsets.data(),
+                                &boot_handle);
+    if(rc != 0) {
+      log_ucp.error() << "UCP allgatherv failed";
     }
   }
 
@@ -2152,7 +2267,7 @@ err:
       log_ucp.error() << "failed to complete put for am";
     }
 
-    ucp_rkey_destroy(req->ucp.rma.rkey);
+    UCP_FNPTR(ucp_rkey_destroy)(req->ucp.rma.rkey);
     free(req->rma.rdma_info_buf);
     internal->request_release(req);
   }
@@ -2196,7 +2311,8 @@ err:
     req_put = internal->request_get(worker);
     CHKERR_JUMP(req_put == nullptr, "failed to get request", log_ucp, err_rel_req);
 
-    status = ucp_ep_rkey_unpack(ep, dest_payload_rdma_info->rkey, &rkey);
+    status = UCP_FNPTR(ucp_ep_rkey_unpack)(ep,
+        dest_payload_rdma_info->rkey, &rkey);
     CHKERR_JUMP(status != UCS_OK,
         "ucp_ep_rkey_unpack failed", log_ucp, err_rel_req_put);
 
@@ -2226,7 +2342,7 @@ err:
     return true;
 
 err_dest_rkey:
-    ucp_rkey_destroy(rkey);
+    UCP_FNPTR(ucp_rkey_destroy)(rkey);
 err_rel_req_put:
     internal->request_release(req_put);
 err_rel_req:
@@ -2444,9 +2560,9 @@ err:
     // rkey unpack requires an ep. With multiple ucp contexts, the ep
     // is not known until we have both send and recv buffer info in
     // addition to node id. So, unpacking here.
-    //ucs_status_t status = ucp_ep_rkey_unpack(ep, rdma_info->rkey, &rkey);
+    //ucs_status_t status = UCP_FNPTR(ucp_ep_rkey_unpack)(ep, rdma_info->rkey, &rkey);
     //assert(status == UCS_OK);
-    //ucp_rkey_destroy(rkey);
+    //UCP_FNPTR(ucp_rkey_destroy)(rkey);
     assert(0);
   }
 

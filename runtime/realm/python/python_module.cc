@@ -16,7 +16,6 @@
 #include "realm/python/python_module.h"
 #include "realm/python/python_internal.h"
 
-#include "realm/numa/numasysif.h"
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/proc_impl.h"
@@ -1052,10 +1051,9 @@ namespace Realm {
       CommandLineParser cp;
 
       cp.add_option_int("-ll:py", cfg_num_python_cpus)
-        .add_option_int("-ll:pynuma", cfg_use_numa)
-        .add_option_int_units("-ll:pystack", cfg_stack_size, 'm')
-        .add_option_stringlist("-ll:pyimport", cfg_import_modules)
-        .add_option_stringlist("-ll:pyinit", cfg_init_scripts);
+          .add_option_int_units("-ll:pystack", cfg_stack_size, 'm')
+          .add_option_stringlist("-ll:pyimport", cfg_import_modules)
+          .add_option_stringlist("-ll:pyinit", cfg_init_scripts);
 #ifdef REALM_USE_OPENMP
         cp.add_option_int("-ll:pyomp", cfg_pyomp_threads);
 #endif
@@ -1102,7 +1100,8 @@ namespace Realm {
       //  disabled
       PythonModule *m = new PythonModule;
 
-      PythonModuleConfig *config = dynamic_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
+      PythonModuleConfig *config =
+          checked_cast<PythonModuleConfig *>(runtime->get_module_config("python"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
@@ -1129,37 +1128,6 @@ namespace Realm {
       }
 #endif
 
-      // get number/sizes of NUMA nodes -
-      //   disable (with a warning) numa binding if support not found
-      if(m->config->cfg_use_numa) {
-        std::map<int, NumaNodeCpuInfo> cpuinfo;
-        if(numasysif_numa_available() &&
-           numasysif_get_cpu_info(cpuinfo) &&
-           !cpuinfo.empty()) {
-          // filter out any numa domains with insufficient core counts
-          int cores_needed = m->config->cfg_num_python_cpus;
-          for(std::map<int, NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
-              it != cpuinfo.end();
-              ++it) {
-            const NumaNodeCpuInfo& ci = it->second;
-            if(ci.cores_available >= cores_needed) {
-              m->active_numa_domains.insert(ci.node_id);
-            } else {
-              log_py.warning() << "not enough cores in NUMA domain " << ci.node_id << " (" << ci.cores_available << " < " << cores_needed << ")";
-            }
-          }
-        } else {
-          log_py.warning() << "numa support not found (or not working)";
-          m->config->cfg_use_numa = false;
-        }
-      }
-
-      // if we don't end up with any active numa domains,
-      //  use NUMA_DOMAIN_DONTCARE
-      // actually, use the value (-1) since it seems to cause link errors!?
-      if(m->active_numa_domains.empty())
-        m->active_numa_domains.insert(-1 /*CoreReservationParameters::NUMA_DOMAIN_DONTCARE*/);
-
       return m;
     }
 
@@ -1177,50 +1145,44 @@ namespace Realm {
     {
       Module::create_processors(runtime);
 
-      for(std::set<int>::const_iterator it = active_numa_domains.begin();
-          it != active_numa_domains.end();
-          ++it) {
-        int cpu_node = *it;
-        for(int i = 0; i < config->cfg_num_python_cpus; i++) {
-          Processor p = runtime->next_local_processor_id();
-          ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
-                                                       runtime->core_reservation_set(),
-                                                       config->cfg_stack_size,
+      for(int i = 0; i < config->cfg_num_python_cpus; i++) {
+        Processor proc = runtime->next_local_processor_id();
+        ProcessorImpl *proc_impl = new LocalPythonProcessor(
+            proc, -1 /*numa node*/, runtime->core_reservation_set(),
+            config->cfg_stack_size,
 #ifdef REALM_USE_OPENMP
-						       config->cfg_pyomp_threads,
+            config->cfg_pyomp_threads,
 #endif
-						       config->cfg_import_modules,
-						       config->cfg_init_scripts);
-          runtime->add_processor(pi);
+            config->cfg_import_modules, config->cfg_init_scripts);
+        runtime->add_processor(proc_impl);
 
-          // create affinities between this processor and system, numa, reg, and zc memories
-          // if the memory is one we created, use the kernel-reported distance
-          // to adjust the answer
-          std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
-          for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
-              it2 != local_mems.end();
-              ++it2) {
-            Memory::Kind kind = (*it2)->get_kind();
-            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::SOCKET_MEM) &&
-               (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
-              continue;
+        // create affinities between this processor and system, numa, reg, and zc memories
+        // if the memory is one we created, use the kernel-reported distance
+        // to adjust the answer
+        std::vector<MemoryImpl *> &local_mems =
+            runtime->nodes[Network::my_node_id].memories;
+        for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
+            it2 != local_mems.end(); ++it2) {
+          Memory::Kind kind = (*it2)->get_kind();
+          if((kind != Memory::SYSTEM_MEM) && (kind != Memory::SOCKET_MEM) &&
+             (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
+            continue;
 
-            Machine::ProcessorMemoryAffinity pma;
-            pma.p = p;
-            pma.m = (*it2)->me;
+          Machine::ProcessorMemoryAffinity pma;
+          pma.p = proc;
+          pma.m = (*it2)->me;
 
-            // use the same made-up numbers as in
-            //  runtime_impl.cc
-            if(kind == Memory::SYSTEM_MEM) {
-              pma.bandwidth = 100;  // "large"
-              pma.latency = 5;      // "small"
-            } else {
-              pma.bandwidth = 80;   // "large"
-              pma.latency = 10;     // "small"
-            }
-
-            runtime->add_proc_mem_affinity(pma);
+          // use the same made-up numbers as in
+          //  runtime_impl.cc
+          if(kind == Memory::SYSTEM_MEM) {
+            pma.bandwidth = 100; // "large"
+            pma.latency = 5;     // "small"
+          } else {
+            pma.bandwidth = 80; // "large"
+            pma.latency = 10;   // "small"
           }
+
+          runtime->add_proc_mem_affinity(pma);
         }
       }
     }

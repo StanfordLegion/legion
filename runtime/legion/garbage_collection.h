@@ -82,7 +82,8 @@ namespace Legion {
       DISJOINT_COMPLETE_REF = 31,
       REPLICATION_REF = 32,
       COLLECTIVE_REF = 33,
-      LAST_SOURCE_REF = 34,
+      INDEX_SPACE_VALUE_REF = 34,
+      LAST_SOURCE_REF = 35,
     };
 
     enum ReferenceKind {
@@ -127,6 +128,7 @@ namespace Legion {
       "Disjoint Complete Reference",                \
       "Replication Reference",                      \
       "Collective Reference",                       \
+      "Index Space Value Reference",                \
     }
 
     extern Realm::Logger log_garbage;

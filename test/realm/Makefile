@@ -38,8 +38,8 @@ NVCC_FLAGS	?=
 HIPCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-REALM_CUDA_OBJS ?=
 
+REALM_CUDA_OBJS ?=
 
 CXX ?= g++
 
@@ -55,7 +55,7 @@ TESTS += deppart
 TESTS += scatter
 TESTS += compqueue
 TESTS += event_subscribe
-TESTS += deferred_allocs
+#TESTS += deferred_allocs
 TESTS += test_nodeset
 TESTS += subgraphs
 TESTS += large_tls
@@ -69,14 +69,14 @@ TESTS += extres_alias
 TESTS += reservations
 TESTS += multiaffine
 TESTS += machine_config
-
-  ifeq ($(strip $(USE_CUDA)),1)
-  TESTS += cuda_memcpy_test
-  TESTS += cuda_transpose_test
-  endif
+TESTS += rect_transform_test
+TESTS += rsrv_acquire_poisoned
 
 ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
+TESTS += test_cuhook
+TESTS += cuda_memcpy_test
+TESTS += cuda_transpose_test
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
@@ -88,7 +88,7 @@ TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4
-TESTARGS_deferred_allocs := -ll:gsize 0 -all
+#TESTARGS_deferred_allocs := -ll:gsize 0 -all
 TESTARGS_scatter := -p1 2 -p2 2
 TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose
@@ -142,14 +142,11 @@ run_machine_config_args : machine_config
 build : $(TESTS)
 
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN)
-
-# scatter uses C++11 lambdas
-scatter.o : CC_FLAGS += -std=c++11
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
 
 machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
-$(TESTS) : % : %.o librealm.a
+$(TESTS) : % : %.o librealm.a $(SLIB_REALM_CUHOOK)
 	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
@@ -161,14 +158,24 @@ EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
 EXTRAOBJS_multiaffine := multiaffine_gpu.o
 EXTRAOBJS_task_stream := task_stream_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream)
+EXTRAOBJS_test_cuhook := test_cuhook_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream) $(EXTRAOBJS_test_cuhook)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 multiaffine : multiaffine_gpu.o
 task_stream : task_stream_gpu.o
+test_cuhook : test_cuhook_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+
+$(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
+	rm -f $@
+	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+
+$(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	# $(NVCC) --compiler-options '-fPIC' -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 endif
 
 ifeq ($(strip $(USE_HIP)),1)

@@ -1299,6 +1299,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
+      virtual bool is_sparse() = 0;
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1622,6 +1623,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
+      virtual bool is_sparse();
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1838,6 +1840,34 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
+    };
+
+    class InstanceExpressionCreator
+    {
+    public:
+      InstanceExpressionCreator(TypeTag t, const Domain &dom)
+        :type_tag(t), dom(dom) { }
+
+      virtual void create_operation()
+      {
+        NT_TemplateHelper::demux<InstanceExpressionCreator>(type_tag, this);
+      }
+
+      static RegionTreeForest *forest();
+
+      template<typename N, typename T>
+      static inline void demux(InstanceExpressionCreator *creator)
+      {
+        Rect<N::N, T> rect = creator->dom;
+        creator->result = new InstanceExpression<N::N, T>(&rect, 1,forest());
+      }
+
+      static IndexSpaceOperation *create_with_domain(TypeTag tag,
+                                                     const Domain &dom);
+    public:
+      const TypeTag type_tag;
+      const Domain dom;
+      IndexSpaceOperation *result;
     };
 
     /**
@@ -2256,19 +2286,11 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual size_t get_coordinate_size(bool range) const = 0;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-				   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode,
-                                   ApEvent &ready_event) = 0;
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event) = 0;
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                 const std::vector<FieldID> &field_ids,
+                                 const std::vector<size_t> &field_sizes,
+                                 const std::vector<std::string> &field_files,
+                                 const OrderingConstraint &dimension_order) = 0;
     public:
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper) = 0;
@@ -2341,6 +2363,7 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
+      virtual bool is_sparse();
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -2517,19 +2540,11 @@ namespace Legion {
                                       ApEvent instances_ready);
       virtual size_t get_coordinate_size(bool range) const;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                   const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode, 
-                                   ApEvent &ready_event);
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event);
+                                   const std::vector<std::string> &field_files,
+                                   const OrderingConstraint &dimension_order);
     public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -3612,7 +3627,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceRef create_external_instance(
+      InstanceRef create_external_instance(const std::set<FieldID> &priv_fields,
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
       PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 

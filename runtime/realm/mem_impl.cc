@@ -74,13 +74,12 @@ namespace Realm {
       assert(0);
     }
 
-    /*static*/ const Memory Memory::NO_MEMORY = { 0 };
+    /*static*/ const Memory Memory::NO_MEMORY = {/* zero-initialization */};
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class MemoryImpl
-  //
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class MemoryImpl
+    //
 
     MemoryImpl::MemoryImpl(Memory _me, size_t _size,
 			   MemoryKind _kind, Memory::Kind _lowlevel_kind,
@@ -1285,7 +1284,7 @@ namespace Realm {
 #if defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
       if(SharedMemoryInfo::create(shared_memory, size, nullptr, numa_node))
 #else
-      std::string name = std::to_string(ID(me).id);
+      std::string name = get_shm_name(mem->memory_id);
       if(SharedMemoryInfo::create(shared_memory, size, name.c_str(), numa_node))
 #endif
       {
@@ -1415,8 +1414,8 @@ namespace Realm {
 
   void *LocalCPUMemory::get_direct_ptr(off_t offset, size_t size)
   {
-//    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
-    return (base + offset);
+    //    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
+    return base ? base + offset : reinterpret_cast<void *>(offset);
   }
 
   

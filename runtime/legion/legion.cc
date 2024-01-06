@@ -314,7 +314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -387,7 +387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -474,7 +474,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate::Predicate(Predicate &&p)
+    Predicate::Predicate(Predicate &&p) noexcept
     //--------------------------------------------------------------------------
     {
       const_value = p.const_value;
@@ -520,7 +520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate& Predicate::operator=(Predicate &&rhs)
+    Predicate& Predicate::operator=(Predicate &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2003,6 +2003,19 @@ namespace Legion {
     {
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
     /////////////////////////////////////////////////////////////
     // AttachLauncher
     /////////////////////////////////////////////////////////////
@@ -2012,10 +2025,17 @@ namespace Legion {
                                    LogicalRegion h, LogicalRegion p,
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
-      : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
+      : resource(r), parent(p), handle(h), external_resource(NULL),
+        restricted(restr), mapped(map),
         collective((r == LEGION_EXTERNAL_INSTANCE) ? true : false),
         deduplicate_across_shards(false), file_name(NULL),
         mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AttachLauncher::~AttachLauncher(void)
     //--------------------------------------------------------------------------
     {
     }
@@ -2033,6 +2053,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLauncher::~IndexAttachLauncher(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     /////////////////////////////////////////////////////////////
     // PredicateLauncher
@@ -2333,7 +2369,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Future &&rhs)
+    Future::Future(Future &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2370,7 +2406,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future& Future::operator=(Future &&rhs)
+    Future& Future::operator=(Future &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2547,7 +2583,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(FutureMap &&map)
+    FutureMap::FutureMap(FutureMap &&map) noexcept
       : impl(map.impl)
     //--------------------------------------------------------------------------
     {
@@ -2584,7 +2620,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    FutureMap& FutureMap::operator=(FutureMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2654,7 +2690,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2698,7 +2734,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3194,7 +3230,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources::ExternalResources(ExternalResources &&rhs)
+    ExternalResources::ExternalResources(ExternalResources &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3223,7 +3259,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources& ExternalResources::operator=(ExternalResources &&rhs)
+    ExternalResources& ExternalResources::operator=(
+                                               ExternalResources &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3289,7 +3326,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator::PieceIterator(PieceIterator &&rhs)
+    PieceIterator::PieceIterator(PieceIterator &&rhs) noexcept
       : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
     //--------------------------------------------------------------------------
     {
@@ -3319,7 +3356,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3524,7 +3561,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3565,7 +3602,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -4685,13 +4722,14 @@ namespace Legion {
                                        const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,int>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color, provenance);
     }
@@ -4705,13 +4743,14 @@ namespace Legion {
                                     const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,size_t>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color, provenance);
     }
@@ -6665,6 +6704,19 @@ namespace Legion {
       ctx->progress_unordered_operations();
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
+
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
                                                  const char *file_name,
@@ -6705,6 +6757,16 @@ namespace Legion {
         ctx->remap_region(region, NULL/*no provenance because deprecated*/);
       return region;
     }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
@@ -8219,4 +8281,3 @@ namespace Legion {
 }; // namespace Legion
 
 // EOF
-

@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use legion_prof_viewer::{
     data::{
-        Color32, DataSource, DataSourceInfo, EntryID, EntryInfo, Field, FieldID, FieldSchema, Item,
-        ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile, SlotMetaTileData, SlotTile, SlotTileData,
-        SummaryTile, SummaryTileData, TileID, TileSet, UtilPoint,
+        Color32, DataSource, DataSourceDescription, DataSourceInfo, EntryID, EntryInfo, Field,
+        FieldID, FieldSchema, Item, ItemLink, ItemMeta, ItemUID, Rgba, SlotMetaTile,
+        SlotMetaTileData, SlotTile, SlotTileData, SummaryTile, SummaryTileData, TileID, TileSet,
+        UtilPoint,
     },
     timestamp as ts,
 };
@@ -252,7 +253,9 @@ impl StateDataSource {
             for kind in &mem_kinds {
                 let group = MemGroup(*node, *kind);
 
-                let Some(mems) = mem_groups.get(&group) else { continue; };
+                let Some(mems) = mem_groups.get(&group) else {
+                    continue;
+                };
 
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
@@ -313,7 +316,9 @@ impl StateDataSource {
 
             // Channels
             loop {
-                let Some(chans) = chan_groups.get(node) else { break; };
+                let Some(chans) = chan_groups.get(node) else {
+                    break;
+                };
 
                 let kind_id = node_id.child(kind_index);
 
@@ -337,7 +342,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", src_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    src_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -355,7 +365,12 @@ impl StateDataSource {
                                     kind,
                                     mem.mem_in_node()
                                 )),
-                                Some(format!("n{}{}", dst_node, kind_first_letter)),
+                                Some(format!(
+                                    "n{}{}{}",
+                                    dst_node,
+                                    kind_first_letter,
+                                    mem.mem_in_node()
+                                )),
                             )
                         } else {
                             (None, None)
@@ -366,8 +381,8 @@ impl StateDataSource {
                                 format!("{}-{}", src_short.unwrap(), dst_short.unwrap())
                             }
                             ChanKind::Fill => format!("f {}", dst_short.unwrap()),
-                            ChanKind::Gather => format!("g {}", src_short.unwrap()),
-                            ChanKind::Scatter => format!("s {}", dst_short.unwrap()),
+                            ChanKind::Gather => format!("g {}", dst_short.unwrap()),
+                            ChanKind::Scatter => format!("s {}", src_short.unwrap()),
                             ChanKind::DepPart => "dp".to_owned(),
                         };
 
@@ -376,9 +391,9 @@ impl StateDataSource {
                                 format!("{} to {}", src_name.unwrap(), dst_name.unwrap())
                             }
                             ChanKind::Fill => format!("Fill {}", dst_name.unwrap()),
-                            ChanKind::Gather => format!("Gather to {}", src_name.unwrap()),
+                            ChanKind::Gather => format!("Gather to {}", dst_name.unwrap()),
                             ChanKind::Scatter => {
-                                format!("Scatter from {}", dst_name.unwrap())
+                                format!("Scatter from {}", src_name.unwrap())
                             }
                             ChanKind::DepPart => "Dependent Partitioning".to_owned(),
                         };
@@ -1232,6 +1247,12 @@ impl StateDataSource {
 }
 
 impl DataSource for StateDataSource {
+    fn fetch_description(&self) -> DataSourceDescription {
+        DataSourceDescription {
+            source_locator: self.state.source_locator.clone(),
+        }
+    }
+
     fn fetch_info(&self) -> DataSourceInfo {
         DataSourceInfo {
             entry_info: self.info.clone(),

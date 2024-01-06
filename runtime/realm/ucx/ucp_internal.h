@@ -110,7 +110,7 @@ namespace UCP {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
       int pollers_max{2};
-      int num_priorities{1};
+      int num_priorities{2};
       int prog_boff_max{4}; //progress thread maximum backoff
       int prog_itr_max{16};
       int rdesc_rel_max{16};
@@ -147,9 +147,14 @@ namespace UCP {
     void finalize();
     void attach(std::vector<NetworkSegment *>& segments);
     void detach(std::vector<NetworkSegment *>& segments);
+    void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
     void broadcast(NodeID root, const void *val_in, void *val_out, size_t bytes);
     void gather(NodeID root, const void *val_in, void *vals_out, size_t bytes);
+    void allgather(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                   size_t *lengths);
+    void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                    std::vector<size_t> &lengths);
     size_t sample_messages_received_count();
     bool check_for_quiescence(size_t sampled_receive_count);
     size_t recommended_max_payload(const RemoteAddress *dest_payload_addr,
@@ -206,6 +211,10 @@ namespace UCP {
       std::vector<UCPWorker*> rx_workers;
     };
 
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    bool resolve_ucp_api_fnptrs();
+#endif
+
 #ifdef REALM_USE_CUDA
   bool init_ucp_contexts(const std::unordered_set<Realm::Cuda::GPU*> &gpus);
 #else
@@ -257,6 +266,9 @@ namespace UCP {
     using WorkersMap = std::unordered_map<const UCPContext*, Workers>;
     using AttachMap  = std::unordered_map<const UCPContext*, std::vector<ucp_mem_h>>;
 
+#ifdef REALM_UCX_DYNAMIC_LOAD
+    void                                    *libucp{nullptr};
+#endif
     bool                                    initialized_boot{false};
     bool                                    initialized_ucp{false};
     Config                                  config;

@@ -21,7 +21,7 @@
 #include <vector>
 #include "realm/point.h"
 
-#define CUDA_MAX_FIELD_BYTES 40
+#define CUDA_MAX_FIELD_BYTES 64
 #define CUDA_MAX_BLOCKS_PER_GRID 2048
 
 namespace Realm {

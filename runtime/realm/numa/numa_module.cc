@@ -145,7 +145,8 @@ namespace Realm {
       //  disabled
       NumaModule *m = new NumaModule;
 
-      NumaModuleConfig *config = dynamic_cast<NumaModuleConfig *>(runtime->get_module_config("numa"));
+      NumaModuleConfig *config =
+          checked_cast<NumaModuleConfig *>(runtime->get_module_config("numa"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());

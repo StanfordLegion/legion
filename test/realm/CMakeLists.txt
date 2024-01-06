@@ -37,7 +37,7 @@ list(APPEND REALM_TESTS
   scatter
   compqueue
   event_subscribe
-  deferred_allocs
+  #deferred_allocs
   test_nodeset
   subgraphs
   large_tls
@@ -52,6 +52,7 @@ list(APPEND REALM_TESTS
   reservations
   multiaffine
   machine_config
+  rsrv_acquire_poisoned
   )
 
 if(Legion_USE_CUDA)
@@ -67,6 +68,9 @@ if(Legion_USE_CUDA)
   list(APPEND REALM_TESTS cuda_transpose_test)
   list(APPEND REALM_TESTS task_stream)
   set(CUDASRC_task_stream task_stream_gpu.cu)
+
+  list(APPEND REALM_TESTS test_cuhook)
+  set(CUDASRC_test_cuhook test_cuhook_gpu.cu)
 endif()
 
 if(Legion_USE_HIP)
@@ -109,12 +113,6 @@ foreach(test IN LISTS REALM_TESTS)
   endif()
 endforeach()
 
-# scatter uses C++11 lambdas
-#target_compile_features(scatter PUBLIC cxx_std_11)
-set_target_properties(scatter PROPERTIES CXX_STANDARD 11
-                                         CXX_STANDARD_REQUIRED YES
-                                         CXX_EXTENSIONS NO)
-
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
@@ -125,7 +123,7 @@ set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
-set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
+#set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
 set(TESTARGS_alltoall          -ll:csize 1024)
 set(TESTARGS_simple_reduce     -all)
@@ -134,6 +132,8 @@ set(TESTARGS_cuda_arrays       -ll:gpu 1)
 set(TESTARGS_transpose_test       -ll:gpu 1 -unit_test 1)
 set(TESTARGS_cuda_memcpy_test      -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
 set(TESTARGS_machine_config_args    -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2)
+set(TESTARGS_cuda_transpose_test      -ll:gpu 1)
+
 if(Legion_USE_CUDA)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
 endif()

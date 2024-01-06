@@ -190,6 +190,7 @@ endif()
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h
+    realm/ucx/ucp_dyn_load.h
     realm/ucx/ucp_module.h
     realm/ucx/ucp_module.cc
     realm/ucx/ucp_internal.h
@@ -354,7 +355,7 @@ if(Legion_USE_Python)
   # to BUILD_RPATH, otherwise build/lib/librealm.so's dlopen will not find it.
   # We're assuming that libpython.so will be found in the same dir as librealm.so
   # after installation, so no need to update INSTALL_RPATH.
-  get_filename_component(PYTHON_LIB_DIR "${PYTHON_LIBRARIES}" DIRECTORY)
+  get_filename_component(PYTHON_LIB_DIR "${Python3_LIBRARIES}" DIRECTORY)
   set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "${PYTHON_LIB_DIR}")
 endif ()
 
@@ -500,7 +501,10 @@ if(REALM_USE_MPI)
 endif()
 
 if(REALM_USE_UCX)
-  target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  target_include_directories(RealmRuntime PRIVATE ${UCX_INCLUDE_DIRS})
+  if(NOT REALM_UCX_DYNAMIC_LOAD)
+    target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  endif()
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)
@@ -563,6 +567,21 @@ if(Legion_USE_CUDA)
 
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
+
+  # build cuda hook library
+  add_library(realm_cuhook SHARED
+    realm/cuda/cuda_hook.cc)
+  set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  endif()
+  target_include_directories(realm_cuhook PRIVATE
+                            ${CMAKE_CURRENT_SOURCE_DIR}
+                            ${PROJECT_BINARY_DIR}/runtime)
+  target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
+  add_dependencies(RealmRuntime realm_cuhook)
+  install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
 if(Legion_USE_HIP)
@@ -756,6 +775,26 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(RealmStatic PRIVATE rt)
+endif()
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
+target_include_directories(RealmStatic
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime
+  )
+
 # Mapper objects
 list(APPEND MAPPER_SRC
   mappers/default_mapper.h     mappers/default_mapper.cc
@@ -779,6 +818,7 @@ list(APPEND LEGION_SRC
   legion/bitmask.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
+  legion/index_space_value.h              legion/index_space_value.cc
   legion/interval_tree.h
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc

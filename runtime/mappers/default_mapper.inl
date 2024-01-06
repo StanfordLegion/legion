@@ -190,12 +190,13 @@ namespace Legion {
           FieldConstraint(missing_fields,
                           false/*contig*/, false/*inorder*/));
       instances.resize(instances.size() + 1);
+      size_t footprint = 0;
       if (!default_make_instance(ctx, target_memory, 
-            creation_constraints, instances.back(), 
-            COPY_MAPPING, force_new_instances, true/*meets*/, req))
+            creation_constraints, instances.back(), COPY_MAPPING,
+            force_new_instances, true/*meets*/, req, &footprint))
       {
         // If we failed to make it that is bad
-        fprintf(stderr,"Default mapper failed allocation for "
+        fprintf(stderr,"Default mapper failed allocation of %zd bytes for "
                        "%s region requirement %d of explicit "
                        "region-to-region copy operation in task %s "
                        "(ID %lld) in memory " IDFMT " for processor "
@@ -206,7 +207,7 @@ namespace Legion {
                        "choices: ask Realm to allocate more memory, "
                        "write a custom mapper to better manage working "
                        "sets, or find a bigger machine. Good luck!",
-                       IS_SRC ? "source" : "destination", idx, 
+                       footprint, IS_SRC ? "source" : "destination", idx,
                        copy.parent_task->get_task_name(),
                        copy.parent_task->get_unique_id(),
 		       target_memory.id,

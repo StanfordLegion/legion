@@ -334,8 +334,6 @@ namespace Realm {
                   const void *src = reinterpret_cast<const void *>(in_base + in_offset);
                   void *dst = reinterpret_cast<void *>(out_base + out_offset);
 
-                  CHECK_HIP( hipMemcpy2DAsync(dst, out_lstride, src, in_lstride, contig_bytes, lines, copy_type, stream->get_stream()) );
-
                   log_gpudma.info() << "gpu memcpy 2d: dst="
                                     << std::hex << (out_base + out_offset) << std::dec
                                     << "+" << out_lstride << " src="
@@ -344,6 +342,10 @@ namespace Realm {
                                     << " bytes=" << bytes << " lines=" << lines
                                     << " stream=" << stream
                                     << " kind=" << memcpy_kind;
+
+                  CHECK_HIP(hipMemcpy2DAsync(dst, out_lstride, src, in_lstride,
+                                             contig_bytes, lines, copy_type,
+                                             stream->get_stream()));
 
                   in_alc.advance(id, lines * iscale);
                   out_alc.advance(od, lines * oscale);

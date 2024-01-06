@@ -392,7 +392,7 @@ namespace Legion {
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFERRED_LAUNCH_TASK_ID,
-      LG_MISSPECULATE_TASK_ID,
+      LG_MISPREDICATION_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_ORDER_CONCURRENT_LAUNCH_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
@@ -443,6 +443,7 @@ namespace Legion {
       LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
+      LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
@@ -510,7 +511,7 @@ namespace Legion {
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
         "Deferred Task Launch",                                   \
-        "Handle Mapping Misspeculation",                          \
+        "Handle Mapping Mispredication",                          \
         "Defer Trigger Task Complete",                            \
         "Order Concurrent Launch",                                \
         "Defer Materialized View Registration",                   \
@@ -561,6 +562,7 @@ namespace Legion {
         "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
+        "Defer Delete Future Instance",                           \
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
@@ -2337,7 +2339,7 @@ namespace Legion {
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 
-          const Realm::ReductionOpUntyped *> ReductionOpTable;
+                   Realm::ReductionOpUntyped *> ReductionOpTable;
   typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
   typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, 
                                   size_t&, const void*);

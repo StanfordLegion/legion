@@ -139,6 +139,8 @@ cache: &global_cache
 
 .openmp: &openmp
   USE_OPENMP: "1"
+.openmp_system: &openmp_system
+  USE_OPENMP_SYSTEM_RUNTIME: "1"
 .python3: &python3
   USE_PYTHON: "1"
   # FIXME: It would be nice to find a better way to do this,
@@ -207,6 +209,8 @@ cache: &global_cache
   UCX_BRANCH: "v1.14.1"
   # mpi_interop example requires MPI to build correctly
   USE_MPI: "1"
+.ucx_dynamic: &ucx_dynamic
+  EXTRA_CMAKE_ARGS: "-DLegion_UCX_DYNAMIC_LOAD=ON"
 .cmake: &cmake
   USE_CMAKE: "1"
 .kokkos: &kokkos
@@ -246,7 +250,9 @@ cache: &global_cache
 .external1: &external1
   TEST_PY_ARGS: "--test=external1"
 .external2: &external2
-  TEST_PY_ARGS: "--test=external2 --test=private"
+  TEST_PY_ARGS: "--test=external2"
+.private: &private
+  TEST_PY_ARGS: "--test=private"
 
 .tsan: &tsan
   SANITIZER_TYPE: "TSAN"
@@ -315,12 +321,16 @@ before_script:
         if [[ "$EMBED_GASNET" -eq 1 ]]; then
           if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
             # clone gasnet, but make it read only since we want an embedded build
-            git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            # git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+            mv gasnet-master gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
           fi
         else
-          git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          # git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+          mv gasnet-master gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
             export GASNET_ROOT="$PWD/gasnet/debug"
@@ -442,17 +452,6 @@ before_script:
       fi
 
     fi
-  - |
-    if [[ "$TEST_JUPYTER" -eq 1 ]]; then
-      # IPython is a transitive dependency here, pin for stability
-      pip3 install ipython==8.12.1 notebook==6.4.10
-    fi
-  - |
-    if [[ "$USE_PROF" -eq 1 ]]; then
-      wget https://bootstrap.pypa.io/get-pip.py
-      python3 get-pip.py
-      pip3 install mypy==0.971
-    fi
 
 
 ###
@@ -498,19 +497,25 @@ before_script:
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
+  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 .p100_cuda117: &p100_cuda117
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.7"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.7"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
+  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 .p100_cuda121: &p100_cuda121
   <<: *p100_base
   CUDA: "/usr/local/cuda-12.1"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-12.1"
+  CUDA_TOOLKIT_ROOT: "$CUDA"
+  CUDA_HOME: "$CUDA"
+  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 ###
@@ -519,16 +524,16 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:230511
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:231213
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:230511
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:231213
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:230511
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:231213
 .image_icc: &image_icc
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:230525
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:231213
 .image_msvc169: &image_msvc169
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc
 
@@ -744,6 +749,10 @@ gcc9_cxx11_debug_openmp_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *regent, *libdw]
+gcc9_cxx11_debug_openmp_system_regent:
+  <<: [*linux_compute, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *openmp_system, *regent, *libdw, *short]
 #   * Python
 gcc9_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
@@ -861,10 +870,10 @@ gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
  variables:
    <<: [*gcc9, *terra12, *release, *cxx11_normal, *ucx, *legion, *libdw]
-gcc9_cxx11_debug_ucx_cmake_legion:
+gcc9_cxx11_debug_ucx_dynamic_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *ucx_dynamic, *cmake, *legion, *ctest, *short, *libdw]
 gcc9_cxx11_debug_ucx_regent:
  <<: [*linux_compute, *image_2004, *tests]
  variables:
@@ -955,10 +964,14 @@ gcc9_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short, *libdw]
-gcc9_cxx11_debug_maxdim4_external2:
+gcc9_cxx17_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
+gcc9_cxx11_debug_private:
+  <<: [*linux_compute, *image_2004, *external_tests]
+  variables:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *short, *libdw]
 
 # Linux with Clang 12
 # * Basic configurations
@@ -1133,10 +1146,14 @@ clang12_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
     <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *libdw]
-clang12_cxx11_debug_maxdim4_external2:
+clang12_cxx12_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *libdw]
+clang12_cxx11_debug_private:
+  <<: [*linux_compute, *image_2004, *external_tests]
+  variables:
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *libdw]
 
 # macOS with Clang
 macos_clang_cxx11_debug_legion:
@@ -1299,6 +1316,10 @@ p100_cuda121_clang12_cxx14_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *cmake, *ctest, *regent, *shared]
+p100_cuda121_gcc9_cxx17_debug_maxdim4_external2:
+  <<: [*p100, *external_tests]
+  variables:
+    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *p100_cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
 p100_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
@@ -1381,18 +1402,18 @@ msvc169_realm:
     <<: [*short]
 
 # sanitizer tests (Realm only):
-gcc9_tsan_realm:
-  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+gcc12_tsan_realm:
+  <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc9, *cxx11_normal, *tsan, *short, *libdw]
-gcc9_ubsan_realm:
-  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+    <<: [*gcc12, *cxx11_normal, *tsan, *short, *libdw]
+gcc12_ubsan_realm:
+  <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc9, *cxx11_normal, *ubsan, *short, *libdw]
-gcc9_asan_realm:
-  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+    <<: [*gcc12, *cxx11_normal, *ubsan, *short, *libdw]
+gcc12_asan_realm:
+  <<: [*linux, *image_2204, *realm_sanitizer_tests]
   variables:
-    <<: [*gcc9, *cxx11_normal, *asan, *short, *libdw]
+    <<: [*gcc12, *cxx11_normal, *asan, *short, *libdw]
 clang_format_realm:
   rules:
     # Always during a merge request update
@@ -1402,4 +1423,4 @@ clang_format_realm:
     - when: never
   <<: [*linux, *image_2204, *realm_clang_format]
   variables:
-    <<: [*gcc9, *cxx11_normal, *short]
+    <<: [*gcc12, *cxx11_normal, *short]

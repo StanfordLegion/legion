@@ -831,7 +831,6 @@ namespace Legion {
     public:
       const DistributedID context_did;
       const std::vector<DistributedID> instances;
-    protected:
       const std::vector<IndividualView*> local_views;
     protected:
       std::map<PhysicalManager*,IndividualView*> remote_instances;

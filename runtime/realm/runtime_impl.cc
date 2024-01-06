@@ -987,7 +987,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   {
     CoreModule *m = new CoreModule;
 
-    CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
+    CoreModuleConfig *config =
+        checked_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
     assert(config != nullptr);
     assert(config->finish_configured);
     assert(m->name == config->get_name());
@@ -1291,13 +1292,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         local_argv = dummy_cmdline_args;
       }
 
-      module_registrar.create_network_modules(network_modules,
-					      &local_argc, &local_argv);
-
-      for (NodeSetIterator it = Network::shared_peers.begin(); it != Network::shared_peers.end(); ++it) {
-        log_runtime.debug() << Network::my_node_id << " is shareable with " << *it;
-      }
-      
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
 
@@ -1359,6 +1353,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  }
 	}
       }
+
+      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
 
       if(argc) *argc = local_argc;
       if(argv) *argv = const_cast<char **>(local_argv);
@@ -1443,35 +1439,53 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       return ok;
     }
 
-    template <typename T>
-    static int fragmented_announce(const NodeSet& targets,
-                                   NetworkModule *net,
-                                   Serialization::DynamicBufferSerializer& dbs,
-                                   size_t max_frag_size,
-                                   T thing)
+    template <typename T, typename Elem>
+    static bool serialize_announce(T &serializer, std::vector<Elem> &elements,
+                                   NetworkModule *net)
     {
-      size_t prev_size = dbs.bytes_used();
-      bool ok = serialize_announce(dbs, thing, net);
-      assert(ok);
+      // TODO: rather than have each element push a tag, we can instead push a tag and
+      // size once here, compacting the announcement data
+      bool ok = true;
+      for(const Elem &element : elements) {
+        ok = serialize_announce(serializer, element, net);
+        if(!ok) {
+          break;
+        }
+      }
+      return ok;
+    }
 
-      size_t size = dbs.bytes_used();
-      if(size > max_frag_size) {
-        // send the data that we had before this object
-        assert(prev_size > 0);
-        ActiveMessage<NodeAnnounceMessage> amsg(targets, prev_size);
-        amsg->num_fragments = 0; // count not known yet
-        amsg.add_payload(dbs.get_buffer(), prev_size); // copy now
-        amsg.commit();
-        dbs.reset();
-        // re-serialize this object
-        bool ok = serialize_announce(dbs, thing, net);
-        assert(ok);
-#ifdef DEBUG_REALM
-        assert(dbs.bytes_used() <= max_frag_size);
-#endif
-        return 1;
-      } else
-        return 0;
+    template <typename T>
+    static bool serialize_announce(T &serializer, Node *node, NetworkModule *net)
+    {
+      bool ok = true;
+      std::vector<Machine::ProcessorMemoryAffinity> pmas;
+      ok = serialize_announce(serializer, node->processors, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->memories, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->memories, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->ib_memories, net);
+      if(!ok) {
+        return ok;
+      }
+      for(ProcessorImpl *proc : node->processors) {
+        get_machine()->get_proc_mem_affinity(pmas, proc->me);
+        ok = serialize_announce(serializer, pmas, net);
+        if(!ok) {
+          return ok;
+        }
+      }
+      ok = serialize_announce(serializer, node->dma_channels, net);
+
+      return ok;
     }
 
     /// Internal auxilary class to handle active messages for sharing CPU memory objects
@@ -1706,7 +1720,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       // load the CoreModuleConfig
-      CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(get_module_config("core"));
+      CoreModuleConfig *config =
+          checked_cast<CoreModuleConfig *>(get_module_config("core"));
       assert(config != nullptr);
 
       core_map = CoreMap::discover_core_map(config->hyperthread_sharing);
@@ -1965,10 +1980,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
       // network-specific memories are created after attachment
-      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
-	  it != network_modules.end();
-	  it++)
-	(*it)->create_memories(this);
+      for(NetworkModule *module : network_modules) {
+        module->get_shared_peers(Network::shared_peers);
+        module->create_memories(this);
+      }
+      for(NodeID node_id : Network::shared_peers) {
+        log_runtime.debug() << Network::my_node_id << " is shareable with " << node_id;
+      }
 
       LocalCPUMemory *regmem;
       if(config->reg_mem_size > 0) {
@@ -2169,102 +2187,59 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       // announce by network type
-      for(std::vector<NetworkModule *>::iterator nit = network_modules.begin();
-	  nit != network_modules.end();
-	  ++nit) {
-	// first, build the set of nodes we'll talk to
-	bool empty = true;
-	NodeSet targets;
-	for(NodeID i = 0; i <= Network::max_node_id; i++)
-	  if((i != Network::my_node_id) && (Network::get_network(i) == *nit)) {
-	    empty = false;
-	    targets.add(i);
-	  }
-	if(empty) continue;
-	
-	Serialization::DynamicBufferSerializer dbs(4096);
+      Serialization::DynamicBufferSerializer dbs(4096);
 
-        // when the preferred message size is small, we'll send multiple
-        //  fragments
-        size_t max_frag_size = ActiveMessage<NodeAnnounceMessage>::recommended_max_payload(targets, false /*!with_congestion*/);
-        int num_fragments = 0;
+      for(NetworkModule *module : network_modules) {
+        // first, build the set of nodes we'll talk to
+        NodeSet targets;
+        for(NodeID i = 0; i <= Network::max_node_id; i++) {
+          if((i != Network::my_node_id) && (Network::get_network(i) == module)) {
+            targets.add(i);
+          }
+        }
+        if(targets.empty()) {
+          continue;
+        }
 
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("sending announcements", false);
-	  fflush(stdout);
-	}
-#endif
+        dbs.reset();
+        ok = serialize_announce(dbs, n, module);
+        assert(ok && "Failed to serialize node for announcement");
 
-	// announce each processor
-	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
-	    it != n->processors.end();
-	    it++)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
+        // Now that all of this node's network-specific information is collected, time to
+        // send it all out
+        {
+          std::vector<char> all_announcements;
+          std::vector<size_t> lengths(targets.size() + 1);
+          char *buffer = nullptr;
+          size_t rank = 0;
 
-	// now each memory
-	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-	    it != n->memories.end();
-	    it++)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-        for (std::vector<IBMemory *>::const_iterator it = n->ib_memories.begin();
-             it != n->ib_memories.end();
-             it++)
-          if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-	// announce each processor's affinities
-	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
-	    it != n->processors.end();
-	    it++)
-	  if(*it) {
-	    Processor p = (*it)->me;
-	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
-	    machine->get_proc_mem_affinity(pmas, p);
-
-	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
-		it2 != pmas.end();
-		it2++)
-              num_fragments += fragmented_announce(targets, *nit,
-                                                   dbs, max_frag_size, *it2);
-	  }
-
-  // announce all the dma channels (and their paths)
-	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
-	    it != n->dma_channels.end();
-	    ++it)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-        // have to send one final message with the remaining data and a valid
-        //  fragment count
-	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
-        amsg->num_fragments = num_fragments + 1;
-        amsg.add_payload(dbs.get_buffer(), dbs.bytes_used()); // copy now
-	amsg.commit();
+          // Use the networking module to exchange all the announcement information, by
+          // whatever optimal path is available.  We assume a non-symmetric machine here,
+          // so we use allgatherv.
+          module->allgatherv(reinterpret_cast<const char *>(dbs.get_buffer()),
+                             dbs.bytes_used(), all_announcements, lengths);
+          buffer = all_announcements.data();
+          // Traverse the nodes _in-order_, as their data is laid out in the same order
+          for(NodeID node_id = 0; node_id <= Network::max_node_id; node_id++) {
+            if(node_id != Network::my_node_id) {
+              if(!targets.contains(node_id)) {
+                // Not a node that's collaborating here, so skip it and don't update the
+                // buffer pointer
+                continue;
+              }
+              machine->parse_node_announce_data(node_id, buffer, lengths[rank], true);
+            }
+            // Increment to the next section of the buffer with data for the next node id
+            buffer += lengths[rank];
+            rank++;
+          }
+        }
       }
 
-      // once we've sent to everybody, wait for all responses
-      {
-	NodeAnnounceMessage::await_all_announcements();
-
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("received all announcements", false);
-	  fflush(stdout);
-	}
-#endif
-      }
-
-      // Now that we have full knowledge of the machine, update the machine
-      // model's mem_mem affinities.
+      // Now that we have full knowledge of the machine, update the machine model's
+      // internal representation Start with the kind maps
+      machine->update_kind_maps();
+      // and the mem_mem affinities
       machine->enumerate_mem_mem_affinities();
 
       if (Config::path_cache_lru_size) {
@@ -2788,13 +2763,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 #endif
       cleanup_query_caches();
       {
-        // clean up all the module configs
-        for (std::map<std::string, ModuleConfig*>::iterator it = module_configs.begin();
-             it != module_configs.end(); it++) {
-          delete (it->second);
-          it->second = nullptr;
-        }
-
         // Clean up all the modules before tearing down the runtime state.
         for (std::vector<Module *>::iterator it = modules.begin();
              it != modules.end(); it++) {
@@ -2810,6 +2778,14 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
         Network::single_network = 0;
 
+        // clean up all the module configs
+        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
+            it != module_configs.end(); it++) {
+          delete(it->second);
+          it->second = nullptr;
+        }
+
+        // dlclose all dynamic module handles
         module_registrar.unload_module_sofiles();
 
         // delete processors, memories, nodes, etc.
@@ -2849,6 +2825,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
         // same for code translators
         delete_container_contents(code_translators);
+
+        // Clear the global nodesets that potentially reference dynamic bitmasks that will
+        // be free'd when we free the allocations.
+        // TODO: properly manage the life-time of the nodeset bitmask allocations to avoid
+        // this issue for future nodesets
+        Network::all_peers.clear();
+        Network::shared_peers.clear();
 
         NodeSetBitmask::free_allocations();
       }

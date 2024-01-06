@@ -151,7 +151,7 @@ namespace Legion {
     class MapperEvent {
     public:
       MapperEvent(void)
-        : impl(Internal::RtUserEvent::NO_RT_USER_EVENT) { }
+        : impl(Internal::RtUserEvent()) { }
       FRIEND_ALL_RUNTIME_CLASSES
     public:
       inline bool exists(void) const { return impl.exists(); }
@@ -2335,6 +2335,9 @@ namespace Legion {
 
       Domain get_index_partition_color_space(MapperContext ctx,
                                                        IndexPartition p) const;
+      
+      IndexSpace get_index_partition_color_space_name(MapperContext ctx,
+                                                      IndexPartition p) const;
 
       void get_index_space_partition_colors(MapperContext ctx, 
                                   IndexSpace sp, std::set<Color> &colors) const;

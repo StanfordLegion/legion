@@ -26,6 +26,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -1287,7 +1288,6 @@ namespace Legion {
               std::vector<ApEvent> rhs_events(num_rhs);
               for (unsigned idx = 0; idx < num_rhs; idx++)
               {
-                ApEvent event;
                 derez.deserialize(rhs_events[idx]);
               }
               tpl->record_merge_events(lhs, rhs_events, tlid);
@@ -5749,17 +5749,16 @@ namespace Legion {
                        deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
-          IndexSpaceExpression *expr = 
-           runtime->forest->intersect_index_spaces(set->set_expr,analysis_expr);
-          if (expr->is_empty())
+          IndexSpaceValue expr = IndexSpaceValue(set->set_expr) & analysis_expr;
+          if (expr.is_empty())
             return;
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
-          if (expr->get_volume() == set->set_expr->get_volume())
+          if (expr.get_volume() == set->set_expr->get_volume())
             set->analyze(*this, set->set_expr, true/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
           else
-            set->analyze(*this, expr, false/*covers*/, mask,
+            set->analyze(*this, *expr, false/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
         }
         else
@@ -7584,11 +7583,32 @@ namespace Legion {
       if (precondition.exists() && ! precondition.has_triggered())
         return defer_registration(precondition, usage, applied_events,
          trace_info, init_precondition, termination, instances_ready, symbolic);
+
       // Invoke the base implementation to see if we actually do it now
       const RtEvent registered = 
         CollectiveCopyFillAnalysis::perform_registration(precondition,
                               usage, applied_events, init_precondition,
                               termination, instances_ready, symbolic);
+      // If we're doing a collective read-write then check to make sure that
+      // we have exactly one arrival on each of the instances, if we don't
+      // then we're not going to have the isolation that we expect
+      if (!collective_arrivals.empty() && IS_WRITE(usage))
+      {
+#ifdef DEBUG_LEGION
+        assert(IS_COLLECTIVE(usage));
+#endif
+        for (std::map<InstanceView*,size_t>::const_iterator it =
+              collective_arrivals.begin(); it !=
+              collective_arrivals.end(); it++)
+          if ((it->second > 1) && (it->first->is_individual_view() ||
+              (it->first->as_collective_view()->local_views.size()<it->second)))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Illegal mapper output: detected multiple write-collective "
+                "users of the same instance on region requirement %d of %s "
+                "(UID %lld). For read-write collectives it is mandatory "
+                "that every point map to a separate instance.",
+                index, op->get_logging_name(), op->get_unique_op_id())
+      }
       if (user_registered.exists())
       {
         Runtime::trigger_event(user_registered, registered);
@@ -9474,7 +9494,6 @@ namespace Legion {
                           applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())     
         analysis->perform_remote(traversal_done, applied_events);
       // Now we can trigger our applied event
@@ -14822,7 +14841,7 @@ namespace Legion {
         const FieldMask overlap = sources.get_valid_mask() & restricted_mask;
         if (!overlap)
           continue;
-        copy_out(expr, expr_covers, restricted_mask, sources, analysis,
+        copy_out(expr, expr_covers, overlap, sources, analysis,
                  trace_info, aggregator);
       }
     }
@@ -15908,7 +15927,7 @@ namespace Legion {
         {
           ExprViewMaskSets::iterator finder =
             restricted_instances.find(ait->first);
-          if (finder != restricted_instances.end())
+          if (finder == restricted_instances.end())
           {
             ait->first->add_nested_expression_reference(did);
             restricted_instances[ait->first].swap(ait->second);
@@ -15942,9 +15961,9 @@ namespace Legion {
             delete (*it);
         }
         // Rebuild the restricted fields
+        restricted_fields.clear();
         if (!restricted_instances.empty())
         {
-          restricted_fields.clear();
           for (ExprViewMaskSets::const_iterator rit =
                 restricted_instances.begin(); rit != 
                 restricted_instances.end(); rit++)
@@ -16179,7 +16198,7 @@ namespace Legion {
         {
           ExprViewMaskSets::iterator finder =
             released_instances.find(ait->first);
-          if (finder != released_instances.end())
+          if (finder == released_instances.end())
           {
             ait->first->add_nested_expression_reference(did);
             released_instances[ait->first].swap(ait->second);

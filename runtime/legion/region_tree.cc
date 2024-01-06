@@ -26,6 +26,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 // templates in legion/region_tree.inl are instantiated by region_tree_tmpl.cc
 
@@ -2000,6 +2001,22 @@ namespace Legion {
                                        const bool check_initialized)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // These are some basic sanity checks that each field is represented
+      // by exactly one instance and that the total number of fields 
+      // represented matches the number of privilege fields.
+      // There has been at least one case where this invariant was violated
+      // for attach operations and there were more fields represented in
+      // instances than there were privileges, see the attach_2d example.
+      FieldMask check_mask;
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const FieldMask &mask = targets[idx].get_valid_fields();
+        assert(check_mask * mask);
+        check_mask |= mask;
+      }
+      assert(check_mask.pop_count() == req.privilege_fields.size());
+#endif
       UpdateAnalysis *analysis = NULL;
       const RtEvent registration_precondition = physical_perform_updates(req,
          version_info, op, index, precondition, term_event, targets, src,
@@ -2884,7 +2901,7 @@ namespace Legion {
 #endif
       RegionNode *attach_node = get_node(req.region);
       return attach_node->column_source->create_external_instance(
-                                field_set, attach_node, attach_op);
+          req.privilege_fields, field_set, attach_node, attach_op);
     }
 
     //--------------------------------------------------------------------------
@@ -5738,7 +5755,7 @@ namespace Legion {
       if (exprs.size() == 1)
         return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
-      // Do a quick pass to see if any of them are empty in which case we 
+      // Do a quick pass to see if any of them are empty in which case we
       // know that the result of the whole intersection is empty
       for (unsigned idx = 0; idx < expressions.size(); idx++)
       {
@@ -9167,7 +9184,7 @@ namespace Legion {
         remaining_global_disjoint_complete_notifications = 0;
       // Add a reference to be removed only after both the disjointness 
       // and the completeness is set
-      add_base_gc_ref(REGION_TREE_REF);
+      add_base_valid_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -10262,7 +10279,7 @@ namespace Legion {
         RemoteDisjointnessFunctor functor(rez, context->runtime);
         map_over_remote_instances(functor);
       }
-      return remove_base_gc_ref(REGION_TREE_REF);
+      return remove_base_valid_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -14359,6 +14376,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef FieldSpaceNode::create_external_instance(
+                                         const std::set<FieldID> &priv_fields,
                                          const std::vector<FieldID> &field_set,
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
@@ -14372,10 +14390,12 @@ namespace Legion {
       FieldMask external_mask;
       compute_field_layout(field_set, field_sizes, 
                            mask_index_map, serdez, external_mask);
+      FieldMask privilege_mask = (priv_fields.size() == field_set.size()) ?
+        external_mask : get_field_mask(priv_fields);
       // Now make the instance, this should always succeed
       PhysicalManager *manager = attach_op->create_manager(node, field_set,
           field_sizes, mask_index_map, serdez, external_mask);
-      return InstanceRef(manager, external_mask); 
+      return InstanceRef(manager, privilege_mask); 
     }
 
     //--------------------------------------------------------------------------
@@ -21994,6 +22014,27 @@ namespace Legion {
       logger->up();
     }
 #endif 
+
+    /* static */
+    IndexSpaceOperation *
+    InstanceExpressionCreator::create_with_domain(TypeTag tag,
+                                                 const Domain &dom)
+    {
+      InstanceExpressionCreator creator(tag, dom);
+      creator.create_operation();
+
+      IndexSpaceOperation *out = creator.result;
+      out->add_base_expression_reference(LIVE_EXPR_REF);
+      ImplicitReferenceTracker::record_live_expression(out);
+
+      return out;
+    }
+
+    /* static */
+    RegionTreeForest *InstanceExpressionCreator::forest()
+    {
+      return implicit_runtime->forest;
+    }
 
   }; // namespace Internal 
 }; // namespace Legion
