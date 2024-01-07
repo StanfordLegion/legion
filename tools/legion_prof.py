@@ -2769,8 +2769,13 @@ class Processor(object):
                     if not found:
                         task.add_wait_interval(call.start, call.stop, call.stop)
                     # Update the operation information for the call
-                    call.initiation = task.initiation
-                    call.initiation_op = task.initiation_op
+                    if isinstance(task, Task):
+                        call.initiation = task.base_op.op_id
+                        call.initiation_op = task.base_op
+                    else:
+                        assert isinstance(task, MetaTask) or isinstance(task, ProfTask)
+                        call.initiation = task.initiation
+                        call.initiation_op = task.initiation_op
 
     def sort_time_range(self) -> None:
         self.sort_calls_and_waits()

@@ -642,8 +642,17 @@ impl Proc {
                     }
                     // Update the operation info for the calls
                     let call_entry = self.entries.get_mut(&call_uid).unwrap();
-                    call_entry.op_id = task_entry.op_id;
-                    call_entry.initiation_op = task_entry.initiation_op;
+                    match task_entry.kind {
+                        ProcEntryKind::Task(_, _) => {
+                            call_entry.initiation_op = task_entry.op_id;
+                        }
+                        ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
+                            call_entry.initiation_op = task_entry.initiation_op;
+                        }
+                        _ => {
+                            panic!("bad processor entry kind");
+                        }
+                    }
                 }
                 // Finally add the task entry back in now that we're done mutating it
                 self.entries.insert(*task_uid, task_entry);
