@@ -1346,7 +1346,7 @@ class Base(ABC):
 class ProcOperation(Base):
     __slots__ = ["proc", "fevent"]
 
-    def __init__(self, fevent: Operation[int] = None) -> None:
+    def __init__(self, fevent: Optional[int] = None) -> None:
         Base.__init__(self)
         self.proc: Optional[Processor] = None
         self.fevent: Optional[int] = fevent
@@ -1656,8 +1656,8 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
         assert self.variant is not None and self.variant.name is not None
         return self.variant.name
 
-class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
-    __my_slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['proftask_id', 'color', 'is_task']
+class ProfTask(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): #type: ignore
+    __my_slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['proftask_id', 'color', 'is_task']
 
     @typecheck
     def __init__(self, 
@@ -1668,6 +1668,7 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
                  stop: int,
                  fevent: int
     ) -> None:
+        HasWaiters.__init__(self)
         ProcOperation.__init__(self, fevent)
         HasNoDependencies.__init__(self)
         TimeRange.__init__(self, None, ready, start, stop)
@@ -1706,27 +1707,10 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
                  level: int, 
                  level_ready: Optional[int]
     ) -> None:
-        if level_ready is not None:
-            l_ready = base_level + (max_levels_ready - level_ready)
-        else:
-            l_ready = None
-        tsv_line = data_tsv_str(level = base_level + (max_levels - level),
-                                level_ready = l_ready,
-                                ready = self.start,
-                                start = self.start,
-                                end = self.stop,
-                                color = self.get_color(),
-                                opacity = "1.0",
-                                title = repr(self),
-                                initiation = None,
-                                _in = None,
-                                out = None,
-                                children = None,
-                                parents = None,
-                                prof_uid = self.prof_uid,
-                                op_id = self.proftask_id,
-                                instances = None)
-        tsv_file.writerow(tsv_line)
+        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
+                                   max_levels_ready,
+                                   level,
+                                   level_ready, None, None)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1761,7 +1745,7 @@ class MapperCallKind(StatObject):
         assert self.color is None
         self.color = color
 
-class MapperCall(HasWaiters, ProcOperation, TimeRange, HasInitiationDependencies):
+class MapperCall(HasWaiters, ProcOperation, TimeRange, HasInitiationDependencies): # type: ignore
     __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['kind']
 
     @typecheck
@@ -1843,7 +1827,7 @@ class RuntimeCallKind(StatObject):
     def __repr__(self) -> str:
         return self.name
 
-class RuntimeCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies):
+class RuntimeCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): # type: ignore
     __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
     
     @typecheck
@@ -2745,12 +2729,14 @@ class Processor(object):
         if subcalls:
             for task,calls in subcalls.items():
                 # Sort the calls by their size from smallest to largest
-                calls.sort(key=lambda c: c.stop-c.start)
+                calls.sort(key=lambda c: c.stop-c.start)  # type: ignore
                 # Push waits into the smalest subcall we can find
                 to_remove: List[int] = list()
                 for idx in range(len(task.wait_intervals)):
                     wait = task.wait_intervals[idx]
                     for call in calls:
+                        assert call.start is not None
+                        assert call.stop is not None
                         if call.start <= wait.start and wait.end <= call.stop:
                             call.wait_intervals.append(wait)
                             to_remove.append(idx)
@@ -2767,7 +2753,11 @@ class Processor(object):
                 for idx in range(len(calls)):
                     found = False
                     call = calls[idx]
+                    assert call.start is not None
+                    assert call.stop is not None
                     for later in calls[idx+1:]:
+                        assert later.start is not None
+                        assert later.stop is not None
                         if later.start <= call.start and call.stop <= later.stop:
                             later.add_wait_interval(call.start, call.stop, call.stop)
                             found = True
@@ -2778,8 +2768,9 @@ class Processor(object):
                     if not found:
                         task.add_wait_interval(call.start, call.stop, call.stop)
                     # Update the operation information for the call
-                    call.initiation = task.initiation
-                    call.initiation_op = task.initiation_op
+                    # TODO: modify types to support this?
+                    # call.initiation = task.initiation
+                    # call.initiation_op = task.initiation_op
 
     def sort_time_range(self) -> None:
         self.sort_calls_and_waits()
