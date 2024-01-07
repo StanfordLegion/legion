@@ -1344,11 +1344,12 @@ class Base(ABC):
 # Operations rendering on Processors
 # Including: Operation, Task, MetaTask, ProfTask, MapperCall, and RuntimeCall
 class ProcOperation(Base):
-    __slots__ = ["proc"]
+    __slots__ = ["proc", "fevent"]
 
-    def __init__(self) -> None:
+    def __init__(self, fevent: Operation[int] = None) -> None:
         Base.__init__(self)
         self.proc: Optional[Processor] = None
+        self.fevent: Optional[int] = fevent
 
     def get_owner(self) -> Processor:
         assert self.proc is not None
@@ -1664,9 +1665,10 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
                  create: int, 
                  ready: int, 
                  start: int, 
-                 stop: int
+                 stop: int,
+                 fevent: int
     ) -> None:
-        ProcOperation.__init__(self)
+        ProcOperation.__init__(self, fevent)
         HasNoDependencies.__init__(self)
         TimeRange.__init__(self, None, ready, start, stop)
         self.proftask_id = op_id
@@ -1759,14 +1761,15 @@ class MapperCallKind(StatObject):
         assert self.color is None
         self.color = color
 
-class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['kind']
+class MapperCall(HasWaiters, ProcOperation, TimeRange, HasInitiationDependencies):
+    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['kind']
 
     @typecheck
     def __init__(self, kind: MapperCallKind, initiation_op: Operation, 
-                 start: int, stop: int
+                 start: int, stop: int, fevent: int
     ) -> None:
-        ProcOperation.__init__(self)
+        HasWaiters.__init__(self)
+        ProcOperation.__init__(self, fevent)
         TimeRange.__init__(self, None, None, start, stop)
         HasInitiationDependencies.__init__(self, initiation_op)
         self.kind = kind
@@ -1787,34 +1790,10 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
                  level: int, 
                  level_ready: Optional[int]
     ) -> None:
-        title = repr(self)
-        _in = dump_json(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
-        out = dump_json(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
-        children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
-
-        if (level_ready is not None):
-            l_ready = base_level + (max_levels_ready - level_ready)
-        else:
-            l_ready = None
-        tsv_line = data_tsv_str(level = base_level + (max_levels - level),
-                                level_ready = l_ready,
-                                ready = self.start,
-                                start = self.start,
-                                end = self.stop,
-                                color = self.get_color(),
-                                opacity = "1.0",
-                                title = repr(self),
-                                initiation = self.initiation,
-                                _in = _in,
-                                out = out,
-                                children = children,
-                                parents = parents,
-                                prof_uid = self.prof_uid,
-                                op_id = None,
-                                instances = None)
-
-        tsv_file.writerow(tsv_line)
+        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
+                                   max_levels_ready,
+                                   level,
+                                   level_ready, None, None)
 
     @typecheck
     def active_time(self) -> int:
@@ -1864,14 +1843,15 @@ class RuntimeCallKind(StatObject):
     def __repr__(self) -> str:
         return self.name
 
-class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
-    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
+class RuntimeCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies):
+    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
     
     @typecheck
     def __init__(self, kind: RuntimeCallKind, 
-                 start: int, stop: int
+                 start: int, stop: int, fevent: int
     ) -> None:
-        ProcOperation.__init__(self)
+        HasWaiters.__init__(self)
+        ProcOperation.__init__(self, fevent)
         TimeRange.__init__(self, None, None, start, stop)
         HasNoDependencies.__init__(self)
         self.kind = kind
@@ -1892,28 +1872,10 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
                  level: int, 
                  level_ready: Optional[int]
     ) -> None:
-        if (level_ready is not None):
-            l_ready = base_level + (max_levels_ready - level_ready)
-        else:
-            l_ready = None
-        tsv_line = data_tsv_str(level = base_level + (max_levels - level),
-                                level_ready = l_ready,
-                                ready = None,
-                                start = self.start,
-                                end = self.stop,
-                                color = self.get_color(),
-                                opacity = "1.0",
-                                title = repr(self),
-                                initiation = None,
-                                _in = None,
-                                out = None,
-                                children = None,
-                                parents = None,
-                                prof_uid = self.prof_uid,
-                                op_id = None, 
-                                instances = None)
-
-        tsv_file.writerow(tsv_line)
+        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
+                                   max_levels_ready,
+                                   level,
+                                   level_ready, None, None)
 
     @typecheck
     def active_time(self) -> int:
@@ -2723,7 +2685,7 @@ class Processor(object):
     __slots__ = [
         'proc_id', 'node_id', 'proc_in_node', 'kind', 'visible',
         'last_time', 'tasks', 'max_levels', 'max_levels_ready', 'time_points',
-        'util_time_points'
+        'util_time_points', 'fevents'
     ]
 
     @typecheck
@@ -2742,6 +2704,7 @@ class Processor(object):
         self.max_levels_ready = 0
         self.time_points: List[TimePoint] = list()
         self.util_time_points: List[TimePoint] = list()
+        self.fevents: Dict[int, Union[MetaTask, ProfTask, Task]] = dict()
 
     @typecheck
     def get_short_text(self) -> str:
@@ -2751,16 +2714,11 @@ class Processor(object):
     def add_task(self, task: Union[MetaTask, ProfTask, Task]) -> None:
         task.proc = self
         self.tasks.append(task)
+        assert task.fevent is not None
+        self.fevents[task.fevent] = task
 
     @typecheck
-    def add_mapper_call(self, call: MapperCall) -> None:
-        # treating mapper calls like any other task
-        call.proc = self
-        self.tasks.append(call)
-
-    @typecheck
-    def add_runtime_call(self, call: RuntimeCall) -> None:
-        # treating runtime calls like any other task
+    def add_call(self, call: Union[MapperCall, RuntimeCall]) -> None:
         call.proc = self
         self.tasks.append(call)
 
@@ -2775,7 +2733,56 @@ class Processor(object):
                 trimmed_tasks.append(task)
         self.tasks = trimmed_tasks 
 
+    def sort_calls_and_waits(self) -> None:
+        subcalls: Dict[Union[MetaTask, ProfTask, Task], List[Union[MapperCall, RuntimeCall]]] = dict()
+        for call in self.tasks:
+            if isinstance(call,MapperCall) or isinstance(call,RuntimeCall):
+                task = self.fevents.get(call.fevent)
+                assert task is not None
+                if task not in subcalls:
+                    subcalls[task] = list()
+                subcalls[task].append(call)
+        if subcalls:
+            for task,calls in subcalls.items():
+                # Sort the calls by their size from smallest to largest
+                calls.sort(key=lambda c: c.stop-c.start)
+                # Push waits into the smalest subcall we can find
+                to_remove: List[int] = list()
+                for idx in range(len(task.wait_intervals)):
+                    wait = task.wait_intervals[idx]
+                    for call in calls:
+                        if call.start <= wait.start and wait.end <= call.stop:
+                            call.wait_intervals.append(wait)
+                            to_remove.append(idx)
+                            break
+                        else:
+                            # Waits should not be partially overlapping with calls
+                            assert wait.end <= call.start or call.stop <= wait.start
+                # Remove any waits that we moved into a call
+                for idx in reversed(to_remove):
+                    task.wait_intervals.pop(idx)
+                # Now for each call, find the next largest subcall that dominates
+                # it and add a wait for it, if one isn't found then we add the
+                # wait to the task for that subcall
+                for idx in range(len(calls)):
+                    found = False
+                    call = calls[idx]
+                    for later in calls[idx+1:]:
+                        if later.start <= call.start and call.stop <= later.stop:
+                            later.add_wait_interval(call.start, call.stop, call.stop)
+                            found = True
+                            break
+                        else:
+                            # Calls should not be partially overlapping with eachother
+                            assert call.stop <= later.start or later.stop <= call.start
+                    if not found:
+                        task.add_wait_interval(call.start, call.stop, call.stop)
+                    # Update the operation information for the call
+                    call.initiation = task.initiation
+                    call.initiation_op = task.initiation_op
+
     def sort_time_range(self) -> None:
+        self.sort_calls_and_waits()
         time_points_all: List[TimePoint] = list()
         for task in self.tasks:
             assert task.start is not None and task.stop is not None
@@ -3708,6 +3715,7 @@ class State(object):
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, start, stop)
+        task.fevent = fevent
         if stop > self.last_time:
             self.last_time = stop
         proc = self.find_or_create_processor(proc_id)
@@ -3729,7 +3737,7 @@ class State(object):
             gpu_start = gpu_stop - 1
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, gpu_start, gpu_stop)
-
+        task.fevent = fevent
         if gpu_stop > self.last_time:
             self.last_time = gpu_stop
         proc = self.find_or_create_processor(proc_id)
@@ -3746,6 +3754,7 @@ class State(object):
         op = self.find_or_create_op(op_id)
         variant = self.find_or_create_meta_variant(lg_id)
         meta = self.create_meta(variant, op, create, ready, start, stop)
+        meta.fevent = fevent
         if stop > self.last_time:
             self.last_time = stop
         proc = self.find_or_create_processor(proc_id)
@@ -3844,19 +3853,6 @@ class State(object):
             self.last_time = stop
         channel = self.find_or_create_deppart_channel()
         channel.add_copy(deppart)
-
-    # UserInfo (Not used?)
-    @typecheck
-    def log_user_info(self, proc_id: int, 
-                      start: int, stop: int, name: str
-    ) -> None:
-        proc = self.find_or_create_processor(proc_id)
-        user = self.create_user_marker(name)
-        user.start = start
-        user.stop = stop
-        if stop > self.last_time:
-            self.last_time = stop 
-        proc.add_task(user)
 
     # TaskWaitInfo
     @typecheck
@@ -4004,16 +4000,16 @@ class State(object):
         assert start <= stop
         assert kind in self.mapper_call_kinds
         # For now we'll only add very expensive mapper calls (more than 100 us)
-        if (stop - start) < 100000:
-            return 
+        #if (stop - start) < 100000:
+        #    return
         if stop > self.last_time:
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind],
-                          self.find_or_create_op(op_id), start, stop)
+                          self.find_or_create_op(op_id), start, stop, fevent)
         # update prof_uid map
         self.prof_uid_map[call.prof_uid] = call
         proc = self.find_or_create_processor(proc_id)
-        proc.add_mapper_call(call)
+        proc.add_call(call)
 
     # RuntimeCallDesc
     @typecheck
@@ -4030,9 +4026,9 @@ class State(object):
         assert kind in self.runtime_call_kinds
         if stop > self.last_time:
             self.last_time = stop
-        call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
+        call = RuntimeCall(self.runtime_call_kinds[kind], start, stop, fevent)
         proc = self.find_or_create_processor(proc_id)
-        proc.add_runtime_call(call)
+        proc.add_call(call)
 
     # ProfTaskInfo
     @typecheck
@@ -4043,7 +4039,7 @@ class State(object):
         # add to self.operations
         if stop > self.last_time:
             self.last_time = stop
-        proftask = ProfTask(op_id, start, start, start, stop)
+        proftask = ProfTask(op_id, start, start, start, stop, fevent)
         proc = self.find_or_create_processor(proc_id)
         proc.add_task(proftask)
 
