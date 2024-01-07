@@ -1710,7 +1710,7 @@ class ProfTask(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): #type: 
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
-                                   level_ready, None, None)
+                                   level_ready, self.proftask_id, None)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1774,6 +1774,7 @@ class MapperCall(HasWaiters, ProcOperation, TimeRange, HasInitiationDependencies
                  level: int, 
                  level_ready: Optional[int]
     ) -> None:
+        self.ready = self.start
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
@@ -1797,10 +1798,7 @@ class MapperCall(HasWaiters, ProcOperation, TimeRange, HasInitiationDependencies
 
     @typecheck
     def __repr__(self) -> str:
-        if self.initiation == 0:
-            return 'Mapper Call '+str(self.kind)
-        else:
-            return 'Mapper Call '+str(self.kind)+' for '+str(self.initiation)
+        return 'Mapper Call '+str(self.kind)+' for '+str(self.initiation)
 
 class RuntimeCallKind(StatObject):
     __slots__ = ['runtime_call_kind', 'name', 'color']
@@ -1856,6 +1854,7 @@ class RuntimeCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): # ty
                  level: int, 
                  level_ready: Optional[int]
     ) -> None:
+        self.ready = self.start
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
@@ -1879,7 +1878,7 @@ class RuntimeCall(HasWaiters, ProcOperation, TimeRange, HasNoDependencies): # ty
 
     @typecheck
     def __repr__(self) -> str:
-        return 'Runtime Call '+str(self.kind)
+        return str(self.kind)
 
 class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['name', 'color', 'is_task']
