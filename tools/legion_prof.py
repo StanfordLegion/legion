@@ -397,11 +397,12 @@ class PathRange(object):
 
 class Dependencies(ABC):
     _abstract_slots = [
-        'deps', 'path', 'visited'
+        'deps', 'path', 'visited', 'initiation_op', 'initiation'
     ]
     def __init__(self) -> None:
         self.deps: Dict[str, Set] = {"in": set(), "out": set(), "parents": set(), "children" : set()}
-
+        self.initiation_op: Optional[Union[Operation, Task]] = None
+        self.initiation: Optional[int] = None
         # for critical path analysis
         self.path = PathRange(0, 0, [])
         self.visited = False
@@ -423,11 +424,9 @@ class Dependencies(ABC):
         pass
 
 class HasDependencies(Dependencies):
-    _abstract_slots = Dependencies._abstract_slots + ['initiation_op', 'initiation']
+    _abstract_slots = Dependencies._abstract_slots
     def __init__(self) -> None:
         Dependencies.__init__(self)
-        self.initiation_op = None
-        self.initiation: Optional[int] = None
     
     @typeassert(op_dependencies=dict, transitive_map=dict)
     def add_initiation_dependencies(self, 
@@ -453,7 +452,7 @@ class HasDependencies(Dependencies):
             assert 0, "Type is: " + str(type(self)) + ", is not HasDependencies."
 
 class HasInitiationDependencies(Dependencies):
-    _abstract_slots = Dependencies._abstract_slots + ['initiation_op', 'initiation']
+    _abstract_slots = Dependencies._abstract_slots
     
     def __init__(self, 
                  initiation_op: Union["Operation", "Task"]
@@ -513,6 +512,7 @@ class HasInitiationDependencies(Dependencies):
 
     @typecheck
     def get_color(self) -> str:
+        assert self.initiation_op is not None
         return self.initiation_op.get_color()
 
 class HasNoDependencies(Dependencies):
@@ -2146,6 +2146,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     @typecheck
     def get_color(self) -> str:
         # Get the color from the initiator
+        assert self.initiation_op is not None
         return self.initiation_op.get_color()
 
     @typecheck
@@ -2533,6 +2534,7 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
     @typecheck
     def get_color(self) -> str:
         # Get the color from the operation
+        assert self.initiation_op is not None
         return self.initiation_op.get_color()
 
     @typecheck
@@ -2768,9 +2770,8 @@ class Processor(object):
                     if not found:
                         task.add_wait_interval(call.start, call.stop, call.stop)
                     # Update the operation information for the call
-                    # TODO: modify types to support this?
-                    # call.initiation = task.initiation
-                    # call.initiation_op = task.initiation_op
+                    call.initiation = task.initiation
+                    call.initiation_op = task.initiation_op
 
     def sort_time_range(self) -> None:
         self.sort_calls_and_waits()
