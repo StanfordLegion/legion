@@ -3995,9 +3995,6 @@ class State(object):
     ) -> None:
         assert start <= stop
         assert kind in self.mapper_call_kinds
-        # For now we'll only add very expensive mapper calls (more than 100 us)
-        #if (stop - start) < 100000:
-        #    return
         if stop > self.last_time:
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind],

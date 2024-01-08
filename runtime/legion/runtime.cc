@@ -11979,6 +11979,7 @@ namespace Legion {
                                     total_address_spaces,
                                     config.prof_footprint_threshold << 20,
                                     config.prof_target_latency,
+                                    config.prof_call_threshold,
                                     config.slow_config_ok);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
@@ -22525,6 +22526,8 @@ namespace Legion {
         .add_option_int("-lg:prof_footprint", 
                         config.prof_footprint_threshold, !filter)
         .add_option_int("-lg:prof_latency",config.prof_target_latency, !filter)
+        .add_option_int("-lg:prof_call_threshold",
+                        config.prof_call_threshold, !filter)
         .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
         // These are all the deprecated versions of these flag
         .add_option_bool("-hl:separate",

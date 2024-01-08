@@ -592,11 +592,12 @@ namespace Legion {
                      const size_t total_runtime_instances,
                      const size_t footprint_threshold,
                      const size_t target_latency,
+                     const size_t minimum_call_threshold,
                      const bool slow_config_ok);
-      LegionProfiler(const LegionProfiler &rhs);
+      LegionProfiler(const LegionProfiler &rhs) = delete;
       virtual ~LegionProfiler(void);
     public:
-      LegionProfiler& operator=(const LegionProfiler &rhs);
+      LegionProfiler& operator=(const LegionProfiler &rhs) = delete;
     public:
       // Dynamically created things must be registered at runtime
       // Tasks
@@ -715,6 +716,8 @@ namespace Legion {
       Runtime *const runtime;
       // Event to trigger once the profiling is actually done
       const RtUserEvent done_event;
+      // Minimum duration of mapper and runtime calls for logging in ns
+      const size_t minimum_call_threshold;
       // Size in bytes of the footprint before we start dumping
       const size_t output_footprint_threshold;
       // The goal size in microseconds of the output tasks

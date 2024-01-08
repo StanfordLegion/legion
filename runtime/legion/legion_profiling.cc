@@ -1035,6 +1035,9 @@ namespace Legion {
                               LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
+      // Check to see if it exceeds the call threshold
+      if ((stop - start) < owner->minimum_call_threshold)
+        return;
       mapper_call_infos.emplace_back(MapperCallInfo());
       MapperCallInfo &info = mapper_call_infos.back();
       info.kind = kind;
@@ -1052,6 +1055,9 @@ namespace Legion {
         LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
+      // Check to see if it exceeds the call threshold
+      if ((stop - start) < owner->minimum_call_threshold)
+        return;
       runtime_call_infos.emplace_back(RuntimeCallInfo());
       RuntimeCallInfo &info = runtime_call_infos.back();
       info.kind = kind;
@@ -1679,8 +1685,10 @@ namespace Legion {
                                    const size_t total_runtime_instances,
                                    const size_t footprint_threshold,
                                    const size_t target_latency,
+                                   const size_t call_threshold,
                                    const bool slow_config_ok)
       : runtime(rt), done_event(Runtime::create_rt_user_event()), 
+        minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency), target_proc(target), 
 #ifndef DEBUG_LEGION
@@ -1788,17 +1796,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : runtime(NULL), done_event(RtUserEvent::NO_RT_USER_EVENT),
-        output_footprint_threshold(0), output_target_latency(0), 
-        target_proc(rhs.target_proc)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     LegionProfiler::~LegionProfiler(void)
     //--------------------------------------------------------------------------
     {
@@ -1808,15 +1805,6 @@ namespace Legion {
 
       // remove our serializer
       delete serializer;
-    }
-
-    //--------------------------------------------------------------------------
-    LegionProfiler& LegionProfiler::operator=(const LegionProfiler &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------

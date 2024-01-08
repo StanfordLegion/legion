@@ -3815,13 +3815,9 @@ fn process_record(
             fevent,
         } => {
             assert!(state.mapper_call_kinds.contains_key(kind));
-            assert!(*start <= *stop);
-            // For now we'll only add very expensive mapper calls (more than 100 us)
-            //if *stop - *start >= Timestamp::from_us(100) {
             let time_range = TimeRange::new_start(*start, *stop);
             state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
             state.update_last_time(*stop);
-            //};
         }
         Record::RuntimeCallInfo {
             kind,
