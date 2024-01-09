@@ -10992,6 +10992,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t MemoryManager::query_available_eager_memory(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      return eager_remaining_capacity;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent MemoryManager::create_eager_instance(PhysicalInstance &instance,
                      LgEvent unique_event, Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------

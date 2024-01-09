@@ -1003,6 +1003,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t TaskContext::query_available_memory(Memory target)
+    //--------------------------------------------------------------------------
+    {
+      if (target.address_space() != runtime->address_space)
+        return 0;
+      MemoryManager *manager = runtime->find_memory_manager(target); 
+      return manager->query_available_eager_memory();
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::increment_inlined(void)
     //--------------------------------------------------------------------------
     {

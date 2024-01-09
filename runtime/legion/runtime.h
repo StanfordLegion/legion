@@ -1653,6 +1653,7 @@ namespace Legion {
     public:
       bool is_visible_memory(Memory other);
     public:
+      size_t query_available_eager_memory(void);
       RtEvent create_eager_instance(PhysicalInstance &instance, LgEvent unique,
                                     Realm::InstanceLayoutGeneric *layout);
       // Create an external instance that is a view to the eager pool instance

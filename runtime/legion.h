@@ -8717,6 +8717,19 @@ namespace Legion {
       const Task* get_current_task(Context ctx);
 
       /**
+       * Query the space available to this task in a given memory.
+       * This is an instantaneous value and may be subject to change.
+       * If the mapper has provided an upper bound for a pool in this
+       * memory then it will reflect how much space is left available
+       * in that pool, otherwise it will reflect the space left in the
+       * actual memory. Note that the space available does not imply
+       * that you can create an instance of this size as the memory 
+       * may be fragmented and the largest hole might be much smaller
+       * than the size returned by this function.
+       */
+      size_t query_available_memory(Context ctx, Memory target);
+
+      /**
        * Indicate that data in a particular physical region
        * appears to be incorrect for whatever reason.  This
        * will cause the runtime to trap into an error handler
