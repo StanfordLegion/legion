@@ -4067,7 +4067,9 @@ namespace Realm {
       config_map.insert({"dynfb_max_size", &cfg_dynfb_max_size});
       config_map.insert({"task_streams", &cfg_task_streams});
       config_map.insert({"d2d_streams", &cfg_d2d_streams});
-      res_fbmem_sizes.push_back(0);
+
+      resource_map.insert({"gpu", &res_num_gpus});
+      resource_map.insert({"fbmem", &res_min_fbmem_size});
     }
 
     bool CudaModuleConfig::discover_resource(void)
@@ -4090,44 +4092,11 @@ namespace Realm {
           CHECK_CU(
               CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&res_fbmem_sizes[i], device));
         }
-        resource_discovered = true;
-      }
-      return resource_discovered;
-    }
-
-    bool CudaModuleConfig::get_resource(const std::string name,
-                                        int &value) const {
-      if (!resource_discovered) {
-        log_gpu.error("Module %s can not detect the int resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
-      }
-      if (name == "gpu") {
-        value = res_num_gpus;
-        return true;
-      } else {
-        log_gpu.error("Module %s does not have the int resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
-      }
-    }
-
-    bool CudaModuleConfig::get_resource(const std::string name,
-                                        size_t &value) const {
-      if (!resource_discovered) {
-        log_gpu.error("Module %s can not detect the size_t resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
-      }
-      if (name == "fbmem") {
-        value =
+        res_min_fbmem_size =
             *std::min_element(res_fbmem_sizes.begin(), res_fbmem_sizes.end());
-        return true;
-      } else {
-        log_gpu.error("Module %s does not have the size_t resource: %s",
-                      module_name.c_str(), name.c_str());
-        return false;
+        resource_discover_finished = true;
       }
+      return resource_discover_finished;
     }
 
     void CudaModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
