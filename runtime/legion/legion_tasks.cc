@@ -16,6 +16,7 @@
 #include "legion/region_tree.h"
 #include "legion/legion_tasks.h"
 #include "legion/legion_spy.h"
+#include "legion/legion_auto_trace.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_context.h"
 #include "legion/legion_profiling.h"
@@ -5027,10 +5028,19 @@ namespace Legion {
                                                                bool inline_task)
     //--------------------------------------------------------------------------
     {
-      InnerContext *inner_ctx = new InnerContext(runtime, this, 
+      InnerContext *inner_ctx;
+      if (runtime->enable_automatic_tracing) {
+        std::cout << "Created my auto tracing context!" << std::endl;
+        inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
           get_depth(), v->is_inner(), regions, output_regions,
-          parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
+          parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/,
           inline_task, concurrent_task || parent_ctx->is_concurrent_context());
+      } else {
+        inner_ctx = new InnerContext(runtime, this,
+          get_depth(), v->is_inner(), regions, output_regions,
+          parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/,
+          inline_task, concurrent_task || parent_ctx->is_concurrent_context());
+      }
       configure_execution_context(inner_ctx);
       inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;

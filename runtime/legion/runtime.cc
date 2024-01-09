@@ -16816,6 +16816,7 @@ namespace Legion {
         safe_control_replication(config.safe_control_replication),
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
+        enable_automatic_tracing(config.enable_automatic_tracing),
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
@@ -17037,6 +17038,7 @@ namespace Legion {
         safe_control_replication(rhs.safe_control_replication),
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
+        enable_automatic_tracing(rhs.enable_automatic_tracing),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
@@ -30283,6 +30285,8 @@ namespace Legion {
         .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
         .add_option_bool("-lg:dump_physical_traces",
                          config.dump_physical_traces, !filter)
+        .add_option_bool("-lg:enable_automatic_tracing",
+                         config.enable_automatic_tracing, !filter)
         .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
         .add_option_bool("-lg:no_physical_tracing",
                          config.no_physical_tracing, !filter)

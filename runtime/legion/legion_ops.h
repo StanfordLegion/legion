@@ -1759,6 +1759,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { exec_fence = (fence_kind == EXECUTION_FENCE); return exec_fence; }
+      FenceKind get_fence_kind(void) { return fence_kind; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);

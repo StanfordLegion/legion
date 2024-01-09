@@ -2521,6 +2521,7 @@ namespace Legion {
             safe_control_replication(0),
             program_order_execution(false),
             dump_physical_traces(false),
+            enable_automatic_tracing(false),
             no_tracing(false),
             no_physical_tracing(false),
             no_trace_optimization(false),
@@ -2578,6 +2579,7 @@ namespace Legion {
       public:
         bool program_order_execution;
         bool dump_physical_traces;
+        bool enable_automatic_tracing;
         bool no_tracing;
         bool no_physical_tracing;
         bool no_trace_optimization;
@@ -2716,6 +2718,7 @@ namespace Legion {
     public:
       const bool program_order_execution;
       const bool dump_physical_traces;
+      const bool enable_automatic_tracing;
       const bool no_tracing;
       const bool no_physical_tracing;
       const bool no_trace_optimization;
