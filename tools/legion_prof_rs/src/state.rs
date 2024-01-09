@@ -502,26 +502,26 @@ impl Proc {
             op_prof_uid.insert(op_id, base.prof_uid);
         }
         prof_uid_proc.insert(base.prof_uid, self.proc_id);
-        // For each kind of task insert it into the appropriate data structures
+        // Insert the fevents for tasks into the data structure
         match kind {
             ProcEntryKind::Task(_, _) | ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
                 // We should only see an event once
                 assert!(!self.fevents.contains_key(&fevent));
                 self.fevents.insert(fevent, base.prof_uid);
-                match kind {
-                    ProcEntryKind::Task(_, _) => {
-                        self.tasks.insert(op.unwrap(), base.prof_uid);
-                    }
-                    ProcEntryKind::MetaTask(variant_id) => {
-                        self.meta_tasks
-                            .entry((initiation_op.unwrap(), variant_id))
-                            .or_insert_with(Vec::new)
-                            .push(base.prof_uid);
-                    }
-                    // If we don't need to look up later... don't bother building the index
-                    _ => {}
-                }
             }
+            _ => {}
+        }
+        match kind {
+            ProcEntryKind::Task(_, _) => {
+                self.tasks.insert(op.unwrap(), base.prof_uid);
+            }
+            ProcEntryKind::MetaTask(variant_id) => {
+                self.meta_tasks
+                    .entry((initiation_op.unwrap(), variant_id))
+                    .or_insert_with(Vec::new)
+                    .push(base.prof_uid);
+            }
+            // If we don't need to look up later... don't bother building the index
             _ => {}
         }
         self.entries
