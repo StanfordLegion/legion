@@ -8717,6 +8717,19 @@ namespace Legion {
       const Task* get_current_task(Context ctx);
 
       /**
+       * Query the space available to this task in a given memory.
+       * This is an instantaneous value and may be subject to change.
+       * If the mapper has provided an upper bound for a pool in this
+       * memory then it will reflect how much space is left available
+       * in that pool, otherwise it will reflect the space left in the
+       * actual memory. Note that the space available does not imply
+       * that you can create an instance of this size as the memory 
+       * may be fragmented and the largest hole might be much smaller
+       * than the size returned by this function.
+       */
+      size_t query_available_memory(Context ctx, Memory target);
+
+      /**
        * Indicate that data in a particular physical region
        * appears to be incorrect for whatever reason.  This
        * will cause the runtime to trap into an error handler
@@ -9254,7 +9267,7 @@ namespace Legion {
        * ever being invoked. The runtime takes ownership for deleting the
        * projection functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
-       * @param functor the objecto register for handling projections
+       * @param functor the object to register for handling projections
        */
       static void preregister_projection_functor(ProjectionID pid,
                                                  ProjectionFunctor *functor);
@@ -9297,7 +9310,14 @@ namespace Legion {
       /**
        * Register a sharding functor for handling control replication
        * queries about which shard owns which a given point in an 
-       * index space launch.
+       * index space launch. The ShardingID must be non-zero because
+       * zero is the special "round-robin" sharding functor. The
+       * runtime takes ownership of for deleting the sharding functor
+       * after the application has finished executing.
+       * @param sid the sharding ID to use for the registration
+       * @param functor the object to register for handling sharding requests 
+       * @param silence_warnings disable warnings about dynamic registration
+       * @param warning_string a string to be reported with any warnings
        */
       void register_sharding_functor(ShardingID sid,
                                      ShardingFunctor *functor,
@@ -9308,7 +9328,11 @@ namespace Legion {
        * Register a sharding functor before the runtime has 
        * started only. The sharding functor will be invoked to
        * handle queries during control replication about which
-       * shard owns a given point in an index space launch.
+       * shard owns a given point in an index space launch. The
+       * runtime takes ownership for deleting the sharding functor
+       * after the application has finished executing.
+       * @param sid the sharding ID to use for the registration
+       * @param functor the object too register for handling sharding 
        */
       static void preregister_sharding_functor(ShardingID sid,
                                                ShardingFunctor *functor);

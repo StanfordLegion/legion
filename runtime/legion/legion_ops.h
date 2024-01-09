@@ -4316,17 +4316,17 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void) { return NULL; }
     protected:
-      void invoke_mapper(std::vector<Memory> &targets);
+      void invoke_mapper(void);
       ApEvent finalize_serdez_targets(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
+      virtual void trigger_execution(void);
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);
-      virtual void create_future_instances(std::vector<Memory> &target_mems);
+      virtual void create_future_instances(void);
       virtual void all_reduce_serdez(void);
       virtual ApEvent all_reduce_redop(RtEvent &executed);
     protected:
@@ -4345,6 +4345,7 @@ namespace Legion {
       Future result;
       std::map<DomainPoint,FutureImpl*> sources;
       std::vector<FutureInstance*> targets;
+      std::vector<Memory> target_memories;
       size_t future_result_size;
       FutureInstance *serdez_redop_instance;
       void *serdez_redop_buffer;

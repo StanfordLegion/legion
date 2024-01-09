@@ -7201,6 +7201,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t Runtime::query_available_memory(Context ctx, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        return 0;
+      return ctx->query_available_memory(target);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::raise_region_exception(Context ctx, 
                                          PhysicalRegion region, bool nuclear)
     //--------------------------------------------------------------------------

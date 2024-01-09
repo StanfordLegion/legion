@@ -23232,6 +23232,7 @@ namespace Legion {
       initial_value = Future();
       sources.clear();
       targets.clear();
+      target_memories.clear();
       if (serdez_redop_buffer != NULL)
         free(serdez_redop_buffer);
       if (serdez_redop_instance != NULL)
@@ -23280,14 +23281,13 @@ namespace Legion {
     {
       populate_sources();
       std::vector<RtEvent> preconditions;
+      // Always make sure we'll have buffers ready on the host for us to
+      // access in order to use for doing the all-reduce
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
-      {
         prepare_future(preconditions, it->second);
-      }
       if (initial_value.impl != NULL)
         prepare_future(preconditions, initial_value.impl);
-
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -23376,70 +23376,57 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Invoke the mapper to do figure out where to put the data
-      std::vector<Memory> target_memories;
-      invoke_mapper(target_memories);
-      // Make sure we subscribe to all these futures before we are mapped
-      // in case they need to make any instances
+      invoke_mapper();
+      // Compute the future reduction size
       if (serdez_redop_fns == NULL)
         future_result_size = redop->sizeof_rhs;
-      else if (serdez_upper_bound == SIZE_MAX)
-      {
-        // Need to do our subscriptions now
-        std::vector<RtEvent> ready_events;
-        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
-            sources.begin(); it != sources.end(); it++)
-        {
-          subscribe_to_future(ready_events, it->second);
-        }
-        if (initial_value.impl != NULL)
-          subscribe_to_future(ready_events, initial_value.impl); 
-        // Wait for the subscriptions to be ready
-        if (!ready_events.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(ready_events);
-          if (wait_on.exists() && ! wait_on.has_triggered())
-            wait_on.wait();
-        }
-
-        // Serdez redop functions are nasty, we need to actually do the 
-        // computation inline here to figure out how big the output buffer
-        // needs to be for the future instances before we can do the
-        // mapper call which might try to actually make the instances.
-        all_reduce_serdez();
-      }
-#ifdef DEBUG_LEGION
-      assert(targets.empty());
-      assert(!target_memories.empty());
-#endif
-      // Make the instances for the target memories
-      create_future_instances(target_memories); 
-      // We're done with our mapping at the point we've made all the instances
-      complete_mapping();
-      std::vector<RtEvent> ready_events;
-      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
-            sources.begin(); it != sources.end(); it++)
-      {
-        const RtEvent ready = it->second->subscribe();
-        if (ready.exists() && !ready.has_triggered())
-          ready_events.push_back(ready);
-      }
-      if (!ready_events.empty())
-        complete_execution(Runtime::merge_events(ready_events));
       else
-        complete_execution();
+        future_result_size = serdez_upper_bound;
+      if (future_result_size < SIZE_MAX)
+      {
+        // We can only make the future results now if we have an actual
+        // future result size to use which might not be the case if the
+        // mapper didn't specify an upper bound on the size of the results
+        create_future_instances(); 
+        // We're done with our mapping at the point we've made all the instances
+        complete_mapping();
+      }
+      // Subscribe to all the futures and then perform the computation
+      std::vector<RtEvent> ready_events;
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
+          sources.begin(); it != sources.end(); it++)
+        subscribe_to_future(ready_events, it->second);
+      if (initial_value.impl != NULL)
+        subscribe_to_future(ready_events, initial_value.impl);
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists())
+        {
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+          return;
+        }
+      }
+      // If we get here then we can trigger execution immediately
+      trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::trigger_complete(void)
+    void AllReduceOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       ApEvent done;
       RtEvent executed;
-      if (serdez_redop_fns == NULL)
-        done = all_reduce_redop(executed);
-      else if (serdez_upper_bound < SIZE_MAX)
+      if (serdez_redop_fns != NULL)
       {
         all_reduce_serdez();
+        if (serdez_upper_bound == SIZE_MAX)
+        {
+          // Make the instances for the target memories
+          create_future_instances(); 
+          // We're done with our mapping now that we've made all the instances
+          complete_mapping();
+        }
         // Check that the result is smaller than the bound
         if (serdez_upper_bound < future_result_size)
         {
@@ -23457,15 +23444,15 @@ namespace Legion {
         done = finalize_serdez_targets();
       }
       else
-        done = finalize_serdez_targets();
+        done = all_reduce_redop(executed);
       if (done.exists())
         record_completion_effect(done);
       result.impl->set_results(done, targets);
-      complete_operation(executed);
+      complete_execution(executed);
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::invoke_mapper(std::vector<Memory> &target_memories)
+    void AllReduceOp::invoke_mapper(void)
     //--------------------------------------------------------------------------
     {
       Mapper::FutureMapReductionInput input;
@@ -23519,10 +23506,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::create_future_instances(std::vector<Memory> &target_mems)
+    void AllReduceOp::create_future_instances(void)
     //--------------------------------------------------------------------------
     {
-      targets.reserve(target_mems.size());
+#ifdef DEBUG_LEGION
+      assert(targets.empty());
+      assert(!target_memories.empty());
+#endif
+      targets.reserve(target_memories.size());
       // If we don't have serdez functions or the upper bound is not set
       // then we can use the future_result_size since we know it is the
       // right size for the futures, otherwise we need to trust the 
@@ -23532,7 +23523,7 @@ namespace Legion {
         future_result_size : serdez_upper_bound;
       int runtime_visible = -1;
       for (std::vector<Memory>::const_iterator it =
-            target_mems.begin(); it != target_mems.end(); it++)
+            target_memories.begin(); it != target_memories.end(); it++)
       {
         if ((runtime_visible < 0) &&
             FutureInstance::check_meta_visible(*it))

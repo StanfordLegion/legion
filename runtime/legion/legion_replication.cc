@@ -6209,18 +6209,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAllReduceOp::create_future_instances(
-                                           std::vector<Memory> &target_memories)
+    void ReplAllReduceOp::create_future_instances(void)
     //--------------------------------------------------------------------------
     {
       // Do the base call first
-      AllReduceOp::create_future_instances(target_memories);
+      AllReduceOp::create_future_instances();
       // Now check to see if we need to make a shadow instance for
       // the all-reduce future collective
       if (all_reduce_collective != NULL)
       {
 #ifdef DEBUG_LEGION
         assert(!targets.empty());
+        assert(serdez_redop_fns == NULL);
 #endif
         FutureInstance *target = targets.front();
         // If the instance is in a memory we cannot see or is "too big"

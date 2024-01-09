@@ -70,6 +70,7 @@
 #include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
+#include <sysinfoapi.h>
 
 static void sleep(int seconds)
 {
@@ -740,6 +741,9 @@ namespace Realm {
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
+
+    resource_map.insert({"cpu", &res_num_cpus});
+    resource_map.insert({"sysmem", &res_sysmem_size});
   }
 
 #ifdef REALM_ON_WINDOWS
@@ -810,13 +814,18 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     GlobalMemoryStatusEx(&memInfo);
     res_sysmem_size = static_cast<size_t>(memInfo.ullTotalPageFile);
     // physical cores
-    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = NULL;
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = nullptr;
     DWORD buffer_size = 0;
 
     // Get the required buffer size
-    if (!GetLogicalProcessorInformationEx(RelationAll, NULL, &buffer_size)) {
-      return false;
+    if(!GetLogicalProcessorInformationEx(RelationAll, nullptr, &buffer_size)) {
+      DWORD last_err = GetLastError();
+      if(last_err != ERROR_INSUFFICIENT_BUFFER) {
+        return false;
+      }
+      assert(buffer_size != 0);
     }
+
     buffer = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[buffer_size]);
     if (!GetLogicalProcessorInformationEx(RelationAll, buffer, &buffer_size)) {
       delete[] buffer;
@@ -854,29 +863,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     sysctlbyname("hw.physicalcpu", &res_num_cpus, &buflen, NULL, 0);
 #endif
     log_runtime.info("Discover resource cpu cores %d, sysmem %zu", res_num_cpus, res_sysmem_size);
-    return true;
-  }
-
-  bool CoreModuleConfig::get_resource(const std::string name, int &value) const
-  {
-    if (name == "cpu") {
-      value = res_num_cpus;
-      return true;
-    } else {
-      log_runtime.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
-      return false;
-    }
-  }
-
-  bool CoreModuleConfig::get_resource(const std::string name, size_t &value) const
-  {
-    if (name == "sysmem") {
-      value = res_sysmem_size;
-      return true;
-    } else {
-      log_runtime.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
-      return false;
-    }
+    resource_discover_finished = true;
+    return resource_discover_finished;
   }
 
   void CoreModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)

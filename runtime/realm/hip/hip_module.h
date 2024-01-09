@@ -102,9 +102,8 @@ namespace Realm {
       HipModuleConfig(void);
 
       bool discover_resource(void);
-    public:  
-      virtual bool get_resource(const std::string name, int &value) const;
-      virtual bool get_resource(const std::string name, size_t &value) const;
+
+    public:
       virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
 
     public:
@@ -132,6 +131,7 @@ namespace Realm {
       // resources
       bool resource_discovered = false;
       int res_num_gpus = 0;
+      size_t res_min_fbmem_size = 0;
       std::vector<size_t> res_fbmem_sizes;
     };
 
