@@ -121,32 +121,40 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // numa module
-  // ModuleConfig *numa_config = rt.get_module_config("numa");
-  // if (numa_config) {
-  //   size_t numa_mem_size = 0;
-  //   size_t numa_nocpu_mem_size = 0;
-  //   int num_numa_cpus = 0;
-  //   bool numa_pin_memory = false;
-  //   ret_value = numa_config->get_property("numamem", numa_mem_size);
-  //   assert(ret_value == true);
-  //   assert(numa_mem_size == TestConfig::numa_mem_size);
-  //   ret_value = numa_config->get_property("numa_nocpumem", numa_nocpu_mem_size);
-  //   assert(ret_value == true);
-  //   assert(numa_nocpu_mem_size == TestConfig::numa_nocpu_mem_size);
-  //   ret_value = numa_config->get_property("numacpus", num_numa_cpus);
-  //   assert(ret_value == true);
-  //   assert(num_numa_cpus == TestConfig::num_numa_cpus);
-  //   ret_value = numa_config->get_property("pin_memory", numa_pin_memory);
-  //   assert(ret_value == true);
-  //   assert(numa_pin_memory == TestConfig::numa_pin_memory);
-  //   // test wrong property
-  //   ret_value = numa_config->get_property("get_error_numa", wrong_config);
-  //   assert(ret_value == false);
-  //   log_app.print("numa numamem %zu, numa_nocpumem %zu, numacpsus %d, numa_pin_memory %d", 
-  //     numa_mem_size, numa_nocpu_mem_size, num_numa_cpus, numa_pin_memory);
-  // } else {
-  //   log_app.print("numa is not loaded");
-  // }
+  ModuleConfig *numa_config = rt.get_module_config("numa");
+  if(numa_config) {
+    bool numa_avail = false;
+    ret_value = numa_config->get_resource("numa", numa_avail);
+    assert(ret_value == true);
+    if(numa_avail) {
+      size_t numa_mem_size = 0;
+      size_t numa_nocpu_mem_size = 0;
+      int num_numa_cpus = 0;
+      bool numa_pin_memory = false;
+      ret_value = numa_config->get_property("numamem", numa_mem_size);
+      assert(ret_value == true);
+      assert(numa_mem_size == TestConfig::numa_mem_size);
+      ret_value = numa_config->get_property("numa_nocpumem", numa_nocpu_mem_size);
+      assert(ret_value == true);
+      assert(numa_nocpu_mem_size == TestConfig::numa_nocpu_mem_size);
+      ret_value = numa_config->get_property("numacpus", num_numa_cpus);
+      assert(ret_value == true);
+      assert(num_numa_cpus == TestConfig::num_numa_cpus);
+      ret_value = numa_config->get_property("pin_memory", numa_pin_memory);
+      assert(ret_value == true);
+      assert(numa_pin_memory == TestConfig::numa_pin_memory);
+      // test wrong property
+      ret_value = numa_config->get_property("get_error_numa", wrong_config);
+      assert(ret_value == false);
+      log_app.print(
+          "numa numamem %zu, numa_nocpumem %zu, numacpsus %d, numa_pin_memory %d",
+          numa_mem_size, numa_nocpu_mem_size, num_numa_cpus, numa_pin_memory);
+    } else {
+      log_app.warning("numa is not available");
+    }
+  } else {
+    log_app.print("numa is not loaded");
+  }
 
   // cuda/hip module
   ModuleConfig *cuda_config = rt.get_module_config("cuda");
@@ -472,22 +480,33 @@ int main(int argc, char **argv)
     }
 
     // numa module
-    // ModuleConfig* numa_config = rt.get_module_config("numa");
-    // if (numa_config) {
-    //   ret_value = numa_config->set_property<size_t>("numamem", TestConfig::numa_mem_size);
-    //   assert(ret_value == true);
-    //   ret_value = numa_config->set_property<size_t>("numa_nocpumem", TestConfig::numa_nocpu_mem_size);
-    //   assert(ret_value == true);
-    //   ret_value = numa_config->set_property<int>("numacpus", TestConfig::num_numa_cpus);
-    //   assert(ret_value == true);
-    //   ret_value = numa_config->set_property<bool>("pin_memory", TestConfig::numa_pin_memory);
-    //   assert(ret_value == true);
-    //   // test wrong config
-    //   ret_value = numa_config->set_property("set_error_numa", TestConfig::numa_mem_size);
-    //   assert(ret_value == false);
-    // } else {
-    //   log_app.print("numa is not loaded");
-    // }
+    ModuleConfig *numa_config = rt.get_module_config("numa");
+    if(numa_config) {
+      bool numa_avail = false;
+      ret_value = numa_config->get_resource("numa", numa_avail);
+      assert(ret_value == true);
+      if(numa_avail) {
+        ret_value =
+            numa_config->set_property<size_t>("numamem", TestConfig::numa_mem_size);
+        assert(ret_value == true);
+        ret_value = numa_config->set_property<size_t>("numa_nocpumem",
+                                                      TestConfig::numa_nocpu_mem_size);
+        assert(ret_value == true);
+        ret_value = numa_config->set_property<int>("numacpus", TestConfig::num_numa_cpus);
+        assert(ret_value == true);
+        ret_value =
+            numa_config->set_property<bool>("pin_memory", TestConfig::numa_pin_memory);
+        assert(ret_value == true);
+        // test wrong config
+        ret_value =
+            numa_config->set_property("set_error_numa", TestConfig::numa_mem_size);
+        assert(ret_value == false);
+      } else {
+        log_app.warning("numa is not available");
+      }
+    } else {
+      log_app.print("numa is not loaded");
+    }
 
     // cuda/hip module
     ModuleConfig* cuda_config = rt.get_module_config("cuda");
