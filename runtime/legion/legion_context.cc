@@ -600,10 +600,16 @@ namespace Legion {
     void TaskContext::yield(void)
     //--------------------------------------------------------------------------
     {
+      const Processor proc = Processor::get_executing_processor();
+      // This can happen in the case of implicit top-level tasks
+      if (!proc.exists())
+        return;
       YieldArgs args(owner_task->get_unique_id());
-      // Run this task with minimum priority to allow other things to run
+      // Run this as the lowest possible priority task on the same processor
+      // which will give all other ready tasks an opportunity to run. Once
+      // the meta-task does run though then we know we can wake-up.
       const RtEvent wait_for = 
-        runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
+        runtime->issue_application_processor_task(args, LG_MIN_PRIORITY, proc);
       wait_for.wait();
     }
 
