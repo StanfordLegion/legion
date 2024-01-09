@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <thread>
 #include "legion/runtime.h"
 #include "legion/legion_tasks.h"
 #include "legion/legion_trace.h"
@@ -986,16 +987,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Processor proc = Processor::get_executing_processor();
-      // This can happen in the case of implicit top-level tasks
-      if (!proc.exists())
-        return;
-      YieldArgs args(owner_task->get_unique_id());
-      // Run this as the lowest possible priority task on the same processor
-      // which will give all other ready tasks an opportunity to run. Once
-      // the meta-task does run though then we know we can wake-up.
-      const RtEvent wait_for = 
-        runtime->issue_application_processor_task(args, LG_MIN_PRIORITY, proc);
-      wait_for.wait();
+      if (proc.exists())
+      {
+        // Normal realm task
+        YieldArgs args(owner_task->get_unique_id());
+        // Run this as the lowest possible priority task on the same processor
+        // which will give all other ready tasks an opportunity to run. Once
+        // the meta-task does run though then we know we can wake-up.
+        const RtEvent wait_for = 
+          runtime->issue_application_processor_task(args, LG_MIN_PRIORITY,proc);
+        wait_for.wait();
+      }
+      else // external implicit top-level task
+        std::this_thread::yield();
     }
 
     //--------------------------------------------------------------------------
