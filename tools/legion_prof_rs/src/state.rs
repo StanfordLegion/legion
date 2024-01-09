@@ -497,28 +497,31 @@ impl Proc {
         fevent: EventID,
         op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
         prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
-        add_fevent: bool,
     ) -> &mut ProcEntry {
         if let Some(op_id) = op {
             op_prof_uid.insert(op_id, base.prof_uid);
         }
         prof_uid_proc.insert(base.prof_uid, self.proc_id);
-        if add_fevent {
-            // We should only see an event once
-            assert!(!self.fevents.contains_key(&fevent));
-            self.fevents.insert(fevent, base.prof_uid);
-        }
+        // For each kind of task insert it into the appropriate data structures
         match kind {
-            ProcEntryKind::Task(_, _) => {
-                self.tasks.insert(op.unwrap(), base.prof_uid);
+            ProcEntryKind::Task(_, _) | ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
+                // We should only see an event once
+                assert!(!self.fevents.contains_key(&fevent));
+                self.fevents.insert(fevent, base.prof_uid);
+                match kind {
+                    ProcEntryKind::Task(_, _) => {
+                        self.tasks.insert(op.unwrap(), base.prof_uid);
+                    }
+                    ProcEntryKind::MetaTask(variant_id) => {
+                        self.meta_tasks
+                            .entry((initiation_op.unwrap(), variant_id))
+                            .or_insert_with(Vec::new)
+                            .push(base.prof_uid);
+                    }
+                    // If we don't need to look up later... don't bother building the index
+                    _ => {}
+                }
             }
-            ProcEntryKind::MetaTask(variant_id) => {
-                self.meta_tasks
-                    .entry((initiation_op.unwrap(), variant_id))
-                    .or_insert_with(Vec::new)
-                    .push(base.prof_uid);
-            }
-            // If we don't need to look up later... don't bother building the index
             _ => {}
         }
         self.entries
@@ -2509,7 +2512,6 @@ impl State {
             fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            true,
         )
     }
 
@@ -2545,7 +2547,6 @@ impl State {
             fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            true,
         )
     }
 
@@ -2576,7 +2577,6 @@ impl State {
             fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            false,
         )
     }
 
@@ -2598,7 +2598,6 @@ impl State {
             fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            false,
         )
     }
 
@@ -2620,7 +2619,6 @@ impl State {
             fevent,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            true,
         )
     }
 
