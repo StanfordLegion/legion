@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <thread>
 #include "legion/runtime.h"
 #include "legion/legion_tasks.h"
 #include "legion/legion_trace.h"
@@ -600,11 +601,20 @@ namespace Legion {
     void TaskContext::yield(void)
     //--------------------------------------------------------------------------
     {
-      YieldArgs args(owner_task->get_unique_id());
-      // Run this task with minimum priority to allow other things to run
-      const RtEvent wait_for = 
-        runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
-      wait_for.wait();
+      const Processor proc = Processor::get_executing_processor();
+      if (proc.exists())
+      {
+        // Normal realm task
+        YieldArgs args(owner_task->get_unique_id());
+        // Run this as the lowest possible priority task on the same processor
+        // which will give all other ready tasks an opportunity to run. Once
+        // the meta-task does run though then we know we can wake-up.
+        const RtEvent wait_for = 
+          runtime->issue_application_processor_task(args, LG_MIN_PRIORITY,proc);
+        wait_for.wait();
+      }
+      else // external implicit top-level task
+        std::this_thread::yield();
     }
 
     //--------------------------------------------------------------------------
