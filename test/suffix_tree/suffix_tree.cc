@@ -59,9 +59,19 @@ void random_search_test() {
   }
 }
 
+void basic_repeats_test() {
+  auto str = std::vector<int>{'a', 'b', 'c', 'a', 'b', 'c', 'a', 'b', 0};
+  auto result = compute_longest_nonoverlapping_repeats(str);
+  assert(result.size() == 3);
+  assert((std::vector<int>{'a', 'b'} == std::vector<int>(str.begin() + result[0].start, str.begin() + result[0].end)) && result[0].repeats == 3);
+  assert((std::vector<int>{'c', 'a', 'b'} == std::vector<int>(str.begin() + result[1].start, str.begin() + result[1].end)) && result[1].repeats == 2);
+  assert((std::vector<int>{'b'} == std::vector<int>(str.begin() + result[2].start, str.begin() + result[2].end)) && result[2].repeats == 3);
+}
+
 int main(int argc, char **argv) {
   random_creation_test();
   random_search_test();
+  basic_repeats_test();
   std::cout << "Passed all tests!" << std::endl;
   return 0;
 }

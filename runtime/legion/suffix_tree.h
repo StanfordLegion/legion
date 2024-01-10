@@ -16,7 +16,10 @@
 #ifndef __LEGION_SUFFIX_TREE_H__
 #define __LEGION_SUFFIX_TREE_H__
 
+#include <algorithm>
+#include <limits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <iostream>
@@ -46,6 +49,9 @@ namespace Legion {
       size_t depth() { return end - start; }
       bool is_internal() { return this->internal; }
       bool is_leaf() { return !this->is_internal(); }
+      const std::unordered_map<T, SuffixTreeNode<T>*>& get_children() { return this->children; }
+      size_t get_start() { return this->start; }
+      size_t get_end() { return this->end; }
 
     protected:
       SuffixTreeNode<T>* split_edge(const std::vector<T>& str, size_t new_len, SuffixTreeNode<T>* child) {
@@ -166,6 +172,8 @@ namespace Legion {
         auto result = this->root->find_path(base_str, query_str, 0, query_str.size());
         return result.matched_len == query_str.size();
       }
+
+      SuffixTreeNode<T>* get_root() { return this->root; }
     private:
       void build(const std::vector<T>& str) {
         this->root->suffix_link = this->root;
@@ -258,6 +266,103 @@ namespace Legion {
 
       SuffixTreeNode<T>* root;
     };
+
+    // Non overlapping repeats implementation.
+    struct NonOverlappingRepeatsResult {
+      size_t start;
+      size_t end;
+      size_t repeats;
+    };
+
+    // Helper functions.
+    namespace {
+      struct RepeatsWalkResult {
+        std::vector<size_t> leaf_starts;
+        size_t imin;
+        size_t imax;
+
+        void combine(const RepeatsWalkResult& other) {
+          // TODO (rohany): See if we can do this in place...
+          std::vector<size_t> leaf_starts;
+          leaf_starts.reserve(this->leaf_starts.size() + other.leaf_starts.size());
+          std::merge(
+            this->leaf_starts.begin(),
+            this->leaf_starts.end(),
+            other.leaf_starts.begin(),
+            other.leaf_starts.end(),
+            std::back_inserter(leaf_starts)
+          );
+          this->leaf_starts = leaf_starts;
+          this->imin = std::min(this->imin, other.imin);
+          this->imax = std::max(this->imax, other.imax);
+        }
+      };
+      template<typename T>
+      RepeatsWalkResult walk(SuffixTreeNode<T>* node, std::vector<NonOverlappingRepeatsResult>& output) {
+        if (node->is_leaf()) {
+          size_t start = node->get_start();
+          RepeatsWalkResult result {
+            .leaf_starts = std::vector<size_t>(1, start),
+            .imin = start,
+            .imax = start,
+          };
+          return result;
+        } else {
+          RepeatsWalkResult result {
+            .leaf_starts = std::vector<size_t>(),
+            .imin = std::numeric_limits<size_t>::max(),
+            .imax = std::numeric_limits<size_t>::min(),
+          };
+          // This approach is performing O(n^2) work by computing the leaf starts at each
+          // node in the tree. If this becomes expensive, there's a way to slightly optimize
+          // this by only collecting all of the leaves of internal nodes that correspond to
+          // repeated substrings in the first place. We'll pay extra tree traversals for this,
+          // but that cost could be offset if there aren't many repeated substrings.
+          for (auto it = node->get_children().begin(); it != node->get_children().end(); it++) {
+            result.combine(walk(it->second, output));
+          }
+          // We've found a repeat. Now find how many times it actually repeats. Exclude nodes of depth
+          // zero to exclude the root node.
+          if (result.imin + node->depth() <= result.imax && node->depth() != 0) {
+            size_t count = 0;
+            assert(result.leaf_starts.size() >= 1);
+            size_t current = result.leaf_starts[0];
+            for (size_t i = 1; i < result.leaf_starts.size(); i++) {
+              size_t next = result.leaf_starts[i];
+              if (current + node->depth() <= next) {
+                current = next;
+                count++;
+              }
+            }
+            // If we found at least one other valid start, then we've found a candidate.
+            if (count >= 1) {
+              output.push_back(NonOverlappingRepeatsResult{
+                .start = node->get_start(),
+                .end = node->get_end(),
+                .repeats = count + 1,
+              });
+            }
+          }
+          return result;
+        }
+      }
+
+      bool compare(const NonOverlappingRepeatsResult& left, const NonOverlappingRepeatsResult& right) {
+        // Note: using > instead of < to sort in descending order.
+        return std::make_pair((left.end - left.start) * left.repeats, left.repeats) >
+               std::make_pair((right.end - right.start) * right.repeats, right.repeats);
+      }
+    }
+
+    // The input string must also be formatted correctly for the suffix tree (unique last character).
+    template<typename T>
+    std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(const std::vector<T>& str) {
+      SuffixTree<T> tree(str);
+      std::vector<NonOverlappingRepeatsResult> result;
+      walk(tree.get_root(), result);
+      std::sort(result.begin(), result.end(), compare);
+      return result;
+    }
   };
 };
 
