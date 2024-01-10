@@ -9087,7 +9087,7 @@ namespace Legion {
        *              profiler in microseconds. All runtime and mapper calls
        *              that are less than this threshold will be discarded
        *              and will not be recorded in the profiling logs. The
-       *              default value is 100 (us).
+       *              default value is 0 (us) so all calls are logged.
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc

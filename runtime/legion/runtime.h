@@ -1690,7 +1690,7 @@ namespace Legion {
             serializer_type("binary"),
             prof_footprint_threshold(128 << 20),
             prof_target_latency(100),
-            prof_call_threshold(100) { }
+            prof_call_threshold(0) { }
       public:
         int delay_start;
         mutable int legion_collective_radix;
