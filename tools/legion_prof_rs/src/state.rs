@@ -570,96 +570,89 @@ impl Proc {
             match entry.kind {
                 ProcEntryKind::MapperCall(_) | ProcEntryKind::RuntimeCall(_) => {
                     let task_uid = self.fevents.get(&entry.fevent).unwrap();
-                    if !subcalls.contains_key(task_uid) {
-                        subcalls.insert(*task_uid, Vec::with_capacity(1));
-                    }
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
                     assert!(call_start <= call_stop);
                     subcalls
-                        .get_mut(&task_uid)
-                        .unwrap()
+                        .entry(*task_uid)
+                        .or_insert_with(Vec::new)
                         .push((*uid, call_start, call_stop));
                 }
                 _ => {}
             }
         }
-        if !subcalls.is_empty() {
-            for (task_uid, calls) in subcalls.iter_mut() {
-                // Remove the old entry from the map to keep the borrow checker happy
-                let mut task_entry = self.entries.remove(&task_uid).unwrap();
-                // Sort subcalls by their size from smallest to largest
-                calls.sort_by_key(|a| a.2 - a.1);
-                // Push waits into the smallest subcall we can find
-                let mut to_remove = Vec::new();
-                for idx in 0..task_entry.waiters.wait_intervals.len() {
-                    let wait = &task_entry.waiters.wait_intervals[idx];
-                    // Find the smallest containing call
-                    for (call_uid, call_start, call_stop) in calls.iter() {
-                        if (*call_start <= wait.start) && (wait.end <= *call_stop) {
-                            let call_entry = self.entries.get_mut(call_uid).unwrap();
-                            call_entry
-                                .waiters
-                                .wait_intervals
-                                .push(WaitInterval::new(wait.start, wait.ready, wait.end));
-                            to_remove.push(idx);
-                            break;
-                        } else {
-                            // Waits should not be partially overlapping with calls
-                            assert!((wait.end <= *call_start) || (*call_stop <= wait.start));
-                        }
+        for (task_uid, calls) in subcalls.iter_mut() {
+            // Remove the old entry from the map to keep the borrow checker happy
+            let mut task_entry = self.entries.remove(&task_uid).unwrap();
+            // Sort subcalls by their size from smallest to largest
+            calls.sort_by_key(|a| a.2 - a.1);
+            // Push waits into the smallest subcall we can find
+            let mut to_remove = Vec::new();
+            for (idx, wait) in task_entry.waiters.wait_intervals.iter().enumerate() {
+                // Find the smallest containing call
+                for (call_uid, call_start, call_stop) in calls.iter() {
+                    if (*call_start <= wait.start) && (wait.end <= *call_stop) {
+                        let call_entry = self.entries.get_mut(call_uid).unwrap();
+                        call_entry
+                            .waiters
+                            .wait_intervals
+                            .push(WaitInterval::new(wait.start, wait.ready, wait.end));
+                        to_remove.push(idx);
+                        break;
+                    } else {
+                        // Waits should not be partially overlapping with calls
+                        assert!((wait.end <= *call_start) || (*call_stop <= wait.start));
                     }
                 }
-                // Remove any waits that we moved into a call
-                for idx in to_remove.iter().rev() {
-                    task_entry.waiters.wait_intervals.remove(*idx);
-                }
-                // For each subcall find the next largest subcall that dominates
-                // it and add a wait for it, if one isn't found then we add the
-                // wait to the task for that subcall
-                for idx1 in 0..calls.len() {
-                    let mut found = false;
-                    let (call_uid, call_start, call_stop) = calls.get(idx1).unwrap();
-                    for idx2 in idx1 + 1..calls.len() {
-                        let (next_uid, next_start, next_stop) = calls.get(idx2).unwrap();
-                        if (next_start <= call_start) && (call_stop <= next_stop) {
-                            let next_entry = self.entries.get_mut(&next_uid).unwrap();
-                            next_entry.waiters.wait_intervals.push(WaitInterval::new(
-                                *call_start,
-                                *call_stop,
-                                *call_stop,
-                            ));
-                            found = true;
-                            break;
-                        } else {
-                            // Calls should not be partially overlapping with eachother
-                            assert!((call_stop <= next_start) || (next_stop <= call_start));
-                        }
-                    }
-                    if !found {
-                        task_entry.waiters.wait_intervals.push(WaitInterval::new(
+            }
+            // Remove any waits that we moved into a call
+            for idx in to_remove.iter().rev() {
+                task_entry.waiters.wait_intervals.remove(*idx);
+            }
+            // For each subcall find the next largest subcall that dominates
+            // it and add a wait for it, if one isn't found then we add the
+            // wait to the task for that subcall
+            for (idx1, (call_uid, call_start, call_stop)) in calls.iter().enumerate() {
+                let mut found = false;
+                for idx2 in idx1 + 1..calls.len() {
+                    let (next_uid, next_start, next_stop) = calls[idx2];
+                    if (next_start <= *call_start) && (*call_stop <= next_stop) {
+                        let next_entry = self.entries.get_mut(&next_uid).unwrap();
+                        next_entry.waiters.wait_intervals.push(WaitInterval::new(
                             *call_start,
                             *call_stop,
                             *call_stop,
                         ));
-                    }
-                    // Update the operation info for the calls
-                    let call_entry = self.entries.get_mut(&call_uid).unwrap();
-                    match task_entry.kind {
-                        ProcEntryKind::Task(_, _) => {
-                            call_entry.initiation_op = task_entry.op_id;
-                        }
-                        ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
-                            call_entry.initiation_op = task_entry.initiation_op;
-                        }
-                        _ => {
-                            panic!("bad processor entry kind");
-                        }
+                        found = true;
+                        break;
+                    } else {
+                        // Calls should not be partially overlapping with eachother
+                        assert!((*call_stop <= next_start) || (next_stop <= *call_start));
                     }
                 }
-                // Finally add the task entry back in now that we're done mutating it
-                self.entries.insert(*task_uid, task_entry);
+                if !found {
+                    task_entry.waiters.wait_intervals.push(WaitInterval::new(
+                        *call_start,
+                        *call_stop,
+                        *call_stop,
+                    ));
+                }
+                // Update the operation info for the calls
+                let call_entry = self.entries.get_mut(&call_uid).unwrap();
+                match task_entry.kind {
+                    ProcEntryKind::Task(_, _) => {
+                        call_entry.initiation_op = task_entry.op_id;
+                    }
+                    ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
+                        call_entry.initiation_op = task_entry.initiation_op;
+                    }
+                    _ => {
+                        panic!("bad processor entry kind");
+                    }
+                }
             }
+            // Finally add the task entry back in now that we're done mutating it
+            self.entries.insert(*task_uid, task_entry);
         }
     }
 
