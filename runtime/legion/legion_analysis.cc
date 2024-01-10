@@ -12922,8 +12922,11 @@ namespace Legion {
                               termination, instances_ready, symbolic);
       // If we're doing a collective read-write then check to make sure that
       // we have exactly one arrival on each of the instances, if we don't
-      // then we're not going to have the isolation that we expect
-      if (!collective_arrivals.empty() && IS_WRITE(usage))
+      // then we're not going to have the isolation that we expect. We make
+      // an exception for this in the case of write-only where we allow for
+      // multiple point tasks to stomp on the same instance since we know
+      // that they are all writing the same values in the end anyway.
+      if (!collective_arrivals.empty() && IS_WRITE(usage) && HAS_READ(usage))
       {
 #ifdef DEBUG_LEGION
         assert(IS_COLLECTIVE(usage));

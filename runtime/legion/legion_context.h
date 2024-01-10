@@ -635,6 +635,7 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
+      size_t query_available_memory(Memory target);
     public:
       void increment_inlined(void);
       void decrement_inlined(void);

@@ -1116,6 +1116,10 @@ namespace Legion {
           case LEGION_ATOMIC: return "ATOMIC";
           case LEGION_SIMULTANEOUS: return "SIMULTANEOUS";
           case LEGION_RELAXED: return "RELAXED";
+          case LEGION_COLLECTIVE_EXCLUSIVE: return "COLLECTIVE_EXCLUSIVE";
+          case LEGION_COLLECTIVE_ATOMIC: return "COLLECTIVE_ATOMIC";
+          case LEGION_COLLECTIVE_SIMULTANEOUS: return "COLLECTIVE_SIMULTANEOUS";
+          case LEGION_COLLECTIVE_RELAXED: return "COLLECTIVE_RELAXED";
           default: assert(false); return "";
         }
       }

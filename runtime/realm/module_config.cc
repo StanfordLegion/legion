@@ -42,20 +42,6 @@ namespace Realm {
     return module_name;
   }
 
-  bool ModuleConfig::get_resource(const std::string name, int &value) const
-  {
-    log_moduleconfig.error("Module %s does not have implemented for get_resource int", module_name.c_str());
-    abort();
-    return false;
-  }
-
-  bool ModuleConfig::get_resource(const std::string name, size_t &value) const
-  {
-    log_moduleconfig.error("Module %s does not have implemented for get_resource size_t", module_name.c_str());
-    abort();
-    return false;
-  }
-
   void ModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
   {
     log_moduleconfig.error("Module %s does not have implemented for configure_cmdline size_t", module_name.c_str());

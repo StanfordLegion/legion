@@ -2593,7 +2593,7 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     protected:
       virtual void populate_sources(void);
-      virtual void create_future_instances(std::vector<Memory> &target_mems);
+      virtual void create_future_instances(void);
       virtual void all_reduce_serdez(void);
       virtual ApEvent all_reduce_redop(RtEvent &executed);
     protected:
