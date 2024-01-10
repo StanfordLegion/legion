@@ -2718,6 +2718,7 @@ class Processor(object):
                 trimmed_tasks.append(task)
         self.tasks = trimmed_tasks 
 
+    @typecheck
     def sort_calls_and_waits(self) -> None:
         subcalls: Dict[Union[MetaTask, ProfTask, Task], List[Union[MapperCall, RuntimeCall]]] = dict()
         for call in self.tasks:
@@ -2727,55 +2728,54 @@ class Processor(object):
                 if task not in subcalls:
                     subcalls[task] = list()
                 subcalls[task].append(call)
-        if subcalls:
-            for task,calls in subcalls.items():
-                # Sort the calls by their size from smallest to largest
-                calls.sort(key=lambda c: c.stop-c.start)  # type: ignore
-                # Push waits into the smalest subcall we can find
-                to_remove: List[int] = list()
-                for idx in range(len(task.wait_intervals)):
-                    wait = task.wait_intervals[idx]
-                    for call in calls:
-                        assert call.start is not None
-                        assert call.stop is not None
-                        if call.start <= wait.start and wait.end <= call.stop:
-                            call.wait_intervals.append(wait)
-                            to_remove.append(idx)
-                            break
-                        else:
-                            # Waits should not be partially overlapping with calls
-                            assert wait.end <= call.start or call.stop <= wait.start
-                # Remove any waits that we moved into a call
-                for idx in reversed(to_remove):
-                    task.wait_intervals.pop(idx)
-                # Now for each call, find the next largest subcall that dominates
-                # it and add a wait for it, if one isn't found then we add the
-                # wait to the task for that subcall
-                for idx in range(len(calls)):
-                    found = False
-                    call = calls[idx]
+        for task,calls in subcalls.items():
+            # Sort the calls by their size from smallest to largest
+            calls.sort(key=lambda c: c.stop-c.start)  # type: ignore
+            # Push waits into the smalest subcall we can find
+            to_remove: List[int] = list()
+            for idx in range(len(task.wait_intervals)):
+                wait = task.wait_intervals[idx]
+                for call in calls:
                     assert call.start is not None
                     assert call.stop is not None
-                    for later in calls[idx+1:]:
-                        assert later.start is not None
-                        assert later.stop is not None
-                        if later.start <= call.start and call.stop <= later.stop:
-                            later.add_wait_interval(call.start, call.stop, call.stop)
-                            found = True
-                            break
-                        else:
-                            # Calls should not be partially overlapping with eachother
-                            assert call.stop <= later.start or later.stop <= call.start
-                    if not found:
-                        task.add_wait_interval(call.start, call.stop, call.stop)
-                    # Update the operation information for the call
-                    if isinstance(task, Task):
-                        call.initiation = task.base_op.op_id
-                        call.initiation_op = task.base_op
+                    if call.start <= wait.start and wait.end <= call.stop:
+                        call.wait_intervals.append(wait)
+                        to_remove.append(idx)
+                        break
                     else:
-                        assert isinstance(task, MetaTask) or isinstance(task, ProfTask)
-                        call.initiation = task.initiation
-                        call.initiation_op = task.initiation_op
+                        # Waits should not be partially overlapping with calls
+                        assert wait.end <= call.start or call.stop <= wait.start
+            # Remove any waits that we moved into a call
+            for idx in reversed(to_remove):
+                task.wait_intervals.pop(idx)
+            # Now for each call, find the next largest subcall that dominates
+            # it and add a wait for it, if one isn't found then we add the
+            # wait to the task for that subcall
+            for idx in range(len(calls)):
+                found = False
+                call = calls[idx]
+                assert call.start is not None
+                assert call.stop is not None
+                for later in calls[idx+1:]:
+                    assert later.start is not None
+                    assert later.stop is not None
+                    if later.start <= call.start and call.stop <= later.stop:
+                        later.add_wait_interval(call.start, call.stop, call.stop)
+                        found = True
+                        break
+                    else:
+                        # Calls should not be partially overlapping with eachother
+                        assert call.stop <= later.start or later.stop <= call.start
+                if not found:
+                    task.add_wait_interval(call.start, call.stop, call.stop)
+                # Update the operation information for the call
+                if isinstance(task, Task):
+                    call.initiation = task.base_op.op_id
+                    call.initiation_op = task.base_op
+                else:
+                    assert isinstance(task, MetaTask) or isinstance(task, ProfTask)
+                    call.initiation = task.initiation
+                    call.initiation_op = task.initiation_op
 
     def sort_time_range(self) -> None:
         self.sort_calls_and_waits()
@@ -3462,13 +3462,13 @@ class State(object):
     __slots__ = [
         'max_dim', 'num_nodes', 'zero_time', 'processors', 'memories', 'mem_proc_affinity', 'channels',
         'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
-        'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
-        'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
+        'prof_uid_map', 'multi_tasks', 'first_times', 'last_times', 'last_time', 
+        'minimum_call_threshold', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
         'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
         'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id'
     ]
-    def __init__(self) -> None:
+    def __init__(self, call_threshold: int) -> None:
         self.max_dim = 3
         self.num_nodes = 0
         self.zero_time = 0
@@ -3486,6 +3486,7 @@ class State(object):
         self.first_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.last_times: Dict[int, Any] = {} # type: ignore # TODO: check if used
         self.last_time = 0
+        self.minimum_call_threshold = call_threshold
         self.mapper_call_kinds: Dict[int, MapperCallKind] = {}
         self.mapper_calls: Dict[int, MapperCall] = {}
         self.runtime_call_kinds: Dict[int, RuntimeCallKind] = {}
@@ -3997,12 +3998,14 @@ class State(object):
         assert kind in self.mapper_call_kinds
         if stop > self.last_time:
             self.last_time = stop
-        call = MapperCall(self.mapper_call_kinds[kind],
-                          self.find_or_create_op(op_id), start, stop, fevent)
-        # update prof_uid map
-        self.prof_uid_map[call.prof_uid] = call
-        proc = self.find_or_create_processor(proc_id)
-        proc.add_call(call)
+        # Only record this call if it is above the minimum call threshold
+        if self.minimum_call_threshold <= (stop - start):
+            call = MapperCall(self.mapper_call_kinds[kind],
+                              self.find_or_create_op(op_id), start, stop, fevent)
+            # update prof_uid map
+            self.prof_uid_map[call.prof_uid] = call
+            proc = self.find_or_create_processor(proc_id)
+            proc.add_call(call)
 
     # RuntimeCallDesc
     @typecheck
@@ -4019,9 +4022,11 @@ class State(object):
         assert kind in self.runtime_call_kinds
         if stop > self.last_time:
             self.last_time = stop
-        call = RuntimeCall(self.runtime_call_kinds[kind], start, stop, fevent)
-        proc = self.find_or_create_processor(proc_id)
-        proc.add_call(call)
+        # Only record this call if it is above the minimum call threshold
+        if self.minimum_call_threshold <= (stop - start):
+            call = RuntimeCall(self.runtime_call_kinds[kind], start, stop, fevent)
+            proc = self.find_or_create_processor(proc_id)
+            proc.add_call(call)
 
     # ProfTaskInfo
     @typecheck
@@ -5609,6 +5614,10 @@ def build_state() -> Optional[State]:
         type=float, default=5.0,
         help='perentage of messages that must be over the threshold to trigger a warning')
     parser.add_argument(
+        '--call-threshold', dest='call_threshold', action='store',
+        type=int, default=0,
+        help='all calls smaller than this threshold (in microseconds) will be filtered from the profile')
+    parser.add_argument(
         '--nodes', dest='nodes', action='store',
         type=str,
         help='a list of nodes that will be visualized')
@@ -5642,7 +5651,8 @@ def build_state() -> Optional[State]:
     # reset prof_uid to 0
     prof_uid_ctr = 0
 
-    state = State()
+    # Convert the call threshold from us to ns
+    state = State(args.call_threshold * 1000)
     has_matches = False
     has_binary_files = False # true if any of the files are a binary file
 

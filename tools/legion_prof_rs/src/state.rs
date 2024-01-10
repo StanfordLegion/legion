@@ -2704,7 +2704,7 @@ impl State {
         self.last_time = max(value, self.last_time);
     }
 
-    pub fn process_records(&mut self, records: &Vec<Record>) {
+    pub fn process_records(&mut self, records: &Vec<Record>, call_threshold: Timestamp) {
         // We need a separate table here because instances can't be
         // immediately linked to their associated memory from the
         // logs. Therefore we defer this process until all records
@@ -2713,7 +2713,14 @@ impl State {
         let mut copies = BTreeMap::new();
         let mut fills = BTreeMap::new();
         for record in records {
-            process_record(record, self, &mut insts, &mut copies, &mut fills);
+            process_record(
+                record,
+                self,
+                &mut insts,
+                &mut copies,
+                &mut fills,
+                call_threshold,
+            );
         }
         // put inst into memories
         for inst in insts.into_values() {
@@ -3343,6 +3350,7 @@ fn process_record(
     insts: &mut BTreeMap<InstUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
+    call_threshold: Timestamp,
 ) {
     match record {
         Record::MapperCallDesc { kind, name } => {
@@ -3805,10 +3813,13 @@ fn process_record(
             proc_id,
             fevent,
         } => {
-            assert!(state.mapper_call_kinds.contains_key(kind));
-            let time_range = TimeRange::new_start(*start, *stop);
-            state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
-            state.update_last_time(*stop);
+            // Check to make sure it is above the call threshold
+            if call_threshold <= (*stop - *start) {
+                assert!(state.mapper_call_kinds.contains_key(kind));
+                let time_range = TimeRange::new_start(*start, *stop);
+                state.create_mapper_call(*kind, *proc_id, *op_id, time_range, *fevent);
+                state.update_last_time(*stop);
+            }
         }
         Record::RuntimeCallInfo {
             kind,
@@ -3817,10 +3828,13 @@ fn process_record(
             proc_id,
             fevent,
         } => {
-            assert!(state.runtime_call_kinds.contains_key(kind));
-            let time_range = TimeRange::new_start(*start, *stop);
-            state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
-            state.update_last_time(*stop);
+            // Check to make sure that it is above the call threshold
+            if call_threshold <= (*stop - *start) {
+                assert!(state.runtime_call_kinds.contains_key(kind));
+                let time_range = TimeRange::new_start(*start, *stop);
+                state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
+                state.update_last_time(*stop);
+            }
         }
         Record::ProfTaskInfo {
             proc_id,

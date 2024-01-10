@@ -80,6 +80,13 @@ struct Cli {
     )]
     message_percentage: f64,
 
+    #[arg(
+        long,
+        default_value_t = 0,
+        help = "minimum threshold (in microseconds) for visualizing function calls"
+    )]
+    call_threshold: u64,
+
     #[arg(long, help = "a list of nodes that will be visualized")]
     nodes: Option<String>,
 
@@ -271,7 +278,7 @@ fn main() -> io::Result<()> {
         match record {
             Records::Prof(r) => {
                 println!("Matched {} objects", r.len());
-                state.process_records(&r);
+                state.process_records(&r, Timestamp::from_us(cli.call_threshold));
             }
             Records::Spy(r) => {
                 println!("Matched {} objects", r.len());
