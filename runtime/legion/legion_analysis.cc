@@ -12724,7 +12724,6 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      assert(!IS_READ_ONLY(usage));
       if (!uninitialized)
       {
 #ifdef DEBUG_LEGION
