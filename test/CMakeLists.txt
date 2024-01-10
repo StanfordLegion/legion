@@ -35,6 +35,7 @@ add_subdirectory(performance/realm/task_ubench)
 add_subdirectory(performance/realm/memcpy)
 add_subdirectory(legion_redop_test)
 add_subdirectory(disjoint_complete)
+add_subdirectory(suffix_tree)
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)

@@ -20,6 +20,22 @@
 #include "legion/legion_context.h"
 #include "legion/legion_utilities.h"
 
+template<>
+struct std::hash<Legion::Internal::Murmur3Hasher::Hash> {
+  std::size_t operator()(const Legion::Internal::Murmur3Hasher::Hash& h) const noexcept {
+    return h.x ^ (h.y << 1);
+  }
+};
+
+template<>
+struct std::equal_to<Legion::Internal::Murmur3Hasher::Hash> {
+  constexpr bool operator()(const Legion::Internal::Murmur3Hasher::Hash& lhs,
+                            const Legion::Internal::Murmur3Hasher::Hash& rhs) const
+  {
+      return lhs.x == rhs.x && lhs.y == rhs.y;
+  }
+};
+
 namespace Legion {
   namespace Internal {
 
@@ -53,7 +69,6 @@ namespace Legion {
                                    bool unordered = false,
                                    bool outermost = true) override;
     private:
-      TraceHashHelper hasher;
     };
 
     // Utility functions.

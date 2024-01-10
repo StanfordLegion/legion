@@ -74,7 +74,6 @@ namespace Legion {
            it != op->regions.end(); it++) {
         this->hash(*it);
       }
-      // TODO (rohany): I don't know if we are allowed to trace tasks with output regions.
       assert(op->output_regions.size() == 0);
       hasher.hash<bool>(op->is_index_space);
       if (op->is_index_space) {
