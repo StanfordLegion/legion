@@ -9651,6 +9651,12 @@ namespace Legion {
        *              This allows control over the granularity so they
        *              can be made small enough to interleave with other
        *              runtime work. The default is 100 (us).
+       * -lg:prof_call_threshold <int> The minimum size of runtime and
+       *              mapper calls in order for them to be logged by the
+       *              profiler in microseconds. All runtime and mapper calls
+       *              that are less than this threshold will be discarded
+       *              and will not be recorded in the profiling logs. The
+       *              default value is 0 (us) so all calls are logged.
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc

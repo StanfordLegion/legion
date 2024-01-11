@@ -32,7 +32,7 @@ namespace Legion {
       Operation*const                   operation;
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
-      unsigned long long                stop_time;
+      unsigned long long                pause_time;
       bool                              reentrant_disabled;
     };
 
@@ -284,7 +284,8 @@ namespace Legion {
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
           Operation *op, RtEvent &precondition, bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
-      virtual void resume_mapper_call(MappingCallInfo *info) = 0;
+      virtual void resume_mapper_call(MappingCallInfo *info,
+                                      RuntimeCallKind kind) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
       void update_mappable_tag(MappingCallInfo *info,
@@ -646,7 +647,8 @@ namespace Legion {
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
           Operation *op, RtEvent &precondition, bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
-      virtual void resume_mapper_call(MappingCallInfo *info);
+      virtual void resume_mapper_call(MappingCallInfo *info,
+                                      RuntimeCallKind kind);
       virtual void finish_mapper_call(MappingCallInfo *info);
     protected:
       // Must be called while holding the mapper reservation
@@ -704,7 +706,8 @@ namespace Legion {
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
           Operation *op, RtEvent &precondition, bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
-      virtual void resume_mapper_call(MappingCallInfo *info);
+      virtual void resume_mapper_call(MappingCallInfo *info,
+                                      RuntimeCallKind kind);
       virtual void finish_mapper_call(MappingCallInfo *info);
     protected:
       // Must be called while holding the lock

@@ -1373,6 +1373,83 @@ namespace Legion {
     };
 
     enum RuntimeCallKind {
+      // Mapper runtime call kinds
+      MAPPER_SEND_MESSAGE_CALL,
+      MAPPER_BROADCAST_CALL,
+      MAPPER_UNPACK_INSTANCE_CALL,
+      MAPPER_CREATE_EVENT_CALL,
+      MAPPER_HAS_TRIGGERED_CALL,
+      MAPPER_TRIGGER_EVENT_CALL,
+      MAPPER_WAIT_EVENT_CALL,
+      MAPPER_FIND_EXECUTION_CONSTRAINTS_CALL,
+      MAPPER_FIND_TASK_LAYOUT_CONSTRAINTS_CALL,
+      MAPPER_FIND_LAYOUT_CONSTRAINTS_CALL,
+      MAPPER_REGISTER_LAYOUT_CALL,
+      MAPPER_RELEASE_LAYOUT_CALL,
+      MAPPER_CONSTRAINTS_CONFLICT_CALL,
+      MAPPER_CONSTRAINTS_ENTAIL_CALL,
+      MAPPER_FIND_VALID_VARIANTS_CALL,
+      MAPPER_FIND_TASK_VARIANT_NAME_CALL,
+      MAPPER_IS_LEAF_VARIANT_CALL,
+      MAPPER_IS_INNER_VARIANT_CALL,
+      MAPPER_IS_IDEMPOTENT_VARIANT_CALL,
+      MAPPER_IS_REPLICABLE_VARIANT_CALL,
+      MAPPER_REGISTER_TASK_VARIANT_CALL,
+      MAPPER_FILTER_VARIANTS_CALL,
+      MAPPER_FILTER_INSTANCES_CALL,
+      MAPPER_CREATE_PHYSICAL_INSTANCE_CALL,
+      MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL,
+      MAPPER_FIND_PHYSICAL_INSTANCE_CALL,
+      MAPPER_FIND_PHYSICAL_INSTANCES_CALL,
+      MAPPER_SET_GC_PRIORITY_CALL,
+      MAPPER_ACQUIRE_INSTANCE_CALL,
+      MAPPER_ACQUIRE_INSTANCES_CALL,
+      MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL,
+      MAPPER_RELEASE_INSTANCE_CALL,
+      MAPPER_RELEASE_INSTANCES_CALL,
+      MAPPER_ACQUIRE_FUTURE_CALL,
+      MAPPER_CREATE_INDEX_SPACE_CALL,
+      MAPPER_UNION_INDEX_SPACES_CALL,
+      MAPPER_INTERSECT_INDEX_SPACES_CALL,
+      MAPPER_SUBTRACT_INDEX_SPACES_CALL,
+      MAPPER_INDEX_SPACE_EMPTY_CALL,
+      MAPPER_INDEX_SPACES_OVERLAP_CALL,
+      MAPPER_INDEX_SPACE_DOMINATES_CALL,
+      MAPPER_HAS_INDEX_PARTITION_CALL,
+      MAPPER_GET_INDEX_PARTITION_CALL,
+      MAPPER_GET_INDEX_SUBSPACE_CALL,
+      MAPPER_GET_INDEX_SPACE_DOMAIN_CALL,
+      MAPPER_GET_INDEX_PARTITION_CS_CALL,
+      MAPPER_GET_INDEX_PARTITION_CS_NAME_CALL,
+      MAPPER_GET_INDEX_SPACE_PARTITION_COLORS_CALL,
+      MAPPER_IS_INDEX_PARTITION_DISJOINT_CALL,
+      MAPPER_IS_INDEX_PARTITION_COMPLETE_CALL,
+      MAPPER_GET_INDEX_SPACE_COLOR_CALL,
+      MAPPER_GET_INDEX_SPACE_COLOR_POINT_CALL,
+      MAPPER_GET_INDEX_PARTITION_COLOR_CALL,
+      MAPPER_GET_PARENT_INDEX_SPACE_CALL,
+      MAPPER_HAS_PARENT_INDEX_PARTITION_CALL,
+      MAPPER_GET_PARENT_INDEX_PARTITION_CALL,
+      MAPPER_GET_INDEX_SPACE_DEPTH_CALL,
+      MAPPER_GET_INDEX_PARTITION_DEPTH_CALL,
+      MAPPER_GET_FIELD_SIZE_CALL,
+      MAPPER_GET_FIELD_SPACE_FIELDS_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_BY_COLOR_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_BY_TREE_CALL,
+      MAPPER_GET_LOGICAL_SUBREGION_CALL,
+      MAPPER_GET_LOGICAL_SUBREGION_BY_COLOR_CALL,
+      MAPPER_GET_LOGICAL_SUBREGION_BY_TREE_CALL,
+      MAPPER_GET_LOGICAL_REGION_COLOR_CALL,
+      MAPPER_GET_LOGICAL_REGION_COLOR_POINT_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_COLOR_CALL,
+      MAPPER_GET_PARENT_LOGICAL_REGION_CALL,
+      MAPPER_HAS_PARENT_LOGICAL_PARTITION_CALL,
+      MAPPER_GET_PARENT_LOGICAL_PARTITION_CALL,
+      MAPPER_RETRIEVE_SEMANTIC_INFO_CALL,
+      MAPPER_RETRIEVE_NAME_CALL,
+      MAPPER_AUTO_LOCK_CALL,
+      // Old runtime call kinds
       PACK_BASE_TASK_CALL, 
       UNPACK_BASE_TASK_CALL,
       TASK_PRIVILEGE_CHECK_CALL,
@@ -1521,6 +1598,81 @@ namespace Legion {
 
 #define RUNTIME_CALL_DESCRIPTIONS(name)                               \
     const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+      "MapperRuntime::send_message",                                  \
+      "MapperRuntime::broadcast",                                     \
+      "MapperRuntime::unpack_physical_instance",                      \
+      "MapperRuntime::create_mapper_event",                           \
+      "MapperRuntime::has_mapper_event_triggered",                    \
+      "MapperRuntime::trigger_mapper_event",                          \
+      "MapperRuntime::wait_on_mapper_event",                          \
+      "MapperRuntime::find_execution_constraints",                    \
+      "MapperRuntime::find_task_layout_constraints",                  \
+      "MapperRuntime::find_layout_constraints",                       \
+      "MapperRuntime::register_layout",                               \
+      "MapperRuntime::release_layout",                                \
+      "MapperRuntime::do_constraints_conflict",                       \
+      "MapperRuntime::do_constraints_entail",                         \
+      "MapperRuntime::find_valid_variants",                           \
+      "MapperRuntime::find_task_variant_name",                        \
+      "MapperRuntime::is_leaf_variant",                               \
+      "MapperRuntime::is_inner_variant",                              \
+      "MapperRuntime::is_idempotent_variant",                         \
+      "MapperRuntime::is_replicable_variant",                         \
+      "MapperRuntime::register_task_variant",                         \
+      "MapperRuntime::filter_variants",                               \
+      "MapperRuntime::filter_instances",                              \
+      "MapperRuntime::create_physical_instance",                      \
+      "MapperRuntime::find_or_create_physical_instance",              \
+      "MapperRuntime::find_physical_instance",                        \
+      "MapperRuntime::find_physical_instances",                       \
+      "MapperRuntime::set_garbage_collection_priority",               \
+      "MapperRuntime::acquire_instance",                              \
+      "MapperRuntime::acquire_instances",                             \
+      "MapperRuntime::acquire_and_filter_instances",                  \
+      "MapperRuntime::release_instance",                              \
+      "MapperRuntime::release_instances",                             \
+      "MapperRuntime::acquire_future",                                \
+      "MapperRuntime::create_index_space",                            \
+      "MapperRuntime::union_index_spaces",                            \
+      "MapperRuntime::intersect_index_spaces",                        \
+      "MapperRuntime::subtract_index_spaces",                         \
+      "MapperRuntime::is_index_space_empty",                          \
+      "MapperRuntime::index_spaces_overlap",                          \
+      "MapperRuntime::index_space_dominates",                         \
+      "MapperRuntime::has_index_partition",                           \
+      "MapperRuntime::get_index_partition",                           \
+      "MapperRuntime::get_index_subspace",                            \
+      "MapperRuntime::get_index_space_domain",                        \
+      "MapperRuntime::get_index_partition_color_space",               \
+      "MapperRuntime::get_index_partition_color_space_name",          \
+      "MapperRuntime::get_index_space_parition_colors",               \
+      "MapperRuntime::is_index_partition_disjoint",                   \
+      "MapperRuntime::is_index_partition_complete",                   \
+      "MapperRuntime::get_index_space_color",                         \
+      "MapperRuntime::get_index_space_color_point",                   \
+      "MapperRuntime::get_index_partition_color",                     \
+      "MapperRuntime::get_parent_index_space",                        \
+      "MapperRuntime::has_parent_index_partition",                    \
+      "MapperRuntime::get_parent_index_partition",                    \
+      "MapperRuntime::get_index_space_depth",                         \
+      "MapperRuntime::get_index_partition_depth",                     \
+      "MapperRuntime::get_field_size",                                \
+      "MapperRuntime::get_field_space_fields",                        \
+      "MapperRuntime::get_logical_partition",                         \
+      "MapperRuntime::get_logical_partition_by_color",                \
+      "MapperRuntime::get_logical_partition_by_tree",                 \
+      "MapperRuntime::get_logical_subregion",                         \
+      "MapperRuntime::get_logical_subregion_by_color",                \
+      "MapperRuntime::get_logical_subregion_by_tree",                 \
+      "MapperRuntime::get_logical_region_color",                      \
+      "MapperRuntime::get_logical_region_color_point",                \
+      "MapperRuntime::get_logical_partition_color",                   \
+      "MapperRuntime::get_parent_logical_region",                     \
+      "MapperRuntime::has_parent_logical_partition",                  \
+      "MapperRuntime::get_parent_logical_partition",                  \
+      "MapperRuntime::retrieve_semantic_information",                 \
+      "MapperRuntime::retrieve_name",                                 \
+      "MapperRuntime::AutoLock",                                      \
       "Pack Base Task",                                               \
       "Unpack Base Task",                                             \
       "Task Privilege Check",                                         \

@@ -17470,14 +17470,13 @@ namespace Legion {
                                     total_address_spaces,
                                     config.prof_footprint_threshold << 20,
                                     config.prof_target_latency,
+                                    config.prof_call_threshold,
                                     config.slow_config_ok);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
-#ifdef DETAILED_LEGION_PROF
       RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
       profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -30342,6 +30341,8 @@ namespace Legion {
         .add_option_int("-lg:prof_footprint", 
                         config.prof_footprint_threshold, !filter)
         .add_option_int("-lg:prof_latency",config.prof_target_latency, !filter)
+        .add_option_int("-lg:prof_call_threshold",
+                        config.prof_call_threshold, !filter)
         .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
         // These are all the deprecated versions of these flag
         .add_option_bool("-hl:separate",
@@ -30615,6 +30616,7 @@ namespace Legion {
           provenance, false/*track parent*/,true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
+      top_task->select_task_options(false/*prioritize*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
@@ -30622,10 +30624,7 @@ namespace Legion {
       ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
-      
-      // Put the task in the ready queue, make sure that the runtime is all
-      // set up across the machine before we launch it as well
-      top_task->enqueue_ready_task(false/*target*/);
+      add_to_ready_queue(target, top_task);
       // Now we can restore the previous implicit context
       implicit_context = previous_implicit;
       return result;
