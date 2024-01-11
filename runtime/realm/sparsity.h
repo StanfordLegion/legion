@@ -79,7 +79,6 @@ namespace Realm {
      */
     void destroy(Event wait_on = Event::NO_EVENT);
 
-
     /**
      * Add one reference to the sparsity map.
      */

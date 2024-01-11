@@ -217,7 +217,7 @@ namespace Realm {
     Deleter map_deleter;
 
     template <int N, typename T>
-    SparsityMapImpl<N,T> *get_or_create(SparsityMap<N,T> me);
+    SparsityMapImpl<N, T> *get_or_create(SparsityMap<N, T> me);
   };
 
 
@@ -226,5 +226,3 @@ namespace Realm {
 #endif // REALM_DEPPART_SPARSITY_IMPL_H
 
 #include "realm/deppart/sparsity_impl.inl"
-
-

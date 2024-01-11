@@ -153,4 +153,3 @@ TEST_F(TransferIteratorTest, DestroyWithDoubleReference)
   EXPECT_NE(impl, nullptr);
   EXPECT_TRUE(impl->is_valid());
 }
-
