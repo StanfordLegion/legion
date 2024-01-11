@@ -11237,17 +11237,21 @@ namespace Legion {
                    view_mask, region_node->row_source, context_uid, idx1);
             }
           }
-          // The parent region requirement is restricted if it is
-          // simultaneous or it is reduce-only. Simultaneous is 
-          // restricted because of normal Legion coherence semantics.
-          // Reduce-only is restricted because we don't issue close
-          // operations at the end of a context for reduce-only cases
-          // right now so by making it restricted things are eagerly
-          // flushed out to the parent task's instance.
-          const bool restricted = 
-            IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
-          eq_set->initialize_set(usage, user_mask, restricted, sources,
-                                 corresponding);
+          // Only need to do the initialization if we're the logical owner
+          if (eq_set->is_logical_owner())
+          {
+            // The parent region requirement is restricted if it is
+            // simultaneous or it is reduce-only. Simultaneous is 
+            // restricted because of normal Legion coherence semantics.
+            // Reduce-only is restricted because we don't issue close
+            // operations at the end of a context for reduce-only cases
+            // right now so by making it restricted things are eagerly
+            // flushed out to the parent task's instance.
+            const bool restricted = 
+              IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
+            eq_set->initialize_set(usage, user_mask, restricted, sources,
+                                   corresponding);
+          }
           region_node->row_source->initialize_equivalence_set_kd_tree(tree,
               eq_set, user_mask, local_shard, false/*current*/);
           // Each equivalence set here comes with a reference that we
