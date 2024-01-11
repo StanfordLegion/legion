@@ -95,6 +95,7 @@ legion_cxx_tests = [
     ['test/output_requirements/output_requirements', ['-empty', '-index', '-replicate']],
     ['test/disjoint_complete/disjoint_complete', []],
     ['test/reduce_future/reduce_future', ['-ll:cpu', '4']],
+    ['test/nested_replication/nested_replication', ['-ll:cpu', '4']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:0', '-ll:cpu', '4']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
