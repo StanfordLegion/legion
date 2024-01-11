@@ -42,6 +42,8 @@ def run_prof(verbose, py_exe_path, legion_path, legion_prof_result_folder, prof_
     cmd = [
         py_exe_path,
         os.path.join(legion_path, 'tools', 'legion_prof.py'),
+        # Filter all calls smaller than 100us because Python profiler can't handle them all
+        '--call-threshold', '100', 
         '-o', result_dir,
     ] + prof_logs
     if verbose: print('Running', ' '.join(cmd))
@@ -60,7 +62,12 @@ def run_prof_rs(verbose, legion_prof_rs, legion_prof_result_folder, prof_logs):
     if is_existed:
         print("remove:", result_dir)
         shutil.rmtree(result_dir)
-    cmd = [legion_prof_rs, '-o', result_dir,] + prof_logs
+    cmd = [
+        legion_prof_rs, 
+        # Filter all calls smaller than 100us to match the Python profiler
+        '--call-threshold', '100', 
+        '-o', result_dir,
+    ] + prof_logs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
