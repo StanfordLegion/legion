@@ -54,6 +54,37 @@
 #endif
 #endif
 
+// Macros for disabling and re-enabling deprecated warnings
+#if defined(__GNUC__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("GCC diagnostic push") \
+  _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("GCC diagnostic pop")
+#elif defined(__clang__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("clang diagnostic push") \
+  _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("clang diagnostic pop")
+#elif defined(__PGIC__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (push)") \
+  _Pragma("diag_suppress 1445")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (pop)")
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning push") \
+  _Pragma("warning disable 1478")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning pop")
+#else
+#warning "Don't know how to suppress deprecated warnings for this compiler"
+#define LEGION_DISABLE_DEPRECATED_WARNINGS
+#define LEGION_REENABLE_DEPRECATED_WARNINGS
+#endif
+
 // If we're doing full LEGION_SPY then turn off event pruning
 #ifdef LEGION_SPY
 #ifndef LEGION_DISABLE_EVENT_PRUNING

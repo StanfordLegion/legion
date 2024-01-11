@@ -160,6 +160,7 @@ namespace Legion {
                                   const Task&                 task,
                                   const ReplicateTaskInput&   input,
                                         ReplicateTaskOutput&  output);
+      LEGION_DEPRECATED("map_replicate_task is now deprecated, please switch to replicate_task")
       virtual void map_replicate_task(const MapperContext      ctx,
                                       const Task&              task,
                                       const MapTaskInput&      input,

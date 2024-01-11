@@ -20697,18 +20697,7 @@ namespace Legion {
       else
       {
         // These are all the deprecated pathways, turn off deprecated warnings
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+        LEGION_DISABLE_DEPRECATED_WARNINGS
         switch (launcher.resource)
         {
           case LEGION_EXTERNAL_POSIX_FILE:
@@ -20772,15 +20761,7 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+        LEGION_REENABLE_DEPRECATED_WARNINGS
       }
       layout_constraint_set.specialized_constraint =
         SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
@@ -21878,18 +21859,7 @@ namespace Legion {
       else
       {
         // These are all the deprecated pathways, turn off deprecated warnings
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+        LEGION_DISABLE_DEPRECATED_WARNINGS
         switch (launcher.resource)
         {
           case LEGION_EXTERNAL_POSIX_FILE:
@@ -21966,15 +21936,7 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+        LEGION_REENABLE_DEPRECATED_WARNINGS
       }
       layout_constraint_set.specialized_constraint =
         SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);

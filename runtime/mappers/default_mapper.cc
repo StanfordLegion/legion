@@ -1558,7 +1558,11 @@ namespace Legion {
         old_default.copy_fill_priority = 0;
         old_default.profiling_priority = 0;
         old_default.postmap_task = false;
+        // Disable deprecated warnings around map_replicate_task since we're
+        // calling it here for backwards compatibility
+        LEGION_DISABLE_DEPRECATED_WARNINGS
         map_replicate_task(ctx, task, old_input, old_default, old_output);
+        LEGION_REENABLE_DEPRECATED_WARNINGS
       }
       if (old_output.task_mappings.empty())
       {
