@@ -3258,7 +3258,6 @@ namespace Legion {
            !precondition.has_triggered_faultignorant()))
       {
         // We need to offload this to realm
-        Realm::CopySrcDstField src, dst;
         bool own_src = false, own_dst = false;
         PhysicalInstance src_inst = source->get_instance(copy_size, own_src);
         PhysicalInstance dst_inst = get_instance(copy_size, own_dst);
@@ -3266,10 +3265,10 @@ namespace Legion {
         // Should only be writing to instances that this future instance owns
         assert(own_instance);
 #endif
-        src.set_field(src_inst, 0/*field id*/, copy_size);
-        dst.set_field(dst_inst, 0/*field id*/, copy_size);
-        std::vector<Realm::CopySrcDstField> srcs(1, src);
-        std::vector<Realm::CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1);
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        srcs.back().set_field(src_inst, 0/*field id*/, copy_size);
+        dsts.back().set_field(dst_inst, 0/*field id*/, copy_size);
         Realm::ProfilingRequestSet requests;
         if (implicit_runtime->profiler != NULL)
         {
@@ -3324,7 +3323,6 @@ namespace Legion {
            !precondition.has_triggered_faultignorant()))
       {
         // We need to offload this to realm
-        Realm::CopySrcDstField src, dst;
         bool own_src = false, own_dst = false;
         PhysicalInstance src_inst = 
           source->get_instance(redop->sizeof_rhs, own_src);
@@ -3333,11 +3331,11 @@ namespace Legion {
         // Should only be reducing to instances that this future instance owns
         assert(own_instance);
 #endif
-        src.set_field(src_inst, 0/*field id*/, size);
-        dst.set_field(dst_inst, 0/*field id*/, size);
-        dst.set_redop(redop_id, true/*fold*/, exclusive);
-        std::vector<Realm::CopySrcDstField> srcs(1, src);
-        std::vector<Realm::CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1);
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        srcs.back().set_field(src_inst, 0/*field id*/, size);
+        dsts.back().set_field(dst_inst, 0/*field id*/, size);
+        dsts.back().set_redop(redop_id, true/*fold*/, exclusive);
         Realm::ProfilingRequestSet requests;
         if (implicit_runtime->profiler != NULL)
         {
@@ -3462,8 +3460,8 @@ namespace Legion {
                       implicit_provenance, unique_event);
         PhysicalInstance result;
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
-             result, external_allocation ? alt_resource->suggested_memory() :
-              memory, ilg, *alt_resource, requests));
+              result, alt_resource->suggested_memory(), ilg,
+              *alt_resource, requests));
         own_inst = true;
         if (resource == NULL)
           delete alt_resource;
@@ -3504,8 +3502,7 @@ namespace Legion {
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
         use_event = RtEvent(PhysicalInstance::create_external_instance(instance,
-              external_allocation ? resource->suggested_memory() : memory,
-              ilg, *resource, requests));
+              resource->suggested_memory(), ilg, *resource, requests));
         own_instance = true;
       }
       own_inst = false;
