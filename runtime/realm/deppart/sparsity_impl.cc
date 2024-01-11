@@ -229,29 +229,29 @@ namespace Realm {
   void SparsityMapImplWrapper::add_reference(void)
   {
     AutoLock<> al(mutex);
-    if(map_impl.load() == 0)
-      return;
-    references.fetch_add(1);
+    if(map_impl.load() != 0) {
+      references++;
+    }
   }
 
   void SparsityMapImplWrapper::remove_references(int count)
   {
     AutoLock<> al(mutex);
-    if(map_impl.load() == 0)
+    if(map_impl.load() == 0) {
       return;
-
-    if(references.load() > 0) {
-      references.fetch_sub(std::min(references.load(), count));
     }
 
-    if(references.load() == 0) {
+    if(references > 0) {
+      references -= std::min(references, count);
+    }
+
+    if(references == 0) {
 #ifdef REALM_SPARSITY_DELETES
       (*map_deleter)(map_impl.load());
 
       NodeID owner_node = ID(me).sparsity_creator_node();
       assert(owner_node == Network::my_node_id);
 
-      // TODO(apryakhin): TSAN complains here.
       get_runtime()->local_sparsity_map_free_lists[owner_node]->free_entry(this);
 
       map_impl.store(0);

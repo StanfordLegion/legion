@@ -208,7 +208,7 @@ namespace Realm {
     SparsityMapImplWrapper *next_free;
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
-    atomic<int> references;
+    int references;
 
     Mutex mutex;
 
