@@ -48,50 +48,44 @@ public:
   static size_t get_total_nodes(Machine m);
   static const char* create_name(AddressSpace node);
 public:
-  virtual const char* get_mapper_name(void) const;
-  virtual MapperSyncModel get_mapper_sync_model(void) const;
-  virtual bool request_valid_instances(void) const { return false; }
+  virtual const char* get_mapper_name(void) const override;
+  virtual MapperSyncModel get_mapper_sync_model(void) const override;
+  virtual bool request_valid_instances(void) const override { return false; }
 public: // Task mapping calls
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
-                                         TaskOptions&     output);
+                                         TaskOptions&     output) override;
   virtual void slice_task(const MapperContext      ctx,
                           const Task&              task, 
                           const SliceTaskInput&    input,
-                                SliceTaskOutput&   output);
+                                SliceTaskOutput&   output) override;
   virtual void map_task(const MapperContext      ctx,
                         const Task&              task,
                         const MapTaskInput&      input,
-                              MapTaskOutput&     output);
-  virtual void map_replicate_task(const MapperContext      ctx,
-                                  const Task&              task,
-                                  const MapTaskInput&      input,
-                                  const MapTaskOutput&     default_output,
-                                  MapReplicateTaskOutput&  output);
+                              MapTaskOutput&     output) override;
+  virtual void replicate_task(const MapperContext         ctx,
+                              const Task&                 task,
+                              const ReplicateTaskInput&   input,
+                                    ReplicateTaskOutput&  output) override;
   virtual void select_sharding_functor(
                              const MapperContext                ctx,
                              const Task&                        task,
                              const SelectShardingFunctorInput&  input,
-                                   SelectShardingFunctorOutput& output);
+                                   SelectShardingFunctorOutput& output) override;
   virtual void select_tunable_value(const MapperContext         ctx,
                                     const Task&                 task,
                                     const SelectTunableInput&   input,
-                                          SelectTunableOutput&  output);
+                                          SelectTunableOutput&  output) override;
   virtual void select_steal_targets(const MapperContext         ctx,
                                     const SelectStealingInput&  input,
-                                          SelectStealingOutput& output);
+                                          SelectStealingOutput& output) override;
   virtual void select_tasks_to_map(const MapperContext          ctx,
                                    const SelectMappingInput&    input,
-                                         SelectMappingOutput&   output);
+                                         SelectMappingOutput&   output) override;
 public:
   virtual void configure_context(const MapperContext         ctx,
                                  const Task&                 task,
-                                       ContextConfigOutput&  output);
-protected:
-  void map_top_level_task(const MapperContext ctx,
-                          const Task& task,
-                          const MapTaskInput& input,
-                                MapTaskOutput& output);
+                                       ContextConfigOutput&  output) override;
 public:
   const AddressSpace local_node;
   const size_t total_nodes;
@@ -346,7 +340,8 @@ void LegionPyMapper::map_task(const MapperContext      ctx,
   if (task.task_id == top_task_id)
   {
     assert(task.get_depth() == 0);
-    map_top_level_task(ctx, task, input, output);
+    assert(task.regions.empty());
+    output.chosen_variant = vid;
   }
   else
   {
@@ -359,43 +354,29 @@ void LegionPyMapper::map_task(const MapperContext      ctx,
   output.target_procs.push_back(task.target_proc);
 }
 
-void LegionPyMapper::map_replicate_task(const MapperContext      ctx,
-                                        const Task&              task,
-                                        const MapTaskInput&      input,
-                                        const MapTaskOutput&     def_output,
-                                        MapReplicateTaskOutput&  output)
+void LegionPyMapper::replicate_task(const MapperContext         ctx,
+                                    const Task&                 task,
+                                    const ReplicateTaskInput&   input,
+                                          ReplicateTaskOutput&  output)
 {
   assert(task.get_depth() == 0);
-  MapTaskOutput top_level_mapping = def_output;
-  map_top_level_task(ctx, task, input, top_level_mapping);
-  assert(output.task_mappings.empty()); // need the resize to write
-  output.task_mappings.resize(total_nodes, top_level_mapping);
-  output.control_replication_map.resize(total_nodes);
-  // Now fill in the set of processors
+  output.chosen_variant = vid;
+  output.target_processors.resize(total_nodes);
+  std::vector<bool> handled(total_nodes, false);
+  size_t count = 0;
   Machine::ProcessorQuery py_procs(machine);
   py_procs.only_kind(Processor::PY_PROC);
-  std::set<AddressSpace> handled;
   for (Machine::ProcessorQuery::iterator it = py_procs.begin();
         it != py_procs.end(); it++)
   {
     const AddressSpace space = it->address_space();
-    // See if we've already seen it
-    if (handled.find(space) != handled.end())
+    if (handled[space])
       continue;
-    output.task_mappings[space].target_procs.push_back(*it);
-    output.control_replication_map[space] = *it;
-    handled.insert(space);
+    output.target_processors[space] = *it;
+    handled[space] = true;
+    count++;
   }
-}
-
-void LegionPyMapper::map_top_level_task(const MapperContext ctx,
-                                        const Task& task,
-                                        const MapTaskInput& input,
-                                              MapTaskOutput& output)
-{
-  assert(task.get_depth() == 0);
-  assert(task.regions.empty());
-  output.chosen_variant = vid;
+  assert(count == total_nodes);
 }
 
 ShardID LegionPyShardingFunctor::shard(const DomainPoint &point,
