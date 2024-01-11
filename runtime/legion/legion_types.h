@@ -451,6 +451,7 @@ namespace Legion {
       LG_DEFER_ISSUE_FILL_TASK_ID,
       LG_DEFER_MUST_EPOCH_RETURN_TASK_ID,
       LG_YIELD_TASK_ID,
+      LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
       LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -570,6 +571,7 @@ namespace Legion {
         "Defer Issue Fill",                                       \
         "Defer Must Epoch Return Resources",                      \
         "Yield",                                                  \
+        "Auto Trace Repeats Processing",                          \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
       };

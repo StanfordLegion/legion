@@ -15,6 +15,9 @@
 
 #include "legion/legion_auto_trace.h"
 #include "legion/legion_auto_trace.inl"
+#include "legion/suffix_tree.h"
+
+#include <unordered_set>
 
 namespace Legion {
   namespace Internal {
@@ -171,6 +174,26 @@ namespace Legion {
         default:
           return true;
       }
+    }
+
+    void auto_trace_process_repeats(const void* args_) {
+      const AutoTraceProcessRepeatsArgs* args = (const AutoTraceProcessRepeatsArgs*)args_;
+      std::vector<NonOverlappingRepeatsResult> result = compute_longest_nonoverlapping_repeats(*args->operations);
+      // Filter the result to remove substrings of longer repeats from consideration.
+      // TODO (rohany): Can we do this without another allocation?
+      std::unordered_set<size_t> ends;
+      std::vector<NonOverlappingRepeatsResult> filtered;
+      // TODO (rohany): This is an over approximation...
+      filtered.reserve(result.size());
+      for (auto res : result) {
+        if (ends.find(res.end) == ends.end()) {
+          continue;
+        }
+        filtered.push_back(res);
+        ends.insert(res.end);
+      }
+      *args->result = std::move(filtered);
+      std::cout << "inside my new meta task!" << std::endl;
     }
   };
 };

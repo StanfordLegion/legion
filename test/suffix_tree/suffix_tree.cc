@@ -15,6 +15,7 @@
 
 #include <legion/suffix_tree.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <vector>
 
@@ -68,10 +69,34 @@ void basic_repeats_test() {
   assert((std::vector<int>{'b'} == std::vector<int>(str.begin() + result[2].start, str.begin() + result[2].end)) && result[2].repeats == 3);
 }
 
+void benchmark_repeats() {
+  size_t strlen = 1000;
+  std::vector<int> vec(strlen + 1);
+  for (size_t j = 0; j < strlen; j++) {
+    vec[j] = 'a' + (rand() % 3);
+  }
+  // Sentinel guaranteed not to be equal to any of the entries.
+  vec[strlen] = 0;
+  int nruns = 1000;
+  int warmup = 10;
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < nruns + warmup; i++) {
+    if (i == warmup) {
+      t1 = std::chrono::high_resolution_clock::now();
+    }
+    compute_longest_nonoverlapping_repeats(vec);
+  }
+  auto t2 = std::chrono::high_resolution_clock::now();
+  double us = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+  std::cout << "Repeats took: " << (us / nruns)  << " microseconds." << std::endl;
+}
+
 int main(int argc, char **argv) {
   random_creation_test();
   random_search_test();
   basic_repeats_test();
+  benchmark_repeats();
   std::cout << "Passed all tests!" << std::endl;
   return 0;
 }

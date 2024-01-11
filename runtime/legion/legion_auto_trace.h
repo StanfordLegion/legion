@@ -18,7 +18,9 @@
 
 #include "legion.h"
 #include "legion/legion_context.h"
+#include "legion/legion_types.h"
 #include "legion/legion_utilities.h"
+#include "legion/suffix_tree.h"
 
 template<>
 struct std::hash<Legion::Internal::Murmur3Hasher::Hash> {
@@ -69,7 +71,23 @@ namespace Legion {
                                    bool unordered = false,
                                    bool outermost = true) override;
     private:
+      std::vector<Murmur3Hasher::Hash> hashes;
     };
+
+    // Offline string analysis operations.
+    struct AutoTraceProcessRepeatsArgs : public LgTaskArgs<AutoTraceProcessRepeatsArgs> {
+    public:
+      static const LgTaskID TASK_ID = LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID;
+    public:
+      AutoTraceProcessRepeatsArgs(
+       std::vector<Murmur3Hasher::Hash>* operations_,
+       std::vector<NonOverlappingRepeatsResult>* result_
+      ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance), operations(operations_), result(result_) {}
+    public:
+      std::vector<Murmur3Hasher::Hash>* operations;
+      std::vector<NonOverlappingRepeatsResult>* result;
+    };
+    void auto_trace_process_repeats(const void* args);
 
     // Utility functions.
     bool is_operation_traceable(Operation* op);
@@ -80,20 +98,31 @@ namespace Legion {
     template <typename T>
     bool AutomaticTracingContext<T>::add_to_dependence_queue(Operation* op, bool unordered, bool outermost) {
       // TODO (rohany): unordered operations should always be forwarded to the underlying context and not buffered up.
-
-      auto kind = op->get_operation_kind();
-      auto kind_str = Operation::get_string_rep(kind);
-      auto prov = op->get_provenance();
-      auto memo = op->get_memoizable();
-      if (prov) {
-        std::cout << "Op: " << std::string(kind_str) << " at " << std::string(prov->human_str()) << " " << (memo != nullptr) << std::endl;
-      } else {
-        std::cout << "Op: " << std::string(kind_str) << " " << (memo != nullptr) << std::endl;
-      }
-
       if (is_operation_traceable(op)) {
         auto hash = TraceHashHelper{}.hash(op);
-        std::cout << hash.x << " " << hash.y << std::endl;
+        // TODO (rohany): Have to have a hash value that can be used as the sentinel $
+        //  token for the suffix tree processing algorithms.
+        assert(!(hash.x == 0 && hash.y == 0));
+
+        this->hashes.push_back(hash);
+
+        // TODO (rohany): Turn this number into a command line parameter.
+        if (this->hashes.size() == 1000) {
+          // TODO (rohany): Do this allocation so that it doesn't have to resize again.
+          // TODO (rohany): Figure out a policy around freeing this allocation.
+          auto string = new std::vector<Murmur3Hasher::Hash>(this->hashes.begin(), this->hashes.end());
+          string->push_back(Murmur3Hasher::Hash{0, 0});
+          auto result = new std::vector<NonOverlappingRepeatsResult>();
+          // TODO (rohany): What should the priority be for this?
+          // TODO (rohany): Make sure that we don't have too many of these
+          //  meta tasks pending at once (should have a fixed amount etc).
+          // TODO (rohany): We'll wait on this result for now.
+          this->runtime->issue_runtime_meta_task(AutoTraceProcessRepeatsArgs(string, result), LG_LATENCY_WORK_PRIORITY).wait();
+
+          // TODO (rohany): These deletions will need to get handled differently later.
+          delete string;
+          delete result;
+        }
       }
 
       return T::add_to_dependence_queue(op, unordered, outermost);

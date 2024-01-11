@@ -155,7 +155,7 @@ namespace Legion {
         #ifdef DEBUG_LEGION
         // Check that the string is properly formatted.
         for (size_t i = 0; i < str.size() - 1; i++) {
-          assert(str[i] != str[str.size() - 1]);
+          assert(!std::equal_to<T>{}(str[i], str[str.size() - 1]));
         }
         #endif
 

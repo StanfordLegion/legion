@@ -20,6 +20,7 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_utilities.h"
 #include "legion/region_tree.h"
+#include "legion/legion_auto_trace.h"
 #include "legion/legion_spy.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
@@ -32734,6 +32735,11 @@ namespace Legion {
           }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
+        case LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID:
+          {
+            auto_trace_process_repeats(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
