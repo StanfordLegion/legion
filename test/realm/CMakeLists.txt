@@ -35,8 +35,7 @@ list(APPEND REALM_TESTS
   proc_group
   deppart
   scatter
-  #TODO(apryakhin@): Re-enable the test once the issue is resolved.
-  #compqueue
+  compqueue
   event_subscribe
   #deferred_allocs
   test_nodeset
@@ -122,8 +121,7 @@ endif()
 # some tests need test-specific arguments
 set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
-#TODO(apryakhin@): Re-enable the test once the issue is resolved.
-#set(TESTARGS_compqueue         -ll:cpu 4)
+set(TESTARGS_compqueue         -ll:cpu 4 -timeout 120)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
 #set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
