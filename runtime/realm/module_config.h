@@ -37,8 +37,8 @@ namespace Realm {
     bool get_property(const std::string name, T &value) const;
     void finish_configure(void);
     const std::string& get_name(void) const;
-    virtual bool get_resource(const std::string name, int &value) const;
-    virtual bool get_resource(const std::string name, size_t &value) const;
+    template <typename T>
+    bool get_resource(const std::string name, T &value) const;
     virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
 
   protected:
@@ -46,7 +46,13 @@ namespace Realm {
     //  so that we can access these configurations using the name
     std::unordered_map<std::string, void* const> config_map;
 
+    // these maps store a map between resource name and address of resource,
+    //  so that we can access these resources using the name
+    std::unordered_map<std::string, void *const> resource_map;
+
     std::string module_name;
+
+    bool resource_discover_finished = false;
 
     bool finish_configured = false;
   };

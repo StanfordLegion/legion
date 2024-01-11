@@ -10874,6 +10874,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t MemoryManager::query_available_eager_memory(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      return eager_remaining_capacity;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent MemoryManager::create_eager_instance(PhysicalInstance &instance,
                      LgEvent unique_event, Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
@@ -15648,8 +15656,9 @@ namespace Legion {
       // requirement so we'll detect that case that specially and handle
       // it here inside the runtime since we control the implementation of
       // the identity projection function
-      const bool find_dependences = IS_WRITE(req) && (is_invertible ||
-       ((projection_id == 0) && (req.handle_type == LEGION_REGION_PROJECTION)));
+      const bool find_dependences = IS_WRITE(req) && !IS_COLLECTIVE(req) &&
+        (is_invertible || ((projection_id == 0) && 
+                           (req.handle_type == LEGION_REGION_PROJECTION)));
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);

@@ -60,6 +60,25 @@ namespace Realm {
     }
   }
 
+  template <typename T>
+  bool ModuleConfig::get_resource(const std::string name, T &value) const
+  {
+    if (!resource_discover_finished) {
+      log_moduleconfig.error("Module %s can not detect resources.",
+                             module_name.c_str());
+      return false;
+    }
+
+    std::unordered_map<std::string, void* const>::const_iterator it = resource_map.find(name);
+    if (it == resource_map.cend()) {
+      log_moduleconfig.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
+      return false;
+    } else {
+      value = *reinterpret_cast<T*>(it->second);
+      return true;
+    }
+  }
+
 };
 
 #endif // ifndef REALM_MODULECONFIG_INL
