@@ -15,15 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionTest_suffix_tree)
+project(LegionTest_trie)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(suffix_tree suffix_tree.cc)
-target_link_libraries(suffix_tree Legion::Legion)
+add_executable(trie trie.cc)
+target_link_libraries(trie Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME suffix_tree COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:suffix_tree> ${Legion_TEST_ARGS})
+  add_test(NAME trie COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:trie> ${Legion_TEST_ARGS})
 endif()

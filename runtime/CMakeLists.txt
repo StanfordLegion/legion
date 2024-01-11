@@ -843,6 +843,7 @@ list(APPEND LEGION_SRC
   legion/legion_auto_trace.h              legion/legion_auto_trace.cc
   legion/legion_auto_trace.inl
   legion/suffix_tree.h
+  legion/trie.h
   legion/legion_types.h
   legion/legion_utilities.h
   legion/legion_views.h                   legion/legion_views.cc
