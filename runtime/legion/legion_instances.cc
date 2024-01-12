@@ -1297,8 +1297,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(key);
-          rez.serialize(own_ctx->did);
+          own_ctx->pack_inner_context(rez);
           rez.serialize(owner_space);
           mapping->pack(rez);
           rez.serialize(&view_did);
@@ -1322,8 +1321,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(key);
-          rez.serialize(own_ctx->did);
+          own_ctx->pack_inner_context(rez);
           rez.serialize(logical_owner);
           rez.serialize<size_t>(0); // no mapping
           rez.serialize(&view_did);
@@ -2852,22 +2850,7 @@ namespace Legion {
       RtEvent man_ready;
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(did, man_ready);
-      DistributedID repl_id, ctx_did;
-      derez.deserialize(repl_id);
-      derez.deserialize(ctx_did);
-      RtEvent ctx_ready;
-      InnerContext *context = NULL;
-      if (repl_id != ctx_did)
-      {
-        // See if we're on a node where there is a shard manager for
-        // this replicated context
-        ShardManager *shard_manager = 
-          runtime->find_shard_manager(repl_id, true/*can fail*/);
-        if (shard_manager != NULL)
-          context = shard_manager->find_local_context();
-      }
-      if (context == NULL)
-        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       CollectiveMapping *mapping = NULL;
@@ -2883,20 +2866,12 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
       // See if we're ready or we need to defer this until later
-      if ((man_ready.exists() && !man_ready.has_triggered()) ||
-          (ctx_ready.exists() && !ctx_ready.has_triggered()))
+      if (man_ready.exists() && !man_ready.has_triggered())
       {
         RemoteCreateViewArgs args(manager, context, logical_owner,
                                   mapping, target, source, done);
-        if (!man_ready.exists())
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
-        else if (!ctx_ready.exists())
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, man_ready);
-        else
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-              Runtime::merge_events(man_ready, ctx_ready));
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, man_ready);
         return;
       }
       process_top_view_request(manager, context, logical_owner, mapping,

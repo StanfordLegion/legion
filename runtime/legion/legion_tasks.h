@@ -150,7 +150,7 @@ namespace Legion {
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
-      inline bool is_replicated(void) const { return replicate; }
+      inline bool is_replicable(void) const { return replicate; }
       int get_depth(void) const;
     public:
       void set_current_proc(Processor current);
@@ -413,12 +413,13 @@ namespace Legion {
         { return profiling_reported; }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
-      void initialize_map_task_input(Mapper::MapTaskInput &input,
-                                     Mapper::MapTaskOutput &output,
-                                     MustEpochOp *must_epoch_owner);
-      void finalize_map_task_output(Mapper::MapTaskInput &input,
-                                    Mapper::MapTaskOutput &output,
-                                    MustEpochOp *must_epoch_owner);
+      virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
+                                             Mapper::MapTaskOutput &output,
+                                             MustEpochOp *must_epoch_owner);
+      virtual void finalize_map_task_output(Mapper::MapTaskInput &input,
+                                            Mapper::MapTaskOutput &output,
+                                            MustEpochOp *must_epoch_owner);
+      void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     protected:
       void prepare_output_instance(unsigned index,
                                    InstanceSet &instance_set,
@@ -432,8 +433,8 @@ namespace Legion {
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
     protected:
+      bool replicate_task(void);
       void invoke_mapper(MustEpochOp *must_epoch_owner);
-      void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);
       RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
@@ -457,9 +458,6 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual bool is_top_level_task(void) const { return false; }
-#ifdef DEBUG_LEGION
-      virtual bool is_implicit_top_level_task(void) const { return false; }
-#endif
       virtual bool is_shard_task(void) const { return false; }
       virtual SingleTask* get_origin_task(void) const = 0;
     public:
@@ -502,7 +500,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_mispredication(void) = 0;
     public:
       // From Memoizable
@@ -512,14 +509,22 @@ namespace Legion {
       virtual void find_completion_effects(std::vector<ApEvent> &effects,
                                            bool tracing = false);
     public:
+      virtual void perform_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      virtual void convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
+    public:
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
     public:
       void perform_concurrent_analysis(Processor target, RtEvent precondition);
       void record_inner_termination(ApEvent termination_event);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
-                                                            bool inline_task);
+      virtual TaskContext* create_execution_context(VariantImpl *v,
+          std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task);
     public:
       static void handle_deferred_task_complete(const void *args);
     protected:
@@ -542,7 +547,7 @@ namespace Legion {
     protected:
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;
-      std::set<RtEvent>                     intra_space_mapping_dependences;
+      std::vector<RtEvent>                  intra_space_mapping_dependences;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
       RtUserEvent                           deferred_complete_mapping;
@@ -764,7 +769,6 @@ namespace Legion {
                              const TaskLauncher &launcher,
                              Provenance *provenance,
                              bool track = true, bool top_level=false,
-                             bool implicit_top_level = false, 
                              bool must_epoch_launch = false,
                              std::vector<OutputRequirement> *outputs = NULL);
       void perform_base_dependence_analysis(void);
@@ -805,7 +809,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_mispredication(void);
       virtual void prepare_map_must_epoch(void);
     public:
@@ -813,10 +816,6 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-#ifdef DEBUG_LEGION
-      virtual bool is_implicit_top_level_task(void) const 
-        { return implicit_top_level_task; }
-#endif
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -858,7 +857,6 @@ namespace Legion {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
-      bool implicit_top_level_task;
     };
 
     /**
@@ -927,7 +925,6 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_mispredication(void);
     public:
       // ProjectionPoint methods
@@ -958,6 +955,14 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index);
+    public: // Collective stuff for replicated versions of this point task
+      virtual void perform_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      virtual void convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous); 
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -987,12 +992,16 @@ namespace Legion {
      */
     class ShardTask : public SingleTask {
     public:
-      ShardTask(Runtime *rt, ShardManager *manager, 
-                ShardID shard_id, Processor target);
-      ShardTask(const ShardTask &rhs);
+      ShardTask(Runtime *rt, SingleTask *source, InnerContext *parent,
+          ShardManager *manager, ShardID shard_id,
+          Processor target, VariantID chosen);
+      ShardTask(Runtime *rt, InnerContext *parent_ctx, Deserializer &derez,
+          ShardManager *manager, ShardID shard_id, Processor target,
+          VariantID chosen);
+      ShardTask(const ShardTask &rhs) = delete;
       virtual ~ShardTask(void);
     public:
-      ShardTask& operator=(const ShardTask &rhs);
+      ShardTask& operator=(const ShardTask &rhs) = delete;
     public:
       virtual void activate(void); 
       virtual void deactivate(bool free = true);
@@ -1022,9 +1031,12 @@ namespace Legion {
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
       virtual bool is_stealable(void) const;
-      virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual std::map<PhysicalManager*,unsigned>*
-                                       get_acquired_instances_ref(void);
+      virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
+                                             Mapper::MapTaskOutput &output,
+                                             MustEpochOp *must_epoch_owner);
+      virtual void finalize_map_task_output(Mapper::MapTaskInput &input,
+                                            Mapper::MapTaskOutput &output,
+                                            MustEpochOp *must_epoch_owner);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1045,15 +1057,23 @@ namespace Legion {
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor); 
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_mispredication(void);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
-                                                            bool inline_task);
+      virtual TaskContext* create_execution_context(VariantImpl *v,
+          std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:
-      void launch_shard(void);
+      void dispatch(void);
       void return_resources(ResourceTracker *target,
                             std::set<RtEvent> &preconditions);
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
@@ -1072,11 +1092,10 @@ namespace Legion {
                                               ShardID remote_shard);
       ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
                                                  ShardID remote_shard);
-      ReplicateContext* get_shard_execution_context(void) const;
+      ReplicateContext* get_replicate_context(void) const;
     public:
-      void initialize_implicit_task(InnerContext *context, TaskID tid,
-                                    MapperID mid, Processor proxy);
-      void complete_startup_initialization(void);
+      void initialize_implicit_task(TaskID tid, MapperID mid, Processor proxy);
+      RtEvent complete_startup_initialization(void);
     public:
       const ShardID shard_id;
     protected:
@@ -1441,6 +1460,12 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(unsigned index,
                        LogicalRegion handle, EqSetTracker *tracker,
                        const FieldMask &mask, unsigned parent_req_index);
+      void perform_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      void convert_replicate_collective_views(const RendezvousKey &key,
+            std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+
       virtual void finalize_collective_versioning_analysis(unsigned index,
           unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &to_perform);

@@ -52,7 +52,8 @@ namespace Legion {
                   const std::vector<RegionRequirement> &reqs,
                   const std::vector<OutputRequirement> &output_reqs,
                   DistributedID did, bool perform_registration,
-                  bool inline_task, bool implicit_ctx = false);
+                  bool inline_task, bool implicit_ctx = false,
+                  CollectiveMapping *mapping = NULL);
       virtual ~TaskContext(void);
     public:
       // This is used enough that we want it inlined
@@ -67,6 +68,10 @@ namespace Legion {
       inline SingleTask* get_owner_task(void) const { return owner_task; }
       inline bool is_priority_mutable(void) const { return mutable_priority; }
       inline int get_depth(void) const { return depth; }
+    public:
+      virtual ShardID get_shard_id(void) const { return 0; }
+      virtual DistributedID get_replication_id(void) const { return 0; }
+      virtual size_t get_total_shards(void) const { return 1; }
     public:
       // Interface for task contexts
       virtual ContextID get_logical_tree_context(void) const = 0;
@@ -652,6 +657,14 @@ namespace Legion {
                                                ReductionOpID redop,
                                                Provenance *provenance);
     public:
+      // Find an index space name for a concrete launch domain
+      IndexSpace find_index_launch_space(const Domain &domain,
+                                         Provenance *provenance);
+    public:
+      // A little help for ConsensusMatchExchange since it is templated
+      static void help_complete_future(Future &f, const void *ptr,
+                                       size_t size, bool own);
+    public:
       SingleTask *const owner_task;
       const std::vector<RegionRequirement> &regions;
       const std::vector<OutputRequirement> &output_reqs;
@@ -984,7 +997,8 @@ namespace Legion {
                    const std::vector<bool> &virt_mapped,
                    ApEvent execution_fence, DistributedID did = 0,
                    bool inline_task = false, bool implicit_task = false,
-                   bool concurrent_task = false);
+                   bool concurrent_task = false,
+                   CollectiveMapping *mapping = NULL);
       InnerContext(const InnerContext &rhs) = delete;
       virtual ~InnerContext(void);
     public:
@@ -995,10 +1009,7 @@ namespace Legion {
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
       void record_physical_trace_replay(RtEvent ready, bool replay);
-      bool is_replaying_physical_trace(void);
-      virtual ShardID get_shard_id(void) const { return 0; }
-      virtual DistributedID get_replication_id(void) const { return 0; }
-      virtual size_t get_total_shards(void) const { return 1; }
+      bool is_replaying_physical_trace(void); 
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
     public: // Garbage collection methods
@@ -1733,9 +1744,9 @@ namespace Legion {
 #endif
       virtual VirtualCloseOp* get_virtual_close_op(void);
     public:
-      virtual void pack_task_context(Serializer &rez) const;
-      static InnerContext* unpack_task_context(Deserializer &derez,
-          Runtime *runtime, RtEvent &ctx_ready);
+      virtual void pack_inner_context(Serializer &rez) const;
+      static InnerContext* unpack_inner_context(Deserializer &derez,
+                                                Runtime *runtime);
     public:
       bool nonexclusive_virtual_mapping(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -2183,7 +2194,8 @@ namespace Legion {
      */
     class TopLevelContext : public InnerContext {
     public:
-      TopLevelContext(Runtime *runtime);
+      TopLevelContext(Runtime *runtime, Processor executing,
+          DistributedID id = 0, CollectiveMapping *mapping = NULL);
       TopLevelContext(const TopLevelContext &rhs) = delete;
       virtual ~TopLevelContext(void);
     public:
@@ -3323,10 +3335,6 @@ namespace Legion {
       void hash_layout_constraints(Murmur3Hasher &hasher,
           const LayoutConstraintSet &constraints, bool hash_pointers);
     public:
-      // A little help for ConsensusMatchExchange since it is templated
-      static void help_complete_future(Future &f, const void *ptr,
-                                       size_t size, bool own);
-    public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
       const size_t total_shards;
@@ -3525,40 +3533,8 @@ namespace Legion {
      */
     class RemoteContext : public InnerContext {
     public:
-      struct RemotePhysicalRequestArgs :
-        public LgTaskArgs<RemotePhysicalRequestArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_REQUEST_TASK_ID;
-      public:
-        RemotePhysicalRequestArgs(RemoteContext *ctx,
-                                  InnerContext *loc, unsigned idx, 
-                                  AddressSpaceID src, RtUserEvent trig)
-          : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
-            target(ctx), local(loc), index(idx), 
-            source(src), to_trigger(trig) { }
-      public:
-        RemoteContext *const target;
-        InnerContext *const local;
-        const unsigned index;
-        const AddressSpaceID source;
-        const RtUserEvent to_trigger;
-      };
-      struct RemotePhysicalResponseArgs : 
-        public LgTaskArgs<RemotePhysicalResponseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID;
-      public:
-        RemotePhysicalResponseArgs(RemoteContext *ctx, InnerContext *res, 
-                                   unsigned idx)
-          : LgTaskArgs<RemotePhysicalResponseArgs>(implicit_provenance), 
-            target(ctx), result(res), index(idx) { }
-      public:
-        RemoteContext *const target;
-        InnerContext *const result;
-        const unsigned index;
-      };
-    public:
-      RemoteContext(DistributedID did, Runtime *runtime);
+      RemoteContext(DistributedID did, Runtime *runtime,
+                    CollectiveMapping *mapping = NULL);
       RemoteContext(const RemoteContext &rhs) = delete;
       virtual ~RemoteContext(void);
     public:
@@ -3582,7 +3558,7 @@ namespace Legion {
                       AddressSpaceID source_space, unsigned req_index,
                       EquivalenceSet *set, const FieldMask &mask);
       virtual InnerContext* find_parent_physical_context(unsigned index);
-      virtual void pack_task_context(Serializer &rez) const;
+      virtual void pack_inner_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
@@ -3609,12 +3585,10 @@ namespace Legion {
       static void handle_context_response(Deserializer &derez,Runtime *runtime);
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
-      static void defer_physical_request(const void *args, Runtime *runtime);
       void set_physical_context_result(unsigned index, 
                                        InnerContext *result);
       static void handle_physical_response(Deserializer &derez, 
                                            Runtime *runtime);
-      static void defer_physical_response(const void *args);
       static void handle_find_collective_view_request(Deserializer &derez,
                                   Runtime *runtime, AddressSpaceID source);
       static void handle_find_collective_view_response(Deserializer &derez,

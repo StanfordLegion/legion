@@ -2870,7 +2870,7 @@ namespace Legion {
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_inner_context(rez);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
@@ -3225,6 +3225,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void CollectiveViewCreatorBase::update_groups_and_counts(
+        CollectiveRendezvous &collective, DistributedID did,
+        const FieldMask &mask, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<DistributedID,FieldMask>::iterator group_finder =
+        collective.groups.find(did);
+      if (group_finder != collective.groups.end())
+      {
+        if (group_finder->second == mask)
+        {
+          // Bump the counts
+          std::map<DistributedID,size_t>::iterator count_finder =
+            collective.counts.find(did);
+          if (count_finder == collective.counts.end())
+            collective.counts[did] = count + 1;
+          else
+            count_finder->second += count;
+        }
+        else
+          // If you ever hit this then heaven help you
+          // The user has done something really out there and
+          // is using the same instance with different sets of
+          // fields for multiple point ops/tasks in the same 
+          // index space operation. All the tricks we do to 
+          // compute the collective arrivals are not going to
+          // work in this case so the arrival counts will need 
+          // to look something like:
+          //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
+          REPORT_LEGION_FATAL(
+              LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+              "Something requested a very strange pattern for collective "
+              "instance rendezvous with different points asking to "
+              "rendezvous with different field sets on the same "
+              "physical instance. This isn't currently supported. "
+              "Please report your use case to the Legion "
+              "developer's mailing list.")
+      }
+      else // No need to update counts since empty implies only one
+      {
+        collective.groups[did] = mask;
+        if (count > 1)
+          collective.counts[did] = count;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void CollectiveViewCreatorBase::finalize_collective_mapping(
         Runtime *runtime, CollectiveMapping *mapping, AddressSpaceID owner,
         std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
@@ -3395,17 +3442,210 @@ namespace Legion {
         delete mapping;
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveViewCreatorBase::pack_collective_rendezvous(
+                 Serializer &rez,
+                 const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(rendezvous.size());
+      for (std::map<LogicalRegion,CollectiveRendezvous>::const_iterator
+            rit = rendezvous.begin(); rit != rendezvous.end(); rit++)
+      {
+        rez.serialize(rit->first);
+        rez.serialize(rit->second.results.size());
+        for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::
+              const_iterator it = rit->second.results.begin(); it !=
+              rit->second.results.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(rit->second.groups.size());
+        for (LegionMap<DistributedID,FieldMask>::const_iterator it =
+              rit->second.groups.begin(); it != rit->second.groups.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(rit->second.counts.size());
+        for (std::map<DistributedID,size_t>::const_iterator it =
+              rit->second.counts.begin(); it != rit->second.counts.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveViewCreatorBase::unpack_collective_rendezvous(
+                       Deserializer &derez,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+      {
+        LogicalRegion region;
+        derez.deserialize(region);
+        std::map<LogicalRegion,CollectiveRendezvous>::iterator region_finder =
+          rendezvous.find(region);
+        if (region_finder != rendezvous.end())
+        {
+          // need to unpack out of place to do the merge
+          size_t num_results;
+          derez.deserialize(num_results);
+          const unsigned offset = region_finder->second.results.size(); 
+          region_finder->second.results.resize(offset + num_results);
+          for (unsigned idx2 = 0; idx2 < num_results; idx2++)
+          {
+            derez.deserialize(
+                region_finder->second.results[offset + idx2].first);
+            derez.deserialize(
+                region_finder->second.results[offset + idx2].second);
+          }
+          // unpack these and then do the merge
+          LegionMap<DistributedID,FieldMask> groups;
+          std::map<DistributedID,size_t> counts;
+          size_t num_groups;
+          derez.deserialize(num_groups);
+          for (unsigned idx2 = 0; idx2 < num_groups; idx2++)
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            derez.deserialize(groups[did]);
+          }
+          size_t num_counts;
+          derez.deserialize(num_counts);
+          for (unsigned idx2 = 0; idx2 < num_counts; idx2++)
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            derez.deserialize(counts[did]);
+          }
+          // merge the groups and counts into the existing case
+          for (LegionMap<DistributedID,FieldMask>::const_iterator it =
+                groups.begin(); it != groups.end(); it++)
+          {
+            std::map<DistributedID,size_t>::iterator count_finder =
+              counts.find(it->first);
+            if (count_finder == counts.end())
+              update_groups_and_counts(region_finder->second,
+                  it->first, it->second);
+            else
+              update_groups_and_counts(region_finder->second,
+                  it->first, it->second, count_finder->second);
+          }
+        }
+        else
+        {
+          // unpack in place since we know it doesn't exist yet
+          CollectiveRendezvous &new_rendezvous = rendezvous[region];
+          size_t num_results;
+          derez.deserialize(num_results);
+          new_rendezvous.results.resize(num_results);
+          for (unsigned idx2 = 0; idx2 < num_results; idx2++)
+          {
+            derez.deserialize(new_rendezvous.results[idx2].first);
+            derez.deserialize(new_rendezvous.results[idx2].second);
+          }
+          size_t num_groups;
+          derez.deserialize(num_groups);
+          for (unsigned idx2 = 0; idx2 < num_groups; idx2++)
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            derez.deserialize(new_rendezvous.groups[did]);
+          }
+          size_t num_counts;
+          derez.deserialize(num_counts);
+          for (unsigned idx2 = 0; idx2 < num_counts; idx2++)
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            derez.deserialize(new_rendezvous.counts[did]);
+          }
+        }
+      }
+    }
+
     ///////////////////////////////////////////////////////////// 
-    // CollectiveVersioning
+    // CollectiveVersioningBase
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<typename OP>
-    CollectiveVersioning<OP>::CollectiveVersioning(Runtime *rt)
-      : OP(rt)
+    /*static*/ void CollectiveVersioningBase::pack_collective_versioning(
+              Serializer &rez,
+              const LegionMap<LogicalRegion,RegionVersioning> &pending_versions)
     //--------------------------------------------------------------------------
     {
+      rez.serialize<size_t>(pending_versions.size());
+      for (LegionMap<LogicalRegion,RegionVersioning>::const_iterator pit =
+            pending_versions.begin(); pit != pending_versions.end(); pit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(pit->second.ready_event.exists());
+#endif
+        rez.serialize(pit->first);
+        rez.serialize(pit->second.ready_event);
+        rez.serialize<size_t>(pit->second.trackers.size());
+        for (LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,FieldMask>::
+              const_iterator it = pit->second.trackers.begin(); it !=
+              pit->second.trackers.end(); it++)
+        {
+          rez.serialize(it->first.first);
+          rez.serialize(it->first.second);
+          rez.serialize(it->second);
+        }
+      }
     }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool CollectiveVersioningBase::unpack_collective_versioning(
+                    Deserializer &derez, 
+                    LegionMap<LogicalRegion,RegionVersioning> &pending_versions)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+      {
+        LogicalRegion region;
+        derez.deserialize(region);
+        RtUserEvent ready_event;
+        derez.deserialize(ready_event);
+        LegionMap<LogicalRegion,RegionVersioning>::iterator finder =
+          pending_versions.find(region);
+        if (finder == pending_versions.end())
+        {
+          finder = pending_versions.emplace(
+              std::make_pair(region,RegionVersioning())).first;
+          finder->second.ready_event = ready_event;
+        }
+        else
+          Runtime::trigger_event(ready_event, finder->second.ready_event);
+        size_t num_trackers;
+        derez.deserialize(num_trackers);
+        for (unsigned idx2 = 0; idx2 < num_trackers; idx2++)
+        {
+          std::pair<AddressSpaceID,EqSetTracker*> key;
+          derez.deserialize(key.first);
+          derez.deserialize(key.second);
+#ifdef DEBUG_LEGION
+          assert(finder->second.trackers.find(key) ==
+                  finder->second.trackers.end());
+#endif
+          derez.deserialize(finder->second.trackers[key]);
+        }
+      }
+      return (num_regions > 0);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveVersioning
+    /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     template<typename OP>
@@ -3438,7 +3678,7 @@ namespace Legion {
       bool done = false;
       LegionMap<LogicalRegion,RegionVersioning> to_perform;
       {
-        AutoLock o_lock(this->op_lock);
+        AutoLock v_lock(versioning_lock);
         std::map<unsigned,PendingVersioning>::iterator finder =
           pending_versioning.find(index);
         if (finder == pending_versioning.end())
@@ -3460,8 +3700,9 @@ namespace Legion {
           }
           const std::pair<AddressSpaceID,EqSetTracker*> key(space, tracker);
 #ifdef DEBUG_LEGION
-          assert(region_finder->second.trackers.find(key) ==
-              region_finder->second.trackers.end());
+          assert((region_finder->second.trackers.find(key) ==
+              region_finder->second.trackers.end()) ||
+              (region_finder->second.trackers[key] == mask));
 #endif
           region_finder->second.trackers.emplace(std::make_pair(key, mask));
           result = region_finder->second.ready_event;
@@ -3480,6 +3721,81 @@ namespace Legion {
         finalize_collective_versioning_analysis(index, parent_req_index,
                                                 to_perform);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveVersioning<OP>::rendezvous_collective_versioning_analysis(
+        unsigned index, unsigned parent_req_index,
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      {
+        AutoLock v_lock(versioning_lock);
+        std::map<unsigned,PendingVersioning>::iterator finder =
+          pending_versioning.find(index);
+        if (finder == pending_versioning.end())
+        {
+          finder = pending_versioning.insert(
+              std::make_pair(index, PendingVersioning())).first;
+          finder->second.remaining_arrivals = this->get_collective_points();
+        }
+        if (!finder->second.region_versioning.empty())
+        {
+          for (LegionMap<LogicalRegion,RegionVersioning>::iterator pit =
+                to_perform.begin(); pit != to_perform.end(); /*nothing*/)
+          {
+            std::map<LogicalRegion,RegionVersioning>::iterator region_finder =
+              finder->second.region_versioning.find(pit->first); 
+            if (region_finder == finder->second.region_versioning.end())
+            {
+              // Doesn't exist so copy it over
+              RegionVersioning &versioning = 
+                finder->second.region_versioning[pit->first];
+              versioning.trackers.swap(pit->second.trackers);
+              versioning.ready_event = pit->second.ready_event;
+            }
+            else
+            {
+              // Merge everything
+              for (LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,
+                    FieldMask>::const_iterator it = 
+                    pit->second.trackers.begin(); it !=
+                    pit->second.trackers.end(); it++)
+              {
+                LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,FieldMask>::
+                  iterator tracker_finder = 
+                  region_finder->second.trackers.find(it->first);
+                if (tracker_finder == region_finder->second.trackers.end())
+                  region_finder->second.trackers.emplace(*it);
+                else
+                  tracker_finder->second |= it->second;
+              }
+              Runtime::trigger_event(pit->second.ready_event,
+                  region_finder->second.ready_event);
+            }
+            LegionMap<LogicalRegion,RegionVersioning>::iterator
+              delete_it = pit++;
+            to_perform.erase(delete_it);
+          }
+        }
+        else
+          finder->second.region_versioning.swap(to_perform);
+#ifdef DEBUG_LEGION
+        assert(to_perform.empty());
+        assert(finder->second.remaining_arrivals > 0);
+#endif
+        if ((--finder->second.remaining_arrivals) == 0)
+        {
+          done = true;
+          to_perform.swap(finder->second.region_versioning);
+          pending_versioning.erase(finder);
+        }
+      }
+      if (done)
+        finalize_collective_versioning_analysis(index, parent_req_index,
+                                                to_perform);
     }
 
     //--------------------------------------------------------------------------
@@ -3509,6 +3825,8 @@ namespace Legion {
         // making these equivalence sets on smaller nodes
         // Use the index space to determine the owner since the region 
         // version of this only gives you the owner for the region tree
+        // If you change this heuristic make sure you update it in 
+        // SingleTask::perform_replicate_collective_vesioning too
         const AddressSpaceID region_owner_space =
             IndexSpaceNode::get_owner_space(pit->first.get_index_space(), 
                                             this->runtime);
@@ -3568,18 +3886,11 @@ namespace Legion {
     template class CollectiveVersioning<DependentPartitionOp>;
     template class CollectiveVersioning<DeletionOp>;
     template class CollectiveVersioning<TaskOp>;
+    template class CollectiveVersioning<CollectiveHelperOp>;
 
     ///////////////////////////////////////////////////////////// 
     // CollectiveViewCreator
     /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    CollectiveViewCreator<OP>::CollectiveViewCreator(Runtime *rt)
-      : CollectiveVersioning<OP>(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
 
     //--------------------------------------------------------------------------
     template<typename OP>
@@ -3635,6 +3946,7 @@ namespace Legion {
     {
       std::map<LogicalRegion,CollectiveRendezvous> to_construct;
       const RendezvousKey key(requirement_index, analysis);
+      std::pair<AddressSpaceID,RendezvousResult*> result_key(source, result);
       {
         AutoLock c_lock(collective_lock);
         std::map<RendezvousKey,PendingCollective>::iterator finder =
@@ -3644,64 +3956,16 @@ namespace Legion {
               std::make_pair(key,
                 PendingCollective(this->get_collective_points()))).first;
         CollectiveRendezvous &collective = finder->second.rendezvous[region];
-        bool found = false;
-        for (std::vector<std::pair<AddressSpaceID,
-                                   RendezvousResult*> >::const_iterator it =
-              collective.results.begin(); it != collective.results.end(); it++)
+        if (!std::binary_search(collective.results.begin(),
+              collective.results.end(), result_key))
         {
-          if (it->first != source)
-            continue;
-          if (it->second != result)
-            continue;
-          found = true;
-          break;
+          collective.results.push_back(result_key);
+          std::sort(collective.results.begin(), collective.results.end());
         }
-        if (!found)
-          collective.results.emplace_back(std::make_pair(source, result));
         // Now update the counts for all the instances
         for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
               it = insts.begin(); it != insts.end(); it++)
-        {
-          LegionMap<DistributedID,FieldMask>::iterator group_finder =
-            collective.groups.find(it->first);
-          if (group_finder != collective.groups.end())
-          {
-            if (group_finder->second == it->second)
-            {
-              // Bump the counts
-              std::map<DistributedID,size_t>::iterator count_finder =
-                collective.counts.find(it->first);
-              if (count_finder == collective.counts.end())
-                collective.counts[it->first] = 2;
-              else
-                count_finder->second++;
-            }
-            else
-              // If you ever hit this then heaven help you
-              // The user has done something really out there and
-              // is using the same instance with different sets of
-              // fields for multiple point ops/tasks in the same 
-              // index space operation. All the tricks we do to 
-              // compute the collective arrivals are not going to
-              // work in this case so the arrival counts will need 
-              // to look something like:
-              //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
-              REPORT_LEGION_FATAL(
-                  LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
-                  "Operation %s (UID %lld) in context %s (UID %lld) "
-                  "requested a very strange pattern for collective "
-                  "instance rendezvous with different points asking to "
-                  "rendezvous with different field sets on the same "
-                  "physical instance. This isn't currently supported. "
-                  "Please report your use case to the Legion "
-                  "developer's mailing list.", this->get_logging_name(),
-                  this->get_unique_op_id(), 
-                  this->parent_ctx->get_task_name(),
-                  this->parent_ctx->get_unique_id())
-          }
-          else // No need to update counts since empty implies only one
-            collective.groups[it->first] = it->second;
-        }
+          update_groups_and_counts(collective, it->first, it->second);
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining_arrivals > 0);
 #endif
@@ -3714,6 +3978,81 @@ namespace Legion {
       if (!to_construct.empty())
         construct_collective_mapping(key, to_construct);
     }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::rendezvous_collective_mapping(
+                      const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+        std::map<RendezvousKey,PendingCollective>::iterator finder =
+          pending_collectives.find(key);
+        if (finder == pending_collectives.end())
+          finder = pending_collectives.insert(
+              std::make_pair(key,
+                PendingCollective(this->get_collective_points()))).first;
+        for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
+              rendezvous.begin(); rit != rendezvous.end(); /*nothing*/)
+        {
+          std::map<LogicalRegion,CollectiveRendezvous>::iterator region_finder =
+            finder->second.rendezvous.find(rit->first);
+          if (region_finder == finder->second.rendezvous.end())
+          {
+            // Doesn't exist so we can just swap everything over
+            CollectiveRendezvous &region_rendezvous = 
+              finder->second.rendezvous[rit->first];
+            region_rendezvous.results.swap(rit->second.results);
+            region_rendezvous.groups.swap(rit->second.groups);
+            region_rendezvous.counts.swap(rit->second.counts);
+          }
+          else
+          {
+            // Need to do the merge
+            for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::
+                  iterator it = rit->second.results.begin(); it !=
+                  rit->second.results.end(); it++)
+            {
+              if (std::binary_search(region_finder->second.results.begin(),
+                    region_finder->second.results.end(), *it))
+                continue;
+              region_finder->second.results.push_back(*it);
+              std::sort(region_finder->second.results.begin(),
+                  region_finder->second.results.end());
+            }
+            for (LegionMap<DistributedID,FieldMask>::iterator it =
+                  rit->second.groups.begin(); it !=
+                  rit->second.groups.end(); it++)
+            {
+              std::map<DistributedID,size_t>::const_iterator count_finder =
+                rit->second.counts.find(it->first);
+              if (count_finder == rit->second.counts.end())
+                update_groups_and_counts(region_finder->second,
+                    it->first, it->second);
+              else
+                update_groups_and_counts(region_finder->second,
+                    it->first, it->second, count_finder->second);
+            }
+          }
+          std::map<LogicalRegion,CollectiveRendezvous>::iterator
+            delete_it = rit++;
+          rendezvous.erase(delete_it);
+        }
+#ifdef DEBUG_LEGION
+        assert(rendezvous.empty());
+        assert(finder->second.remaining_arrivals > 0);
+#endif
+        if (--finder->second.remaining_arrivals == 0)
+        {
+          rendezvous.swap(finder->second.rendezvous);
+          pending_collectives.erase(finder);
+        }
+      }
+      if (!rendezvous.empty())
+        construct_collective_mapping(key, rendezvous);
+    } 
 
     //--------------------------------------------------------------------------
     template<typename OP>
@@ -3813,6 +4152,7 @@ namespace Legion {
     template class CollectiveViewCreator<ReleaseOp>;
     template class CollectiveViewCreator<DependentPartitionOp>;
     template class CollectiveViewCreator<TaskOp>;
+    template class CollectiveViewCreator<CollectiveHelperOp>;
 
     ///////////////////////////////////////////////////////////// 
     // External Op 
@@ -14867,7 +15207,6 @@ namespace Legion {
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           provenance, false/*track*/,
                                           false/*top level*/,
-                                          false/*implicit*/,
                                           true/*must epoch*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
@@ -20358,18 +20697,7 @@ namespace Legion {
       else
       {
         // These are all the deprecated pathways, turn off deprecated warnings
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+        LEGION_DISABLE_DEPRECATED_WARNINGS
         switch (launcher.resource)
         {
           case LEGION_EXTERNAL_POSIX_FILE:
@@ -20433,15 +20761,7 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+        LEGION_REENABLE_DEPRECATED_WARNINGS
       }
       layout_constraint_set.specialized_constraint =
         SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
@@ -21539,18 +21859,7 @@ namespace Legion {
       else
       {
         // These are all the deprecated pathways, turn off deprecated warnings
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+        LEGION_DISABLE_DEPRECATED_WARNINGS
         switch (launcher.resource)
         {
           case LEGION_EXTERNAL_POSIX_FILE:
@@ -21627,15 +21936,7 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+        LEGION_REENABLE_DEPRECATED_WARNINGS
       }
       layout_constraint_set.specialized_constraint =
         SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
@@ -23502,7 +23803,7 @@ namespace Legion {
       rez.serialize(remote_ptr);
       rez.serialize(source);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_inner_context(rez);
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
         provenance->serialize(rez);
@@ -23512,17 +23813,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime,
-                                      std::set<RtEvent> &ready_events)
+    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      parent_ctx = runtime->find_or_request_inner_context(did, ready);
-      if (ready.exists())
-        ready_events.insert(ready);
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       set_provenance(Provenance::deserialize(derez));
       derez.deserialize<bool>(tracing);
     }
@@ -23703,7 +23998,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteOp* RemoteOp::unpack_remote_operation(Deserializer &derez,
-                              Runtime *runtime, std::set<RtEvent> &ready_events)
+                                                           Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       Operation::OpKind kind;
@@ -23789,7 +24084,7 @@ namespace Legion {
           assert(false);
       }
       // Do the rest of the unpack
-      result->unpack_remote_base(derez, runtime, ready_events);
+      result->unpack_remote_base(derez, runtime);
       result->unpack(derez);
       return result;
     }

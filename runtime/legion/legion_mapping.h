@@ -595,6 +595,11 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> > valid_instances;
         std::vector<std::vector<CollectiveView> >   valid_collectives;
         std::vector<unsigned>                       premapped_regions;
+        // These only apply when mapping a replicated task
+        DomainPoint                                 shard;
+        Domain                                      shard_domain;
+        Processor                                   shard_processor;
+        VariantID                                   shard_variant;
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> > chosen_instances; 
@@ -621,24 +626,20 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Map Replicate Task 
+       *  Replicate Task
        * ----------------------------------------------------------------------
-       * This mapper call is invoked instead of map_task to map multiple copies
-       * of a single task to run in parallel and generate multiple functionally
-       * equivalent copies of the output data in different locations. It is
-       * the responsibility of the mapper to ensure that each task gets assigned
-       * to exactly one processor and each copy of the task gets assigned to 
-       * a different processor. The mapper must also guarantee that any region
-       * requirements with write privileges be mapped to different physical
-       * instances for each copy of the task. The runtime will check all these
-       * invariants in debug mode or if safe mapping is enabled.
+       * This mapper call is invoked if the 'replicate' parameter was set in
+       * select_task_options. It provides the mapper the options to replicate
+       * the execution of this task on multiple different processors. All the
+       * copies of the task must use the same variant which must be set as
+       * supporting replication. If the variant is a non-leaf variant then the
+       * execution will be control-replicated.
        *
-       * The mapper can also choose to make this a control replicated version
-       * of this task by filling in the 'control_replicate' map. This will make
-       * all the copies of the task work together as though they were one
-       * logical version of the task rather than having them all execute
-       * independently. The vector should be exactly the same size as the 
-       * vector of task_mappings if it is not empty
+       * Note that if the task has any region requirements with write or
+       * reduction privileges then it will be incumbent upon the mapper to
+       * ensure that each of the different copies of the task are mapped to
+       * different physical instances. This invariant will be verified by the
+       * runtime if safe mapping is enabled.
        *
        * The mapper can optionally give names to the shards by filling in the
        * 'shard_points' vector with a set of unique points, all which must be
@@ -650,19 +651,32 @@ namespace Legion {
        * is then passed as the 'shard_domain' argument to all invocations of a
        * sharding functor for operations launched by these shards.
        */
+      struct ReplicateTaskInput {
+        // Nothing here for now
+      };
+      struct ReplicateTaskOutput {
+        VariantID                                     chosen_variant;
+        std::vector<Processor>                        target_processors;
+        // The following outputs are optional
+        std::vector<DomainPoint>                      shard_points;
+        Domain                                        shard_domain;
+      };
+      //------------------------------------------------------------------------
+      virtual void replicate_task(MapperContext               ctx,
+                                  const Task&                 task,
+                                  const ReplicateTaskInput&   input,
+                                        ReplicateTaskOutput&  output) = 0;
+      //------------------------------------------------------------------------
+
+      // This is here for backwards compatibility
+      // The mapper call it was used by no longer exists
+      // It was replaced by replicate_task
       struct MapReplicateTaskOutput {
         std::vector<MapTaskOutput>                      task_mappings;
         std::vector<Processor>                          control_replication_map;
         std::vector<DomainPoint>                        shard_points;
         Domain                                          shard_domain;
       };
-      //------------------------------------------------------------------------
-      virtual void map_replicate_task(MapperContext            ctx,
-                                      const Task&              task,
-                                      const MapTaskInput&      input,
-                                      const MapTaskOutput&     default_output,
-                                      MapReplicateTaskOutput&  output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------

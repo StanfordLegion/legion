@@ -3127,20 +3127,8 @@ namespace Legion {
      * reductions, and exchanges of information between the 
      * variaous shard tasks.
      */
-    class ShardManager : public DistributedCollectable, 
+    class ShardManager : public CollectiveViewCreator<CollectiveHelperOp>,
                          public Mapper::SelectShardingFunctorInput {
-    public:
-      struct ShardManagerLaunchArgs :
-        public LgTaskArgs<ShardManagerLaunchArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
-      public:
-        ShardManagerLaunchArgs(ShardTask *s)
-          : LgTaskArgs<ShardManagerLaunchArgs>(s->get_unique_op_id()), 
-            shard(s) { }
-      public:
-        ShardTask *const shard;
-      };
     public:
       enum BroadcastMessageKind {
         RESOURCE_UPDATE_KIND,
@@ -3158,14 +3146,15 @@ namespace Legion {
       };
     public:
       ShardManager(Runtime *rt, DistributedID did,
-                   CollectiveMapping *mapping,
-                   bool control, bool top, bool isomorphic_points,
+                   CollectiveMapping *mapping, unsigned local_count,
+                   bool top, bool isomorphic_points, bool cr,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
                    std::vector<DomainPoint> &&sorted_points,
                    std::vector<ShardID> &&shard_lookup,
-                   AddressSpaceID owner_space, SingleTask *original = NULL,
-                   RtBarrier shard_task_barrier = RtBarrier::NO_RT_BARRIER);
+                   SingleTask *original = NULL,
+                   RtBarrier shard_task_bar = RtBarrier::NO_RT_BARRIER,
+                   RtBarrier callback_bar = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs) = delete;
       ~ShardManager(void);
     public:
@@ -3183,10 +3172,8 @@ namespace Legion {
         { return (*address_spaces)[sid]; }    
       inline bool is_first_local_shard(ShardTask *task) const
         { return (local_shards[0] == task); }
-      inline const std::set<AddressSpace>& get_unique_shard_spaces(void) const
-        { return unique_shard_spaces; }
       inline ReplicateContext* find_local_context(void) const
-        { return local_shards[0]->get_shard_execution_context(); }
+        { return local_shards[0]->get_replicate_context(); }
       inline size_t count_local_shards(void) const 
         { return local_shards.size(); }
       inline unsigned find_local_index(ShardTask *task) const
@@ -3199,18 +3186,45 @@ namespace Legion {
         }
       inline ContextID get_first_shard_tree_context(void) const
         { return local_shards.front()->
-          get_shard_execution_context()->get_logical_tree_context(); }
+          get_replicate_context()->get_logical_tree_context(); }
+    public: // From CollectiveHelperOp
+      virtual InnerContext* get_context(void);
+      virtual InnerContext* find_physical_context(unsigned index);
+      virtual size_t get_collective_points(void) const;
     public:
-      void set_shard_mapping(const std::vector<Processor> &shard_mapping);
-      void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
-      void create_callback_barrier(size_t arrival_count);
-      ShardTask* create_shard(ShardID id, Processor target);
+      void distribute_explicit(SingleTask *task, VariantID chosen_variant,
+                               std::vector<Processor> &target_processors);
+      void distribute_implicit(TaskID top_task_id, MapperID mapper_id,
+                               Processor::Kind kind, unsigned shards_per_space,
+                               InnerContext *top_context);
+      void pack_shard_manager(Serializer &rez) const;
+      void set_shard_mapping(std::vector<Processor> &shard_mapping);
+      ShardTask* create_shard(ShardID id, Processor target,
+          VariantID variant, InnerContext *parent_ctx, SingleTask *source);
+      ShardTask* create_shard(ShardID id, Processor target,
+          VariantID variant, InnerContext *parent_ctx, Deserializer &derez);
+    public:
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      void finalize_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      void finalize_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
+      void rendezvous_check_virtual_mappings(ShardID shard,
+          MapperManager *mapper, const std::vector<bool> &virtual_mappings);
+    public:
+#if 0
       void launch(const std::vector<bool> &virtual_mapped);
-      void distribute_shards(AddressSpaceID target,
-                             const std::vector<ShardTask*> &shards);
       void unpack_shards_and_launch(Deserializer &derez);
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
+#endif
       EquivalenceSet* get_initial_equivalence_set(unsigned idx,
               LogicalRegion region, InnerContext *context, bool first_shard);
       // If the creating shards are NULL we'll assume that they are all
@@ -3328,10 +3342,10 @@ namespace Legion {
       void send_find_or_create_collective_view(ShardID target, Serializer &rez);
       void handle_find_or_create_collective_view(Deserializer &derez);
     public:
-      static void handle_launch(const void *args);
-    public:
-      static void handle_launch(Deserializer &derez, Runtime *rt, 
-                                AddressSpaceID source);
+      static void handle_distribution(Deserializer &derez, Runtime *rt); 
+      static void handle_collective_versioning(Deserializer &derez,Runtime *rt);
+      static void handle_collective_mapping(Deserializer &derez, Runtime *rt);
+      static void handle_virtual_rendezvous(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
@@ -3378,9 +3392,11 @@ namespace Legion {
       const Domain shard_domain;
       const size_t total_shards;
       SingleTask *const original_task;
-      const bool control_replicated;
+      const unsigned local_constituents;
+      const unsigned remote_constituents;
       const bool top_level_task;
       const bool isomorphic_points;
+      const bool control_replicated; 
     protected:
       mutable LocalLock                manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput
@@ -3400,12 +3416,12 @@ namespace Legion {
       unsigned    local_execution_complete, remote_execution_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
-      unsigned    remote_constituents;
       unsigned    semantic_attach_counter;
       FutureInstance *local_future_result;
       std::set<RtEvent> mapping_preconditions;
       std::vector<ApEvent> execution_effects;
     protected:
+      // These barriers only are needed for control replicated tasks
       RtBarrier shard_task_barrier;
       RtBarrier callback_barrier;
     protected:
@@ -3455,10 +3471,8 @@ namespace Legion {
                                         created_fill_views;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
-    protected:
-      // A unique set of address spaces on which shards exist 
-      std::set<AddressSpaceID> unique_shard_spaces;
 #ifdef LEGION_USE_LIBDL
+    protected:
       std::set<Runtime::RegistrationKey> unique_registration_callbacks;
 #endif
     protected:
@@ -3474,6 +3488,14 @@ namespace Legion {
       std::map<std::pair<size_t,size_t>,ShardLocalData> shard_local_data;
     protected:
       AttachDeduplication *attach_deduplication;
+    protected:
+      struct VirtualMappingRendezvous {
+        std::vector<bool> virtual_mappings;
+        MapperManager *mapper;
+        ShardID shard;
+        unsigned remaining_arrivals;
+      };
+      VirtualMappingRendezvous *virtual_mapping_rendezvous;
     };
 
   }; // namespace Internal

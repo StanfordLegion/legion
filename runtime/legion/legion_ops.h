@@ -26,6 +26,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_analysis.h"
 #include "legion/mapper_manager.h"
+#include <utility>
 
 namespace Legion {
   namespace Internal {
@@ -808,6 +809,27 @@ namespace Legion {
     };
 
     /**
+     * class CollectiveHelperOp
+     * This is a small class that helps behave like an operation
+     * for the other types that might want to perform collective
+     * rendezvous but are not an operation like a ShardManager
+     */
+    class CollectiveHelperOp : public DistributedCollectable {
+    public:
+      CollectiveHelperOp(Runtime *rt, DistributedID did,
+                         bool register_with_runtime = true,
+                         CollectiveMapping *mapping = NULL)
+        : DistributedCollectable(rt, did, register_with_runtime, mapping) { }
+    public:
+      virtual InnerContext* get_context(void) = 0;
+      virtual InnerContext* find_physical_context(unsigned index) = 0;
+      virtual size_t get_collective_points(void) const = 0;
+    public:
+      inline void activate(void) { }
+      inline void deactivate(bool) { }
+    };
+
+    /**
      * \class CollectiveVersioningBase
      */
     class CollectiveVersioningBase {
@@ -820,7 +842,12 @@ namespace Legion {
         LegionMap<LogicalRegion,RegionVersioning> region_versioning;
         size_t remaining_arrivals;
       };
+      static void pack_collective_versioning(Serializer &rez,
+          const LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      static bool unpack_collective_versioning(Deserializer &derez,
+                LegionMap<LogicalRegion,RegionVersioning> &to_perform);
     protected:
+      mutable LocalLock                                 versioning_lock;
       std::map<unsigned,PendingVersioning>              pending_versioning;
     };
 
@@ -831,7 +858,9 @@ namespace Legion {
     class CollectiveVersioning : public OP,
                                  public CollectiveVersioningBase {
     public:
-      CollectiveVersioning(Runtime *rt);
+      template<typename ... Args>
+      CollectiveVersioning(Runtime *rt, Args&& ... args)
+        : OP(rt, std::forward<Args>(args) ...) { }
       CollectiveVersioning(const CollectiveVersioning<OP> &rhs) = delete; 
     public:
       CollectiveVersioning<OP>& operator=(
@@ -843,6 +872,9 @@ namespace Legion {
       RtEvent rendezvous_collective_versioning_analysis(unsigned index,
           LogicalRegion handle, EqSetTracker *tracker, AddressSpaceID space,
           const FieldMask &mask, unsigned parent_req_index); 
+      void rendezvous_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
       virtual void finalize_collective_versioning_analysis(unsigned index,
           unsigned parent_req_index,
           LegionMap<LogicalRegion,RegionVersioning> &to_perform);
@@ -980,6 +1012,12 @@ namespace Legion {
           const FieldMaskSet<CollectiveResult> &views);
       static void handle_finalize_collective_mapping(Deserializer &derez,
                                                      Runtime *runtime);
+      static void update_groups_and_counts(CollectiveRendezvous &target,
+          DistributedID did, const FieldMask &mask, size_t count = 1);
+      static void pack_collective_rendezvous(Serializer &rez,
+          const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      static void unpack_collective_rendezvous(Deserializer &derez,
+          std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
     protected:
       // Collective instance rendezvous data structures
       mutable LocalLock                                 collective_lock;
@@ -998,7 +1036,9 @@ namespace Legion {
     class CollectiveViewCreator : public CollectiveVersioning<OP>, 
                                   public CollectiveViewCreatorBase {
     public:
-      CollectiveViewCreator(Runtime *rt);
+      template<typename ... Args>
+      CollectiveViewCreator(Runtime *rt, Args&& ... args)
+        : CollectiveVersioning<OP>(rt, std::forward<Args>(args) ...) { }
       CollectiveViewCreator(const CollectiveViewCreator<OP> &rhs) = delete; 
     public:
       CollectiveViewCreator<OP>& operator=(
@@ -1022,6 +1062,8 @@ namespace Legion {
                                   AddressSpaceID source,
                                   const LegionVector<
                                    std::pair<DistributedID,FieldMask> > &insts);
+      void rendezvous_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       // In the case of control replication we need to perform additional 
       // rendezvous steps across the shards so we override for those cases
       virtual void construct_collective_mapping(const RendezvousKey &key,
@@ -1138,7 +1180,9 @@ namespace Legion {
     template<typename OP>
     class Memoizable : public OP {
     public:
-      Memoizable(Runtime *rt) : OP(rt) { }
+      template<typename ... Args>
+      Memoizable(Runtime *rt, Args&& ... args) 
+        : OP(rt, std::forward<Args>(args) ...) { }
       virtual ~Memoizable(void) { }
     public:
       virtual void trigger_dependence_analysis(void) override;
@@ -4485,15 +4529,14 @@ namespace Legion {
     public:
       void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;
-      void unpack_remote_base(Deserializer &derez, Runtime *runtime,
-                              std::set<RtEvent> &ready_events);
+      void unpack_remote_base(Deserializer &derez, Runtime *runtime);
       void pack_profiling_requests(Serializer &rez, 
                                    std::set<RtEvent> &applied) const;
       void unpack_profiling_requests(Deserializer &derez);
       static void handle_deferred_deletion(const void *args);
       // Caller takes ownership of this object and must delete it when done
       static RemoteOp* unpack_remote_operation(Deserializer &derez,
-                         Runtime *runtime, std::set<RtEvent> &ready_events);
+                                               Runtime *runtime);
       static void handle_report_uninitialized(Deserializer &derez);
       static void handle_report_profiling_count_update(Deserializer &derez);
       static void handle_completion_effect(Deserializer &derez);

@@ -8310,18 +8310,18 @@ class Operation(object):
             # A little sanity check at the moment: nested control replication can only
             # come from tasks replicated from a single shard. When we break that invariant
             # then we'll need to do something here
-            assert not collective
+            if collective:
+                raise NotImplementedError("Need support for verification of "
+                        "collective region requirements on replicated tasks.")
             if self.reqs is not None:
                 self.compute_current_version_numbers()
-                assert self.mapping is None
-                # We have to do verification for all our replicants first
+                # We have to do verification for all our shards first
                 for shard in itervalues(self.task.replicants.shards):
-                    self.mapping = shard.op.mapping
+                    shard.op.version_numbers = self.version_numbers
                     for index,req in iteritems(self.reqs):
-                        if not self.verify_physical_requirement(index, req, perform_checks, 
-                                                                registration=False):
+                        if not shard.op.verify_physical_requirement(index, req, perform_checks, 
+                                                                    registration=False):
                             return False
-                    self.mapping = None
         else:
             if self.reqs:
                 # Compute our version numbers first
@@ -8374,25 +8374,15 @@ class Operation(object):
             assert not collective
             if self.reqs:
                 collective = dict()
-                # Do the registration for all our replicants
+                # Do the registration for all our shards
                 for shard in itervalues(self.task.replicants.shards):
-                    self.mapping = shard.op.mapping
                     for index,req in iteritems(self.reqs):
-                        if not self.verify_physical_requirement(index, req, perform_checks,
+                        if not shard.op.verify_physical_requirement(index, req, perform_checks,
                                                     registration=True, collective=collective):
                             return False
-                    self.mapping = None
-            # Last decided how to analyze each of the shards depending
-            # on whether we are control replicated or not
-            if self.task.replicants.control_replicated:
-                # Traverse it like a single logical task 
-                if not self.task.perform_task_physical_verification(perform_checks):
-                    return False
-            else:
-                # Can verify each of these separately 
-                for shard in itervalues(self.task.replicants.shards):
-                    if not shard.perform_task_physical_verification(perform_checks):
-                        return False
+            # Traverse it like a single logical task 
+            if not self.task.perform_task_physical_verification(perform_checks):
+                return False
         else:
             if self.reqs:
                 for index,req in iteritems(self.reqs):
@@ -8513,6 +8503,8 @@ class Operation(object):
             title += ' Point: ' + self.task.point.to_string()
         if self.replayed:
             title += '  (replayed)'
+        if self.task and self.task.shard is not None:
+            title += '  (Shard '+str(self.task.shard)+')'
         label = printer.generate_html_op_label(title, self.reqs, self.mappings,
                                        self.get_color(), self.state.detailed_graphs)
         if dataflow or self.task is None or len(self.task.operations) == 0:
@@ -8612,9 +8604,10 @@ class Operation(object):
             return
         # If this is a single task, recurse and generate our subgraph first
         if self.kind is SINGLE_TASK_KIND:
-            # Get our corresponding task
-            task = self.state.get_task(self.uid)   
-            task.print_event_graph_context(printer, elevate, all_nodes, top)
+            self.task.print_event_graph_context(printer, elevate, all_nodes, top)
+            # If the task is replicated then we don't print it out
+            if self.task.replicants:
+                return
         # Look through all our generated realm operations and emit them
         if self.realm_copies:
             for copy in self.realm_copies:
@@ -8789,7 +8782,7 @@ class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'used_instances', 'virtual_indexes', 'processor', 
                  'priority', 'premappings', 'postmappings', 'tunables', 
-                 'operation_indexes', 'variant', 'replicants', 'shard']
+                 'operation_indexes', 'variant', 'replicants', 'shard', 'original']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -8811,6 +8804,7 @@ class Task(object):
         self.variant = None
         self.replicants = None
         self.shard = None
+        self.original = None
 
     def __str__(self):
         if self.op is None:
@@ -8867,7 +8861,8 @@ class Task(object):
     def set_shard(self, shard, original):
         assert not self.shard
         self.shard = shard
-        self.op.set_context(original)
+        self.original = original
+        self.op.set_context(original.op.context)
 
     def add_premapping(self, index):
         if not self.premappings:
@@ -9188,7 +9183,7 @@ class Task(object):
                         else:
                             assert self.shard is not None # Control replicated task
                             for fid,inst in iteritems(mappings):
-                                self.op.context.used_instances.add((inst,fid))
+                                self.original.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
         # If we get here this is a created privilege flowing back
@@ -9196,10 +9191,24 @@ class Task(object):
         return 0
 
     def perform_task_physical_verification(self, perform_checks):
+        # Check to see if this is a leaf with no operations
         if not self.operations:
             if not self.replicants:
                 return True
-            assert self.replicants.control_replicated 
+            # If it was replicated we need to look at the replicants
+            elif self.replicants.control_replicated:
+                # Check to make sure that all shards have the same count
+                count = None
+                for shard in self.replicants.shards.values():
+                    if count is None:
+                        count = len(shard.operations) if shard.operations else 0
+                    else:
+                        assert count == (len(shard.operations) if shard.operations else 0) 
+                if count == 0:
+                    return True
+            else:
+                # Not control replicated means they are all leaves
+                return True
         # Depth is a proxy for context 
         depth = self.get_depth()
         assert self.used_instances is None
@@ -9511,48 +9520,32 @@ class Task(object):
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
-            # Check to see if we were replicated
-            if self.replicants:
-                # If we're control replicated we need to alias all the single
-                # operations across shards so they have the same operation name
-                num_ops = -1
+            if not self.replicants:
+                return
+            # If we're control replicated we need to alias all the single
+            # operations across shards so they have the same operation name
+            num_ops = -1
+            for shard in itervalues(self.replicants.shards):
+                shard_ops = 0
+                for op in shard.operations:
+                    if not op.fully_logged:
+                        break
+                    else:
+                        shard_ops += 1
+                if num_ops == -1:
+                    num_ops = shard_ops
+                elif num_ops != shard_ops:
+                    print(('Warning: shard %s has %s operations which is '+
+                            'different than %s operations in other shards. '+
+                            'This is likely the result of a crash in a run.') %
+                            (str(shard.shard),str(shard_ops),str(num_ops)))
+                    if self.state.assert_on_warning:
+                        assert False
+                    num_ops = min(shard_ops,num_ops)
+            if num_ops <= 0:
                 for shard in itervalues(self.replicants.shards):
-                    shard_ops = 0
-                    for op in shard.operations:
-                        if not op.fully_logged:
-                            break
-                        else:
-                            shard_ops += 1
-                    if num_ops == -1:
-                        num_ops = shard_ops
-                    elif num_ops != shard_ops:
-                        print(('Warning: shard %s has %s operations which is '+
-                                'different than %s operations in other shards. '+
-                                'This is likely the result of a crash in a run.') %
-                                (str(shard.shard),str(shard_ops),str(num_ops)))
-                        if self.state.assert_on_warning:
-                            assert False
-                        num_ops = min(shard_ops,num_ops)
-                for idx in range(num_ops):
-                    owner_op = None
-                    # See if we have an owner op
-                    for shard in itervalues(self.replicants.shards):
-                        op = shard.operations[idx]
-                        if op.owner_shard is not None and \
-                                op.owner_shard == op.context.shard:
-                            owner_op = op
-                            break
-                    # We should only have owner ops for single operations
-                    if owner_op is not None:
-                        # Alias all the node names to the owner node name
-                        for shard in itervalues(self.replicants.shards):
-                            op = shard.operations[idx]
-                            if op is not owner_op:
-                                op.node_name = owner_op.node_name
-                # Now we can do the normal event graph print routine
-                for shard in itervalues(self.replicants.shards):
-                    shard.print_event_graph_context(printer, elevate, all_nodes, top)
-            return
+                    shard.op.print_event_graph(printer, elevate, all_nodes, top)
+                return
         if not top:
             # Start the cluster 
             title = self.html_safe_name + ' (UID: '+str(self.op.uid)+')'
@@ -9560,6 +9553,8 @@ class Task(object):
                 title += ' Point: ' + self.point.to_string()
             if self.op.replayed:
                 title += '  (replayed)'
+            if self.replicants:
+                title += '  (control replicated)'
             label = printer.generate_html_op_label(title, self.op.reqs,
                                                    self.op.mappings,
                                                    self.op.get_color(), 
@@ -9567,28 +9562,58 @@ class Task(object):
             self.op.cluster_name = printer.start_new_cluster(label)
             # Make an invisible node for this cluster
             printer.println(self.op.node_name + ' [shape=point,style=invis];')
-        # Generate the sub-graph
-        for op in self.operations:
-            if op.inlined:
-                continue
-            #if not op.fully_logged:
-            #    print(('Warning: skipping event graph printing of %s because it '+
-            #                'was not fully logged...') % str(op))
-            #    if op.state.assert_on_warning:
-            #        assert False
-            #    continue
-            op.print_event_graph(printer, elevate, all_nodes, False)
-        # Find our local nodes
-        local_nodes = list()
-        for node,context in iteritems(elevate):
-            if context is self:
-                local_nodes.append(node)
-                node.print_event_node(printer)
-                all_nodes.add(node)
-        # Hold off printing the edges until the very end
-        # Remove our nodes from elevate
-        for node in local_nodes:
-            del elevate[node] 
+        if self.replicants:
+            assert num_ops > 0
+            for idx in range(num_ops):
+                owner_op = None
+                # See if we have an owner op
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    if op.owner_shard is not None and \
+                            op.owner_shard == op.context.shard:
+                        owner_op = op
+                        break
+                # We should only have owner ops for single operations
+                if owner_op is not None:
+                    # Alias all the node names to the owner node name
+                    for shard in itervalues(self.replicants.shards):
+                        op = shard.operations[idx]
+                        if op is not owner_op:
+                            op.node_name = owner_op.node_name
+            # Now we can do the normal event graph print routine
+            for shard in itervalues(self.replicants.shards):
+                shard.op.print_event_graph(printer, elevate, all_nodes, top)
+                local_nodes = list()
+                for node,context in iteritems(elevate):
+                    if context is shard:
+                        local_nodes.append(node)
+                        node.print_event_graph(printer)
+                        all_nodes.add(node)
+                for node in local_nodes:
+                    del elevate[node]
+        else:
+            # Generate the sub-graph
+            for op in self.operations:
+                if op.inlined:
+                    continue
+                #if not op.fully_logged:
+                #    print(('Warning: skipping event graph printing of %s because it '+
+                #                'was not fully logged...') % str(op))
+                #    if op.state.assert_on_warning:
+                #        assert False
+                #    continue
+                op.print_event_graph(printer, elevate, all_nodes, False)
+            # Find our local nodes
+            local_nodes = list()
+            for node,context in iteritems(elevate):
+                if context is self:
+                    local_nodes.append(node)
+                    node.print_event_node(printer)
+                    all_nodes.add(node)
+            # Hold off printing the edges until the very end
+            # Remove our nodes from elevate
+            for node in local_nodes:
+                del elevate[node] 
         if not top:
             # End the cluster
             printer.end_this_cluster()
@@ -9699,7 +9724,7 @@ class Future(object):
                         if self.logical_creator.context.shard is not None:
                             # Control-replicated case
                             offset = self.logical_creator.context.operations.index(self.logical_creator)
-                            for shard in self.logical_creator.context.op.context.replicants.shards.values():
+                            for shard in self.logical_creator.context.original.replicants.shards.values():
                                 shard_op = shard.operations[offset]
                                 if shard_op.points and self.point in shard_op.points:
                                     self.physical_creators.add(shard_op.get_point_task(self.point).op)
@@ -9713,7 +9738,7 @@ class Future(object):
                         if self.logical_creator.context.shard is not None:
                             # Control-replicated case
                             offset = self.logical_creator.context.operations.index(self.logical_creator)
-                            for shard in self.logical_creator.context.op.context.replicants.shards.values():
+                            for shard in self.logical_creator.context.original.replicants.shards.values():
                                 if shard.operations[offset].points:
                                     for point in shard.operations[offset].points.values():
                                         self.physical_creators.add(point.op)
@@ -9845,6 +9870,7 @@ class Replicants(object):
     def update_shards(self):
         assert self.orig
         self.orig.replicants = self 
+        self.orig.op.fully_logged = True
         for sid,shard in iteritems(self.shards):
             shard.set_shard(sid, self.orig)
             shard.merge(self.orig)

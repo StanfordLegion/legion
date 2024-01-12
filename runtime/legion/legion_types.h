@@ -54,6 +54,37 @@
 #endif
 #endif
 
+// Macros for disabling and re-enabling deprecated warnings
+#if defined(__GNUC__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("GCC diagnostic push") \
+  _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("GCC diagnostic pop")
+#elif defined(__clang__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("clang diagnostic push") \
+  _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("clang diagnostic pop")
+#elif defined(__PGIC__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (push)") \
+  _Pragma("diag_suppress 1445")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (pop)")
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning push") \
+  _Pragma("warning disable 1478")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning pop")
+#else
+#warning "Don't know how to suppress deprecated warnings for this compiler"
+#define LEGION_DISABLE_DEPRECATED_WARNINGS
+#define LEGION_REENABLE_DEPRECATED_WARNINGS
+#endif
+
 // If we're doing full LEGION_SPY then turn off event pruning
 #ifdef LEGION_SPY
 #ifndef LEGION_DISABLE_EVENT_PRUNING
@@ -395,11 +426,8 @@ namespace Legion {
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
-      LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_DEFER_COMPOSITE_COPY_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
-      LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
-      LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_TASK_ID,
       LG_TRANSITIVE_REDUCTION_TASK_ID,
       LG_DELETE_TEMPLATE_TASK_ID,
@@ -512,11 +540,8 @@ namespace Legion {
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
         "Defer Phi View Registration",                            \
-        "Control Replication Launch",                             \
         "Defer Composite Copy",                                   \
         "Tighten Index Space",                                    \
-        "Remote Physical Context Request",                        \
-        "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Template Transitive Reduction",                          \
         "Delete Physical Template",                               \
@@ -575,7 +600,7 @@ namespace Legion {
       PREMAP_TASK_CALL,
       SLICE_TASK_CALL,
       MAP_TASK_CALL,
-      MAP_REPLICATE_TASK_CALL,
+      REPLICATE_TASK_CALL,
       SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
       TASK_SELECT_SOURCES_CALL,
@@ -632,7 +657,7 @@ namespace Legion {
       "premap_task",                                \
       "slice_task",                                 \
       "map_task",                                   \
-      "map_replicate_task",                         \
+      "replicate_task",                             \
       "select_task_variant",                        \
       "postmap_task",                               \
       "select_task_sources",                        \
@@ -899,8 +924,7 @@ namespace Legion {
       SEND_REPL_TRACE_FRONTIER_REQUEST,
       SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
-      SEND_REPL_IMPLICIT_REQUEST,
-      SEND_REPL_IMPLICIT_RESPONSE,
+      SEND_REPL_IMPLICIT_RENDEZVOUS,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
@@ -978,7 +1002,10 @@ namespace Legion {
       SEND_CONSTRAINT_RELEASE,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
-      SEND_REPLICATE_LAUNCH,
+      SEND_REPLICATE_DISTRIBUTION,
+      SEND_REPLICATE_COLLECTIVE_VERSIONING,
+      SEND_REPLICATE_COLLECTIVE_MAPPING,
+      SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
       SEND_REPLICATE_POST_MAPPED,
       SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
@@ -1217,8 +1244,7 @@ namespace Legion {
         "Send Replicate Trace Frontier Request",                      \
         "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
-        "Send Replicate Implicit Request",                            \
-        "Send Replicate Implicit Response",                           \
+        "Send Replicate Implicit Rendezvous",                         \
         "Send Replicate Find or Create Collective View",              \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
@@ -1296,7 +1322,10 @@ namespace Legion {
         "Send Constraint Release",                                    \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
-        "Send Replication Launch",                                    \
+        "Send Replication Distribution",                              \
+        "Send Replication Collective Versioning",                     \
+        "Send Replication Collective Mapping",                        \
+        "Send Replication Virtual Mapping Rendezvous",                \
         "Send Replication Post Mapped",                               \
         "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \

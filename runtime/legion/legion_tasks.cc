@@ -718,49 +718,7 @@ namespace Legion {
             get_task_name(), get_unique_id(),
             target_proc.id, runtime->address_space)
       stealable = options.stealable;
-      map_origin = options.map_locally;
-      replicate = options.replicate;
-      if (replicate)
-      {
-        if (concurrent_task)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Mapper %s requested to replicate concurrent task %s (UID %lld). "
-              "Replication of concurrent tasks are not supported.",
-              mapper->get_mapper_name(), get_task_name(), get_unique_id())
-        if (must_epoch_task)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Mapper %s requested to replicate must epoch task %s (UID %lld). "
-              "Replication of must epoch tasks are not supported.",
-              mapper->get_mapper_name(), get_task_name(), get_unique_id())
-        if (!output_regions.empty())
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-              "Mapper %s requested to replicate task %s (UID %lld) "
-              "with %zd output regions. Legion does not currently support "
-              "the replication of tasks with output regions, but we may "
-              "consider supporting it in the future.",mapper->get_mapper_name(),
-              get_task_name(), get_unique_id(), output_regions.size())
-        // Reduction-only privileges and relaxed coherence modes
-        // are not permitted for tasks that are going to be replicated
-        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-        {
-          if (IS_REDUCE(logical_regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Mapper %s requested to replicate task %s (UID %lld) "
-                          "but region requirement %d has reduction privileges. "
-                          "Tasks with reduction-only privileges are not "
-                          "permitted to be replicated.", 
-                          mapper->get_mapper_name(), get_task_name(),
-                          get_unique_id(), idx)
-          else if (!IS_EXCLUSIVE(logical_regions[idx]))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Mapper %s requested to replicate task %s (UID %lld) "
-                          "but region requirement %d has relaxed coherence. "
-                          "Tasks with relaxed coherence modes are not "
-                          "permitted to be replicated.", 
-                          mapper->get_mapper_name(), get_task_name(),
-                          get_unique_id(), idx)
-        }
-      }
+      map_origin = options.map_locally; 
       request_valid_instances = options.valid_instances;
       if (parent_priority != options.parent_priority)
       {
@@ -822,6 +780,70 @@ namespace Legion {
             }
           }
         }
+      }
+      if (options.replicate)
+      {
+        // Replication of concurrent index space task launches are illegal
+        if (concurrent_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s request to replicate task %s (UID %lld) that is a "
+              "concurrent index space task launch in 'select_task_options'. "
+              "It is illegal to replicate the point tasks of a concurrent "
+              "index space task launch.", mapper->get_mapper_name(),
+              get_task_name(), get_unique_id())
+        // Replication of must epoch tasks are not allowed
+        if (must_epoch_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s requested to replicate must epoch task %s (UID %lld). "
+              "Replication of must epoch tasks are not supported.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        // Replication of origin-mapped tasks is not supported
+        if (map_origin)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+              "Mapper %s requested to both replicate and origin map task %s "
+              "(UID %lld) in 'select_task_options'. Replication of origin-"
+              "mapped tasks is not currently supported and the request to "
+              "replicate the task will be ignored.", mapper->get_mapper_name(),
+              get_task_name(), get_unique_id())
+          options.replicate = false;
+        }
+        // Output regions are not currently supported
+        if (!output_regions.empty())
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+              "Mapper %s requested to replicate task %s (UID %lld) with output "
+              "regions in 'select_task_options'. Legion does not currently "
+              "support replication of tasks with output regions at the moment. "
+              "You can request support for this feature by emailing the "
+              "the Legion developers list or opening a github issue. The "
+              "mapper call to replicate_task is being elided.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+          options.replicate = false;
+        }
+        // We allow replication of tasks with reduction privileges, but
+        // not if they are also part of a collective region requirement
+        // because we don't know how to make a collective view that is
+        // replicated for all the shards of the repdlicated task, but then
+        // an all-reduce view across the points of the index space task
+        // launch that are operating collectively
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+        {
+          if (!IS_REDUCE(logical_regions[idx]))
+            continue;
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+              "Mapper %s requested to replicate task %s (UID %lld) with "
+              "reduction privilege on region requirement %d in "
+              "'select_task_options'. Legion does not currently support "
+              "replication of tasks with reduction privileges. "
+              "You can request support for this feature by emailing the "
+              "Legion developers list or opening a github issue. The mapper "
+              "call to replicate_task is being elided.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id(), idx)
+          options.replicate = false;
+          break;
+        }
+        replicate = options.replicate;
       }
       if (options.inline_task)
       {
@@ -2324,10 +2346,14 @@ namespace Legion {
       this->no_access_regions = rhs->no_access_regions;
       this->target_processors = rhs->target_processors;
       this->physical_instances = rhs->physical_instances;
+      this->intra_space_mapping_dependences = 
+        rhs->intra_space_mapping_dependences;
       // no need to copy the control replication map
       this->selected_variant  = rhs->selected_variant;
       this->task_priority     = rhs->task_priority;
       this->shard_manager     = rhs->shard_manager;
+      if (this->shard_manager != NULL)
+        this->shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       // For now don't copy anything else below here
       // In the future we may need to copy the profiling requests
     }
@@ -2379,25 +2405,10 @@ namespace Legion {
       }
       else
       { 
-        if (!deferred_complete_mapping.exists())
-        {
-#ifdef DEBUG_LEGION
-          assert(!is_remote()); // should only happen on the owner
-#endif
-          // Make a user event to send remotely to serve as the 
-          // mapping completion trigger
-          RtUserEvent remote_deferred_complete_mapping = 
-            Runtime::create_rt_user_event();
-          rez.serialize(remote_deferred_complete_mapping);
-          // We can do the trigger now and defer it
-          complete_mapping(remote_deferred_complete_mapping);
-        }
-        else
-        {
-          rez.serialize(deferred_complete_mapping);
-          // Clear it once we've packed it up
-          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        }
+        rez.serialize<size_t>(intra_space_mapping_dependences.size());
+        for (unsigned idx = 0;
+              idx < intra_space_mapping_dependences.size(); idx++)
+          rez.serialize(intra_space_mapping_dependences[idx]);
       }
     }
 
@@ -2409,9 +2420,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, UNPACK_SINGLE_TASK_CALL);
       DerezCheck z(derez);
       unpack_base_task(derez, ready_events);
-#ifdef DEBUG_LEGION
-      assert(!deferred_complete_mapping.exists());
-#endif
       if (map_origin)
       {
         derez.deserialize(selected_variant);
@@ -2479,8 +2487,11 @@ namespace Legion {
       }
       else
       {
-        derez.deserialize(deferred_complete_mapping);
-        version_infos.resize(logical_regions.size());
+        size_t num_intra_space_dependences;
+        derez.deserialize(num_intra_space_dependences);
+        intra_space_mapping_dependences.resize(num_intra_space_dependences);
+        for (unsigned idx = 0; idx < num_intra_space_dependences; idx++)
+          derez.deserialize(intra_space_mapping_dependences[idx]);
       }
       update_no_access_regions();
     } 
@@ -2521,6 +2532,12 @@ namespace Legion {
           else
           {
             // Remote but still need to map
+            if (is_replicable())
+            {
+              if (replicate_task())
+                return;
+              replicate = false;
+            }
             const RtEvent done_mapping = perform_mapping();
             if (done_mapping.exists() && !done_mapping.has_triggered())
               defer_launch_task(done_mapping);
@@ -2565,6 +2582,12 @@ namespace Legion {
             if (distribute_task())
             {
               // Still local so try mapping and launching
+              if (is_replicable())
+              {
+                if (replicate_task())
+                  return;
+                replicate = false;
+              }
               const RtEvent done_mapping = perform_mapping();
               if (!done_mapping.exists() || done_mapping.has_triggered())
                 launch_task();
@@ -2663,6 +2686,8 @@ namespace Legion {
       // their valid instances, then fill in the mapper input structure
       input.valid_instances.resize(regions.size());
       input.valid_collectives.resize(regions.size());
+      input.shard_processor = Processor::NO_PROC;
+      input.shard_variant = 0;
       output.chosen_instances.resize(regions.size());
       output.source_instances.resize(regions.size());
       output.output_targets.resize(output_regions.size());
@@ -2757,7 +2782,7 @@ namespace Legion {
           else if (runtime->separate_runtime_instances)
             // Ignore additional processors in separate runtime instances
             output.target_procs.resize(1);
-        }
+        } 
         if (!runtime->unsafe_mapper)
           validate_target_processors(output.target_procs);
         // Save the target processors from the output
@@ -3478,6 +3503,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::handle_post_mapped(RtEvent mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (deferred_complete_mapping.exists())
+      {
+        if (mapped_precondition.exists())
+          map_applied_conditions.insert(mapped_precondition);
+        // Little race condition here so pull it on the stack first
+        RtUserEvent to_trigger = deferred_complete_mapping;
+        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        if (!map_applied_conditions.empty())
+          Runtime::trigger_event(to_trigger, 
+              Runtime::merge_events(map_applied_conditions)); 
+        else
+          Runtime::trigger_event(to_trigger);
+      }
+      else
+        complete_mapping(mapped_precondition);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent SingleTask::replay_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -3502,6 +3548,39 @@ namespace Legion {
         // We group all reservations together anyway
         tpl->get_task_reservations(this, atomic_locks);
       return single_task_termination;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+      assert(!IS_COLLECTIVE(regions[index]));
+      assert(!std::binary_search(check_collective_regions.begin(),
+            check_collective_regions.end(), index));
+#endif
+      // Bounce it back onto the shard manager to finalize
+      shard_manager->finalize_replicate_collective_versioning(index,
+          parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+      assert(!IS_COLLECTIVE(regions[key.region_index]));
+      assert(!std::binary_search(check_collective_regions.begin(),
+            check_collective_regions.end(), key.region_index));
+#endif
+      shard_manager->finalize_replicate_collective_views(key, rendezvous);
     }
 
     //--------------------------------------------------------------------------
@@ -3632,6 +3711,321 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    bool SingleTask::replicate_task(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      // There are some local invariants checked here, but there are more
+      // of them checked in select_task_options right after the mapper call
+      // that decides whether we're going to try to replicate this task
+      if (is_recording())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+            "Unsupported request to replicate task %s (UID %lld) during "
+            "trace capture by mapper %s. Legion does not currently support "
+            "replication of tasks inside of physical traces at the moment. "
+            "You can request support for this feature by emailing the "
+            "the Legion developers list or opening a github issue. The "
+            "mapper call to replicate_task is being elided.",
+            get_task_name(), get_unique_id(), mapper->get_mapper_name())
+        return false;
+      }
+#if 0
+      if (!check_collective_regions.empty())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+            "Unsupported request to replicate task %s (UID %lld) with "
+            "collective region requirements by mapper %s. Legion does not "
+            "currently support replication of tasks with collective region "
+            "requirements at the moment. You can request support for this "
+            "feature by emailing the the Legion developers list or opening a "
+            "github issue. The mapper call to replicate_task is being elided.",
+            get_task_name(), get_unique_id(), mapper->get_mapper_name())
+        return false;
+      }
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (!IS_COLLECTIVE(regions[idx]))
+          continue;
+        REPORT_LEGION_WARNING(LEGION_WARNING_UNSUPPORTED_REPLICATION,
+            "Unsupported request to replicate task %s (UID %lld) with "
+            "collective region requirements by mapper %s. Legion does not "
+            "currently support replication of tasks with collective region "
+            "requirements at the moment. You can request support for this "
+            "feature by emailing the the Legion developers list or opening a "
+            "github issue. The mapper call to replicate_task is being elided.",
+            get_task_name(), get_unique_id(), mapper->get_mapper_name())
+        return false;
+      }
+#endif
+      Mapper::ReplicateTaskInput input;
+      Mapper::ReplicateTaskOutput output;
+      output.chosen_variant = 0;
+      mapper->invoke_replicate_task(this, &input, &output);
+      // If we don't have more than one target processor then we're not
+      // actually going to replicate this task
+      if (output.target_processors.size() <= 1)
+        return false;
+      VariantImpl *var_impl = runtime->find_variant_impl(task_id,
+          output.chosen_variant, true/*can_fail*/);
+      if (var_impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' "
+                      "on mapper %s. Mapper selected an invalid task "
+                      "variant %d for task %s (UID %lld) that was chosen "
+                      "to be replicated.", "replicate_task",
+                      mapper->get_mapper_name(), output.chosen_variant,
+                      get_task_name(), get_unique_id())
+      // Check that the chosen variant is replicable
+      if (!var_impl->is_replicable())
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' "
+                      "on mapper %s. Mapper failed to pick an valid task "
+                      "variant %d for task %s (UID %lld) that was chosen "
+                      "to be replicated. Task variants selected for "
+                      "replication must be marked as replicable variants.",
+                      "replicate_task", mapper->get_mapper_name(),
+                      output.chosen_variant, get_task_name(), get_unique_id())
+      if (!runtime->unsafe_mapper)
+      {
+        // Check that all the processors exist
+        for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+          if (!output.target_processors[idx].exists())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper specified a NO_PROC in the "
+                        "vector of target processors when replicating "
+                        "task %s (UID %lld). All processors in "
+                        "target_processors must exist.", "replicate_task",
+                         mapper->get_mapper_name(),
+                         get_task_name(), get_unique_id())
+        // Check that the chosen variant works with all the targets processors
+        const ProcessorConstraint &constraint = 
+          var_impl->execution_constraints.processor_constraint; 
+        if (constraint.is_valid())
+        {
+          const char *proc_names[] = {
+#define PROC_NAMES(name, desc) desc,
+            REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+          };
+          for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+            if (!constraint.can_use(output.target_processors[idx].kind()))
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper specified %s processor " IDFMT 
+                        " which cannot be used with variant %d when "
+                        "replicating task %s (UID %lld) as the variant does "
+                        "not support that kind of processor.", "replicate_task",
+                         mapper->get_mapper_name(), 
+                         proc_names[output.target_processors[idx].kind()],
+                         output.target_processors[idx].id,
+                         output.chosen_variant, 
+                         get_task_name(), get_unique_id())
+        }
+        // If the chosen variant is not a leaf check that processors are unique
+        // Note that if the chosen variant is a leaf then they don't need to be
+        // unique since the different shards won't need to synchronize
+        if (!var_impl->is_leaf())
+        {
+          std::vector<Processor> sorted_procs = output.target_processors;
+          std::sort(sorted_procs.begin(), sorted_procs.end());
+          for (unsigned idx = 1; idx < sorted_procs.size(); idx++)
+            if (sorted_procs[idx-1] == sorted_procs[idx])
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided duplicate target "
+                        "processors for non-leaf task variant %d when "
+                        "replicating task %s (UID %lld). In order to control "
+                        "replicate a task all the target processors must be "
+                        "unique.", "replicate_task", mapper->get_mapper_name(),
+                        output.chosen_variant, get_task_name(), get_unique_id())
+        }
+        // Check that shard points match the size target processors if not empty
+        if (!output.shard_points.empty())
+        {
+          if (!output.shard_domain.exists())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided shard_points without "
+                        "providing an associated shard_domain when replicating "
+                        "task %s (UID %lld). A shard domain must also be "
+                        "provided in conjunction with a set of shard points.",
+                        "replicate_task", mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id())
+          if (output.shard_points.size() != output.target_processors.size())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided %zd shard_points "
+                        "which does not match the %zd target processors "
+                        "specified when replicating task %s (UID %lld). If "
+                        "shard_points are provided they must exactly match the "
+                        "number of target processors.", "replicate_task", 
+                        mapper->get_mapper_name(), output.shard_points.size(),
+                        output.target_processors.size(),
+                        get_task_name(), get_unique_id())
+          std::vector<DomainPoint> sorted_points = output.shard_points;
+          std::sort(sorted_points.begin(), sorted_points.end());
+          for (unsigned idx = 1; idx < sorted_points.size(); idx++)
+            if (sorted_points[idx-1] == sorted_points[idx])
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided duplicate shard "
+                        "points when replicating task %s (UID %lld). In "
+                        "order to control replicate a task all the target "
+                        "processors must be unique.", "replicate_task", 
+                        mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id())
+        }
+        // Check that shard domain volume matches number of points if not empty
+        if (output.shard_domain.exists())
+        {
+          if (output.shard_points.empty())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided shard_domain without "
+                        "providing any associated shard_points when replicating"
+                        " task %s (UID %lld). The shard_points data structure "
+                        "must also be populated in conjunction with a "
+                        "shard_domain.", "replicate_task",
+                        mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id())
+          if (output.shard_points.size() != output.shard_domain.get_volume())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided %zd shard_points "
+                        "for shard_domain with %zd points when replicating "
+                        "task %s (UID %lld). The number of shard_points must "
+                        "exactly match the volume of the shard_domain.",
+                        "replicate_task", mapper->get_mapper_name(),
+                        output.shard_points.size(), 
+                        output.shard_domain.get_volume(),
+                        get_task_name(), get_unique_id())
+          for (unsigned idx = 0; idx < output.shard_points.size(); idx++)
+            if (!output.shard_domain.contains(output.shard_points[idx]))
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' "
+                        "on mapper %s. Mapper provided a point in shard_points "
+                        "that is not contained in the shard_domain when "
+                        "replicating task %s (UID %lld). Each point in "
+                        "shard_points must exist in the shard_domain.", 
+                        "replicate_task", mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id())
+        }
+      } 
+      // Start building the data structures needed to make the ShardManager
+      std::vector<DomainPoint> sorted_points;
+      sorted_points.reserve(output.target_processors.size());
+      std::vector<ShardID> shard_lookup;
+      shard_lookup.reserve(output.target_processors.size());
+      bool isomorphic_points = false;
+      if (!output.shard_points.empty())
+      {
+        std::map<DomainPoint,ShardID> shard_mapping;
+        const int dim = output.shard_points.front().get_dim();
+        if (dim != 1)
+          isomorphic_points = false;
+        for (unsigned idx = 0; idx < output.shard_points.size(); idx++)
+        {
+          if (isomorphic_points && (output.shard_points[idx][0] != idx))
+            isomorphic_points = false;
+          if (output.shard_points[idx].get_dim() != dim)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s specified shard points with different "
+                "dimensionalities of %d and %d for 'replicate_task' "
+                "call for task %s (UID %lld). All shard points must have "
+                "the same dimenstionality.", mapper->get_mapper_name(),
+                dim, output.shard_points[idx].get_dim(),
+                get_task_name(), get_unique_id())
+          std::pair<std::map<DomainPoint,ShardID>::iterator,bool> result =
+            shard_mapping.insert(std::pair<DomainPoint,ShardID>(
+                  output.shard_points[idx],idx));
+          if (!result.second)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s specified duplicate shard point names for shards "
+                "%d and %d in 'replicate_task' mapper call for task %s "
+                "(UID %lld). Each shard point must be given a unique name.",
+                mapper->get_mapper_name(), result.first->second, idx,
+                get_task_name(), get_unique_id())
+        }
+        for (std::map<DomainPoint,ShardID>::const_iterator it =
+              shard_mapping.begin(); it != shard_mapping.end(); it++)
+        {
+          sorted_points.push_back(it->first);
+          shard_lookup.push_back(it->second);
+        }
+        const int domain_dim = output.shard_domain.get_dim();
+        if ((domain_dim > 0) && (domain_dim != dim))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s specified a 'shard_domain' output with "
+              "dimensionality %d different than the %d dimension points "
+              "in 'shard_points' in 'replicate_task' call for task %s "
+              "(UID %lld). The dimensionality of 'shard_domain' must "
+              "match the dimensionality of the 'shard_points'.",
+              mapper->get_mapper_name(), domain_dim, dim,
+              get_task_name(), get_unique_id())
+      }
+      else
+      {
+        // Mapper didn't specify it so we can fill it in
+        output.shard_domain = Domain(DomainPoint(0),
+            DomainPoint(output.target_processors.size()-1));
+        output.shard_points.reserve(output.target_processors.size());
+        for (unsigned idx = 0; idx < output.target_processors.size(); idx++)
+        {
+          output.shard_points.push_back(DomainPoint(idx));
+          sorted_points.push_back(DomainPoint(idx));
+          shard_lookup.push_back(idx);
+        }
+      }
+      // Construct the collective mapping
+      std::vector<AddressSpaceID> spaces(output.target_processors.size());
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        spaces[idx] =
+          runtime->find_address_space(output.target_processors[idx]);
+      std::sort(spaces.begin(), spaces.end());
+      // Uniquify them
+      std::vector<AddressSpaceID>::iterator last = 
+        std::unique(spaces.begin(), spaces.end());
+      spaces.erase(last, spaces.end());
+      // The shard manager will take ownership of this
+      CollectiveMapping *mapping =
+        new CollectiveMapping(spaces, runtime->legion_collective_radix);
+      const DistributedID manager_did = runtime->get_available_distributed_id();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_replication(get_unique_id(), manager_did,
+                                   !var_impl->is_leaf());
+#ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
+#endif
+      std::vector<ShardID> local_shards;
+      for (ShardID idx = 0; idx < output.target_processors.size(); idx++)
+      {
+        const Processor processor = output.target_processors[idx];
+        if (processor.address_space() != runtime->address_space)
+          continue;
+        local_shards.push_back(idx);
+      }
+      shard_manager = new ShardManager(runtime, manager_did, mapping,
+          local_shards.size(), is_top_level_task(), isomorphic_points,
+          !var_impl->is_leaf(), output.shard_domain, 
+          std::move(output.shard_points), std::move(sorted_points),
+          std::move(shard_lookup), this);
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      // Now create our local shards and start them mapping
+      for (unsigned idx = 0; idx < local_shards.size(); idx++)
+        shard_manager->create_shard(local_shards[idx], 
+            output.target_processors[local_shards[idx]],
+            output.chosen_variant, parent_ctx, this);
+      // Distribute the shard manager and launch the shards 
+      shard_manager->distribute_explicit(this, output.chosen_variant,
+                                         output.target_processors);
+      return true;
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     void SingleTask::invoke_mapper_replicated(MustEpochOp *must_epoch_owner)
     //--------------------------------------------------------------------------
@@ -3944,6 +4338,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     RtEvent SingleTask::map_all_regions(MustEpochOp *must_epoch_op,
@@ -3994,10 +4389,7 @@ namespace Legion {
                                          defer_args, 1/*invocation count*/);
           }
           // Now do the mapping call
-          if (is_replicated())
-            invoke_mapper_replicated(must_epoch_op);
-          else
-            invoke_mapper(must_epoch_op);
+          invoke_mapper(must_epoch_op);
         }
         else
         {
@@ -4006,10 +4398,7 @@ namespace Legion {
           if ((defer_args == NULL/*first invocation*/) ||
               (defer_args->invocation_count == 0))
           {
-            if (is_replicated())
-              invoke_mapper_replicated(must_epoch_op);
-            else
-              invoke_mapper(must_epoch_op);
+            invoke_mapper(must_epoch_op);
             const RtEvent version_ready_event = 
               perform_versioning_analysis(true/*post mapper*/);
             if (version_ready_event.exists() && 
@@ -4438,13 +4827,6 @@ namespace Legion {
       assert(logical_regions.size() == physical_instances.size());
       assert(logical_regions.size() == no_access_regions.size());
 #endif 
-      // If we have a shard manager that means we were replicated so
-      // we just do the launch directly from the shard manager
-      if ((shard_manager != NULL) && !is_shard_task())
-      {
-        shard_manager->launch(virtual_mapped);
-        return;
-      }
       // If we haven't computed our virtual mapping information
       // yet (e.g. because we origin mapped) then we have to
       // do that now
@@ -4514,15 +4896,8 @@ namespace Legion {
       // STEP 2: Set up the task's context
       {
         const bool is_leaf_variant = variant->is_leaf();
-        if (is_leaf_variant)
-        {
-          execution_context = new LeafContext(runtime, this, inline_task);
-          // Add a reference to our execution context
-          execution_context->add_base_gc_ref(SINGLE_TASK_REF);
-        }
-        else // This method adds a reference to the context for us
-          execution_context = 
-            initialize_inner_execution_context(variant, inline_task);
+        execution_context = create_execution_context(variant, 
+            wait_on_events, inline_task, is_leaf_variant);
         std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
@@ -5015,17 +5390,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* SingleTask::initialize_inner_execution_context(VariantImpl *v,
-                                                               bool inline_task)
+    TaskContext* SingleTask::create_execution_context(VariantImpl *v,
+        std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task)
     //--------------------------------------------------------------------------
     {
-      InnerContext *inner_ctx = new InnerContext(runtime, this, 
-          get_depth(), v->is_inner(), regions, output_regions,
-          parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
-          inline_task, concurrent_task || parent_ctx->is_concurrent_context());
-      configure_execution_context(inner_ctx);
-      inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
-      return inner_ctx;
+      if (!leaf_task)
+      {
+        InnerContext *inner_ctx = new InnerContext(runtime, this, 
+            get_depth(), v->is_inner(), regions, output_regions,
+            parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
+            inline_task,concurrent_task || parent_ctx->is_concurrent_context());
+        configure_execution_context(inner_ctx);
+        inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
+        return inner_ctx;
+      }
+      else
+      {
+        LeafContext *leaf_ctx = new LeafContext(runtime, this, inline_task);
+        leaf_ctx->add_base_gc_ref(SINGLE_TASK_REF);
+        return leaf_ctx;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5047,9 +5431,6 @@ namespace Legion {
     void SingleTask::record_inner_termination(ApEvent termination_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(single_task_termination.exists() || is_implicit_top_level_task());
-#endif
       if (single_task_termination.exists())
       {
         Runtime::trigger_event(NULL, 
@@ -5057,9 +5438,6 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(is_implicit_top_level_task());
-#endif
         if (termination_event.exists())
         {
           AutoLock o_lock(op_lock);
@@ -5746,7 +6124,6 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
-      implicit_top_level_task = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5776,7 +6153,6 @@ namespace Legion {
                                            Provenance *provenance,
                                            bool track /*=true*/,
                                            bool top_level /*=false*/,
-                                           bool implicit_top_level /*=false*/,
                                            bool must_epoch_launch /*=false*/,
                               std::vector<OutputRequirement> *outputs /*=NULL*/)
     //--------------------------------------------------------------------------
@@ -5872,10 +6248,7 @@ namespace Legion {
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
-      {
         this->top_level_task = true;
-        this->implicit_top_level_task = implicit_top_level;
-      }
       if (runtime->legion_spy_enabled)
       {
         if (top_level)
@@ -6122,59 +6495,42 @@ namespace Legion {
       // If we succeeded in mapping and it's a leaf task
       // then we get to mark that we are done mapping
       RtEvent applied_condition;
-      if (!is_replicated())
-      { 
-        // The common path
-        if (is_leaf())
+      // The common path
+      if (is_leaf())
+      {
+        if (!map_applied_conditions.empty())
         {
-          if (!map_applied_conditions.empty())
-          {
-            applied_condition = Runtime::merge_events(map_applied_conditions);
-            map_applied_conditions.clear();
-          }
-          // If we mapped remotely we might have a deferred complete mapping
-          // that we can trigger now
-          if (deferred_complete_mapping.exists())
-          {
-#ifdef DEBUG_LEGION
-            assert(is_remote());
-#endif
-            Runtime::trigger_event(deferred_complete_mapping,applied_condition);
-            applied_condition = deferred_complete_mapping;
-            deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-          }
+          applied_condition = Runtime::merge_events(map_applied_conditions);
+          map_applied_conditions.clear();
         }
-        else if (!is_remote())
+        // If we mapped remotely we might have a deferred complete mapping
+        // that we can trigger now
+        if (deferred_complete_mapping.exists())
         {
-          // We did this mapping on the owner
 #ifdef DEBUG_LEGION
-          assert(!deferred_complete_mapping.exists());
+          assert(is_remote());
 #endif
-          deferred_complete_mapping = Runtime::create_rt_user_event();
+          Runtime::trigger_event(deferred_complete_mapping,applied_condition);
           applied_condition = deferred_complete_mapping;
-        }
-        else
-        {
-          // We did this mapping remotely so there better be an event
-#ifdef DEBUG_LEGION
-          assert(deferred_complete_mapping.exists());
-#endif
-          applied_condition = deferred_complete_mapping;
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
-      else
+      else if (!is_remote())
       {
-        // Replciated case
+        // We did this mapping on the owner
 #ifdef DEBUG_LEGION
         assert(!deferred_complete_mapping.exists());
 #endif
         deferred_complete_mapping = Runtime::create_rt_user_event();
         applied_condition = deferred_complete_mapping;
-#ifdef LEGION_SPY
-        // Still need to do this for Legion Spy
-        LegionSpy::log_operation_events(unique_op_id,
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+      }
+      else
+      {
+        // We did this mapping remotely so there better be an event
+#ifdef DEBUG_LEGION
+        assert(deferred_complete_mapping.exists());
 #endif
+        applied_condition = deferred_complete_mapping;
       }
       // Mark that we have completed mapping
       if (!acquired_instances.empty())
@@ -6421,6 +6777,9 @@ namespace Legion {
       }
       else
       {
+        if ((instance != NULL) && (instance->size > 0) && 
+            (shard_manager == NULL))
+          check_future_return_bounds(instance);
         if (elide_future_return)
         {
           if ((instance != NULL) && 
@@ -6431,7 +6790,8 @@ namespace Legion {
         }
         else
         {
-          if ((instance != NULL) && (instance->size > 0))
+          if ((instance != NULL) && (instance->size > 0) && 
+              (shard_manager == NULL))
             check_future_return_bounds(instance);
           result.impl->set_result(single_task_termination, instance,
                                   metadata, metasize);
@@ -6439,38 +6799,6 @@ namespace Legion {
       }
       complete_execution();
     }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::handle_post_mapped(RtEvent mapped_precondition)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDIVIDUAL_POST_MAPPED_CALL);
-      if (deferred_complete_mapping.exists())
-      {
-        if (mapped_precondition.exists())
-          map_applied_conditions.insert(mapped_precondition);
-        // Little race condition here so pull it on the stack first
-        RtUserEvent to_trigger = deferred_complete_mapping;
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        if (!map_applied_conditions.empty())
-          Runtime::trigger_event(to_trigger, 
-              Runtime::merge_events(map_applied_conditions)); 
-        else
-          Runtime::trigger_event(to_trigger);
-      }
-      // If we're an implicit top-level we do our complete mapping call here
-      else if (top_level_task && implicit_top_level_task)
-        complete_mapping(mapped_precondition);
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      else
-      {
-        assert(!mapped_precondition.exists());
-        assert(map_applied_conditions.empty());
-      }
-#endif
-#endif
-    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_mispredication(void)
@@ -6514,13 +6842,35 @@ namespace Legion {
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
       pack_single_task(rez, target);
+      if (!is_origin_mapped())
+      {
+        if (!deferred_complete_mapping.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert(!is_remote()); // should only happen on the owner
+#endif
+          // Make a user event to send remotely to serve as the 
+          // mapping completion trigger
+          RtUserEvent remote_deferred_complete_mapping = 
+            Runtime::create_rt_user_event();
+          rez.serialize(remote_deferred_complete_mapping);
+          // We can do the trigger now and defer it
+          complete_mapping(remote_deferred_complete_mapping);
+        }
+        else
+        {
+          rez.serialize(deferred_complete_mapping);
+          // Clear it once we've packed it up
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
       size_t valid_output_regions_size = valid_output_regions.size();
       rez.serialize(valid_output_regions_size);
       for (unsigned idx = 0; idx < valid_output_regions.size(); idx++)
         rez.serialize<bool>(valid_output_regions[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
-      parent_ctx->pack_task_context(rez);
+      parent_ctx->pack_inner_context(rez);
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
@@ -6554,6 +6904,14 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
+      if (!is_origin_mapped())
+      {
+#ifdef DEBUG_LEGION
+        assert(!deferred_complete_mapping.exists());
+#endif
+        derez.deserialize(deferred_complete_mapping);
+        version_infos.resize(logical_regions.size());
+      }
       size_t valid_output_regions_size = 0;
       derez.deserialize(valid_output_regions_size);
       valid_output_regions.resize(valid_output_regions_size);
@@ -6567,8 +6925,7 @@ namespace Legion {
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
       // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       derez.deserialize(top_level_task);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -6607,9 +6964,6 @@ namespace Legion {
         }
       }
       set_provenance(Provenance::deserialize(derez));
-      // Make sure the parent ctx is ready
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Remote individual tasks are always resolved
@@ -7168,7 +7522,7 @@ namespace Legion {
       }
       RtEvent applied_condition;
       // If we succeeded in mapping and we're a leaf so we are done mapping
-      if (is_leaf() && !is_replicated())
+      if (is_leaf())
       {
         if (!map_applied_conditions.empty())
         {
@@ -7396,40 +7750,11 @@ namespace Legion {
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
-      if ((instance != NULL) && (instance->size > 0))
+      if ((instance != NULL) && (instance->size > 0) && (shard_manager == NULL))
         check_future_return_bounds(instance);
       slice_owner->handle_future(single_task_termination, index_point,
           instance, metadata, metasize, functor, future_proc, own_functor); 
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::handle_post_mapped(RtEvent mapped_precondition)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, POINT_TASK_POST_MAPPED_CALL);
-      if (deferred_complete_mapping.exists())
-      {
-        if (mapped_precondition.exists())
-          map_applied_conditions.insert(mapped_precondition);
-        // Little race condition here so pull it on the stack first
-        RtUserEvent to_trigger = deferred_complete_mapping;
-        deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
-        if (!map_applied_conditions.empty())
-          Runtime::trigger_event(to_trigger, 
-              Runtime::merge_events(map_applied_conditions)); 
-        else
-          Runtime::trigger_event(to_trigger);
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      else
-      {
-        assert(!mapped_precondition.exists());
-        assert(map_applied_conditions.empty());
-      }
-#endif
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7608,6 +7933,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::perform_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+#endif
+      if (IS_COLLECTIVE(regions[index]) || std::binary_search(
+            check_collective_regions.begin(), 
+            check_collective_regions.end(), index))
+        slice_owner->perform_replicate_collective_versioning(index,
+            parent_req_index, to_perform);
+      else
+        SingleTask::perform_replicate_collective_versioning(index,
+            parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::convert_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+#endif
+      if (IS_COLLECTIVE(regions[key.region_index]) || std::binary_search(
+            check_collective_regions.begin(), 
+            check_collective_regions.end(), key.region_index))
+        slice_owner->convert_replicate_collective_views(key, rendezvous);
+      else
+        SingleTask::convert_replicate_collective_views(key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
@@ -7640,7 +8002,13 @@ namespace Legion {
           {
             const DomainPoint &prev = dependences[idx-1];
             const RtEvent pre = slice_owner->find_intra_space_dependence(prev);
-            intra_space_mapping_dependences.insert(pre);
+            if (!std::binary_search(intra_space_mapping_dependences.begin(),
+                  intra_space_mapping_dependences.end(), pre))
+            {
+              intra_space_mapping_dependences.push_back(pre);
+              std::sort(intra_space_mapping_dependences.begin(),
+                        intra_space_mapping_dependences.end());
+            }
             if (runtime->legion_spy_enabled)
             {
               // We know we only need a dependence on the previous point but
@@ -7669,44 +8037,82 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardTask::ShardTask(Runtime *rt, ShardManager *manager,
-                         ShardID id, Processor proc)
+    ShardTask::ShardTask(Runtime *rt, SingleTask *source, InnerContext *parent,
+        ShardManager *manager, ShardID id, Processor proc, VariantID variant)
       : SingleTask(rt), shard_id(id), all_shards_complete(false)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(proc.address_space() == runtime->address_space);
+#endif
       SingleTask::activate();
+      set_current_proc(proc); // do this before clone_single_from
+      if (source != NULL)
+        clone_single_from(source);
+      else
+        parent_ctx = parent;
       resolved = true;
-      target_proc = proc;
-      current_proc = proc;
+      stealable = false;
+      replicate = false;
       shard_manager = manager;
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      selected_variant = variant;
       shard_barrier = shard_manager->get_shard_task_barrier();
-      // Only make our termination event on the node where the shard will run
-      if (runtime->find_address_space(proc) == runtime->address_space)
-        single_task_termination = Runtime::create_ap_user_event(NULL);
-    }
-    
-    //--------------------------------------------------------------------------
-    ShardTask::ShardTask(const ShardTask &rhs)
-      : SingleTask(NULL), shard_id(0)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
+      // If we have any region requirements then they are all collective
+      check_collective_regions.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        check_collective_regions[idx] = idx;
+      if (runtime->legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(unique_op_id, idx, logical_regions[idx]);
+      }
     }
 
+    //--------------------------------------------------------------------------
+    ShardTask::ShardTask(Runtime *rt, InnerContext *parent, Deserializer &derez,
+        ShardManager *manager, ShardID id, Processor proc, VariantID variant)
+      : SingleTask(rt), shard_id(id), all_shards_complete(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proc.address_space() == runtime->address_space);
+#endif
+      SingleTask::activate();
+      set_current_proc(proc);
+      std::set<RtEvent> ready_events;
+      unpack_single_task(derez, ready_events);
+      resolved = true;
+      stealable = false;
+      replicate = false;
+      parent_ctx = parent;
+      shard_manager = manager;
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
+      selected_variant = variant;
+      shard_barrier = shard_manager->get_shard_task_barrier();
+      // If we have any region requirements then they are all collective
+      check_collective_regions.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        check_collective_regions[idx] = idx;
+      if (runtime->legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(unique_op_id, idx, logical_regions[idx]);
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+    }
+    
     //--------------------------------------------------------------------------
     ShardTask::~ShardTask(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ShardTask& ShardTask::operator=(const ShardTask &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
+#ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7721,6 +8127,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Set our shard manager to NULL since we are not supposed to delete it
+      if (shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
+        delete shard_manager;
       shard_manager = NULL;
       SingleTask::deactivate(false/*free*/);
     }
@@ -7799,11 +8207,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ShardTask::perform_mapping(MustEpochOp *owner, 
+    RtEvent ShardTask::perform_mapping(MustEpochOp *must_epoch_owner, 
                                        const DeferMappingArgs *args)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      const RtEvent deferred = map_all_regions(must_epoch_owner, args);
+      if (deferred.exists())
+        return deferred;
+      RtEvent applied_condition;
+      // If we succeeded in mapping and we're a leaf so we are done mapping
+      if (is_leaf())
+      {
+        if (!map_applied_conditions.empty())
+        {
+          applied_condition = Runtime::merge_events(map_applied_conditions);
+          map_applied_conditions.clear();
+        }
+        // If we mapped remotely we might have a deferred complete mapping
+        // that we can trigger now
+        if (deferred_complete_mapping.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert(is_remote());
+#endif
+          Runtime::trigger_event(deferred_complete_mapping, applied_condition);
+          applied_condition = deferred_complete_mapping;
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!deferred_complete_mapping.exists());
+#endif
+        deferred_complete_mapping = Runtime::create_rt_user_event();
+        applied_condition = deferred_complete_mapping;
+      }
+      shard_manager->handle_post_mapped(true/*local*/, applied_condition);
+      complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -7823,20 +8264,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardTask::can_early_complete(ApUserEvent &chain_event)
+    void ShardTask::initialize_map_task_input(Mapper::MapTaskInput &input,
+                                              Mapper::MapTaskOutput &output,
+                                              MustEpochOp *must_epoch_owner)
     //--------------------------------------------------------------------------
     {
-      // no point for early completion for shard tasks
-      return false;
+      SingleTask::initialize_map_task_input(input, output, must_epoch_owner);
+      input.shard = get_shard_point(); 
+      input.shard_domain = get_shard_domain();
+      input.shard_processor = current_proc; 
+      input.shard_variant = selected_variant;
+      output.chosen_variant = selected_variant;
+      output.target_procs.resize(1, current_proc);
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>*
-                                     ShardTask::get_acquired_instances_ref(void)
+    void ShardTask::finalize_map_task_output(Mapper::MapTaskInput &input,
+                                             Mapper::MapTaskOutput &output,
+                                             MustEpochOp *must_epoch_owner)
     //--------------------------------------------------------------------------
     {
-      // We shouldn't actually have any references for this kind of task
-      return NULL;
+      // This is a replicated task, the mapper isn't allowed to 
+      // mutate the target_processors from the shard processor
+      if ((output.target_procs.size() != 1) ||
+          (output.target_procs.front() != input.shard_processor))
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Mapper %s provided invalid target_processors from call to "
+            "'map_task' for replicated task %s (UID %lld). Replicated "
+            "tasks are only permitted to have one target processor and "
+            "it must be exactly 'input.shard_procesor' as that is where "
+            "this replicated copy of the task has been assigned to run "
+            "by this same mapper.", mapper->get_mapper_name(),
+            get_task_name(), get_unique_id())
+      if (output.chosen_variant != input.shard_variant)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper specified an invalid task variant "
+                      "of ID %d for replicated task %s (ID %lld), which "
+                      "differs from the specified 'input.shard_variant' %d "
+                      "previously chosen by the mapper in 'replicate_task'. "
+                      "The mapper is required to maintain the previously "
+                      "selected variant in the output 'map_task'.",
+                      "map_task", mapper->get_mapper_name(),
+                      output.chosen_variant, get_task_name(),
+                      get_unique_id(), input.shard_variant)
+      SingleTask::finalize_map_task_output(input, output, must_epoch_owner);
+      if (!is_leaf() && !regions.empty() && !runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper != NULL);
+        assert(regions.size() == virtual_mapped.size());
+#endif
+        // If this is not a leaf shard then check that all the shards agree
+        // on which regions are going to be virtually mapped and which aren't
+        shard_manager->rendezvous_check_virtual_mappings(shard_id, mapper,
+                                                         virtual_mapped);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7857,10 +8340,13 @@ namespace Legion {
     void ShardTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(shard_barrier.exists() == shard_manager->control_replicated);
+#endif
       // We need to ensure that each shard has gotten this call to ensure that
       // all the child operations are done and have propagated all their context
       // information back to us before we go about invalidating our contexts
-      if (!all_shards_complete)
+      if (!all_shards_complete && shard_manager->control_replicated)
       {
         Runtime::phase_barrier_arrive(shard_barrier, 1/*false*/);
         const RtEvent shards_complete = shard_barrier;
@@ -7899,12 +8385,17 @@ namespace Legion {
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Make sure all the shards are complete together
-      if (!preconditions.empty())
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/,
-            Runtime::merge_events(preconditions));
+      if (shard_manager->control_replicated)
+      {
+        if (!preconditions.empty())
+          Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/,
+              Runtime::merge_events(preconditions));
+        else
+          Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+        complete_operation(shard_barrier);
+      }
       else
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
-      complete_operation(shard_barrier);
+        complete_operation();
       if (need_commit)
         trigger_children_committed();
     }
@@ -7932,7 +8423,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       pack_single_task(rez, target);
-      parent_ctx->pack_task_context(rez);
+      parent_ctx->pack_inner_context(rez);
       return false;
     }
 
@@ -7943,20 +8434,11 @@ namespace Legion {
     {
       DerezCheck z(derez);
 #ifdef DEBUG_LEGION
-      assert(single_task_termination.exists());
-#endif
-      // Save this on the stack to prevent it being overwritten by unpack_single
-      const ApUserEvent temp_single_task_termination = single_task_termination;
-      unpack_single_task(derez, ready_events);
-      RtEvent ctx_ready;
-      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
-      // Restore the single task termination event
-#ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
 #endif
-      single_task_termination = temp_single_task_termination;
+      unpack_single_task(derez, ready_events);
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
+      set_current_proc(current);
       return false;
     }
 
@@ -7977,16 +8459,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(functor == NULL);
 #endif
-      shard_manager->handle_post_execution(instance, single_task_termination, 
+      if ((instance != NULL) && (instance->size > 0))
+        check_future_return_bounds(instance);
+      shard_manager->handle_post_execution(instance, single_task_termination,
                                            metadata, metasize, true/*local*/);
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardTask::handle_post_mapped(RtEvent mapped_precondition)
-    //--------------------------------------------------------------------------
-    {
-      shard_manager->handle_post_mapped(true/*local*/, mapped_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7998,15 +8475,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* ShardTask::initialize_inner_execution_context(VariantImpl *v,
-                                                              bool inline_task)
+    RtEvent ShardTask::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_collective_rendezvous(unique_op_id, 
+                        requirement_index, analysis_index);
+      return shard_manager->convert_collective_views(requirement_index,
+          analysis_index, region, targets, physical_ctx, analysis_mapping,
+          first_local, target_views, collective_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardTask::perform_collective_versioning_analysis(unsigned index,
+        LogicalRegion handle, EqSetTracker *tracker, const FieldMask &mask,
+        unsigned parent_req_index)
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->rendezvous_collective_versioning_analysis(index,
+          handle, tracker, runtime->address_space, mask, parent_req_index);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskContext* ShardTask::create_execution_context(VariantImpl *v,
+        std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_shard(LEGION_DISTRIBUTED_ID_FILTER(shard_manager->did),
                              shard_id, get_unique_id());
-      // Check to see if we are control replicated or not
-      if (shard_manager->control_replicated)
+      if (!leaf_task)
       {
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
@@ -8019,12 +8522,17 @@ namespace Legion {
         repl_ctx->configure_context(mapper, task_priority);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
-        // Wait until all the other shards are ready too
-        complete_startup_initialization();
-        return repl_ctx;
+        // Make sure that none of the shards start until all the replicate
+        // contexts have been made across all the shards
+        RtEvent ready = complete_startup_initialization();
+        launch_events.insert(ApEvent(ready));
       }
-      else // No control replication so do the normal thing
-        return SingleTask::initialize_inner_execution_context(v, inline_task);
+      else
+      {
+        execution_context = new LeafContext(runtime, this, inline_task);
+        execution_context->add_base_gc_ref(SINGLE_TASK_REF);
+      }
+      return execution_context;
     }
 
     //--------------------------------------------------------------------------
@@ -8039,35 +8547,43 @@ namespace Legion {
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
-      complete_startup_initialization();
+      const RtEvent wait_on = complete_startup_initialization();
+      if (!wait_on.has_triggered())
+        wait_on.wait();
       return repl_ctx;
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::complete_startup_initialization(void)
+    RtEvent ShardTask::complete_startup_initialization(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_barrier.exists());
+      assert(shard_manager->control_replicated == shard_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
-      shard_barrier.wait();
-      // Advance this for when we get to completion
-      Runtime::advance_barrier(shard_barrier);
+      // We only do this for control replicated tasks
+      if (shard_manager->control_replicated)
+      {
+        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+        const RtEvent result = shard_barrier;
+        // Advance this for when we get to completion
+        Runtime::advance_barrier(shard_barrier);
+        return result;
+      }
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::launch_shard(void)
+    void ShardTask::dispatch(void)
     //--------------------------------------------------------------------------
     {
-      // If it is a leaf then we can mark it mapped right now, 
-      // otherwise wait for the call back, note we already know
-      // that it has no virtual instances because it is a 
-      // replicated task
-      if (is_leaf())
-        shard_manager->handle_post_mapped(true/*local*/, RtEvent::NO_RT_EVENT);
-      // Then launch the task for execution
-      launch_task();
+      // Have to launch a task to do this in case they need to rendezvous
+      const RtUserEvent shard_mapped = Runtime::create_rt_user_event();
+      DeferMappingArgs args(this, NULL, shard_mapped,
+          0/*invocation count*/, NULL/*performed*/, NULL/*effects*/);
+      runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
+      // Then defer the launching of the shard when the mapping is done
+      defer_launch_task(shard_mapped);
     }
 
     //--------------------------------------------------------------------------
@@ -8096,96 +8612,42 @@ namespace Legion {
     void ShardTask::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_collective_message(derez);
+      get_replicate_context()->handle_collective_message(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_rendezvous_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_rendezvous_message(derez);
+      get_replicate_context()->handle_rendezvous_message(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_compute_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_compute_equivalence_sets(derez);
+      get_replicate_context()->handle_compute_equivalence_sets(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_output_equivalence_set(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_output_equivalence_set(derez);
+      get_replicate_context()->handle_output_equivalence_set(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_refine_equivalence_sets(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_refine_equivalence_sets(derez);
+      get_replicate_context()->handle_refine_equivalence_sets(derez);
     }
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_intra_space_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_intra_space_dependence(derez);
+      get_replicate_context()->handle_intra_space_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -8193,16 +8655,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_resource_update(derez, applied);
+      get_replicate_context()->handle_resource_update(derez, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -8210,16 +8663,7 @@ namespace Legion {
                                                    std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_created_region_contexts(derez, applied);
+      get_replicate_context()->handle_created_region_contexts(derez, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -8227,16 +8671,7 @@ namespace Legion {
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_trace_update(derez, source);
+      get_replicate_context()->handle_trace_update(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -8244,17 +8679,8 @@ namespace Legion {
                                             ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      return repl_ctx->handle_find_trace_shard_event(template_index, event,
-                                                     remote_shard);
+      return get_replicate_context()->handle_find_trace_shard_event(
+          template_index, event, remote_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -8262,21 +8688,12 @@ namespace Legion {
                                             ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      return repl_ctx->handle_find_trace_shard_frontier(template_index, event,
-                                                        remote_shard);
+      return get_replicate_context()->handle_find_trace_shard_frontier(
+          template_index, event, remote_shard);
     }
 
     //--------------------------------------------------------------------------
-    ReplicateContext* ShardTask::get_shard_execution_context(void) const
+    ReplicateContext* ShardTask::get_replicate_context(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8291,18 +8708,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::initialize_implicit_task(InnerContext *context, TaskID tid,
+    void ShardTask::initialize_implicit_task(TaskID tid,
                                              MapperID mid, Processor proxy)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(parent_ctx == NULL);
-#endif
-      parent_ctx = context;
       task_id = tid;
       map_id = mid;
       orig_proc = proxy;
       current_proc = proxy;
+#ifdef DEBUG_LEGION
+      assert(!deferred_complete_mapping.exists());
+#endif
+      deferred_complete_mapping = Runtime::create_rt_user_event();
+      shard_manager->handle_post_mapped(true/*local*/, 
+          deferred_complete_mapping);
+      complete_mapping(deferred_complete_mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -8382,7 +8802,7 @@ namespace Legion {
       if (intra_space_mapping_dependences.empty())
         return false;
       unsigned count = 0;
-      for (std::set<RtEvent>::const_iterator it =
+      for (std::vector<RtEvent>::const_iterator it =
             intra_space_mapping_dependences.begin(); it !=
             intra_space_mapping_dependences.end(); it++)
       {
@@ -11289,7 +11709,7 @@ namespace Legion {
       rez.serialize(index_owner);
       rez.serialize(remote_unique_id);
       rez.serialize(origin_mapped);
-      parent_ctx->pack_task_context(rez);
+      parent_ctx->pack_inner_context(rez);
       rez.serialize(internal_space);
       if (!elide_future_return)
       {
@@ -11362,8 +11782,7 @@ namespace Legion {
       derez.deserialize(index_owner);
       derez.deserialize(remote_unique_id); 
       derez.deserialize(origin_mapped);
-      RtEvent ctx_ready;
-      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       derez.deserialize(internal_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
@@ -11375,9 +11794,6 @@ namespace Legion {
       num_uncommitted_points = num_points;
       // Remote slice tasks are always resolved
       resolved = true;
-      // We have to do this before unpacking the points
-      if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        ctx_ready.wait();
       if (!elide_future_return)
       {
         if (redop == 0)
@@ -12693,6 +13109,31 @@ namespace Legion {
       else
         return index_owner->rendezvous_collective_versioning_analysis(index,
             handle, tracker, runtime->address_space, mask, parent_req_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::perform_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index,
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        MultiTask::rendezvous_collective_versioning_analysis(index,
+            parent_req_index, to_perform);
+      else
+        index_owner->rendezvous_collective_versioning_analysis(index,
+            parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::convert_replicate_collective_views(const RendezvousKey &key,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        MultiTask::rendezvous_collective_mapping(key, rendezvous);
+      else
+        index_owner->rendezvous_collective_mapping(key, rendezvous);
     }
 
     //--------------------------------------------------------------------------

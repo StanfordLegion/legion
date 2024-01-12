@@ -5285,7 +5285,7 @@ namespace Legion {
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx],
                               provenance, false/*track*/, false/*top level*/,
-                              false/*implicit*/, true/*must epoch*/);
+                              true/*must epoch*/);
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -9332,48 +9332,58 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, DistributedID id, 
-                               CollectiveMapping *mapping,
-                               bool control, bool top, bool iso,
-                               const Domain &dom,
+                               CollectiveMapping *mapping, unsigned local,
+                               bool top, bool iso, bool cr, const Domain &dom,
                                std::vector<DomainPoint> &&shards,
                                std::vector<DomainPoint> &&sorted,
                                std::vector<ShardID> &&lookup,
-                               AddressSpaceID owner, 
-                               SingleTask *original/*= NULL*/, RtBarrier bar)
-      : DistributedCollectable(rt, 
+                               SingleTask *original/*= NULL*/, 
+                               RtBarrier task_bar, RtBarrier call_bar)
+      : CollectiveViewCreator<CollectiveHelperOp>(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(id, SHARD_MANAGER_DC), true, mapping),
         shard_points(shards), sorted_points(sorted), shard_lookup(lookup), 
         shard_domain(dom), total_shards(shard_points.size()),
-        original_task(original), control_replicated(control),
-        top_level_task(top), isomorphic_points(iso), address_spaces(NULL),
-        local_mapping_complete(0), remote_mapping_complete(0),
-        local_execution_complete(0), remote_execution_complete(0),
-        trigger_local_complete(0), trigger_remote_complete(0),
-        trigger_local_commit(0), trigger_remote_commit(0), 
-        remote_constituents(0), semantic_attach_counter(0), 
-        local_future_result(NULL), shard_task_barrier(bar),
-        attach_deduplication(NULL)
+        original_task(original), local_constituents(local),
+        remote_constituents((mapping == NULL) ? 0 : 
+            mapping->count_children(owner_space, local_space)),
+        top_level_task(top), isomorphic_points(iso), control_replicated(cr),
+        address_spaces(NULL), local_mapping_complete(0),
+        remote_mapping_complete(0), local_execution_complete(0),
+        remote_execution_complete(0), trigger_local_complete(0),
+        trigger_remote_complete(0), trigger_local_commit(0),
+        trigger_remote_commit(0), semantic_attach_counter(0),
+        local_future_result(NULL), shard_task_barrier(task_bar),
+        callback_barrier(call_bar), attach_deduplication(NULL),
+        virtual_mapping_rendezvous(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(total_shards > 0);
+      assert((local_constituents > 0) || (remote_constituents > 0));
       assert(shard_points.size() == sorted_points.size());
       assert(shard_points.size() == shard_lookup.size());
 #endif
-      if (control_replicated && (owner_space == runtime->address_space))
+      if (is_owner())
       {
 #ifdef DEBUG_LEGION
         assert(!shard_task_barrier.exists());
+        assert(!callback_barrier.exists());
 #endif
-        shard_task_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // callback barrier can't be made until we know how many
-        // unique address spaces we'll actually have so see
-        // ShardManager::launch
+        if (control_replicated)
+        {
+          shard_task_barrier =
+            RtBarrier(Realm::Barrier::create_barrier(total_shards));
+          callback_barrier =
+            RtBarrier(Realm::Barrier::create_barrier(
+                (collective_mapping == NULL) ? 1 : collective_mapping->size()));
+        }
       }
 #ifdef DEBUG_LEGION
-      else if (control_replicated)
-        assert(shard_task_barrier.exists());
+      else
+      {
+        assert(shard_task_barrier.exists() == control_replicated);
+        assert(callback_barrier.exists() == control_replicated);
+      }
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Shard Manager %lld %d", 
@@ -9409,6 +9419,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext* ShardManager::get_context(void)
+    //--------------------------------------------------------------------------
+    {
+      return local_shards.front()->get_context();
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* ShardManager::find_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return local_shards.front()->find_physical_context(index);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ShardManager::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return local_constituents + remote_constituents;
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::notify_local(void)
     //--------------------------------------------------------------------------
     {
@@ -9418,56 +9449,316 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::set_shard_mapping(const std::vector<Processor> &mapping)
+    void ShardManager::distribute_explicit(SingleTask *task, VariantID variant,
+                                      std::vector<Processor> &target_processors)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapping.size() == total_shards);
+      assert(!local_shards.empty());
 #endif
-      shard_mapping = mapping;
+      // Initialize the address spaces data structure
+      set_shard_mapping(target_processors);
+      if (collective_mapping != NULL)
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            pack_shard_manager(rez);
+            rez.serialize<bool>(true/*explicit*/);
+            rez.serialize(variant);
+            task->get_context()->pack_inner_context(rez);
+            task->pack_single_task(rez, *it);
+          }
+          runtime->send_replicate_distribution(*it, rez);
+        }
+      }
+      for (std::vector<ShardTask*>::const_iterator it =
+            local_shards.begin(); it != local_shards.end(); it++)
+        (*it)->dispatch();
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::set_address_spaces(
-                                      const std::vector<AddressSpaceID> &spaces)
+    void ShardManager::distribute_implicit(TaskID task_id, MapperID mapper_id,
+         Processor::Kind kind, unsigned shards_per_space, InnerContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (collective_mapping == NULL)
+        return;
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space, children);
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          pack_shard_manager(rez);
+          rez.serialize<bool>(false/*explicit*/);
+          rez.serialize(task_id);
+          rez.serialize(mapper_id);
+          rez.serialize(kind);
+          rez.serialize(shards_per_space);
+          rez.serialize(ctx->did);
+          rez.serialize(ctx->get_executing_processor());
+        }
+        runtime->send_replicate_distribution(*it, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::pack_shard_manager(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did);
+      rez.serialize(shard_domain);
+      rez.serialize<size_t>(total_shards);
+      rez.serialize<bool>(isomorphic_points);
+      if (isomorphic_points)
+      {
+        for (unsigned idx = 0; idx < total_shards; idx++)
+          rez.serialize(shard_points[idx]);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          rez.serialize(sorted_points[idx]);
+          rez.serialize(shard_lookup[idx]);
+        }
+      }
+      rez.serialize<bool>(top_level_task);
+      rez.serialize<bool>(control_replicated);
+      rez.serialize(shard_task_barrier);
+      rez.serialize(callback_barrier);
+      collective_mapping->pack(rez);
+#ifdef DEBUG_LEGION
+      assert(shard_mapping.size() == total_shards);
+#endif
+      for (unsigned idx = 0; idx < total_shards; idx++)
+        rez.serialize(shard_mapping[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::set_shard_mapping(std::vector<Processor> &mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(address_spaces == NULL);
+      assert(mapping.size() == total_shards);
 #endif
-      address_spaces = new ShardMapping(spaces);
+      shard_mapping.swap(mapping);
+      address_spaces = new ShardMapping();
       address_spaces->add_reference();
+      address_spaces->resize(shard_mapping.size());
+      for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
+        (*address_spaces)[idx] = shard_mapping[idx].address_space();
+      // Also initialize the collective parameters
       // We just need the collective radix, but use the existing routine
       int collective_radix = runtime->legion_collective_radix;
       int collective_log_radix, collective_stages;
       int participating_spaces, collective_last_radix;
-      configure_collective_settings(spaces.size(), runtime->address_space,
+      configure_collective_settings(shard_mapping.size(),runtime->address_space,
           collective_radix, collective_log_radix, collective_stages,
           participating_spaces, collective_last_radix);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::create_callback_barrier(size_t arrival_count)
+    ShardTask* ShardManager::create_shard(ShardID id, Processor target, 
+                    VariantID variant, InnerContext *parent, SingleTask *source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!callback_barrier.exists());
-      assert(owner_space == runtime->address_space);
-      assert(arrival_count == runtime->total_address_spaces);
-#endif
-      callback_barrier = 
-        RtBarrier(Realm::Barrier::create_barrier(arrival_count));
-    }
-
-    //--------------------------------------------------------------------------
-    ShardTask* ShardManager::create_shard(ShardID id, Processor target)
-    //--------------------------------------------------------------------------
-    {
-      ShardTask *shard = new ShardTask(runtime, this, id, target);
+      ShardTask *shard = new Memoizable<ShardTask>(runtime, source, parent,
+                                                   this, id, target, variant);
       local_shards.push_back(shard);
       return shard;
     }
 
+    //--------------------------------------------------------------------------
+    ShardTask* ShardManager::create_shard(ShardID id, Processor target, 
+               VariantID variant, InnerContext *parent_ctx, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardTask *shard = new Memoizable<ShardTask>(runtime, parent_ctx, derez,
+                                                   this, id, target, variant);
+      local_shards.push_back(shard);
+      return shard;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::finalize_collective_versioning_analysis(unsigned index,
+        unsigned parent_req_index, 
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // All shards should be using the same region
+      assert(to_perform.size() <= 1);
+#endif
+      if (!is_owner())
+      {
+        const AddressSpaceID target =
+          collective_mapping->get_parent(owner_space, local_space);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(index);
+          rez.serialize(parent_req_index);
+          pack_collective_versioning(rez, to_perform);
+        }
+        runtime->send_replicate_collective_versioning(target, rez);
+      }
+      else
+        original_task->perform_replicate_collective_versioning(index,
+            parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::construct_collective_mapping(const RendezvousKey &key,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // All shards should be using the same region
+      assert(rendezvous.size() == 1);
+#endif
+      if (!is_owner())
+      {
+        const AddressSpaceID target =
+          collective_mapping->get_parent(owner_space, local_space);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(key.region_index);
+          rez.serialize(key.analysis);
+          pack_collective_rendezvous(rez, rendezvous);
+        }
+        runtime->send_replicate_collective_mapping(target, rez);
+      }
+      else
+        original_task->convert_replicate_collective_views(key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::finalize_replicate_collective_versioning(unsigned index,
+        unsigned parent_req_index, 
+        LegionMap<LogicalRegion,RegionVersioning> &to_perform)
+    //--------------------------------------------------------------------------
+    {
+      // Dispatch back to the base class
+      CollectiveViewCreator<CollectiveHelperOp>::
+        finalize_collective_versioning_analysis(
+            index, parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::finalize_replicate_collective_views(
+                       const RendezvousKey &key,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      // Dispatch back to the base class
+      CollectiveViewCreator<CollectiveHelperOp>::construct_collective_mapping(
+          key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::rendezvous_check_virtual_mappings(ShardID shard,
+        MapperManager *mapper, const std::vector<bool> &virtual_mappings)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!virtual_mappings.empty());
+#endif
+      AutoLock m_lock(manager_lock);
+      if (virtual_mapping_rendezvous == NULL)
+      {
+        virtual_mapping_rendezvous = new VirtualMappingRendezvous();
+        virtual_mapping_rendezvous->virtual_mappings = virtual_mappings;
+        virtual_mapping_rendezvous->mapper = mapper;
+        virtual_mapping_rendezvous->shard = shard;
+        virtual_mapping_rendezvous->remaining_arrivals = 
+          local_constituents + (is_owner() ? 0 : 1);
+        // Send it off to any children we might have
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            pack_global_ref(children.size());
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+            {
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(shard);
+                rez.serialize<size_t>(virtual_mappings.size());
+                for (unsigned idx = 0; idx < virtual_mappings.size(); idx++)
+                  rez.serialize<bool>(virtual_mappings[idx]);
+              }
+              runtime->send_replicate_rendezvous_virtual_mappings(*it, rez);
+            }
+          }
+        }
+      }
+      else
+      {
+        const std::vector<bool> &previous_mappings = 
+          virtual_mapping_rendezvous->virtual_mappings;
+#ifdef DEBUG_LEGION
+        assert(previous_mappings.size() == virtual_mappings.size());
+#endif
+        // Check to see if they are the same
+        int bad_index = -1;
+        for (unsigned idx = 0; idx < virtual_mappings.size(); idx++)
+        {
+          if (previous_mappings[idx] == virtual_mappings[idx])
+            continue;
+          bad_index = idx;
+          break;
+        }
+        if (bad_index >= 0)
+        {
+          if (mapper == NULL)
+            mapper = virtual_mapping_rendezvous->mapper;
+#ifdef DEBUG_LEGION
+          assert(mapper != NULL);
+#endif
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s provided different virtual mapping outputs for "
+              "region requirement %d of shards %d and %d of replicated "
+              "task %s. All shards of a replicated task must either provide "
+              "concrete instances for a particular region requirement or all "
+              "shards must decide to virtual map the region requirement. "
+              "Mixed virtual and concrete instances are not allowed.",
+              mapper->get_mapper_name(), bad_index,
+              (shard < virtual_mapping_rendezvous->shard) ? shard :
+                virtual_mapping_rendezvous->shard,
+              (shard < virtual_mapping_rendezvous->shard) ?
+                virtual_mapping_rendezvous->shard : shard,
+              local_shards.back()->get_task_name())
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(virtual_mapping_rendezvous->remaining_arrivals > 0);
+#endif
+      if (--virtual_mapping_rendezvous->remaining_arrivals == 0)
+      {
+        delete virtual_mapping_rendezvous;
+        virtual_mapping_rendezvous = NULL;
+      }
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     void ShardManager::launch(const std::vector<bool> &virtual_mapped)
     //--------------------------------------------------------------------------
@@ -9634,15 +9925,7 @@ namespace Legion {
           launch_shard(shard);
       }
     }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::launch_shard(ShardTask *task, RtEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-      ShardManagerLaunchArgs args(task);
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                       precondition);
-    }
+#endif
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx,
@@ -10240,11 +10523,10 @@ namespace Legion {
     bool ShardManager::is_total_sharding(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      if (unique_shard_spaces.empty())
-        for (unsigned shard = 0; shard < total_shards; shard++)
-              unique_shard_spaces.insert((*address_spaces)[shard]);
-      return (unique_shard_spaces.size() == runtime->total_address_spaces);
+      if (collective_mapping == NULL)
+        return (runtime->total_address_spaces == 1);
+      else
+        return (runtime->total_address_spaces == collective_mapping->size());
     }
 
     //--------------------------------------------------------------------------
@@ -10384,7 +10666,7 @@ namespace Legion {
         {
           local_mapping_complete++;
 #ifdef DEBUG_LEGION
-          assert(local_mapping_complete <= local_shards.size());
+          assert(local_mapping_complete <= local_constituents);
 #endif
         }
         else
@@ -10394,7 +10676,7 @@ namespace Legion {
           assert(remote_mapping_complete <= remote_constituents);
 #endif
         }
-        notify = (local_mapping_complete == local_shards.size()) &&
+        notify = (local_mapping_complete == local_constituents) &&
                  (remote_mapping_complete == remote_constituents);
       }
       if (notify)
@@ -10428,7 +10710,7 @@ namespace Legion {
         {
           local_execution_complete++;
 #ifdef DEBUG_LEGION
-          assert(local_execution_complete <= local_shards.size());
+          assert(local_execution_complete <= local_constituents);
 #endif
         }
         else
@@ -10438,7 +10720,7 @@ namespace Legion {
           assert(remote_execution_complete <= remote_constituents);
 #endif
         }
-        notify = (local_execution_complete == local_shards.size()) &&
+        notify = (local_execution_complete == local_constituents) &&
                  (remote_execution_complete == remote_constituents);
         // See if we need to save the future or compare it
         if (inst != NULL)
@@ -10509,7 +10791,7 @@ namespace Legion {
         {
           trigger_local_complete++;
 #ifdef DEBUG_LEGION
-          assert(trigger_local_complete <= local_shards.size());
+          assert(trigger_local_complete <= local_constituents);
 #endif
         }
         else
@@ -10521,7 +10803,7 @@ namespace Legion {
         }
         if (effects.exists())
           shard_effects.insert(effects);
-        notify = (trigger_local_complete == local_shards.size()) &&
+        notify = (trigger_local_complete == local_constituents) &&
                  (trigger_remote_complete == remote_constituents);
       }
       if (notify)
@@ -10576,7 +10858,7 @@ namespace Legion {
         {
           trigger_local_commit++;
 #ifdef DEBUG_LEGION
-          assert(trigger_local_commit <= local_shards.size());
+          assert(trigger_local_commit <= local_constituents);
 #endif
         }
         else
@@ -10586,7 +10868,7 @@ namespace Legion {
           assert(trigger_remote_commit <= remote_constituents);
 #endif
         }
-        notify = (trigger_local_commit == local_shards.size()) &&
+        notify = (trigger_local_commit == local_constituents) &&
                  (trigger_remote_commit == remote_constituents);
       }
       if (notify)
@@ -11009,54 +11291,26 @@ namespace Legion {
                    BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      std::vector<AddressSpaceID> shard_spaces;
-      {
-        AutoLock m_lock(manager_lock);
-        if (unique_shard_spaces.empty())
-          for (unsigned shard = 0; shard < total_shards; shard++)
-                unique_shard_spaces.insert((*address_spaces)[shard]);
-        shard_spaces.insert(shard_spaces.end(), 
-            unique_shard_spaces.begin(), unique_shard_spaces.end());
-      }
       // First pack it out and send it out to any remote nodes 
-      if (shard_spaces.size() > 1)
+      if (collective_mapping != NULL)
       {
-        // Find the start index
-        int start_idx = -1;
-        for (unsigned idx = 0; idx < shard_spaces.size(); idx++)
-        {
-          if (shard_spaces[idx] != runtime->address_space)
-            continue;
-          start_idx = idx;
-          break;
-        }
 #ifdef DEBUG_LEGION
-        assert(start_idx >= 0);
+        assert(collective_mapping->contains(local_space));
 #endif
-        std::vector<unsigned> locals;
         std::vector<AddressSpaceID> targets;
-        for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
-        {
-          unsigned next = idx + 1;
-          if (next >= shard_spaces.size())
-            break;
-          locals.push_back(next);
-          // Convert from relative to actual address space
-          const unsigned next_index = (start_idx + next) % shard_spaces.size();
-          targets.push_back(shard_spaces[next_index]);
-        }
-        for (unsigned idx = 0; idx < locals.size(); idx++)
+        collective_mapping->get_children(local_space, local_space, targets);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
         {
           RtEvent next_done = Runtime::create_rt_user_event();
           Serializer rez2;
           rez2.serialize(did);
-          rez2.serialize<unsigned>(start_idx);
-          rez2.serialize<unsigned>(locals[idx]);
+          rez2.serialize(local_space);
           rez2.serialize(kind);
           rez2.serialize<size_t>(rez.get_used_bytes());
           rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
           rez2.serialize(next_done);
-          runtime->send_control_replicate_broadcast_update(targets[idx], rez2);
+          runtime->send_control_replicate_broadcast_update(*it, rez2);
           applied_events.insert(next_done);
         }
       }
@@ -11090,9 +11344,11 @@ namespace Legion {
     void ShardManager::handle_broadcast(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      unsigned start_idx, local_idx;
-      derez.deserialize(start_idx);
-      derez.deserialize(local_idx);
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      AddressSpaceID origin;
+      derez.deserialize(origin);
       BroadcastMessageKind kind;
       derez.deserialize(kind);
       size_t message_size;
@@ -11101,45 +11357,25 @@ namespace Legion {
       derez.advance_pointer(message_size);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      // Send out any remote updates first
-      std::vector<AddressSpaceID> shard_spaces;
-      {
-        AutoLock m_lock(manager_lock);
-        if (unique_shard_spaces.empty())
-          for (unsigned shard = 0; shard < total_shards; shard++)
-                unique_shard_spaces.insert((*address_spaces)[shard]);
-        shard_spaces.insert(shard_spaces.end(), 
-            unique_shard_spaces.begin(), unique_shard_spaces.end());
-      }
+
       // First pack it out and send it out to any remote nodes 
-      std::vector<unsigned> locals;
       std::vector<AddressSpaceID> targets;
-      const unsigned start = local_idx * runtime->legion_collective_radix + 1;
-      for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
-      {
-        unsigned next = start + idx;
-        if (next >= shard_spaces.size())
-          break;
-        locals.push_back(next);
-        // Convert from relative to actual address space
-        const unsigned next_index = (start_idx + next) % shard_spaces.size();
-        targets.push_back(shard_spaces[next_index]);
-      }
+      collective_mapping->get_children(origin, local_space, targets);
       std::set<RtEvent> remote_handled;
       if (!targets.empty())
       {
-        for (unsigned idx = 0; idx < targets.size(); idx++)
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
         {
           RtEvent next_done = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(did);
-          rez.serialize<unsigned>(start_idx);
-          rez.serialize<unsigned>(locals[idx]);
+          rez.serialize(origin);
           rez.serialize(kind);
           rez.serialize<size_t>(message_size);
           rez.serialize(message, message_size);
           rez.serialize(next_done);
-          runtime->send_control_replicate_broadcast_update(targets[idx], rez);
+          runtime->send_control_replicate_broadcast_update(*it, rez);
           remote_handled.insert(next_done);
         } 
       }
@@ -11542,7 +11778,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          InnerContext *context = (*it)->get_shard_execution_context();
+          InnerContext *context = (*it)->get_replicate_context();
           RegionTreeID tid;
           derez.deserialize(tid);
           size_t num_insts;
@@ -11592,16 +11828,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_launch(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const ShardManagerLaunchArgs *largs = (const ShardManagerLaunchArgs*)args;
-      largs->shard->launch_shard();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_launch(Deserializer &derez, 
-                                        Runtime *runtime, AddressSpaceID source)
+    /*static*/ void ShardManager::handle_distribution(Deserializer &derez, 
+                                                      Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -11634,24 +11862,150 @@ namespace Legion {
           shard_points[shard_lookup[idx]] = sorted_points[idx];
         }
       }
-      bool control_repl;
-      derez.deserialize(control_repl);
-      bool top_level_task;
+      bool top_level_task, control_replicated;
       derez.deserialize(top_level_task);
-      RtBarrier shard_task_barrier;
+      derez.deserialize(control_replicated);
+      RtBarrier shard_task_barrier, callback_barrier;
       derez.deserialize(shard_task_barrier);
+      derez.deserialize(callback_barrier);
       size_t num_spaces;
       derez.deserialize(num_spaces);
 #ifdef DEBUG_LEGION
       assert(num_spaces > 0);
 #endif
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
-      ShardManager *manager = 
-       new ShardManager(runtime, repl_id, mapping, control_repl, top_level_task,
-                isomorphic_points, shard_domain, std::move(shard_points),
-                std::move(sorted_points), std::move(shard_lookup), 
-                source, NULL/*original*/, shard_task_barrier);
-      manager->unpack_shards_and_launch(derez);
+      unsigned local_shards = 0;
+      std::vector<Processor> target_processors(total_shards);
+      for (unsigned idx = 0; idx < total_shards; idx++)
+      {
+        derez.deserialize(target_processors[idx]);
+        if (target_processors[idx].address_space() == runtime->address_space)
+          local_shards++;
+      }
+      ShardManager *manager =
+       new ShardManager(runtime, repl_id, mapping, local_shards, top_level_task,
+                isomorphic_points, control_replicated, shard_domain,
+                std::move(shard_points), std::move(sorted_points),
+                std::move(shard_lookup), NULL/*original*/,
+                shard_task_barrier, callback_barrier);
+      bool explicit_distribution;
+      derez.deserialize<bool>(explicit_distribution);
+      if (explicit_distribution)
+      {
+        VariantID variant;
+        derez.deserialize(variant);
+        InnerContext *parent_ctx = 
+          InnerContext::unpack_inner_context(derez, runtime);
+        // Create the local shards
+        ShardTask *first_shard = NULL;
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          if (target_processors[idx].address_space() != runtime->address_space)
+            continue;
+          if (first_shard == NULL)
+            first_shard = manager->create_shard(idx, target_processors[idx], 
+                variant, parent_ctx, derez);
+          else
+            manager->create_shard(idx, target_processors[idx], variant,
+                parent_ctx, first_shard);
+        }
+        manager->distribute_explicit(first_shard, variant, target_processors);
+      }
+      else
+      {
+        TaskID task_id;
+        derez.deserialize(task_id);
+        MapperID mapper_id;
+        derez.deserialize(mapper_id);
+        Processor::Kind kind;
+        derez.deserialize(kind);
+        unsigned shards_per_space;
+        derez.deserialize(shards_per_space);
+        DistributedID ctx_did;
+        derez.deserialize(ctx_did);
+        Processor exec_proc;
+        derez.deserialize(exec_proc);
+        // This is a top-level implicit context so we know we can make
+        // a new TopLevelContext here directly
+        TopLevelContext *top_context =
+          new TopLevelContext(runtime, exec_proc, ctx_did, mapping);
+        top_context->register_with_runtime();
+        manager->set_shard_mapping(target_processors);
+        // Continue the distribution on to the other nodes
+        manager->distribute_implicit(task_id, mapper_id, kind,
+                                     shards_per_space, top_context);
+        ImplicitShardManager *implicit_manager = 
+          runtime->find_implicit_shard_manager(task_id, mapper_id, 
+                                          kind, shards_per_space);
+        RtUserEvent to_trigger = 
+          implicit_manager->set_shard_manager(manager, top_context);
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        if (implicit_manager->remove_reference())
+          delete implicit_manager;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_collective_versioning(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      unsigned index, parent_req_index;
+      derez.deserialize(index);
+      derez.deserialize(parent_req_index);
+      LegionMap<LogicalRegion,RegionVersioning> to_perform;
+      unpack_collective_versioning(derez, to_perform);
+
+      ShardManager *manager = runtime->find_shard_manager(did);
+      manager->rendezvous_collective_versioning_analysis(index, 
+          parent_req_index, to_perform);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_collective_mapping(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RendezvousKey key;
+      derez.deserialize(key.region_index);
+      derez.deserialize(key.analysis);
+      std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
+      unpack_collective_rendezvous(derez, rendezvous);
+
+      ShardManager *manager = runtime->find_shard_manager(did);
+      manager->rendezvous_collective_mapping(key, rendezvous);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_virtual_rendezvous(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      ShardID shard;
+      derez.deserialize(shard);
+      size_t num_mappings;
+      derez.deserialize(num_mappings);
+      std::vector<bool> virtual_mappings(num_mappings);
+      for (unsigned idx = 0; idx < num_mappings; idx++)
+      {
+        bool virtual_mapping;
+        derez.deserialize(virtual_mapping);
+        virtual_mappings[idx] = virtual_mapping;
+      }
+
+      ShardManager *manager = runtime->find_shard_manager(did);
+      manager->rendezvous_check_virtual_mappings(shard, NULL, virtual_mappings);
+      manager->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -11857,6 +12211,9 @@ namespace Legion {
                      std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(control_replicated);
+#endif
       // See if we're the first one to handle this DSO
       const Runtime::RegistrationKey key(dedup_tag, 
                                          dso->dso_name, dso->symbol_name);
@@ -11868,33 +12225,41 @@ namespace Legion {
         if (finder != unique_registration_callbacks.end())
           return;
         unique_registration_callbacks.insert(key);
-        if (unique_shard_spaces.empty())
-          for (unsigned shard = 0; shard < total_shards; shard++)
-                unique_shard_spaces.insert((*address_spaces)[shard]);
       }
       // We're the first one so handle it
       if (!is_total_sharding())
       {
         std::set<RtEvent> local_preconditions;
-        AddressSpaceID space = 0;
-        for (std::set<AddressSpaceID>::const_iterator it = 
-              unique_shard_spaces.begin(); it != 
-              unique_shard_spaces.end(); it++, space++)
+        if (collective_mapping != NULL)
         {
-          if ((*it) == runtime->address_space)
-            break;
-        }
 #ifdef DEBUG_LEGION
-        assert(space < unique_shard_spaces.size());
+          assert(collective_mapping->contains(local_space));
 #endif
-        for ( ; space < runtime->total_address_spaces; 
-              space += unique_shard_spaces.size())
+          const unsigned index = collective_mapping->find_index(local_space);
+          for (AddressSpaceID space = 0; 
+                space < runtime->total_address_spaces; space++)
+          {
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(space))
+              continue;
+            if ((space % collective_mapping->size()) == index)
+              runtime->send_registration_callback(space, dso, global_done,
+                  local_preconditions, buffer, buffer_size, withargs,
+                  true/*deduplicate*/, dedup_tag);
+          }
+        }
+        else
         {
-          if (unique_shard_spaces.find(space) != unique_shard_spaces.end())
-            continue;
-          runtime->send_registration_callback(space, dso, global_done,
-              local_preconditions, buffer, buffer_size, withargs, 
-              true/*deduplicate*/, dedup_tag);
+          // Just send it to everyone
+          for (AddressSpaceID space = 0; 
+                space < runtime->total_address_spaces; space++)
+          {
+            if (space == local_space)
+              continue;
+            runtime->send_registration_callback(space, dso, global_done,
+                  local_preconditions, buffer, buffer_size, withargs,
+                  true/*deduplicate*/, dedup_tag);
+          }
         }
         if (!local_preconditions.empty())
         {
@@ -16042,7 +16407,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_collective_wait();
-      return context->compute_index_attach_launch_spaces(sizes, provenance);
+#ifdef DEBUG_LEGIOn
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context);
+#endif
+      return repl_ctx->compute_index_attach_launch_spaces(sizes, provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -16543,175 +16914,14 @@ namespace Legion {
     void CollectiveViewRendezvous::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(rendezvous.size());
-      for (std::map<LogicalRegion,CollectiveRendezvous>::const_iterator
-            rit = rendezvous.begin(); rit != rendezvous.end(); rit++)
-      {
-        rez.serialize(rit->first);
-        rez.serialize(rit->second.results.size());
-        for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::
-              const_iterator it = rit->second.results.begin(); it !=
-              rit->second.results.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-        rez.serialize<size_t>(rit->second.groups.size());
-        for (LegionMap<DistributedID,FieldMask>::const_iterator it =
-              rit->second.groups.begin(); it != rit->second.groups.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-        rez.serialize<size_t>(rit->second.counts.size());
-        for (std::map<DistributedID,size_t>::const_iterator it =
-              rit->second.counts.begin(); it != rit->second.counts.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
+      CollectiveViewCreatorBase::pack_collective_rendezvous(rez, rendezvous);  
     }
 
     //--------------------------------------------------------------------------
     void CollectiveViewRendezvous::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
-      {
-        LogicalRegion region;
-        derez.deserialize(region);
-        std::map<LogicalRegion,CollectiveRendezvous>::iterator region_finder =
-          rendezvous.find(region);
-        if (region_finder != rendezvous.end())
-        {
-          // need to unpack out of place to do the merge
-          size_t num_results;
-          derez.deserialize(num_results);
-          const unsigned offset = region_finder->second.results.size(); 
-          region_finder->second.results.resize(offset + num_results);
-          for (unsigned idx2 = 0; idx2 < num_results; idx2++)
-          {
-            derez.deserialize(
-                region_finder->second.results[offset + idx2].first);
-            derez.deserialize(
-                region_finder->second.results[offset + idx2].second);
-          }
-          // unpack these and then do the merge
-          LegionMap<DistributedID,FieldMask> groups;
-          std::map<DistributedID,size_t> counts;
-          size_t num_groups;
-          derez.deserialize(num_groups);
-          for (unsigned idx2 = 0; idx2 < num_groups; idx2++)
-          {
-            DistributedID did;
-            derez.deserialize(did);
-            derez.deserialize(groups[did]);
-          }
-          size_t num_counts;
-          derez.deserialize(num_counts);
-          for (unsigned idx2 = 0; idx2 < num_counts; idx2++)
-          {
-            DistributedID did;
-            derez.deserialize(did);
-            derez.deserialize(counts[did]);
-          }
-          // merge the groups and counts into the existing case
-          for (LegionMap<DistributedID,FieldMask>::const_iterator it =
-                groups.begin(); it != groups.end(); it++)
-          {
-            LegionMap<DistributedID,FieldMask>::iterator group_finder =
-              region_finder->second.groups.find(it->first);
-            std::map<DistributedID,size_t>::iterator count_finder =
-              counts.find(it->first);
-            if (group_finder != region_finder->second.groups.end())
-            {
-              if (group_finder->second == it->second)
-              {
-                std::map<DistributedID,size_t>::iterator local_finder =
-                    region_finder->second.counts.find(it->first);
-                if (count_finder != counts.end())
-                {
-                  if (local_finder == region_finder->second.counts.end())
-                    region_finder->second.counts[it->first] = 
-                      count_finder->second + 1;
-                  else
-                    local_finder->second += count_finder->second;
-                }
-                else
-                {
-                  if (local_finder == region_finder->second.counts.end())
-                    region_finder->second.counts[it->first] = 2;
-                  else
-                    local_finder->second++;
-                }
-              }
-              else
-              {
-                // If you ever hit this then heaven help you
-                // The user has done something really out there and
-                // is using the same instance with different sets of
-                // fields for multiple point ops/tasks in the same 
-                // index space operation. All the tricks we do to 
-                // compute the collective arrivals are not going to
-                // work in this case so the arrival counts will need 
-                // to look something like:
-                //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
-                REPORT_LEGION_FATAL(
-                    LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
-                    "Operation %s (UID %lld) in context %s (UID %lld) "
-                    "requested a very strange pattern for collective "
-                    "instance rendezvous with different points asking to "
-                    "rendezvous with different field sets on the same "
-                    "physical instance. This isn't currently supported. "
-                    "Please report your use case to the Legion "
-                    "developer's mailing list.", op->get_logging_name(),
-                    op->get_unique_op_id(), context->get_task_name(),
-                    context->get_unique_id())
-              }
-            }
-            else
-            {
-              // New instance, just insert it
-              region_finder->second.groups.insert(*it);
-              // See if we have any counts to move over
-              if (count_finder != counts.end())
-                region_finder->second.counts.insert(*count_finder);
-            }
-          }
-        }
-        else
-        {
-          // unpack in place since we know it doesn't exist yet
-          CollectiveRendezvous &new_rendezvous = rendezvous[region];
-          size_t num_results;
-          derez.deserialize(num_results);
-          new_rendezvous.results.resize(num_results);
-          for (unsigned idx2 = 0; idx2 < num_results; idx2++)
-          {
-            derez.deserialize(new_rendezvous.results[idx2].first);
-            derez.deserialize(new_rendezvous.results[idx2].second);
-          }
-          size_t num_groups;
-          derez.deserialize(num_groups);
-          for (unsigned idx2 = 0; idx2 < num_groups; idx2++)
-          {
-            DistributedID did;
-            derez.deserialize(did);
-            derez.deserialize(new_rendezvous.groups[did]);
-          }
-          size_t num_counts;
-          derez.deserialize(num_counts);
-          for (unsigned idx2 = 0; idx2 < num_counts; idx2++)
-          {
-            DistributedID did;
-            derez.deserialize(did);
-            derez.deserialize(new_rendezvous.counts[did]);
-          }
-        }
-      }
+      CollectiveViewCreatorBase::unpack_collective_rendezvous(derez,rendezvous);
     }
 
     //--------------------------------------------------------------------------
@@ -16759,25 +16969,8 @@ namespace Legion {
     void CollectiveVersioningRendezvous::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(pending_versions.size());
-      for (LegionMap<LogicalRegion,RegionVersioning>::const_iterator pit =
-            pending_versions.begin(); pit != pending_versions.end(); pit++)
-      {
-#ifdef DEBUG_LEGION
-        assert(pit->second.ready_event.exists());
-#endif
-        rez.serialize(pit->first);
-        rez.serialize(pit->second.ready_event);
-        rez.serialize<size_t>(pit->second.trackers.size());
-        for (LegionMap<std::pair<AddressSpaceID,EqSetTracker*>,FieldMask>::
-              const_iterator it = pit->second.trackers.begin(); it !=
-              pit->second.trackers.end(); it++)
-        {
-          rez.serialize(it->first.first);
-          rez.serialize(it->first.second);
-          rez.serialize(it->second);
-        }
-      }
+      CollectiveVersioningBase::pack_collective_versioning(rez, 
+                                                           pending_versions); 
       if (!pending_versions.empty())
         rez.serialize(parent_req_index);
     }
@@ -16786,39 +16979,8 @@ namespace Legion {
     void CollectiveVersioningRendezvous::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
-      {
-        LogicalRegion region;
-        derez.deserialize(region);
-        RtUserEvent ready_event;
-        derez.deserialize(ready_event);
-        LegionMap<LogicalRegion,RegionVersioning>::iterator finder =
-          pending_versions.find(region);
-        if (finder == pending_versions.end())
-        {
-          finder = pending_versions.emplace(
-              std::make_pair(region,RegionVersioning())).first;
-          finder->second.ready_event = ready_event;
-        }
-        else
-          Runtime::trigger_event(ready_event, finder->second.ready_event);
-        size_t num_trackers;
-        derez.deserialize(num_trackers);
-        for (unsigned idx2 = 0; idx2 < num_trackers; idx2++)
-        {
-          std::pair<AddressSpaceID,EqSetTracker*> key;
-          derez.deserialize(key.first);
-          derez.deserialize(key.second);
-#ifdef DEBUG_LEGION
-          assert(finder->second.trackers.find(key) ==
-                  finder->second.trackers.end());
-#endif
-          derez.deserialize(finder->second.trackers[key]);
-        }
-      }
-      if (num_regions > 0)
+      if (CollectiveVersioningBase::unpack_collective_versioning(derez,
+                                                      pending_versions))
         derez.deserialize(parent_req_index);
     }
 
