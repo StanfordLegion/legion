@@ -21,6 +21,7 @@
 #include "legion/legion_types.h"
 #include "legion/legion_utilities.h"
 #include "legion/suffix_tree.h"
+#include "legion/trie.h"
 
 template<>
 struct std::hash<Legion::Internal::Murmur3Hasher::Hash> {
@@ -41,6 +42,10 @@ struct std::equal_to<Legion::Internal::Murmur3Hasher::Hash> {
 namespace Legion {
   namespace Internal {
 
+    // Forward declarations.
+    class BatchedTraceIdentifier;
+    class TraceOccurrenceWatcher;
+
     // TODO (rohany): Can add hashing methods here for hashing? I don't think that
     //  I want to do this on the Operations themselves because i'm not going to has
     //  everything about each operation, but just fields that are necessary for tracing.
@@ -59,19 +64,92 @@ namespace Legion {
       Murmur3Hasher hasher;
     };
 
+    class BatchedTraceIdentifier {
+    public:
+      BatchedTraceIdentifier(
+        Runtime* runtime,
+        TraceOccurrenceWatcher* watcher,
+        size_t batchsize,  // Number of operations batched at once.
+        size_t max_add // Maximum number of traces to add to the watcher at once.
+      );
+      void process(Murmur3Hasher::Hash hash, size_t opidx);
+    private:
+      // We need a runtime here in order to launch meta tasks.
+      Runtime* runtime;
+      std::vector<Murmur3Hasher::Hash> hashes;
+      TraceOccurrenceWatcher* watcher;
+      size_t batchsize;
+      size_t max_add;
+    };
+
+    class TraceOccurrenceWatcher {
+    public:
+      TraceOccurrenceWatcher(size_t visit_threshold);
+      void process(Murmur3Hasher::Hash hash, size_t opidx);
+
+      template<typename T>
+      void insert(T start, T end, size_t opidx);
+      template<typename T>
+      bool prefix(T start, T end);
+    private:
+      struct TraceMeta {
+        // Needs to be default constructable.
+        TraceMeta() : opidx(0) { }
+        TraceMeta(size_t opidx_) : opidx(opidx_) { }
+        // The opidx that this trace was inserted at.
+        size_t opidx;
+        // The occurrence watcher will only maintain the number
+        // of visits. I don't think that we need to do decaying visits
+        // here, though we might want to lower the amount of traces that
+        // get committed to the replayer.
+        size_t visits = 0;
+        // completed marks whether this trace has moved
+        // from the "watched" state to the "committed" state.
+        // Once a trace has been completed, it will not be
+        // returned from complete() anymore.
+        bool completed = false;
+      };
+      Trie<Murmur3Hasher::Hash, TraceMeta> trie;
+      size_t visit_threshold;
+
+      // TriePointer maintains an active trace being
+      // traversed in the watcher's trie.
+      class TriePointer {
+      public:
+        TriePointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
+          : node(node_), opidx(opidx_), depth(0) { }
+        bool advance(Murmur3Hasher::Hash token);
+        bool complete();
+      public:
+        TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
+        size_t opidx;
+        size_t depth;
+      };
+      // All currently active pointers that need advancing.
+      std::vector<TriePointer> active_pointers;
+    };
+
     template <typename T>
     class AutomaticTracingContext : public T {
     public:
       // TODO (rohany): I'm not sure of the C++-ism to declare this constructor
       //  here and then implement it somewhere else.
       template <typename ... Args>
-      AutomaticTracingContext(Args&& ... args) : T(std::forward<Args>(args) ... ) {}
+      AutomaticTracingContext(Args&& ... args)
+        // TODO (rohany): Make all of these constants command line parameters.
+        : T(std::forward<Args>(args) ... ),
+          opidx(0),
+          identifier(this->runtime, &this->watcher, 100, 10),
+          watcher(15)
+          {}
     public:
       bool add_to_dependence_queue(Operation *op,
                                    bool unordered = false,
                                    bool outermost = true) override;
     private:
-      std::vector<Murmur3Hasher::Hash> hashes;
+      size_t opidx;
+      BatchedTraceIdentifier identifier;
+      TraceOccurrenceWatcher watcher;
     };
 
     // Offline string analysis operations.
@@ -99,36 +177,28 @@ namespace Legion {
     bool AutomaticTracingContext<T>::add_to_dependence_queue(Operation* op, bool unordered, bool outermost) {
       // TODO (rohany): unordered operations should always be forwarded to the underlying context and not buffered up.
       if (is_operation_traceable(op)) {
-        auto hash = TraceHashHelper{}.hash(op);
+        Murmur3Hasher::Hash hash = TraceHashHelper{}.hash(op);
         // TODO (rohany): Have to have a hash value that can be used as the sentinel $
         //  token for the suffix tree processing algorithms.
         assert(!(hash.x == 0 && hash.y == 0));
+        this->identifier.process(hash, this->opidx);
+        this->watcher.process(hash, this->opidx);
 
-        this->hashes.push_back(hash);
-
-        // TODO (rohany): Turn this number into a command line parameter.
-        if (this->hashes.size() == 1000) {
-          // TODO (rohany): Do this allocation so that it doesn't have to resize again.
-          // TODO (rohany): Figure out a policy around freeing this allocation.
-          auto string = new std::vector<Murmur3Hasher::Hash>(this->hashes.begin(), this->hashes.end());
-          string->push_back(Murmur3Hasher::Hash{0, 0});
-          auto result = new std::vector<NonOverlappingRepeatsResult>();
-          // TODO (rohany): What should the priority be for this?
-          // TODO (rohany): Make sure that we don't have too many of these
-          //  meta tasks pending at once (should have a fixed amount etc).
-          // TODO (rohany): We'll wait on this result for now.
-          this->runtime->issue_runtime_meta_task(AutoTraceProcessRepeatsArgs(string, result), LG_LATENCY_WORK_PRIORITY).wait();
-
-          // TODO (rohany): These deletions will need to get handled differently later.
-          delete string;
-          delete result;
-        }
+        this->opidx++;
       }
 
       return T::add_to_dependence_queue(op, unordered, outermost);
     }
 
+    template <typename T>
+    void TraceOccurrenceWatcher::insert(T start, T end, size_t opidx) {
+      this->trie.insert(start, end, TraceMeta(opidx));
+    }
 
+    template <typename T>
+    bool TraceOccurrenceWatcher::prefix(T start, T end) {
+      return this->trie.prefix(start, end);
+    }
   };
 };
 

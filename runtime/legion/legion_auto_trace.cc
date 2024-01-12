@@ -17,6 +17,7 @@
 #include "legion/legion_auto_trace.inl"
 #include "legion/suffix_tree.h"
 
+#include <iterator>
 #include <unordered_set>
 
 namespace Legion {
@@ -178,22 +179,129 @@ namespace Legion {
 
     void auto_trace_process_repeats(const void* args_) {
       const AutoTraceProcessRepeatsArgs* args = (const AutoTraceProcessRepeatsArgs*)args_;
-      std::vector<NonOverlappingRepeatsResult> result = compute_longest_nonoverlapping_repeats(*args->operations);
+      // TODO (rohany): Make this a command line parameter.
+      std::vector<NonOverlappingRepeatsResult> result = compute_longest_nonoverlapping_repeats(*args->operations, 5);
       // Filter the result to remove substrings of longer repeats from consideration.
-      // TODO (rohany): Can we do this without another allocation?
+      size_t copyidx = 0;
       std::unordered_set<size_t> ends;
-      std::vector<NonOverlappingRepeatsResult> filtered;
-      // TODO (rohany): This is an over approximation...
-      filtered.reserve(result.size());
       for (auto res : result) {
-        if (ends.find(res.end) == ends.end()) {
+        if (ends.find(res.end) != ends.end()) {
           continue;
         }
-        filtered.push_back(res);
+        result[copyidx] = res;
+        copyidx++;
         ends.insert(res.end);
       }
-      *args->result = std::move(filtered);
+      // Erase the unused pieces of result.
+      result.erase(result.begin() + copyidx, result.end());
+      *args->result = std::move(result);
       std::cout << "inside my new meta task!" << std::endl;
+    }
+
+    BatchedTraceIdentifier::BatchedTraceIdentifier(
+        Runtime* runtime_,
+        TraceOccurrenceWatcher* watcher_,
+        size_t batchsize_,
+        size_t max_add_
+        )
+        : runtime(runtime_), batchsize(batchsize_), watcher(watcher_), max_add(max_add_) {
+      // Reserve one extra place so that we can insert the sentinel
+      // character at the end of the string.
+      this->hashes.reserve(batchsize_ + 1);
+    }
+
+    void BatchedTraceIdentifier::process(Murmur3Hasher::Hash hash, size_t opidx) {
+      this->hashes.push_back(hash);
+      if (this->hashes.size() == this->batchsize) {
+        // TODO (rohany): Define this sentinel somewhere else.
+        // Insert the sentinel token before sending the string off to the meta task.
+        this->hashes.push_back(Murmur3Hasher::Hash{0, 0});
+        std::vector<NonOverlappingRepeatsResult> result;
+        AutoTraceProcessRepeatsArgs args(&this->hashes, &result);
+        // TODO (rohany): What should the priority be for this?
+        // TODO (rohany): Make sure that we don't have too many of these
+        //  meta tasks pending at once (should have a fixed amount etc).
+        // TODO (rohany): We'll wait on this result for now.
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY).wait();
+
+        // Insert the received traces into the occurrence watcher.
+        size_t count = 0;
+        for (auto trace : result) {
+          // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
+          // TODO (rohany): Do we need to consider superstrings here?
+          auto start = this->hashes.begin() + trace.start;
+          auto end = this->hashes.begin() + trace.end;
+          if (!this->watcher->prefix(start, end)) {
+            this->watcher->insert(start, end, opidx);
+            count++;
+            // Only insert max_add traces at a time.
+            if (count == this->max_add) {
+              break;
+            }
+          }
+        }
+        std::cout << "Inserted: " << count << " traces" << std::endl;
+        // After we're done processing our trace, clear the memory so that we
+        // can collect more traces.
+        this->hashes.clear();
+      }
+    }
+
+    TraceOccurrenceWatcher::TraceOccurrenceWatcher(size_t visit_threshold_) : visit_threshold(visit_threshold_) { }
+
+    void TraceOccurrenceWatcher::process(Murmur3Hasher::Hash hash, size_t opidx) {
+      this->active_pointers.push_back(TriePointer(this->trie.get_root(), opidx));
+      // We'll avoid any allocations here by copying in pointers
+      // as we process them.
+      size_t copyidx = 0;
+      for (size_t i = 0; i < this->active_pointers.size(); i++) {
+        // Try to advance the pointer.
+        TriePointer pointer = this->active_pointers[i];
+        if (!pointer.advance(hash)) {
+          continue;
+        }
+        this->active_pointers[copyidx] = pointer;
+        copyidx++;
+        // Check to see if the pointer completed.
+        if (pointer.complete()) {
+          // If this pointer corresponds to a completed trace, then we have
+          // some work to do. First, increment the number of visits on the node.
+          TrieNode<Murmur3Hasher::Hash, TraceMeta>* node = pointer.node;
+          auto& value = node->get_value();
+          value.visits++;
+          if (value.visits >= this->visit_threshold && !value.completed) {
+            std::cout << "PROMOTING TRACE: " << value.opidx << " " << pointer.depth << std::endl;
+            value.completed = true;
+            std::vector<Murmur3Hasher::Hash> trace(pointer.depth);
+            for (size_t j = 0; j < pointer.depth; j++) {
+              assert(node != nullptr);
+              trace[pointer.depth - j - 1] = node->get_token();
+              node = node->get_parent();
+            }
+            // TODO (rohany): Here, insert the trace into the TraceReplayWatcher.
+          }
+        }
+      }
+      // Erase the remaining elements from active_pointers.
+      this->active_pointers.erase(this->active_pointers.begin() + copyidx, this->active_pointers.end());
+    }
+
+    bool TraceOccurrenceWatcher::TriePointer::advance(Murmur3Hasher::Hash token) {
+      // We couldn't advance the pointer. Importantly, we can't check
+      // node.end here, as this node could be the prefix of another
+      // trace in the trie.
+      auto it = this->node->get_children().find(token);
+      if (it == this->node->get_children().end()) {
+        return false;
+      }
+      // Otherwise, move down to the node's child.
+      this->node = it->second;
+      this->depth++;
+      return true;
+    }
+
+    bool TraceOccurrenceWatcher::TriePointer::complete() {
+      return this->node->get_end() && this->opidx >= this->node->get_value().opidx;
     }
   };
 };

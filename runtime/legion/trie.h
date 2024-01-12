@@ -28,13 +28,19 @@ namespace Legion {
     template <typename T, typename V>
     class TrieNode {
     public:
-      TrieNode(T token_) : token(token_), end(false) {}
+      TrieNode(T token_, TrieNode<T, V>* parent_) : token(token_), end(false), parent(parent_) {}
       // TODO (rohany): Implement a recursive destructor.
+      const std::unordered_map<T, TrieNode<T, V>*>& get_children() const { return this->children; }
+      TrieNode<T, V>* get_parent() const { return this->parent; }
+      V& get_value() { return this->value; }
+      bool get_end() { return this->end; }
+      T get_token() { return this->token; }
     private:
       friend class Trie<T, V>;
       T token;
       V value;
       bool end;
+      TrieNode<T, V>* parent;
       std::unordered_map<T, TrieNode<T, V>*> children;
     };
 
@@ -43,17 +49,19 @@ namespace Legion {
     class Trie {
     public:
       // Initialize the root with an arbitrary token.
-      Trie() : root(new TrieNode<T, V>(T{})) {}
+      Trie() : root(new TrieNode<T, V>(T{}, nullptr)) {}
 
-      void insert(const std::vector<T>& str, V value) {
+      template<typename ITER>
+      void insert(ITER start, ITER end, V value) {
         TrieNode<T, V>* node = this->root;
 
-        for (auto token : str) {
+        for (auto tokitr = start; tokitr != end; tokitr++) {
+          auto token = *tokitr;
           auto it = node->children.find(token);
           if (it != node->children.end()) {
             node = it->second;
           } else {
-            TrieNode<T, V>* new_node = new TrieNode<T, V>(token);
+            TrieNode<T, V>* new_node = new TrieNode<T, V>(token, node);
             node->children[token] = new_node;
             node = new_node;
           }
@@ -65,9 +73,11 @@ namespace Legion {
         node->value = value;
       }
 
-      bool contains(const std::vector<T>& str) {
+      template<typename ITER>
+      bool contains(ITER start, ITER end) {
         TrieNode<T, V>* node = this->root;
-        for (auto token : str) {
+        for (auto tokitr = start; tokitr != end; tokitr++) {
+          auto token = *tokitr;
           auto it = node->children.find(token);
           if (it != node->children.end()) {
             node = it->second;
@@ -79,10 +89,12 @@ namespace Legion {
         return node->end;
       }
 
-      bool prefix(const std::vector<T>& str) {
+      template<typename ITER>
+      bool prefix(ITER start, ITER end) {
         TrieNode<T, V>* node = this->root;
 
-        for (auto token : str) {
+        for (auto tokitr = start; tokitr != end; tokitr++) {
+          auto token = *tokitr;
           auto it = node->children.find(token);
           if (it != node->children.end()) {
             node = it->second;
@@ -96,6 +108,7 @@ namespace Legion {
 
       // TODO (rohany): Implement remove and superstring.
 
+      TrieNode<T, V>* get_root() { return root; }
     private:
       // TODO (rohany): Does this actually need to be a pointer?
       TrieNode<T, V>* root;

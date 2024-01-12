@@ -47,7 +47,7 @@ void random_test() {
       int strlen = (rand() % maxlen) + 1;
       auto string = random_string(strlen);
       if (strings.find(string) == strings.end()) {
-        trie.insert(string, empty{});
+        trie.insert(string.begin(), string.end(), empty{});
         strings.insert(string);
         break;
       }
@@ -57,10 +57,9 @@ void random_test() {
   // All of the strings in our set should be in the trie, and a random
   // prefix of each should be in the trie.
   for (auto string : strings) {
-    assert(trie.contains(string));
+    assert(trie.contains(string.begin(), string.end()));
     int len = rand() % string.size();
-    std::vector<char> prefix(string.begin(), string.begin() + len);
-    assert(trie.prefix(prefix));
+    assert(trie.prefix(string.begin(), string.begin() + len));
   }
 
   // A bunch of random strings should not be in the trie.
@@ -69,7 +68,7 @@ void random_test() {
       int strlen = (rand() % maxlen) + 1;
       auto string = random_string(strlen);
       if (strings.find(string) == strings.end()) {
-        assert(!trie.contains(string));
+        assert(!trie.contains(string.begin(), string.end()));
         break;
       }
     }

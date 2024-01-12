@@ -298,7 +298,7 @@ namespace Legion {
         }
       };
       template<typename T>
-      RepeatsWalkResult walk(SuffixTreeNode<T>* node, std::vector<NonOverlappingRepeatsResult>& output) {
+      RepeatsWalkResult walk(SuffixTreeNode<T>* node, std::vector<NonOverlappingRepeatsResult>& output, size_t min_length) {
         if (node->is_leaf()) {
           size_t start = node->get_start();
           RepeatsWalkResult result {
@@ -319,11 +319,11 @@ namespace Legion {
           // repeated substrings in the first place. We'll pay extra tree traversals for this,
           // but that cost could be offset if there aren't many repeated substrings.
           for (auto it = node->get_children().begin(); it != node->get_children().end(); it++) {
-            result.combine(walk(it->second, output));
+            result.combine(walk(it->second, output, min_length));
           }
           // We've found a repeat. Now find how many times it actually repeats. Exclude nodes of depth
           // zero to exclude the root node.
-          if (result.imin + node->depth() <= result.imax && node->depth() != 0) {
+          if (result.imin + node->depth() <= result.imax && node->depth() != 0 && node->depth() >= min_length) {
             size_t count = 0;
             assert(result.leaf_starts.size() >= 1);
             size_t current = result.leaf_starts[0];
@@ -356,10 +356,10 @@ namespace Legion {
 
     // The input string must also be formatted correctly for the suffix tree (unique last character).
     template<typename T>
-    std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(const std::vector<T>& str) {
+    std::vector<NonOverlappingRepeatsResult> compute_longest_nonoverlapping_repeats(const std::vector<T>& str, size_t min_length = 0) {
       SuffixTree<T> tree(str);
       std::vector<NonOverlappingRepeatsResult> result;
-      walk(tree.get_root(), result);
+      walk(tree.get_root(), result, min_length);
       std::sort(result.begin(), result.end(), compare);
       return result;
     }
