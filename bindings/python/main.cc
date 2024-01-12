@@ -337,21 +337,23 @@ void LegionPyMapper::map_task(const MapperContext      ctx,
                               const MapTaskInput&      input,
                                     MapTaskOutput&     output)
 {
+  assert(task.target_proc.kind() == Processor::PY_PROC);
   if (task.task_id == top_task_id)
   {
     assert(task.get_depth() == 0);
     assert(task.regions.empty());
     output.chosen_variant = vid;
+    output.target_procs.resize(1, task.target_proc);
+    assert(output.target_procs.back() == task.target_proc);
   }
   else
   {
     assert(task.task_id <= (top_task_id + 2));
     assert(task.regions.empty());
     output.chosen_variant = vid;
+    // Still need to fill in the target procs
+    output.target_procs.push_back(task.target_proc);
   }
-  // Still need to fill in the target procs
-  assert(task.target_proc.kind() == Processor::PY_PROC);
-  output.target_procs.push_back(task.target_proc);
 }
 
 void LegionPyMapper::replicate_task(const MapperContext         ctx,
