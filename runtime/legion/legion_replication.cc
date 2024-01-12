@@ -9381,8 +9381,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       else
       {
-        assert(shard_task_barrier.exists());
-        assert(callback_barrier.exists() || !control_replicated);
+        assert(shard_task_barrier.exists() == control_replicated);
+        assert(callback_barrier.exists() == control_replicated);
       }
 #endif
 #ifdef LEGION_GC
