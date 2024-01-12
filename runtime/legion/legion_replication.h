@@ -3147,13 +3147,14 @@ namespace Legion {
     public:
       ShardManager(Runtime *rt, DistributedID did,
                    CollectiveMapping *mapping, unsigned local_count,
-                   bool top, bool isomorphic_points,
+                   bool top, bool isomorphic_points, bool cr,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
                    std::vector<DomainPoint> &&sorted_points,
                    std::vector<ShardID> &&shard_lookup,
                    SingleTask *original = NULL,
-                   RtBarrier shard_task_barrier = RtBarrier::NO_RT_BARRIER);
+                   RtBarrier shard_task_bar = RtBarrier::NO_RT_BARRIER,
+                   RtBarrier callback_bar = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs) = delete;
       ~ShardManager(void);
     public:
@@ -3171,8 +3172,6 @@ namespace Legion {
         { return (*address_spaces)[sid]; }    
       inline bool is_first_local_shard(ShardTask *task) const
         { return (local_shards[0] == task); }
-      inline const std::set<AddressSpace>& get_unique_shard_spaces(void) const
-        { return unique_shard_spaces; }
       inline ReplicateContext* find_local_context(void) const
         { return local_shards[0]->get_replicate_context(); }
       inline size_t count_local_shards(void) const 
@@ -3200,7 +3199,6 @@ namespace Legion {
                                InnerContext *top_context);
       void pack_shard_manager(Serializer &rez) const;
       void set_shard_mapping(std::vector<Processor> &shard_mapping);
-      void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target,
           VariantID variant, InnerContext *parent_ctx, SingleTask *source);
       ShardTask* create_shard(ShardID id, Processor target,
@@ -3398,6 +3396,7 @@ namespace Legion {
       const unsigned remote_constituents;
       const bool top_level_task;
       const bool isomorphic_points;
+      const bool control_replicated; 
     protected:
       mutable LocalLock                manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput
@@ -3422,6 +3421,7 @@ namespace Legion {
       std::set<RtEvent> mapping_preconditions;
       std::vector<ApEvent> execution_effects;
     protected:
+      // These barriers only are needed for control replicated tasks
       RtBarrier shard_task_barrier;
       RtBarrier callback_barrier;
     protected:
@@ -3471,10 +3471,8 @@ namespace Legion {
                                         created_fill_views;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
-    protected:
-      // A unique set of address spaces on which shards exist 
-      std::set<AddressSpaceID> unique_shard_spaces;
 #ifdef LEGION_USE_LIBDL
+    protected:
       std::set<Runtime::RegistrationKey> unique_registration_callbacks;
 #endif
     protected:

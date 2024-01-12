@@ -4010,8 +4010,9 @@ namespace Legion {
       }
       shard_manager = new ShardManager(runtime, manager_did, mapping,
           local_shards.size(), is_top_level_task(), isomorphic_points,
-          output.shard_domain, std::move(output.shard_points),
-          std::move(sorted_points), std::move(shard_lookup), this);
+          !var_impl->is_leaf(), output.shard_domain, 
+          std::move(output.shard_points), std::move(sorted_points),
+          std::move(shard_lookup), this);
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
       // Now create our local shards and start them mapping
       for (unsigned idx = 0; idx < local_shards.size(); idx++)
@@ -8339,10 +8340,13 @@ namespace Legion {
     void ShardTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(shard_barrier.exists() == shard_manager->control_replicated);
+#endif
       // We need to ensure that each shard has gotten this call to ensure that
       // all the child operations are done and have propagated all their context
       // information back to us before we go about invalidating our contexts
-      if (!all_shards_complete)
+      if (!all_shards_complete && shard_manager->control_replicated)
       {
         Runtime::phase_barrier_arrive(shard_barrier, 1/*false*/);
         const RtEvent shards_complete = shard_barrier;
@@ -8381,12 +8385,17 @@ namespace Legion {
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Make sure all the shards are complete together
-      if (!preconditions.empty())
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/,
-            Runtime::merge_events(preconditions));
+      if (shard_manager->control_replicated)
+      {
+        if (!preconditions.empty())
+          Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/,
+              Runtime::merge_events(preconditions));
+        else
+          Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+        complete_operation(shard_barrier);
+      }
       else
-        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
-      complete_operation(shard_barrier);
+        complete_operation();
       if (need_commit)
         trigger_children_committed();
     }
@@ -8549,13 +8558,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_barrier.exists());
+      assert(shard_manager->control_replicated == shard_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
-      const RtEvent result = shard_barrier;
-      // Advance this for when we get to completion
-      Runtime::advance_barrier(shard_barrier);
-      return result;
+      // We only do this for control replicated tasks
+      if (shard_manager->control_replicated)
+      {
+        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+        const RtEvent result = shard_barrier;
+        // Advance this for when we get to completion
+        Runtime::advance_barrier(shard_barrier);
+        return result;
+      }
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------

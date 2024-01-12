@@ -7274,14 +7274,12 @@ namespace Legion {
       // The shard manager will take ownership of this
       ShardManager *manager = new ShardManager(runtime, repl_context,
           collective_mapping, shards_per_address_space, true/*top level*/,
-          isomorphic_points, shard_domain, std::move(points),
-          std::move(sorted_points), std::move(shard_lookup), implicit_top);
+          isomorphic_points, true/*control replicated*/, shard_domain, 
+          std::move(points), std::move(sorted_points),
+          std::move(shard_lookup), implicit_top);
       shard_manager = manager;
       implicit_top->set_shard_manager(manager);
       manager->set_shard_mapping(shard_mapping);
-      // We also need to make the callback barrier here, but its easy here
-      // because we know that this has to contain all address spaces
-      manager->create_callback_barrier(runtime->total_address_spaces);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
                                    true/*control replication*/);

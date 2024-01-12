@@ -9333,11 +9333,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, DistributedID id, 
                                CollectiveMapping *mapping, unsigned local,
-                               bool top, bool iso, const Domain &dom,
+                               bool top, bool iso, bool cr, const Domain &dom,
                                std::vector<DomainPoint> &&shards,
                                std::vector<DomainPoint> &&sorted,
                                std::vector<ShardID> &&lookup,
-                               SingleTask *original/*= NULL*/, RtBarrier bar)
+                               SingleTask *original/*= NULL*/, 
+                               RtBarrier task_bar, RtBarrier call_bar)
       : CollectiveViewCreator<CollectiveHelperOp>(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(id, SHARD_MANAGER_DC), true, mapping),
         shard_points(shards), sorted_points(sorted), shard_lookup(lookup), 
@@ -9345,14 +9346,15 @@ namespace Legion {
         original_task(original), local_constituents(local),
         remote_constituents((mapping == NULL) ? 0 : 
             mapping->count_children(owner_space, local_space)),
-        top_level_task(top), isomorphic_points(iso),
+        top_level_task(top), isomorphic_points(iso), control_replicated(cr),
         address_spaces(NULL), local_mapping_complete(0),
         remote_mapping_complete(0), local_execution_complete(0),
         remote_execution_complete(0), trigger_local_complete(0),
         trigger_remote_complete(0), trigger_local_commit(0),
         trigger_remote_commit(0), semantic_attach_counter(0),
-        local_future_result(NULL), shard_task_barrier(bar),
-        attach_deduplication(NULL), virtual_mapping_rendezvous(NULL)
+        local_future_result(NULL), shard_task_barrier(task_bar),
+        callback_barrier(call_bar), attach_deduplication(NULL),
+        virtual_mapping_rendezvous(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9365,16 +9367,23 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!shard_task_barrier.exists());
+        assert(!callback_barrier.exists());
 #endif
-        shard_task_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // callback barrier can't be made until we know how many
-        // unique address spaces we'll actually have so see
-        // ShardManager::launch
+        if (control_replicated)
+        {
+          shard_task_barrier =
+            RtBarrier(Realm::Barrier::create_barrier(total_shards));
+          callback_barrier =
+            RtBarrier(Realm::Barrier::create_barrier(
+                (collective_mapping == NULL) ? 1 : collective_mapping->size()));
+        }
       }
 #ifdef DEBUG_LEGION
       else
+      {
         assert(shard_task_barrier.exists());
+        assert(callback_barrier.exists() || !control_replicated);
+      }
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Shard Manager %lld %d", 
@@ -9396,7 +9405,7 @@ namespace Legion {
         delete it->second;
       sharding_functions.clear();
       // Finally unregister ourselves with the runtime
-      if (is_owner())
+      if (is_owner() && control_replicated)
       {
         shard_task_barrier.destroy_barrier();
         callback_barrier.destroy_barrier();
@@ -9523,7 +9532,9 @@ namespace Legion {
         }
       }
       rez.serialize<bool>(top_level_task);
+      rez.serialize<bool>(control_replicated);
       rez.serialize(shard_task_barrier);
+      rez.serialize(callback_barrier);
       collective_mapping->pack(rez);
 #ifdef DEBUG_LEGION
       assert(shard_mapping.size() == total_shards);
@@ -9554,19 +9565,6 @@ namespace Legion {
       configure_collective_settings(shard_mapping.size(),runtime->address_space,
           collective_radix, collective_log_radix, collective_stages,
           participating_spaces, collective_last_radix);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::create_callback_barrier(size_t arrival_count)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!callback_barrier.exists());
-      assert(owner_space == runtime->address_space);
-      assert(arrival_count == runtime->total_address_spaces);
-#endif
-      callback_barrier = 
-        RtBarrier(Realm::Barrier::create_barrier(arrival_count));
     }
 
     //--------------------------------------------------------------------------
@@ -10525,11 +10523,10 @@ namespace Legion {
     bool ShardManager::is_total_sharding(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      if (unique_shard_spaces.empty())
-        for (unsigned shard = 0; shard < total_shards; shard++)
-              unique_shard_spaces.insert((*address_spaces)[shard]);
-      return (unique_shard_spaces.size() == runtime->total_address_spaces);
+      if (collective_mapping == NULL)
+        return (runtime->total_address_spaces == 1);
+      else
+        return (runtime->total_address_spaces == collective_mapping->size());
     }
 
     //--------------------------------------------------------------------------
@@ -11294,54 +11291,26 @@ namespace Legion {
                    BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      std::vector<AddressSpaceID> shard_spaces;
-      {
-        AutoLock m_lock(manager_lock);
-        if (unique_shard_spaces.empty())
-          for (unsigned shard = 0; shard < total_shards; shard++)
-                unique_shard_spaces.insert((*address_spaces)[shard]);
-        shard_spaces.insert(shard_spaces.end(), 
-            unique_shard_spaces.begin(), unique_shard_spaces.end());
-      }
       // First pack it out and send it out to any remote nodes 
-      if (shard_spaces.size() > 1)
+      if (collective_mapping != NULL)
       {
-        // Find the start index
-        int start_idx = -1;
-        for (unsigned idx = 0; idx < shard_spaces.size(); idx++)
-        {
-          if (shard_spaces[idx] != runtime->address_space)
-            continue;
-          start_idx = idx;
-          break;
-        }
 #ifdef DEBUG_LEGION
-        assert(start_idx >= 0);
+        assert(collective_mapping->contains(local_space));
 #endif
-        std::vector<unsigned> locals;
         std::vector<AddressSpaceID> targets;
-        for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
-        {
-          unsigned next = idx + 1;
-          if (next >= shard_spaces.size())
-            break;
-          locals.push_back(next);
-          // Convert from relative to actual address space
-          const unsigned next_index = (start_idx + next) % shard_spaces.size();
-          targets.push_back(shard_spaces[next_index]);
-        }
-        for (unsigned idx = 0; idx < locals.size(); idx++)
+        collective_mapping->get_children(local_space, local_space, targets);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
         {
           RtEvent next_done = Runtime::create_rt_user_event();
           Serializer rez2;
           rez2.serialize(did);
-          rez2.serialize<unsigned>(start_idx);
-          rez2.serialize<unsigned>(locals[idx]);
+          rez2.serialize(local_space);
           rez2.serialize(kind);
           rez2.serialize<size_t>(rez.get_used_bytes());
           rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
           rez2.serialize(next_done);
-          runtime->send_control_replicate_broadcast_update(targets[idx], rez2);
+          runtime->send_control_replicate_broadcast_update(*it, rez2);
           applied_events.insert(next_done);
         }
       }
@@ -11375,9 +11344,11 @@ namespace Legion {
     void ShardManager::handle_broadcast(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      unsigned start_idx, local_idx;
-      derez.deserialize(start_idx);
-      derez.deserialize(local_idx);
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      AddressSpaceID origin;
+      derez.deserialize(origin);
       BroadcastMessageKind kind;
       derez.deserialize(kind);
       size_t message_size;
@@ -11386,45 +11357,25 @@ namespace Legion {
       derez.advance_pointer(message_size);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      // Send out any remote updates first
-      std::vector<AddressSpaceID> shard_spaces;
-      {
-        AutoLock m_lock(manager_lock);
-        if (unique_shard_spaces.empty())
-          for (unsigned shard = 0; shard < total_shards; shard++)
-                unique_shard_spaces.insert((*address_spaces)[shard]);
-        shard_spaces.insert(shard_spaces.end(), 
-            unique_shard_spaces.begin(), unique_shard_spaces.end());
-      }
+
       // First pack it out and send it out to any remote nodes 
-      std::vector<unsigned> locals;
       std::vector<AddressSpaceID> targets;
-      const unsigned start = local_idx * runtime->legion_collective_radix + 1;
-      for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
-      {
-        unsigned next = start + idx;
-        if (next >= shard_spaces.size())
-          break;
-        locals.push_back(next);
-        // Convert from relative to actual address space
-        const unsigned next_index = (start_idx + next) % shard_spaces.size();
-        targets.push_back(shard_spaces[next_index]);
-      }
+      collective_mapping->get_children(origin, local_space, targets);
       std::set<RtEvent> remote_handled;
       if (!targets.empty())
       {
-        for (unsigned idx = 0; idx < targets.size(); idx++)
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
         {
           RtEvent next_done = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(did);
-          rez.serialize<unsigned>(start_idx);
-          rez.serialize<unsigned>(locals[idx]);
+          rez.serialize(origin);
           rez.serialize(kind);
           rez.serialize<size_t>(message_size);
           rez.serialize(message, message_size);
           rez.serialize(next_done);
-          runtime->send_control_replicate_broadcast_update(targets[idx], rez);
+          runtime->send_control_replicate_broadcast_update(*it, rez);
           remote_handled.insert(next_done);
         } 
       }
@@ -11911,10 +11862,12 @@ namespace Legion {
           shard_points[shard_lookup[idx]] = sorted_points[idx];
         }
       }
-      bool top_level_task;
+      bool top_level_task, control_replicated;
       derez.deserialize(top_level_task);
-      RtBarrier shard_task_barrier;
+      derez.deserialize(control_replicated);
+      RtBarrier shard_task_barrier, callback_barrier;
       derez.deserialize(shard_task_barrier);
+      derez.deserialize(callback_barrier);
       size_t num_spaces;
       derez.deserialize(num_spaces);
 #ifdef DEBUG_LEGION
@@ -11931,9 +11884,10 @@ namespace Legion {
       }
       ShardManager *manager =
        new ShardManager(runtime, repl_id, mapping, local_shards, top_level_task,
-                isomorphic_points, shard_domain, std::move(shard_points),
-                std::move(sorted_points), std::move(shard_lookup), 
-                NULL/*original*/, shard_task_barrier);
+                isomorphic_points, control_replicated, shard_domain,
+                std::move(shard_points), std::move(sorted_points),
+                std::move(shard_lookup), NULL/*original*/,
+                shard_task_barrier, callback_barrier);
       bool explicit_distribution;
       derez.deserialize<bool>(explicit_distribution);
       if (explicit_distribution)
@@ -12257,6 +12211,9 @@ namespace Legion {
                      std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(control_replicated);
+#endif
       // See if we're the first one to handle this DSO
       const Runtime::RegistrationKey key(dedup_tag, 
                                          dso->dso_name, dso->symbol_name);
@@ -12268,33 +12225,41 @@ namespace Legion {
         if (finder != unique_registration_callbacks.end())
           return;
         unique_registration_callbacks.insert(key);
-        if (unique_shard_spaces.empty())
-          for (unsigned shard = 0; shard < total_shards; shard++)
-                unique_shard_spaces.insert((*address_spaces)[shard]);
       }
       // We're the first one so handle it
       if (!is_total_sharding())
       {
         std::set<RtEvent> local_preconditions;
-        AddressSpaceID space = 0;
-        for (std::set<AddressSpaceID>::const_iterator it = 
-              unique_shard_spaces.begin(); it != 
-              unique_shard_spaces.end(); it++, space++)
+        if (collective_mapping != NULL)
         {
-          if ((*it) == runtime->address_space)
-            break;
-        }
 #ifdef DEBUG_LEGION
-        assert(space < unique_shard_spaces.size());
+          assert(collective_mapping->contains(local_space));
 #endif
-        for ( ; space < runtime->total_address_spaces; 
-              space += unique_shard_spaces.size())
+          const unsigned index = collective_mapping->find_index(local_space);
+          for (AddressSpaceID space = 0; 
+                space < runtime->total_address_spaces; space++)
+          {
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(space))
+              continue;
+            if ((space % collective_mapping->size()) == index)
+              runtime->send_registration_callback(space, dso, global_done,
+                  local_preconditions, buffer, buffer_size, withargs,
+                  true/*deduplicate*/, dedup_tag);
+          }
+        }
+        else
         {
-          if (unique_shard_spaces.find(space) != unique_shard_spaces.end())
-            continue;
-          runtime->send_registration_callback(space, dso, global_done,
-              local_preconditions, buffer, buffer_size, withargs, 
-              true/*deduplicate*/, dedup_tag);
+          // Just send it to everyone
+          for (AddressSpaceID space = 0; 
+                space < runtime->total_address_spaces; space++)
+          {
+            if (space == local_space)
+              continue;
+            runtime->send_registration_callback(space, dso, global_done,
+                  local_preconditions, buffer, buffer_size, withargs,
+                  true/*deduplicate*/, dedup_tag);
+          }
         }
         if (!local_preconditions.empty())
         {
