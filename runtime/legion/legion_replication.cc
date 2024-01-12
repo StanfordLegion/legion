@@ -13160,7 +13160,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (shadow_instance != NULL)
-        delete shadow_instance;
+      {
+        if (!shadow_reads.empty())
+        {
+          // Reads always dominate the most recent write
+          const ApEvent precondition = Runtime::merge_events(NULL,shadow_reads);
+          if (!shadow_instance->defer_deletion(precondition))
+            delete shadow_instance;
+        }
+        else if (!shadow_instance->defer_deletion(shadow_ready))
+          delete shadow_instance;
+      }
     }
 
     //--------------------------------------------------------------------------

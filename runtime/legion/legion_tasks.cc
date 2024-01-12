@@ -1045,12 +1045,7 @@ namespace Legion {
       if (use_target_processor)
         set_current_proc(target_proc);
       if (!wait_on.exists() || wait_on.has_triggered())
-      {
-        // Need to invoke select task options here for top-level tasks
-        if (!options_selected)
-          select_task_options(false/*prioritize*/);
         runtime->add_to_ready_queue(current_proc, this);
-      }
       else
         parent_ctx->add_to_task_queue(this, wait_on);
     }
@@ -12831,6 +12826,12 @@ namespace Legion {
                 (reduction_instance_point.get_dim() > 0));
 #endif
             rez.serialize(reduction_instance_point);
+            if (!reduction_fold_effects.empty())
+              // All the reduction fold effects dominate the
+              // reduction_instance_precondition so we can just
+              // overwrite it without including it in the merger
+              reduction_instance_precondition =
+                Runtime::merge_events(NULL, reduction_fold_effects);
             if ((reduction_instance != NULL) &&
                 !reduction_instance.load()->pack_instance(rez, 
                   reduction_instance_precondition, true/*pack ownership*/))

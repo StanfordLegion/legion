@@ -35,7 +35,9 @@
 #include <link.h>
 #endif // REALM_USE_DLMOPEN
 
+#include <array>
 #include <list>
+#include <memory>
 
 namespace Realm {
 
@@ -128,12 +130,42 @@ namespace Realm {
   }
 #endif
 
-  PythonInterpreter::PythonInterpreter() 
+  PythonInterpreter::PythonInterpreter()
   {
-#ifdef REALM_PYTHON_LIB
-    const char *python_lib = REALM_PYTHON_LIB;
+    std::unique_ptr<FILE, decltype(&pclose)> fp{
+        popen("python3 -c 'import sysconfig; import os; import sys; "
+              "lbdir = sysconfig.get_config_var(\"LIBDIR\");"
+              "masd = sysconfig.get_config_var(\"multiarchsubdir\");"
+              "masd = masd if masd else \"\";"
+              "masd = masd[len(os.sep):] if masd.startswith(os.sep) else masd;"
+              "name = f\"libpython{sys.version_info.major}.{sys.version_info.minor}\";"
+              "print(os.path.join(lbdir, masd, name),end=\"\")'",
+              "r"),
+        pclose};
+    if(fp == NULL) {
+      log_py.fatal() << "Failed to run a popen script";
+      abort();
+    }
+
+    std::array<char, PATH_MAX> path;
+    int lines = 0;
+    std::string python_lib = "";
+    while(fgets(path.data(), path.size(), fp.get())) {
+      python_lib += path.data();
+      lines++;
+    }
+    if(lines != 1) {
+      log_py.fatal() << "Failed to find a libpython candidate";
+      if(lines != 0) {
+        log_py.fatal() << "Expected single line output, received: " << python_lib;
+      }
+      abort();
+    }
+
+#if defined(REALM_ON_MACOS)
+    python_lib += ".dylib";
 #else
-    const char *python_lib = "libpython2.7.so";
+    python_lib += ".so";
 #endif
 
 #ifdef REALM_USE_DLMOPEN
@@ -144,14 +176,14 @@ namespace Realm {
     const char *dlmproxy_filename = getenv("DLMPROXY_LIBPTHREAD");
     if(!dlmproxy_filename)
       dlmproxy_filename = "dlmproxy_libpthread.so.0";
-    dlmproxy_handle = dlmopen(LM_ID_NEWLM,
-			      dlmproxy_filename,
-			      RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_LAZY);
+    dlmproxy_handle =
+        dlmopen(LM_ID_NEWLM, dlmproxy_filename, RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_LAZY);
     if(!dlmproxy_handle) {
       const char *error = dlerror();
-      log_py.fatal() << "HELP!  Use of dlmopen for python requires dlmproxy for pthreads!  Failed to\n"
-		     << "  load: " << dlmproxy_filename << "\n"
-		     << "  error: " << error;
+      log_py.fatal() << "HELP!  Use of dlmopen for python requires dlmproxy for "
+                        "pthreads!  Failed to\n"
+                     << "  load: " << dlmproxy_filename << "\n"
+                     << "  error: " << error;
       assert(false);
     }
 
@@ -168,15 +200,16 @@ namespace Realm {
     int ret = dlinfo(dlmproxy_handle, RTLD_DI_LMID, &lmid);
     assert(ret == 0);
 
-    handle = dlmopen(lmid, python_lib, RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_NOW);
+    handle = dlmopen(lmid, python_lib.c_str(), RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_NOW);
 #else
     // life is so much easier if we use dlopen (but we only get one copy then)
-    handle = dlopen(python_lib, RTLD_GLOBAL | RTLD_LAZY);
+    handle = dlopen(python_lib.c_str(), RTLD_GLOBAL | RTLD_LAZY);
 #endif
+
     if (!handle) {
       const char *error = dlerror();
-      log_py.fatal() << error;
-      assert(false);
+      log_py.fatal() << "libpython not loaded, dlerror: " << error;
+      abort();
     }
 
     api = new PythonAPI(handle);

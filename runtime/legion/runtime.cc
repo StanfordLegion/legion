@@ -3256,7 +3256,6 @@ namespace Legion {
            !precondition.has_triggered_faultignorant()))
       {
         // We need to offload this to realm
-        Realm::CopySrcDstField src, dst;
         bool own_src = false, own_dst = false;
         PhysicalInstance src_inst = source->get_instance(copy_size, own_src);
         PhysicalInstance dst_inst = get_instance(copy_size, own_dst);
@@ -3264,10 +3263,10 @@ namespace Legion {
         // Should only be writing to instances that this future instance owns
         assert(own_instance);
 #endif
-        src.set_field(src_inst, 0/*field id*/, copy_size);
-        dst.set_field(dst_inst, 0/*field id*/, copy_size);
-        std::vector<Realm::CopySrcDstField> srcs(1, src);
-        std::vector<Realm::CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1);
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        srcs.back().set_field(src_inst, 0/*field id*/, copy_size);
+        dsts.back().set_field(dst_inst, 0/*field id*/, copy_size);
         Realm::ProfilingRequestSet requests;
         if (implicit_runtime->profiler != NULL)
         {
@@ -3322,7 +3321,6 @@ namespace Legion {
            !precondition.has_triggered_faultignorant()))
       {
         // We need to offload this to realm
-        Realm::CopySrcDstField src, dst;
         bool own_src = false, own_dst = false;
         PhysicalInstance src_inst = 
           source->get_instance(redop->sizeof_rhs, own_src);
@@ -3331,11 +3329,11 @@ namespace Legion {
         // Should only be reducing to instances that this future instance owns
         assert(own_instance);
 #endif
-        src.set_field(src_inst, 0/*field id*/, size);
-        dst.set_field(dst_inst, 0/*field id*/, size);
-        dst.set_redop(redop_id, true/*fold*/, exclusive);
-        std::vector<Realm::CopySrcDstField> srcs(1, src);
-        std::vector<Realm::CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1);
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        srcs.back().set_field(src_inst, 0/*field id*/, size);
+        dsts.back().set_field(dst_inst, 0/*field id*/, size);
+        dsts.back().set_redop(redop_id, true/*fold*/, exclusive);
         Realm::ProfilingRequestSet requests;
         if (implicit_runtime->profiler != NULL)
         {
@@ -3460,8 +3458,8 @@ namespace Legion {
                       implicit_provenance, unique_event);
         PhysicalInstance result;
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
-             result, external_allocation ? alt_resource->suggested_memory() :
-              memory, ilg, *alt_resource, requests));
+              result, alt_resource->suggested_memory(), ilg,
+              *alt_resource, requests));
         own_inst = true;
         if (resource == NULL)
           delete alt_resource;
@@ -3502,8 +3500,7 @@ namespace Legion {
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
         use_event = RtEvent(PhysicalInstance::create_external_instance(instance,
-              external_allocation ? resource->suggested_memory() : memory,
-              ilg, *resource, requests));
+              resource->suggested_memory(), ilg, *resource, requests));
         own_instance = true;
       }
       own_inst = false;
@@ -17581,14 +17578,13 @@ namespace Legion {
                                     total_address_spaces,
                                     config.prof_footprint_threshold << 20,
                                     config.prof_target_latency,
+                                    config.prof_call_threshold,
                                     config.slow_config_ok);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
-#ifdef DETAILED_LEGION_PROF
       RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
       profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -30606,6 +30602,8 @@ namespace Legion {
         .add_option_int("-lg:prof_footprint", 
                         config.prof_footprint_threshold, !filter)
         .add_option_int("-lg:prof_latency",config.prof_target_latency, !filter)
+        .add_option_int("-lg:prof_call_threshold",
+                        config.prof_call_threshold, !filter)
         .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
         // These are all the deprecated versions of these flag
         .add_option_bool("-hl:separate",
@@ -30879,6 +30877,7 @@ namespace Legion {
           provenance, false/*track parent*/, true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
+      top_task->select_task_options(false/*prioritize*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
@@ -30886,10 +30885,7 @@ namespace Legion {
       ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
-      
-      // Put the task in the ready queue, make sure that the runtime is all
-      // set up across the machine before we launch it as well
-      top_task->enqueue_ready_task(false/*target*/);
+      add_to_ready_queue(target, top_task);
       // Now we can restore the previous implicit context
       implicit_context = previous_implicit;
       return result;

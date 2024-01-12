@@ -12387,7 +12387,7 @@ namespace Legion {
         // log this with the profiler 
         runtime->profiler->record_implicit(get_unique_id(), owner_task->task_id,
             executing_processor, implicit_profiler->start_time, stop,
-            implicit_profiler->waits);
+            implicit_profiler->waits, owner_task->get_completion_event());
       }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)

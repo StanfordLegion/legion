@@ -2538,7 +2538,8 @@ namespace Legion {
             num_profiling_nodes(0),
             serializer_type("binary"),
             prof_footprint_threshold(128 << 20),
-            prof_target_latency(100) { }
+            prof_target_latency(100),
+            prof_call_threshold(0) { }
       public:
         int delay_start;
         int legion_collective_radix;
@@ -2594,6 +2595,7 @@ namespace Legion {
         std::string prof_logfile;
         size_t prof_footprint_threshold;
         size_t prof_target_latency;
+        size_t prof_call_threshold;
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
       };

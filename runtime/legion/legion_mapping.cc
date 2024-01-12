@@ -1651,7 +1651,7 @@ namespace Legion {
       held = true;
       Internal::local_lock_list = this;
       if (paused)
-        ctx->manager->resume_mapper_call(ctx);
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1698,7 +1698,7 @@ namespace Legion {
       Internal::local_lock_list = this;
       held = true;
       if (paused)
-        ctx->manager->resume_mapper_call(ctx);
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
   }; // namespace Mapping
