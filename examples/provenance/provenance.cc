@@ -134,7 +134,10 @@ void top_level_task(const Task *task,
     std::vector<FieldID> attach_fields(2);
     attach_fields[0] = FID_X;
     attach_fields[1] = FID_Y;
-    launcher.attach_array_soa(xy_ptr, false/*column major*/, attach_fields);
+    launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+    launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
+    Realm::ExternalMemoryResource resource(xy_ptr, 2*sizeof(double)*num_elements);
+    launcher.external_resource = &resource;
     std::string launcher_prov = "Attach XY SOA:" + std::to_string(__LINE__);
     launcher.provenance = launcher_prov;
     xy_pr = runtime->attach_external_resource(ctx, launcher);
@@ -144,7 +147,10 @@ void top_level_task(const Task *task,
     AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
     std::vector<FieldID> attach_fields(1);
     attach_fields[0] = FID_Z;
-    launcher.attach_array_soa(z_ptr, false/*column major*/, attach_fields);
+    launcher.initialize_constraints(false/*column major*/, true/*soa*/, attach_fields);
+    launcher.privilege_fields.insert(attach_fields.begin(), attach_fields.end());
+    Realm::ExternalMemoryResource resource(z_ptr, sizeof(double)*num_elements);
+    launcher.external_resource = &resource;
     std::string launcher_prov = "Attach Z SOA:" + std::to_string(__LINE__);
     launcher.provenance = launcher_prov;
     z_pr = runtime->attach_external_resource(ctx, launcher);

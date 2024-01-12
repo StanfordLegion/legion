@@ -246,7 +246,8 @@ namespace Realm {
       //  disabled
       HDF5Module *m = new HDF5Module;
 
-      HDF5ModuleConfig *config = dynamic_cast<HDF5ModuleConfig *>(runtime->get_module_config("hdf5"));
+      HDF5ModuleConfig *config =
+          checked_cast<HDF5ModuleConfig *>(runtime->get_module_config("hdf5"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());

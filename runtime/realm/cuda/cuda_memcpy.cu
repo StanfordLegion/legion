@@ -101,7 +101,8 @@ static __device__ inline void memcpy_kernel_transpose(
         Offset_t x_base_idx =
             ((x_base / chunks) * (src_stride_x * chunks) + x_base % chunks);
         tile[in_tile_idx + block_offset] =
-            in_base[x_base_idx + y_base * src_stride_y * chunks + block_offset];
+            in_base[x_base_idx + y_base * src_stride_y * chunks +
+                    block_offset * src_stride_x];
       }
     }
 
@@ -120,8 +121,8 @@ static __device__ inline void memcpy_kernel_transpose(
         Offset_t x_base_idx =
             ((x_base / chunks) * (dst_stride_x * chunks) + x_base % chunks);
 
-        out_base[x_base_idx + dst_stride_y * y_base * chunks + block_offset] =
-            tile[out_tile_idx];
+        out_base[x_base_idx + dst_stride_y * y_base * chunks +
+                 block_offset * dst_stride_x] = tile[out_tile_idx];
       }
     }
   }

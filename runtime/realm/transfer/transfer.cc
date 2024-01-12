@@ -16,6 +16,7 @@
 // data transfer (a.k.a. dma) engine for Realm
 
 #include "realm/transfer/transfer.h"
+#include "realm/transfer/transfer_utils.h"
 #include "realm/transfer/channel.h"
 
 #include "realm/transfer/lowlevel_dma.h"
@@ -221,76 +222,6 @@ namespace Realm {
       field_rel_offset = it->second.rel_offset + field_offset;
     }
     return field_rel_offset;
-  }
-
-  // finds the largest subrectangle of 'domain' that starts with 'start',
-  //  lies entirely within 'restriction', and is consistent with an iteration
-  //  order (over the original 'domain') of 'dim_order'
-  // the subrectangle is returned in 'subrect', the start of the next subrect
-  //  is in 'next_start', and the return value indicates whether the 'domain'
-  //  has been fully covered
-  template <int N, typename T>
-  static bool next_subrect(const Rect<N,T>& domain, const Point<N,T>& start,
-                           const Rect<N,T>& restriction, const int *dim_order,
-                           Rect<N,T>& subrect, Point<N,T>& next_start)
-  {
-    // special case for when we can do the whole domain in one subrect
-    if((start == domain.lo) && restriction.contains(domain)) {
-      subrect = domain;
-      return true;
-    }
-
-#ifdef DEBUG_REALM
-    // starting point better be inside the restriction
-    assert(restriction.contains(start));
-#endif
-    subrect.lo = start;
-
-    for(int di = 0; di < N; di++) {
-      int d = dim_order[di];
-
-      // can we go to the end of the domain in this dimension?
-      if(domain.hi[d] <= restriction.hi[d]) {
-        // we can go to the end of the domain in this dimension ...
-        subrect.hi[d] = domain.hi[d];
-        next_start[d] = domain.lo[d];
-
-        if(start[d] == domain.lo[d]) {
-          // ... and since we started at the start, we can continue to next dim
-          continue;
-        } else {
-          // ... but we have to stop since this wasn't a full span
-          if(++di < N) {
-            d = dim_order[di];
-            subrect.hi[d] = start[d];
-            next_start[d] = start[d] + 1;
-
-            while(++di < N) {
-              d = dim_order[di];
-              subrect.hi[d] = start[d];
-              next_start[d] = start[d];
-            }
-
-            return false;  // still more to do
-          }
-        }
-      } else {
-        // we didn't get to the end, so we'll have to pick up where we left off
-        subrect.hi[d] = restriction.hi[d];
-        next_start[d] = restriction.hi[d] + 1;
-
-        while(++di < N) {
-          d = dim_order[di];
-          subrect.hi[d] = start[d];
-          next_start[d] = start[d];
-        }
-
-        return false;  // still more to do
-      }
-    }
-
-    // if we got through all dimensions, we're done with this domain
-    return true;
   }
 
   template <int N, typename T>
@@ -1200,7 +1131,7 @@ namespace Realm {
 
     // specify the xd port used for indirect address flow control, if any
     virtual void set_indirect_input_port(XferDes *xd, int port_idx,
-					 TransferIterator *inner_iter);
+                                         TransferIterator *inner_iter);
     virtual void reset(void);
 
     static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndirect<N,T> > serdez_subclass;
@@ -2992,6 +2923,8 @@ namespace Realm {
   {
     Memory src_mem = channel_copy_info.src_mem;
     Memory dst_mem = channel_copy_info.dst_mem;
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
     std::vector<size_t> empty_vec;
     log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem
                      << " serdez=" << serdez_id
@@ -3051,13 +2984,13 @@ namespace Realm {
                                    redop_id, total_bytes, src_frags, dst_frags,
                                    best_cost, channel, kind)) {
         log_xpath.info() << "direct: " << src_mem << "(" << src_mem.kind()
-                         << ")->" << dst_mem << " (" << dst_mem.kind()
-                         << ") cost=" << best_cost
-                         << " channel_kind=" << channel->kind;
+                         << ",n:" << src_node << ")->" << dst_mem << " ("
+                         << dst_mem.kind() << ",n:" << dst_node << ") cost=" << best_cost
+                         << " channel=" << channel->kind;
         info.path.assign(1, src_mem);
-	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
-	  info.path.push_back(dst_mem);
-	  info.xd_channels.assign(1, channel);
+        if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+          info.path.push_back(dst_mem);
+          info.xd_channels.assign(1, channel);
         } else
           info.xd_channels.clear();
       }
@@ -3072,8 +3005,6 @@ namespace Realm {
       std::vector<Channel *> channels;
     };
     std::vector<PartialPath> partials;
-    NodeID src_node = ID(src_mem).memory_owner_node();
-    NodeID dst_node = ID(dst_mem).memory_owner_node();
     size_t num_src_ibs, total_ibs;
     {
       const Node& n = get_runtime()->nodes[src_node];
@@ -3109,9 +3040,11 @@ namespace Realm {
                                    0 /*no redop on not-last hops*/,
                                    total_bytes, src_frags, 0 /*no dst_frags*/,
                                    cost, channel, kind)) {
-        log_xpath.info() << "first: " << src_mem << "->" << partials[i].ib_mem
-                         << "(" << partials[i].ib_mem.kind()
-                         << ") cost=" << cost;
+        NodeID dst_node = ID(partials[i].ib_mem).memory_owner_node();
+        log_xpath.info() << "first: " << src_mem << "(" << src_mem.kind()
+                         << ",n:" << src_node << ")->" << partials[i].ib_mem << "("
+                         << partials[i].ib_mem.kind() << ",n:" << dst_node
+                         << ") cost=" << cost << " channel=" << channel->kind;
         // ignore anything that's already worse than the direct path
         if((best_cost == 0) || (cost < best_cost)) {
           active_ibs.insert(i);
@@ -3146,14 +3079,19 @@ namespace Realm {
                                      0, 0, 0, // no serdez or redop on interhops
                                      total_bytes, 0, 0, // no fragmentation also
                                      cost, channel, kind)) {
+
+          NodeID src_node = ID(partials[src_idx].ib_mem).memory_owner_node();
+          NodeID dst_node = ID(partials[dst_idx].ib_mem).memory_owner_node();
           size_t total_cost = partials[src_idx].cost + cost;
-          log_xpath.info() << "inter: " << partials[src_idx].ib_mem << "("
-                           << partials[src_idx].ib_mem.kind() << ")->"
-                           << partials[dst_idx].ib_mem << "("
-                           << partials[dst_idx].ib_mem.kind() << ")"
-                           << " cost=" << partials[src_idx].cost << "+" << cost
-                           << " = " << total_cost << " <? "
-                           << partials[dst_idx].cost;
+          log_xpath.info() << "inter: src_idx:" << src_idx << " "
+                           << partials[src_idx].ib_mem << "("
+                           << partials[src_idx].ib_mem.kind() << ",n:" << src_node
+                           << ")-> dst_idx:" << dst_idx << " " << partials[dst_idx].ib_mem
+                           << "(" << partials[dst_idx].ib_mem.kind() << ",n:" << dst_node
+                           << ")"
+                           << " channel=" << channel->kind
+                           << " cost=" << partials[src_idx].cost << "+" << cost << " = "
+                           << total_cost << " <? " << partials[dst_idx].cost;
           // also prune any path that already exceeds the cost of the direct path
           if(((partials[dst_idx].cost == 0) ||
               (total_cost < partials[dst_idx].cost)) &&
@@ -3185,11 +3123,13 @@ namespace Realm {
                                    0 /*no src serdez*/, serdez_id, redop_id,
                                    total_bytes, 0 /*no src_frags*/, dst_frags,
                                    cost, channel, kind)) {
+        NodeID src_node = ID(partials[i].ib_mem).memory_owner_node();
         size_t total_cost = partials[i].cost + cost;
         log_xpath.info() << "last: " << partials[i].ib_mem << "("
-                         << partials[i].ib_mem.kind() << ")->" << dst_mem
-                         << " cost=" << partials[i].cost << "+" << cost << " = "
-                         << total_cost << " <? " << best_cost;
+                         << partials[i].ib_mem.kind() << ",n:" << src_node << ")->"
+                         << dst_mem << "(" << dst_mem.kind() << ",n:" << dst_node << ")"
+                         << " channel=" << channel->kind << " cost=" << partials[i].cost
+                         << "+" << cost << " = " << total_cost << " <? " << best_cost;
         if((best_cost == 0) || (total_cost < best_cost)) {
           best_cost = total_cost;
           info.path.swap(partials[i].path);
@@ -3271,7 +3211,7 @@ namespace Realm {
 
     // ... but we need three helpers that will be defined in the typed versions
     virtual size_t num_spaces() const = 0;
-    virtual void populate_copy_info(ChannelCopyInfo& info) const = 0;
+    virtual void populate_copy_info(ChannelCopyInfo &info) const = 0;
     virtual size_t domain_size() const = 0;
     virtual size_t address_size() const = 0;
 
@@ -3437,10 +3377,10 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
-	xdn.target_node = path_infos[0].xd_channels[i]->node;
+        TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
+        xdn.target_node = path_infos[0].xd_channels[i]->node;
         xdn.channel = path_infos[0].xd_channels[i];
-	//xdn.kind = path_infos[0].xd_kinds[i];
+        //xdn.kind = path_infos[0].xd_kinds[i];
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
 	xdn.scatter_control_input = -1;
@@ -3746,10 +3686,10 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
+        TransferGraph::XDTemplate &xdn = xd_nodes[xd_idx + i];
         xdn.channel = path_infos[0].xd_channels[i];
-	xdn.target_node = path_infos[0].xd_channels[i]->node;
-	//xdn.kind = path_infos[0].xd_kinds[i];
+        xdn.target_node = path_infos[0].xd_channels[i]->node;
+        //xdn.kind = path_infos[0].xd_kinds[i];
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
 	xdn.gather_control_input = -1;
 	xdn.scatter_control_input = -1;
@@ -4019,7 +3959,7 @@ namespace Realm {
 
   protected:
     virtual size_t num_spaces() const;
-    virtual void populate_copy_info(ChannelCopyInfo& info) const;
+    virtual void populate_copy_info(ChannelCopyInfo &info) const;
     virtual size_t domain_size() const;
     virtual size_t address_size() const;
 
@@ -5353,16 +5293,14 @@ namespace Realm {
 	      src_sizes[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].size;
 	    }
 	    IndirectionInfo *gather_info = desc.indirects[xdn.inputs[j].indirect.ind_idx];
-	    ii.iter = gather_info->create_indirect_iterator(ii.mem,
-							    xdn.inputs[j].indirect.inst,
-							    src_fields,
-							    src_offsets,
-							    src_sizes, xdn.channel);
-	    // use first field's serdez - they all have to be the same
-	    ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
-	    ii.ib_offset = 0;
-	    ii.ib_size = 0;
-	    break;
+            ii.iter = gather_info->create_indirect_iterator(
+                ii.mem, xdn.inputs[j].indirect.inst, src_fields, src_offsets, src_sizes,
+                xdn.channel);
+            // use first field's serdez - they all have to be the same
+            ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
+            ii.ib_offset = 0;
+            ii.ib_size = 0;
+            break;
 	  }
 	case TransferGraph::XDTemplate::IO_EDGE:
 	  {
@@ -5485,17 +5423,15 @@ namespace Realm {
 	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].size;
 	    }
 	    IndirectionInfo *scatter_info = desc.indirects[xdn.outputs[j].indirect.ind_idx];
-	    oi.iter = scatter_info->create_indirect_iterator(oi.mem,
-							     xdn.outputs[j].indirect.inst,
-							     dst_fields,
-							     dst_offsets,
-							     dst_sizes, xdn.channel);
-	    // use first field's serdez - they all have to be the same
-	    oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
-	    oi.ib_offset = 0;
-	    oi.ib_size = 0;
-	    break;
-	  }
+            oi.iter = scatter_info->create_indirect_iterator(
+                oi.mem, xdn.outputs[j].indirect.inst, dst_fields, dst_offsets, dst_sizes,
+                xdn.channel);
+            // use first field's serdez - they all have to be the same
+            oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
+            oi.ib_offset = 0;
+            oi.ib_size = 0;
+            break;
+          }
 	case TransferGraph::XDTemplate::IO_EDGE:
 	  {
 	    oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;
@@ -5694,19 +5630,17 @@ namespace Realm {
     return ev;
   }
 
-#define DOIT(N,T) \
-  template Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>&, \
-				       const std::vector<CopySrcDstField>&, \
-				       const std::vector<const CopyIndirection<N,T>::Base *>&, \
-				       const ProfilingRequestSet&,	\
-				       Event,                           \
-				       int) const;			\
-  template class TransferIteratorIndexSpace<N,T>; \
-  template class TransferIteratorIndirect<N,T>; \
-  template class WrappingTransferIteratorIndirect<N,T>; \
-  template class TransferIteratorIndirectRange<N,T>; \
-  template class TransferDomainIndexSpace<N,T>; \
-  template class AddressSplitXferDesFactory<N,T>;
+#define DOIT(N, T)                                                                       \
+  template Event IndexSpace<N, T>::copy(                                                 \
+      const std::vector<CopySrcDstField> &, const std::vector<CopySrcDstField> &,        \
+      const std::vector<const CopyIndirection<N, T>::Base *> &,                          \
+      const ProfilingRequestSet &, Event, int) const;                                    \
+  template class TransferIteratorIndexSpace<N, T>;                                       \
+  template class TransferIteratorIndirect<N, T>;                                         \
+  template class WrappingTransferIteratorIndirect<N, T>;                                 \
+  template class TransferIteratorIndirectRange<N, T>;                                    \
+  template class TransferDomainIndexSpace<N, T>;                                         \
+  template class AddressSplitXferDesFactory<N, T>;
   FOREACH_NT(DOIT)
 
 #define DOIT2(N,T,N2,T2) \

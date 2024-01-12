@@ -185,7 +185,7 @@ namespace Realm {
       // unused
       assert(0);
       return 0;
-   }
+    }
 
     static GPUStream *select_stream(GPU* dst, GPU* src, const GPU::CudaIpcMapping *dst_mapping = 0)
     {
@@ -554,21 +554,6 @@ namespace Realm {
           out_is_ipc = dst_is_ipc[output_control.current_io_port];
         }
 
-        std::string memcpy_kind;
-        if(in_gpu) {
-          if(out_gpu == in_gpu) {
-            memcpy_kind = "d2d";
-          } else if(out_mapping) {
-            memcpy_kind = "ipc";
-          } else if(!out_gpu) {
-            memcpy_kind = "d2h";
-          } else {
-            memcpy_kind = "p2p";
-          }
-        } else {
-          memcpy_kind = "h2d";
-        }
-
         if (in_port == 0 || out_port == 0) {
           if (in_port) {
             in_port->addrcursor.skip_bytes(max_bytes);
@@ -601,6 +586,21 @@ namespace Realm {
 
         stream = select_stream(out_gpu, in_gpu, out_mapping);
         assert(stream != NULL);
+
+        std::string memcpy_kind;
+        if(in_gpu) {
+          if(out_gpu == in_gpu) {
+            memcpy_kind = "d2d";
+          } else if(out_mapping) {
+            memcpy_kind = "ipc";
+          } else if(!out_gpu) {
+            memcpy_kind = "d2h";
+          } else {
+            memcpy_kind = "p2p";
+          }
+        } else {
+          memcpy_kind = "h2d";
+        }
 
         AutoGPUContext agc(stream->get_gpu());
         size_t copy_info_total = 0;

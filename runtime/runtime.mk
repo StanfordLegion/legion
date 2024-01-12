@@ -365,6 +365,11 @@ ifeq ($(strip $(USE_OPENMP)),1)
   ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
     REALM_CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
   endif
+  USE_OPENMP_SYSTEM_RUNTIME ?= 0
+  ifeq ($(strip $(USE_OPENMP_SYSTEM_RUNTIME)),1)
+    REALM_CC_FLAGS += -DREALM_OPENMP_SYSTEM_RUNTIME
+    LD_FLAGS += -fopenmp
+  endif
 endif
 
 USE_PYTHON ?= 0
@@ -981,6 +986,7 @@ MAPPER_SRC	?=
 # Set the source files
 REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
     $(LG_RT_DIR)/realm/bgwork.cc \
+    $(LG_RT_DIR)/realm/transfer/address_list.cc \
     $(LG_RT_DIR)/realm/transfer/transfer.cc \
     $(LG_RT_DIR)/realm/transfer/channel.cc \
     $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
@@ -1043,9 +1049,11 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/ucx/ucp_module.cc \
 endif
 endif
 ifeq ($(strip $(USE_OPENMP)),1)
-REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
-		   $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
-		   $(LG_RT_DIR)/realm/openmp/openmp_api.cc
+REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc
+ifeq ($(strip $(USE_OPENMP_SYSTEM_RUNTIME)),0)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
+               $(LG_RT_DIR)/realm/openmp/openmp_api.cc
+endif
 endif
 REALM_SRC 	+= $(LG_RT_DIR)/realm/procset/procset_module.cc
 ifeq ($(strip $(USE_PYTHON)),1)

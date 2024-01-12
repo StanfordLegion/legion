@@ -70,6 +70,7 @@
 #include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
+#include <sysinfoapi.h>
 
 static void sleep(int seconds)
 {
@@ -740,6 +741,9 @@ namespace Realm {
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
+
+    resource_map.insert({"cpu", &res_num_cpus});
+    resource_map.insert({"sysmem", &res_sysmem_size});
   }
 
 #ifdef REALM_ON_WINDOWS
@@ -810,13 +814,18 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     GlobalMemoryStatusEx(&memInfo);
     res_sysmem_size = static_cast<size_t>(memInfo.ullTotalPageFile);
     // physical cores
-    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = NULL;
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = nullptr;
     DWORD buffer_size = 0;
 
     // Get the required buffer size
-    if (!GetLogicalProcessorInformationEx(RelationAll, NULL, &buffer_size)) {
-      return false;
+    if(!GetLogicalProcessorInformationEx(RelationAll, nullptr, &buffer_size)) {
+      DWORD last_err = GetLastError();
+      if(last_err != ERROR_INSUFFICIENT_BUFFER) {
+        return false;
+      }
+      assert(buffer_size != 0);
     }
+
     buffer = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[buffer_size]);
     if (!GetLogicalProcessorInformationEx(RelationAll, buffer, &buffer_size)) {
       delete[] buffer;
@@ -854,29 +863,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     sysctlbyname("hw.physicalcpu", &res_num_cpus, &buflen, NULL, 0);
 #endif
     log_runtime.info("Discover resource cpu cores %d, sysmem %zu", res_num_cpus, res_sysmem_size);
-    return true;
-  }
-
-  bool CoreModuleConfig::get_resource(const std::string name, int &value) const
-  {
-    if (name == "cpu") {
-      value = res_num_cpus;
-      return true;
-    } else {
-      log_runtime.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
-      return false;
-    }
-  }
-
-  bool CoreModuleConfig::get_resource(const std::string name, size_t &value) const
-  {
-    if (name == "sysmem") {
-      value = res_sysmem_size;
-      return true;
-    } else {
-      log_runtime.error("Module %s does not have the resource: %s", module_name.c_str(), name.c_str());
-      return false;
-    }
+    resource_discover_finished = true;
+    return resource_discover_finished;
   }
 
   void CoreModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
@@ -987,7 +975,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   {
     CoreModule *m = new CoreModule;
 
-    CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
+    CoreModuleConfig *config =
+        checked_cast<CoreModuleConfig *>(runtime->get_module_config("core"));
     assert(config != nullptr);
     assert(config->finish_configured);
     assert(m->name == config->get_name());
@@ -1291,8 +1280,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         local_argv = dummy_cmdline_args;
       }
 
-      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
-
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
 
@@ -1354,6 +1341,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  }
 	}
       }
+
+      module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
 
       if(argc) *argc = local_argc;
       if(argv) *argv = const_cast<char **>(local_argv);
@@ -1438,35 +1427,53 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       return ok;
     }
 
-    template <typename T>
-    static int fragmented_announce(const NodeSet& targets,
-                                   NetworkModule *net,
-                                   Serialization::DynamicBufferSerializer& dbs,
-                                   size_t max_frag_size,
-                                   T thing)
+    template <typename T, typename Elem>
+    static bool serialize_announce(T &serializer, std::vector<Elem> &elements,
+                                   NetworkModule *net)
     {
-      size_t prev_size = dbs.bytes_used();
-      bool ok = serialize_announce(dbs, thing, net);
-      assert(ok);
+      // TODO: rather than have each element push a tag, we can instead push a tag and
+      // size once here, compacting the announcement data
+      bool ok = true;
+      for(const Elem &element : elements) {
+        ok = serialize_announce(serializer, element, net);
+        if(!ok) {
+          break;
+        }
+      }
+      return ok;
+    }
 
-      size_t size = dbs.bytes_used();
-      if(size > max_frag_size) {
-        // send the data that we had before this object
-        assert(prev_size > 0);
-        ActiveMessage<NodeAnnounceMessage> amsg(targets, prev_size);
-        amsg->num_fragments = 0; // count not known yet
-        amsg.add_payload(dbs.get_buffer(), prev_size); // copy now
-        amsg.commit();
-        dbs.reset();
-        // re-serialize this object
-        bool ok = serialize_announce(dbs, thing, net);
-        assert(ok);
-#ifdef DEBUG_REALM
-        assert(dbs.bytes_used() <= max_frag_size);
-#endif
-        return 1;
-      } else
-        return 0;
+    template <typename T>
+    static bool serialize_announce(T &serializer, Node *node, NetworkModule *net)
+    {
+      bool ok = true;
+      std::vector<Machine::ProcessorMemoryAffinity> pmas;
+      ok = serialize_announce(serializer, node->processors, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->memories, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->memories, net);
+      if(!ok) {
+        return ok;
+      }
+      ok = serialize_announce(serializer, node->ib_memories, net);
+      if(!ok) {
+        return ok;
+      }
+      for(ProcessorImpl *proc : node->processors) {
+        get_machine()->get_proc_mem_affinity(pmas, proc->me);
+        ok = serialize_announce(serializer, pmas, net);
+        if(!ok) {
+          return ok;
+        }
+      }
+      ok = serialize_announce(serializer, node->dma_channels, net);
+
+      return ok;
     }
 
     /// Internal auxilary class to handle active messages for sharing CPU memory objects
@@ -1701,7 +1708,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       // load the CoreModuleConfig
-      CoreModuleConfig *config = dynamic_cast<CoreModuleConfig *>(get_module_config("core"));
+      CoreModuleConfig *config =
+          checked_cast<CoreModuleConfig *>(get_module_config("core"));
       assert(config != nullptr);
 
       core_map = CoreMap::discover_core_map(config->hyperthread_sharing);
@@ -2167,102 +2175,59 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       }
 
       // announce by network type
-      for(std::vector<NetworkModule *>::iterator nit = network_modules.begin();
-	  nit != network_modules.end();
-	  ++nit) {
-	// first, build the set of nodes we'll talk to
-	bool empty = true;
-	NodeSet targets;
-	for(NodeID i = 0; i <= Network::max_node_id; i++)
-	  if((i != Network::my_node_id) && (Network::get_network(i) == *nit)) {
-	    empty = false;
-	    targets.add(i);
-	  }
-	if(empty) continue;
-	
-	Serialization::DynamicBufferSerializer dbs(4096);
+      Serialization::DynamicBufferSerializer dbs(4096);
 
-        // when the preferred message size is small, we'll send multiple
-        //  fragments
-        size_t max_frag_size = ActiveMessage<NodeAnnounceMessage>::recommended_max_payload(targets, false /*!with_congestion*/);
-        int num_fragments = 0;
+      for(NetworkModule *module : network_modules) {
+        // first, build the set of nodes we'll talk to
+        NodeSet targets;
+        for(NodeID i = 0; i <= Network::max_node_id; i++) {
+          if((i != Network::my_node_id) && (Network::get_network(i) == module)) {
+            targets.add(i);
+          }
+        }
+        if(targets.empty()) {
+          continue;
+        }
 
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("sending announcements", false);
-	  fflush(stdout);
-	}
-#endif
+        dbs.reset();
+        ok = serialize_announce(dbs, n, module);
+        assert(ok && "Failed to serialize node for announcement");
 
-	// announce each processor
-	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
-	    it != n->processors.end();
-	    it++)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
+        // Now that all of this node's network-specific information is collected, time to
+        // send it all out
+        {
+          std::vector<char> all_announcements;
+          std::vector<size_t> lengths(targets.size() + 1);
+          char *buffer = nullptr;
+          size_t rank = 0;
 
-	// now each memory
-	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-	    it != n->memories.end();
-	    it++)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-        for (std::vector<IBMemory *>::const_iterator it = n->ib_memories.begin();
-             it != n->ib_memories.end();
-             it++)
-          if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-	// announce each processor's affinities
-	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
-	    it != n->processors.end();
-	    it++)
-	  if(*it) {
-	    Processor p = (*it)->me;
-	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
-	    machine->get_proc_mem_affinity(pmas, p);
-
-	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
-		it2 != pmas.end();
-		it2++)
-              num_fragments += fragmented_announce(targets, *nit,
-                                                   dbs, max_frag_size, *it2);
-	  }
-
-  // announce all the dma channels (and their paths)
-	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
-	    it != n->dma_channels.end();
-	    ++it)
-	  if(*it)
-            num_fragments += fragmented_announce(targets, *nit,
-                                                 dbs, max_frag_size, *it);
-
-        // have to send one final message with the remaining data and a valid
-        //  fragment count
-	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
-        amsg->num_fragments = num_fragments + 1;
-        amsg.add_payload(dbs.get_buffer(), dbs.bytes_used()); // copy now
-	amsg.commit();
+          // Use the networking module to exchange all the announcement information, by
+          // whatever optimal path is available.  We assume a non-symmetric machine here,
+          // so we use allgatherv.
+          module->allgatherv(reinterpret_cast<const char *>(dbs.get_buffer()),
+                             dbs.bytes_used(), all_announcements, lengths);
+          buffer = all_announcements.data();
+          // Traverse the nodes _in-order_, as their data is laid out in the same order
+          for(NodeID node_id = 0; node_id <= Network::max_node_id; node_id++) {
+            if(node_id != Network::my_node_id) {
+              if(!targets.contains(node_id)) {
+                // Not a node that's collaborating here, so skip it and don't update the
+                // buffer pointer
+                continue;
+              }
+              machine->parse_node_announce_data(node_id, buffer, lengths[rank], true);
+            }
+            // Increment to the next section of the buffer with data for the next node id
+            buffer += lengths[rank];
+            rank++;
+          }
+        }
       }
 
-      // once we've sent to everybody, wait for all responses
-      {
-	NodeAnnounceMessage::await_all_announcements();
-
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("received all announcements", false);
-	  fflush(stdout);
-	}
-#endif
-      }
-
-      // Now that we have full knowledge of the machine, update the machine
-      // model's mem_mem affinities.
+      // Now that we have full knowledge of the machine, update the machine model's
+      // internal representation Start with the kind maps
+      machine->update_kind_maps();
+      // and the mem_mem affinities
       machine->enumerate_mem_mem_affinities();
 
       if (Config::path_cache_lru_size) {

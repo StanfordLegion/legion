@@ -98,6 +98,15 @@ namespace Realm {
       config_map.insert({"numa_nocpumem", &cfg_numa_nocpu_mem_size});
       config_map.insert({"numacpus", &cfg_num_numa_cpus});
       config_map.insert({"pin_memory", &cfg_pin_memory});
+
+      resource_map.insert({"numa", &res_numa_available});
+    }
+
+    bool NumaModuleConfig::discover_resource(void)
+    {
+      res_numa_available = numasysif_numa_available();
+      resource_discover_finished = true;
+      return resource_discover_finished;
     }
 
     void NumaModuleConfig::configure_from_cmdline(std::vector<std::string>& cmdline)
@@ -136,6 +145,7 @@ namespace Realm {
     /*static*/ ModuleConfig *NumaModule::create_module_config(RuntimeImpl *runtime)
     {
       NumaModuleConfig *config = new NumaModuleConfig();
+      config->discover_resource();
       return config;
     }
 
@@ -145,7 +155,8 @@ namespace Realm {
       //  disabled
       NumaModule *m = new NumaModule;
 
-      NumaModuleConfig *config = dynamic_cast<NumaModuleConfig *>(runtime->get_module_config("numa"));
+      NumaModuleConfig *config =
+          checked_cast<NumaModuleConfig *>(runtime->get_module_config("numa"));
       assert(config != nullptr);
       assert(config->finish_configured);
       assert(m->name == config->get_name());
@@ -162,11 +173,11 @@ namespace Realm {
       }
 
       // next step - see if the system supports NUMA allocation/binding
-      if(!numasysif_numa_available()) {
-	// TODO: warning or fatal error here?
-	log_numa.warning() << "numa support not available in system";
-	delete m;
-	return 0;
+      if(!config->res_numa_available) {
+        // TODO: warning or fatal error here?
+        log_numa.warning() << "numa support not available in system";
+        delete m;
+        return 0;
       }
 
       // get number/sizes of NUMA nodes

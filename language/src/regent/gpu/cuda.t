@@ -209,6 +209,12 @@ local supported_archs = {
 }
 
 local function parse_cuda_arch(arch)
+  -- If the user manually passed a compute version, just return that
+  local arch_value = tonumber(arch)
+  if arch_value ~= nil then
+    return arch_value
+  end
+
   arch = string.lower(arch)
   local sm = supported_archs[arch]
   if sm == nil then

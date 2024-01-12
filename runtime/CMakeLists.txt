@@ -28,6 +28,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 list(APPEND REALM_SRC
   realm/realm_c.h
   realm/transfer/lowlevel_disk.cc
+  realm/transfer/address_list.h            realm/transfer/address_list.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
@@ -190,6 +191,7 @@ endif()
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h
+    realm/ucx/ucp_dyn_load.h
     realm/ucx/ucp_module.h
     realm/ucx/ucp_module.cc
     realm/ucx/ucp_internal.h
@@ -354,7 +356,7 @@ if(Legion_USE_Python)
   # to BUILD_RPATH, otherwise build/lib/librealm.so's dlopen will not find it.
   # We're assuming that libpython.so will be found in the same dir as librealm.so
   # after installation, so no need to update INSTALL_RPATH.
-  get_filename_component(PYTHON_LIB_DIR "${PYTHON_LIBRARIES}" DIRECTORY)
+  get_filename_component(PYTHON_LIB_DIR "${Python3_LIBRARIES}" DIRECTORY)
   set_property(TARGET RealmRuntime APPEND PROPERTY BUILD_RPATH "${PYTHON_LIB_DIR}")
 endif ()
 
@@ -500,7 +502,10 @@ if(REALM_USE_MPI)
 endif()
 
 if(REALM_USE_UCX)
-  target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  target_include_directories(RealmRuntime PRIVATE ${UCX_INCLUDE_DIRS})
+  if(NOT REALM_UCX_DYNAMIC_LOAD)
+    target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
+  endif()
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)
@@ -770,6 +775,26 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(RealmStatic PRIVATE rt)
+endif()
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
+target_include_directories(RealmStatic
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime
+  )
 
 # Mapper objects
 list(APPEND MAPPER_SRC

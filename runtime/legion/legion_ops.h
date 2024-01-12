@@ -3536,21 +3536,17 @@ namespace Legion {
       void compute_parent_index(void);
       void log_requirement(void);
     public:
-      ExternalResource resource;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      const char *file_name;
-      std::map<FieldID,const char*> field_map;
-      std::map<FieldID,void*> field_pointers_map;
-      LegionFileMode file_mode;
       PhysicalRegion region;
       unsigned parent_req_index;
       InstanceSet external_instances;
       ApUserEvent attached_event;
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
-      size_t footprint;
+      Realm::ExternalInstanceResource *external_resource;
+      std::vector<std::string> hdf5_field_files;
       ApEvent termination_event;
       bool restricted;
       bool mapping;
@@ -3633,7 +3629,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       PhysicalRegionImpl* initialize(IndexAttachOp *owner, InnerContext *ctx,
-        const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
+        const IndexAttachLauncher &launcher,
         const DomainPoint &point, unsigned index);
     public:
       // Overload to look for coregions between points
