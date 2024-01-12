@@ -2165,11 +2165,6 @@ namespace Legion {
         { close_mask |= mask; }
       inline const FieldMask& get_close_mask(void) const
         { return close_mask; }
-#if 0
-      // Make this virtual so we can override for ReplMergeCloseOp
-      virtual void record_refinements(const FieldMask &refinement_mask, 
-                                      const bool overwrite);
-#endif
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2179,19 +2174,11 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_dependence_analysis(void);
-#if 0
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-#endif
     protected:
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;
       VersionInfo version_info;
-#if 0
-      FieldMask refinement_mask;
-      bool refinement_overwrite;
-#endif
     };
 
     /**
@@ -2319,35 +2306,7 @@ namespace Legion {
           RegionTreeNode *refinement_node, unsigned parent_req_index);
       void record_refinement_mask(unsigned refinement_number,
                                   const FieldMask &refinement_mask);
-#if 0
-      RefinementNode* clone_refinement(void) const;
-      bool interferes(RefinementNode *refinement, bool &dominates) const;
-      void incorporate_refinement(RefinementNode *refinement);
-#endif
       RegionTreeNode* get_refinement_node(void) const;
-#if 0
-      void record_refinement(RegionTreeNode *node, const FieldMask &mask,
-                             RefProjectionSummary *summary = NULL);
-      void record_refinements(FieldMaskSet<RegionTreeNode> &nodes);
-      void record_uninitialized(const FieldMask &mask);
-#ifdef DEBUG_LEGION
-      void verify_refinement_mask(const FieldMask &refinement_mask);
-#endif
-    protected:
-      void update_refinement(std::set<RtEvent> &map_applied_conditions);
-      void initialize_region(RegionNode *node, const FieldMask &mask,
-                             InnerContext *context,
-         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-                            FieldMaskSet<PartitionNode> &refinement_partitions,
-                            VersionInfo &info, bool record_all = false);
-      void initialize_partition(PartitionNode *node, const FieldMask &mask,
-                            InnerContext *context,
-         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-                            FieldMaskSet<PartitionNode> &refinement_partitions,
-                            VersionInfo &info, bool record_all = false);
-      void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
-                              VersionInfo &info, bool record_all);
-#endif
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2358,9 +2317,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
     protected:
-#if 0
-      RefinementNode *refinement;
-#endif
       FieldMask refinement_mask;
       RegionTreeNode *refinement_node;
       // The parent region requirement for the refinement to update
@@ -2368,22 +2324,6 @@ namespace Legion {
       // For uniquely identify this refinement in the context of
       // its creator operation
       unsigned refinement_number;
-#if 0
-      // The current equivalence sets for the node to be refined
-      LegionMap<RegionNode*,VersionInfo> version_infos;
-      // Equivalence sets that need to be released at completion
-      std::vector<EquivalenceSet*> to_release;
-      // Upper bound node where this refinement is occuring
-      RegionNode *to_refine;
-      // Region tree nodes from which to make refinements
-      FieldMaskSet<RegionTreeNode> make_from;
-      // Projection summaries for non-trivial projections from nodes
-      LegionMap<RegionTreeNode*,
-                FieldMaskSet<RefProjectionSummary> > projections;
-      
-      // Fields which do not have initialized equivalence sets
-      FieldMask uninitialized_fields;
-#endif
     };
 
     /**

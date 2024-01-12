@@ -810,9 +810,6 @@ namespace Legion {
       // These are debugging methods and are never called from
       // actual code, therefore they never take locks
       void dump_logical_state(LogicalRegion region, ContextID ctx);
-#if 0
-      void dump_physical_state(LogicalRegion region, ContextID ctx);
-#endif
 #endif
     public:
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
@@ -4414,41 +4411,6 @@ namespace Legion {
                                          RegionTreeNode *previous_child,
                                          LogicalRegion privilege_root,
                                          LogicalAnalysis &logical_analysis);
-#if 0
-      void siphon_logical_children(LogicalCloser &closer,
-                                   LogicalState &state,
-                                   const FieldMask &closing_mask,
-                                   const FieldMask *aliased_children,
-                                   bool record_close_operations,
-                                   RegionTreeNode *next_child,
-                                   FieldMask &open_below);
-      void siphon_logical_projection(LogicalCloser &closer,
-                                     LogicalState &state,
-                                     const FieldMask &closing_mask,
-                                     const ProjectionInfo &proj_info,
-                                     bool record_close_operations,
-                                     FieldMask &open_below);
-      void flush_logical_reductions(LogicalCloser &closer,
-                                    LogicalState &state,
-                                    FieldMask &reduction_flush_fields,
-                                    bool record_close_operations,
-                                    RegionTreeNode *next_child,
-                                    LegionDeque<FieldState> &states);
-      // Note that 'allow_next_child' and 
-      // 'record_closed_fields' are mutually exclusive
-      void perform_close_operations(LogicalCloser &closer,
-                                    const FieldMask &closing_mask,
-                                    FieldState &closing_state,
-                                    RegionTreeNode *next_child,
-                                    bool allow_next_child,
-                                    const FieldMask *aliased_children,
-                                    bool upgrade_next_child, 
-                                    bool read_only_close,
-                                    bool overwriting_close,
-                                    bool record_close_operations,
-                                    bool record_closed_fields,
-                                    FieldMask &output_mask); 
-#endif
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
                                   LegionDeque<FieldState> &new_states);
@@ -4458,50 +4420,8 @@ namespace Legion {
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
-#if 0
-      void update_logical_refinement(ContextID ctx, size_t total_shards, 
-                                     const FieldMask &refinement_mask,
-                                     FieldMaskSet<RefinementNode> &refinements);
-#endif
       void invalidate_logical_refinement(ContextID ctx, 
                               const FieldMask &invalidate_mask);
-#if 0
-      void record_refinement_tree(ContextID ctx, const FieldMask &mask,
-                                  const std::vector<RegionTreeNode*> &children);
-      void invalidate_refinement_tree(ContextID ctx, 
-                                      const FieldMask &invalidate_mask);
-      void perform_tree_dominance_analysis(ContextID ctx,
-                                           const LogicalUser &user,
-                                           const FieldMask &field_mask,
-                                           Operation *skip_op = NULL,
-                                           GenerationID skip_gen = 0);
-      void register_logical_deletion(ContextID ctx,
-                                     const LogicalUser &user,
-                                     const FieldMask &check_mask,
-                                     const RegionTreePath &path,
-                                     const LogicalTraceInfo &trace_info,
-                                     FieldMask &already_closed_mask,
-                                     bool invalidate_tree); 
-      void siphon_logical_deletion(LogicalCloser &closer,
-                                   LogicalState &state,
-                                   const FieldMask &current_mask,
-                                   RegionTreeNode *next_child,
-                                   FieldMask &open_below,
-                                   bool force_close_next);
-    public:
-      void migrate_logical_state(ContextID src, ContextID dst, bool merge,
-               const std::vector<ShardID> *shard_to_shard_mapping = NULL);
-      void migrate_version_state(ContextID src, ContextID dst, 
-                                 std::set<RtEvent> &applied, bool merge,
-               const std::vector<ShardID> *shard_to_shard_mapping = NULL);
-      void pack_logical_state(ContextID ctx, Serializer &rez, 
-                              const bool invalidate); 
-      void unpack_logical_state(ContextID ctx, Deserializer &derez);
-      void pack_version_state(ContextID ctx, Serializer &rez, 
-                              const bool invalidate,
-                              std::set<RtEvent> &applied_events); 
-      void unpack_version_state(ContextID ctx, Deserializer &derez);
-#endif
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx);
@@ -4523,15 +4443,6 @@ namespace Legion {
       inline PartitionNode* as_partition_node(void) const;
 #endif
       virtual RefinementTracker* create_refinement_tracker(void) = 0;
-#if 0
-      virtual RefinementTracker* create_refinement_tracker(bool current) = 0;
-      virtual RefinementTracker* create_refinement_tracker(
-                                          RegionTreeNode *child) = 0;
-      virtual RefinementTracker* create_refinement_tracker(
-                                  ProjectionSummary *projection) = 0;
-      virtual RefinementTracker* unpack_refinement(Deserializer &derez,
-                    std::map<LegionColor,RegionTreeNode*> &to_traverse) = 0;
-#endif
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
@@ -4548,31 +4459,13 @@ namespace Legion {
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
-#if 0
-      virtual void print_physical_context(ContextID ctx, 
-                                          TreeStateLogger *logger,
-                                          const FieldMask &mask,
-                                  std::deque<RegionTreeNode*> &to_traverse) = 0;
-#endif
       virtual void print_context_header(TreeStateLogger *logger) = 0;
-#if 0
-      virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-                                 bool self, InnerContext &source_context,
-                                 std::set<RtEvent> &applied_events,
-                                 std::vector<EquivalenceSet*> &to_release,
-                                 bool nonexclusive_virtual_root = false) = 0;
-#endif
 #ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask) = 0;
-#if 0
-      virtual void dump_physical_context(ContextID ctx, 
-                                         TreeStateLogger *logger,
-                                         const FieldMask &mask) = 0;
-#endif
 #endif
     public:
       // Logical helper operations
@@ -4647,18 +4540,6 @@ namespace Legion {
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
       void initialize_refined_fields(ContextID ctx, const FieldMask &m);
-#if 0
-      ProjectionRegion* find_largest_disjoint_complete_subtree(
-          InnerContext *context, const std::vector<ShardID> &participants,
-          size_t *leaves = NULL);
-      void refine_disjoint_complete_tree(ContextID ctx, PartitionNode *child,
-                                         RefinementOp *refinement, 
-                                         const FieldMask &refinement_mask,
-                                         std::set<RtEvent> &applied_events);
-      bool filter_unversioned_fields(ContextID ctx, TaskContext *context,
-                                     const FieldMask &filter_mask,
-                                     RegionRequirement &req);
-#endif
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -4668,19 +4549,6 @@ namespace Legion {
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
       virtual RefinementTracker* create_refinement_tracker(void)
         { return new RegionRefinementTracker(this); }
-#if 0
-      virtual RefinementTracker* create_refinement_tracker(bool current) 
-        { return new RegionRefinementTracker(this, current); }
-      virtual RefinementTracker* create_refinement_tracker(RegionTreeNode *next)
-        { return new RegionRefinementTracker(this, next); }
-      virtual RefinementTracker* create_refinement_tracker(
-                                                  ProjectionSummary *projection)
-        { return new RegionRefinementTracker(this,
-            projection->result->as_region_projection()); }
-      virtual RefinementTracker* unpack_refinement(Deserializer &derez,
-          std::map<LegionColor,RegionTreeNode*> &to_traverse)
-        { return RegionRefinementTracker::unpack(this, derez, to_traverse); }
-#endif
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -4721,12 +4589,6 @@ namespace Legion {
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
-#if 0
-      virtual void print_physical_context(ContextID ctx, 
-                                          TreeStateLogger *logger,
-                                          const FieldMask &mask,
-                                      std::deque<RegionTreeNode*> &to_traverse);
-#endif
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
@@ -4738,25 +4600,9 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask);
-#if 0
-      virtual void dump_physical_context(ContextID ctx, 
-                                         TreeStateLogger *logger,
-                                         const FieldMask &mask);
-#endif
 #endif
     public:
       // Support for refinements and versioning
-#if 0
-      void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
-                                         const FieldMask &refinement_mask,
-                                         FieldMask &refined_partition,
-                                         std::set<RtEvent> &applied_events);
-      void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
-                                          const FieldMask &mask);
-      void initialize_nonexclusive_virtual_analysis(ContextID ctx,
-                                  const FieldMask &mask,
-                                  const FieldMaskSet<EquivalenceSet> &eq_sets);
-#endif
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
@@ -4766,26 +4612,6 @@ namespace Legion {
                                        std::set<RtEvent> &ready_events,
                                        RtEvent *output_region_ready = NULL,
                                        bool collective_rendezvous = false);
-#if 0
-      void compute_equivalence_sets(ContextID ctx,
-                                    InnerContext *parent_ctx,
-                                    EqSetTracker *target,
-                                    const AddressSpaceID target_space,
-                                    IndexSpaceExpression *expr,
-                                    const FieldMask &mask,
-                                    std::set<RtEvent> &ready_events,
-                                    const bool downward_only,
-                                    const bool expr_covers);
-      virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-                                 bool self, InnerContext &source_context,
-                                 std::set<RtEvent> &applied_events, 
-                                 std::vector<EquivalenceSet*> &to_release,
-                                 bool nonexclusive_virtual_root = false);
-      void record_refinement(ContextID ctx, EquivalenceSet *set, 
-                             const FieldMask &mask);
-      void propagate_refinement(ContextID ctx, PartitionNode *child,
-                                const FieldMask &mask);
-#endif
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -4844,19 +4670,6 @@ namespace Legion {
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
       virtual RefinementTracker* create_refinement_tracker(void)
         { return new PartitionRefinementTracker(this); }
-#if 0
-      virtual RefinementTracker* create_refinement_tracker(bool current) 
-        { return new PartitionRefinementTracker(this, current); }
-      virtual RefinementTracker* create_refinement_tracker(RegionTreeNode *next)
-        { /*shoudl never be called*/ assert(false); return NULL; }
-      virtual RefinementTracker* create_refinement_tracker(
-                                                  ProjectionSummary* projection)
-        { return new PartitionRefinementTracker(this, 
-            projection->result->as_partition_projection()); }
-      virtual RefinementTracker* unpack_refinement(Deserializer &derez,
-          std::map<LegionColor,RegionTreeNode*> &to_traverse)
-        { return PartitionRefinementTracker::unpack(this, derez, to_traverse); }
-#endif
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -4886,44 +4699,11 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
-#if 0
-    public:
-      ProjectionPartition* find_largest_disjoint_complete_subtree(
-          InnerContext *context, const std::vector<ShardID> &participants,
-          size_t &leaves);
-      void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
-                                         const FieldMask &refinement_mask,
-                                         std::set<RtEvent> &applied_events);
-      void compute_equivalence_sets(ContextID ctx,
-                                    InnerContext *context,
-                                    EqSetTracker *target,
-                                    const AddressSpaceID target_space,
-                                    IndexSpaceExpression *expr,
-                                    const FieldMask &mask,
-                                    std::set<RtEvent> &ready_events,
-                                    const bool downward_only,
-                                    const bool expr_covers);
-      virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-                                 bool self, InnerContext &source_context,
-                                 std::set<RtEvent> &applied_events,
-                                 std::vector<EquivalenceSet*> &to_release,
-                                 bool nonexclusive_virtual_root = false);
-      void record_refinement(ContextID ctx, ShardedColorMap *children_shards,
-                             const FieldMask &mask);
-      void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask);
-#endif
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
-#if 0
-      virtual void print_physical_context(ContextID ctx, 
-                                          TreeStateLogger *logger,
-                                          const FieldMask &mask,
-                                      std::deque<RegionTreeNode*> &to_traverse);
-#endif
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
@@ -4935,11 +4715,6 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask);
-#if 0
-      virtual void dump_physical_context(ContextID ctx, 
-                                         TreeStateLogger *logger,
-                                         const FieldMask &mask);
-#endif
 #endif
     public:
       const LogicalPartition handle;

@@ -1502,31 +1502,6 @@ namespace Legion {
       std::map<DomainPoint,Processor> concurrent_processors;
     };
 
-#if 0
-    /**
-     * \class ElideCloseExchange
-     * This class supports an exchange of symbolic projection trees to
-     * determine if it is safe to elide a close operation in the logical
-     * dependence analysis.
-     */
-    class ElideCloseExchange : public AllGatherCollective<false> {
-    public:
-      ElideCloseExchange(ProjectionTree *t,
-                         ReplicateContext *ctx, CollectiveID id)
-        : AllGatherCollective<false>(ctx, id), tree(t) { }
-    public:
-      virtual MessageKind get_message_kind(void) const
-        { return SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE; }
-      virtual void pack_collective_stage(ShardID target,
-                                         Serializer &rez, int stage) 
-        { tree->serialize(rez); }
-      virtual void unpack_collective_stage(Deserializer &derez, int stage)
-        { tree->deserialize(derez); }
-    public:
-      ProjectionTree *const tree;
-    };
-#endif
-
     /**
      * \class ProjectionTreeExchange
      * This class provides a way of exchanging the projection trees 
@@ -2024,17 +1999,9 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
-#if 0
-      virtual void record_refinements(const FieldMask &refinement_mask,
-                                      const bool overwrite);
-      virtual void trigger_ready(void);
-#endif
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
-#if 0
-      RtBarrier refinement_barrier;
-#endif
     };
 
     /**
@@ -2079,15 +2046,6 @@ namespace Legion {
     protected:
       RtBarrier mapped_barrier;
       RtBarrier refinement_barrier;
-#if 0
-      // Fields for regions that are shared to this node
-      FieldMaskSet<RegionNode> sharded_regions;
-      // Version information objects for each of our local regions
-      // that we are own after sharding non-replicated partitions
-      LegionMap<RegionNode*,VersionInfo> sharded_region_version_infos;
-      // Fields for all the partitions that we encounter
-      FieldMaskSet<PartitionNode> refinement_partitions;
-#endif
     };
 
     /**
@@ -3219,12 +3177,6 @@ namespace Legion {
       void rendezvous_check_virtual_mappings(ShardID shard,
           MapperManager *mapper, const std::vector<bool> &virtual_mappings);
     public:
-#if 0
-      void launch(const std::vector<bool> &virtual_mapped);
-      void unpack_shards_and_launch(Deserializer &derez);
-      void launch_shard(ShardTask *task,
-                        RtEvent precondition = RtEvent::NO_RT_EVENT) const;
-#endif
       EquivalenceSet* get_initial_equivalence_set(unsigned idx,
               LogicalRegion region, InnerContext *context, bool first_shard);
       // If the creating shards are NULL we'll assume that they are all

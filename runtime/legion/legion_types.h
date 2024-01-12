@@ -2208,11 +2208,6 @@ namespace Legion {
     class ProjectionNode;
     class ProjectionRegion;
     class ProjectionPartition;
-#if 0
-    class RefinementNode;
-    class RegionRefinementNode;
-    class PartitionRefinementNode;
-#endif
     class RefinementTracker;
     class RegionRefinementTracker;
     class PartitionRefinementTracker;

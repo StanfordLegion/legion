@@ -360,22 +360,6 @@ namespace Legion {
                              bool silence_warnings, const char *warning_string);
       void report_incompatible_accessor(const char *accessor_kind,
                                         PhysicalInstance instance);
-#if 0
-      RtEvent request_application_instance(Memory target, SingleTask *task,
-                       UniqueID uid, AddressSpaceID source,
-                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT,
-                       size_t upper_bound_size = SIZE_MAX);
-      ApEvent find_application_instance_ready(Memory target, SingleTask *task);
-      // The return event for this method indicates when the resources have
-      // been allocated for the instance and we can consider it mapped
-      RtEvent request_internal_buffer(Operation *op, bool eager);
-      const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
-      FutureInstance* get_canonical_instance(void);
-      ApEvent reduce_from_canonical(FutureInstance *target, AllReduceOp *op,
-                          const ReductionOpID redop_id,
-                          const ReductionOp *redop, bool exclusive,
-                          ApEvent precondition = ApEvent::NO_AP_EVENT);
-#else
       bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source, 
@@ -388,7 +372,6 @@ namespace Legion {
       ApEvent reduce_to(FutureInstance *target, AllReduceOp *op,
                         const ReductionOpID redop_id, const ReductionOp *redop,
                         bool exclusive, ApEvent precondition);
-#endif
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
@@ -2302,11 +2285,6 @@ namespace Legion {
                           const RegionRequirement &req, 
                           Runtime *runtime, const Domain &launch_domain,
                           const std::vector<ProjectionPoint*> &points);
-#if 0
-      // Projection for refinements
-      void project_refinement(IndexSpaceNode *domain, RegionTreeNode *node,
-                              std::vector<RegionNode*> &regions) const;
-#endif
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(LogicalRegion upper_bound,
@@ -2345,24 +2323,6 @@ namespace Legion {
                   RegionTreeNode *root, RegionTreeForest *context, 
                   std::map<RegionTreeNode*,ProjectionNode*> &node_map,
                   ShardID owner_shard);
-#if 0
-    public: 
-      // From scratch
-      ProjectionTree* construct_projection_tree(Operation *op, unsigned index,
-                  ShardID local_shard, RegionTreeNode *root,
-                  IndexSpaceNode *launch_domain, ShardingFunction *sharding, 
-                  IndexSpaceNode *shard_domain) const;
-      // Contribute to an existing tree
-      void construct_projection_tree(Operation *op, unsigned index,
-                  ShardID local_shard, RegionTreeNode *root, 
-                  IndexSpaceNode *launch_domain, ShardingFunction *sharding,
-                  IndexSpaceNode *sharding_domain,
-                  std::map<IndexTreeNode*,ProjectionTree*> &node_map) const;
-      static void add_to_projection_tree(LogicalRegion region,
-                  IndexTreeNode *root, RegionTreeForest *context, 
-                  std::map<IndexTreeNode*,ProjectionTree*> &node_map,
-                  ShardID owner_shard = 0); 
-#endif
     public:
       const unsigned depth; 
       const bool is_exclusive;

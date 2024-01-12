@@ -11205,34 +11205,11 @@ namespace Legion {
         trace = NULL;
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::record_refinements(const FieldMask &refinements, 
-                                          const bool overwrite)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // This should either be a refinement merge close or a normal close
-      assert(!close_mask);
-      assert(!refinement_mask);
-      assert(!!refinements);
-      assert(!(refinements - close_mask));
-      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      close_mask = refinement_mask;
-      refinement_mask = refinements;
-      refinement_overwrite = overwrite;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void MergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
       CloseOp::activate();
-#if 0
-      refinement_overwrite = false;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11242,9 +11219,6 @@ namespace Legion {
       CloseOp::deactivate(false/*free*/);
       close_mask.clear();
       version_info.clear();
-#if 0
-      refinement_mask.clear();
-#endif
       if (freeop)
         runtime->free_merge_close_op(this);
     }
@@ -11295,80 +11269,6 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging(create_op, creator_req_idx, true/*merge close*/);
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!!refinement_mask && !refinement_overwrite)
-      {
-#ifdef DEBUG_LEGION
-        assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        // Compute the current equivalence sets for this region
-        std::set<RtEvent> ready_events;
-        const ContextID ctx = parent_ctx->get_context().get_id();
-        RegionNode *region_node = runtime->forest->get_node(requirement.region);
-        region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-           refinement_mask, unique_op_id, parent_req_index, ready_events);
-        if (!ready_events.empty())
-          enqueue_ready_operation(Runtime::merge_events(ready_events));
-        else
-          enqueue_ready_operation();
-      }
-      else
-        enqueue_ready_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!!refinement_mask)
-      {
-#ifdef DEBUG_LEGION
-        assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        std::set<RtEvent> map_applied_conditions;
-        InnerContext *physical_context = find_physical_context(0/*idx*/);
-        const ContextID ctx = parent_ctx->get_context().get_id();
-        RegionNode *region_node = runtime->forest->get_node(requirement.region);
-        // Make a new equivalence set and record it at this node
-        const AddressSpaceID local_space = runtime->address_space;
-        EquivalenceSet *set = new EquivalenceSet(runtime,
-            runtime->get_available_distributed_id(), local_space, 
-            region_node->row_source, region_node->handle.get_tree_id(),
-            physical_context, true/*register now*/);
-        // Merge the state from the old equivalence sets if not overwriting
-        if (!refinement_overwrite)
-        {
-          const FieldMaskSet<EquivalenceSet> &previous_sets = 
-            version_info.get_equivalence_sets();
-          // Note that we'll explicitly get back any of these previous sets
-          // that are going to be released from the call to invalidate the
-          // refinement. We'll hold on to their references until we get to
-          // the complete stage to make sure they are not collected before
-          // the clone operation is finished.
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                previous_sets.begin(); it != previous_sets.end(); it++)
-            set->clone_from(runtime->address_space, it->first, 
-                it->second, false/*forward*/, map_applied_conditions);
-        }
-        // No need for invalidation since we're the first ones here
-        region_node->invalidate_refinement(ctx, refinement_mask, 
-            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
-        region_node->record_refinement(ctx, set, refinement_mask);
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
-        else
-          complete_mapping();
-      }
-      else
-        complete_mapping();
-      complete_execution();
-    }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Post Close Operation 
@@ -11922,25 +11822,6 @@ namespace Legion {
     {
       InternalOp::deactivate(false/*free*/);
       refinement_mask.clear();
-#if 0
-      version_infos.clear();
-      to_release.clear();
-      make_from.clear();
-      if (!projections.empty())
-      {
-        for (LegionMap<RegionTreeNode*,FieldMaskSet<RefProjectionSummary> >::
-              const_iterator pit = projections.begin(); pit !=
-              projections.end(); pit++)
-        {
-          for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
-                pit->second.begin(); it != pit->second.end(); it++)
-            if (it->first->remove_reference())
-              delete it->first;
-        }
-        projections.clear();
-      }
-      uninitialized_fields.clear();
-#endif
       if (freeop)
         runtime->free_refinement_op(this);
     }
@@ -12030,65 +11911,6 @@ namespace Legion {
       }
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    RefinementNode* RefinementOp::clone_refinement(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(refinement != NULL);
-#endif
-      return refinement->clone();
-    }
-
-    //--------------------------------------------------------------------------
-    bool RefinementOp::interferes(RefinementNode *refine, bool &dominates) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(refinement != NULL);
-#endif
-      RegionTreeNode *other = refine->get_region_tree_node();
-      RegionTreeNode *local = refinement->get_region_tree_node();
-      // If they are from different region trees then there is no interference
-      if (other->get_tree_id() != other->get_tree_id())
-        return false;
-      // Find the common ancestor
-      IndexTreeNode *common_ancestor = NULL;
-      IndexTreeNode *local_index_node = local->get_row_source();
-      IndexTreeNode *other_index_node = other->get_row_source();
-      if (runtime->forest->are_disjoint_tree_only(local_index_node,
-            other_index_node, common_ancestor))
-        return false;
-      // If they are not disjoint based on their tree-only relationship
-      // then they are going to interfere so check to see which one dominates
-      // Note there are no aliased partitions in these trees so the only way
-      // they interfer is if one dominates the other
-#ifdef DEBUG_LEGION
-      assert((common_ancestor == local_index_node) || 
-              (common_ancestor == other_index_node));
-#endif
-      dominates = (common_ancestor == local_index_node);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::incorporate_refinement(RefinementNode *refine)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(refinement != NULL);
-#ifndef NDEBUG_
-      bool incorporated =
-#endif
-#endif
-        refinement->incorporate(refine);
-#ifdef DEBUG_LEGION
-      assert(incorporated);
-#endif
-    }
-#endif
-
     //--------------------------------------------------------------------------
     RegionTreeNode* RefinementOp::get_refinement_node(void) const
     //--------------------------------------------------------------------------
@@ -12099,96 +11921,6 @@ namespace Legion {
       return refinement_node;
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    void RefinementOp::initialize(Operation *creator, unsigned index,
-                                  RegionNode *root, const FieldMask &mask,
-                                  LogicalRegion privilege_root)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(to_refine == NULL);
-#endif
-      initialize_internal(creator, index);
-      to_refine = root;
-      // Initialize the mask for make_from for now in case
-      // get_internal_mask is called before recording any
-      // entries in make_from (e.g. logical tracing)
-      make_from.relax_valid_mask(mask);
-      MustEpochOp *must = creator->get_must_epoch_op();
-      if (must != NULL)
-        set_must_epoch(must, false/*do registration*/);
-      if (runtime->legion_spy_enabled)
-      {
-        LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 
-                                            unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
-                                      true/*region*/,
-                                      root->handle.index_space.id,
-                                      root->handle.field_space.id,
-                                      root->handle.tree_id, LEGION_READ_WRITE, 
-                                      LEGION_EXCLUSIVE, 0/*redop*/, 
-                                      privilege_root.index_space.id);
-        std::set<FieldID> fields;
-        root->column_source->get_field_set(mask, parent_ctx, fields);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
-        LegionSpy::log_internal_op_creator(unique_op_id, 
-                    creator->get_unique_op_id(), index);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::record_refinement(RegionTreeNode *node, 
-                           const FieldMask &mask, RefProjectionSummary *summary)
-    //--------------------------------------------------------------------------
-    {
-      // clear any residual fields before recording in make_from
-      // they were just there until we recorded refinements
-      if (make_from.empty())
-        make_from.clear();
-      make_from.insert(node, mask);
-      if (summary != NULL)
-      {
-        FieldMaskSet<RefProjectionSummary> &summaries = projections[node];
-#ifdef DEBUG_LEGION
-        assert(summaries.get_valid_mask() * mask);
-#endif
-        if (summaries.insert(summary, mask))
-          summary->add_reference();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::record_refinements(FieldMaskSet<RegionTreeNode> &nodes)
-    //--------------------------------------------------------------------------
-    {
-      if (!make_from.empty())
-      {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              nodes.begin(); it != nodes.end(); it++)
-          make_from.insert(it->first, it->second);
-      }
-      else
-        make_from.swap(nodes);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::record_uninitialized(const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      uninitialized_fields |= mask;
-    }
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void RefinementOp::verify_refinement_mask(const FieldMask &refinement_mask)
-    //--------------------------------------------------------------------------
-    {
-      assert(get_internal_mask() == refinement_mask);
-    }
-#endif
-#endif
-
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
@@ -12198,25 +11930,6 @@ namespace Legion {
       // of the pipeline without being impeded by the must epoch op
       must_epoch = NULL;
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void RefinementOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> ready_events;
-      if (!!refinement_mask)
-      {
-        const ContextID ctx = parent_ctx->get_context().get_id();
-        refinement->perform_versioning_analysis(ctx, parent_ctx,
-            refinement_mask, version_infos, unique_op_id, ready_events);
-      }
-      if (!ready_events.empty())
-        enqueue_ready_operation(Runtime::merge_events(ready_events));
-      else
-        enqueue_ready_operation();
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_mapping(void)
@@ -12265,235 +11978,6 @@ namespace Legion {
         complete_mapping();
       complete_execution();
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void RefinementOp::update_refinement(
-                                      std::set<RtEvent> &map_applied_conditions)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(refinement != NULL);
-#endif
-      // First go through and invalidate the current refinement
-      const ContextID ctx = parent_ctx->get_context().get_id();
-      RegionTreeNode *node = refinement->get_region_tree_node();
-      node->invalidate_refinement(ctx, refinement_mask,
-          false/*self*/, *parent_ctx, map_applied_conditions, to_release);
-      // Now we can traverse the new refinement tree and install our updates
-      refinement->register_refinement(ctx, refinement_mask, parent_ctx,
-                                      context_index, refinement_number,
-                                      find_parent_index(0),
-                                      map_applied_conditions, version_infos);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // Go through and build the pending refinements so we get valid
-      // references on all the old equivalence sets before they are invalidated
-      std::set<RtEvent> map_applied_conditions;
-      FieldMaskSet<PartitionNode> refinement_partitions;
-      std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
-      InnerContext *context = find_physical_context(0/*idx*/);
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-            make_from.begin(); it != make_from.end(); it++)
-      {
-        // Check to see if we have any projections to handle from this node
-        // if not then we are doing the trivial projections
-        if (!projections.empty() && 
-            (projections.find(it->first) != projections.end()))
-        {
-          const FieldMaskSet<RefProjectionSummary> &summaries = 
-            projections[it->first];
-          for (FieldMaskSet<RefProjectionSummary>::const_iterator sit =
-                summaries.begin(); sit != summaries.end(); sit++)
-          {
-            // Do the projection to get the regions
-            std::vector<RegionNode*> regions;
-            sit->first->project_refinement(it->first, regions);
-            for (std::vector<RegionNode*>::const_iterator rit =
-                  regions.begin(); rit != regions.end(); rit++)
-              initialize_region(*rit, sit->second, context, refinement_regions,
-                                refinement_partitions, version_info);
-          }
-          const FieldMask remaining = it->second - summaries.get_valid_mask();
-          if (!!remaining)
-          {
-            if (it->first->is_region())
-              initialize_region(it->first->as_region_node(), remaining, context,
-                  refinement_regions, refinement_partitions, version_info);
-            else
-              initialize_partition(it->first->as_partition_node(), remaining, 
-               context, refinement_regions, refinement_partitions,version_info);
-          }
-        }
-        else if (it->first->is_region())
-          initialize_region(it->first->as_region_node(), it->second, context,
-              refinement_regions, refinement_partitions, version_info);
-        else
-          initialize_partition(it->first->as_partition_node(), it->second,
-             context, refinement_regions, refinement_partitions, version_info);
-      }
-      // Now we can invalidate the previous refinement
-      const ContextID ctx = parent_ctx->get_context().get_id();
-      if (!!uninitialized_fields)
-      {
-        const FieldMask invalidate_mask = 
-          get_internal_mask() - uninitialized_fields;
-        if (!!invalidate_mask)
-          to_refine->invalidate_refinement(ctx, invalidate_mask,
-              false/*self*/, *parent_ctx, map_applied_conditions, to_release);
-      }
-      else
-        to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
-      // Finally propagate the new refinements up from the regions
-      for (FieldMaskSet<PartitionNode>::const_iterator it =
-            refinement_partitions.begin(); it !=
-            refinement_partitions.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(refinement_regions.find(it->first) != refinement_regions.end());
-#endif
-        it->first->propagate_refinement(ctx, refinement_regions[it->first],
-                                        it->second);
-      }
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
-      complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::initialize_region(RegionNode *node,
-         const FieldMask &mask, InnerContext *context, 
-         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-         FieldMaskSet<PartitionNode> &refinement_partitions,
-         VersionInfo &info, bool record_all)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node->parent != NULL); // should always have a parent
-#endif
-      PendingEquivalenceSet *pending = new PendingEquivalenceSet(node, context);
-      initialize_pending(pending, mask, info, record_all);
-      // Parent context takes ownership here
-      parent_ctx->record_pending_disjoint_complete_set(pending, mask);
-      std::vector<RegionNode*> &children = refinement_regions[node->parent];
-      if (children.size() < node->parent->get_num_children())
-      {
-        // Iterate through the existing children and see if we find ourselves
-        bool found = false;
-        for (std::vector<RegionNode*>::const_iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          if ((*it) != node)
-            continue;
-          found = true;
-          break;
-        }
-        if (!found)
-          children.push_back(node);
-      }
-      refinement_partitions.insert(node->parent, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::initialize_partition(PartitionNode *node,
-         const FieldMask &mask, InnerContext *context,
-         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-         FieldMaskSet<PartitionNode> &refinement_partitions,
-         VersionInfo &info, bool record_all)
-    //--------------------------------------------------------------------------
-    {
-      // Make pending refinements for each of the child regions and
-      // register them with the context so it can find them later
-      IndexPartNode *index_part = node->row_source;
-      std::vector<RegionNode*> &children = refinement_regions[node];
-      const size_t max_check = children.size();
-      const bool add_children = (max_check < index_part->get_num_children());
-      if (add_children)
-        children.reserve(index_part->total_children);
-      // Iterate over each child and make an equivalence set  
-      for (ColorSpaceIterator itr(index_part); itr; itr++)
-      {
-        RegionNode *child = node->get_child(*itr);
-        PendingEquivalenceSet *pending =
-          new PendingEquivalenceSet(child, context);
-        initialize_pending(pending, mask, info, record_all);
-        // Parent context takes ownership here
-        parent_ctx->record_pending_disjoint_complete_set(pending, mask);
-        if (add_children)
-        {
-          bool found = false;
-          for (unsigned idx = 0; idx < max_check; idx++)
-          {
-            if (children[idx] != child)
-              continue;
-            found = true;
-            break;
-          }
-          if (!found)
-            children.push_back(child);
-        }
-      }
-      refinement_partitions.insert(node, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::initialize_pending(PendingEquivalenceSet *pending,
-                  const FieldMask &set_mask, VersionInfo &info, bool record_all)
-    //--------------------------------------------------------------------------
-    {
-      if (!record_all)
-      {
-        IndexSpaceNode *child_expr = pending->region_node->row_source;
-        const FieldMaskSet<EquivalenceSet> &previous_sets = 
-          info.get_equivalence_sets();
-        if (!previous_sets.empty() && !child_expr->is_empty())
-        {
-          // Import state into this equivalence set
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                previous_sets.begin(); it != previous_sets.end(); it++)
-          {
-            // See if the fields overlap first
-            const FieldMask overlap = it->second & set_mask;
-            if (!overlap)
-              continue;
-            if (child_expr != it->first->region_node->row_source)
-            {
-              IndexSpaceExpression *overlap_expr =
-                runtime->forest->intersect_index_spaces(child_expr,
-                              it->first->region_node->row_source);
-              if (overlap_expr->is_empty())
-                continue;
-            }
-            pending->record_previous(it->first, overlap);
-          }
-        }
-      }
-      else
-        pending->record_all(info);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!to_release.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it =
-              to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete (*it);
-        to_release.clear();
-      }
-      complete_operation();
-    }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Reset Operation 

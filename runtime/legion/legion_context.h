@@ -1032,9 +1032,6 @@ namespace Legion {
       virtual bool verify_hash(const uint64_t hash[2],
           const char *description, Provenance *provenance, bool every);
     public:
-#if 0
-      void clone_requirement(unsigned idx, RegionRequirement &target);
-#endif
       LogicalRegion find_logical_region(unsigned index);
       int find_parent_region_req(const RegionRequirement &req, 
                                  bool check_privilege = true);
@@ -1183,36 +1180,6 @@ namespace Legion {
           AddressSpaceID target_space, unsigned references,
           FieldMaskSet<EqKDTree> &new_subscriptions);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
-#if 0
-      virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
-          size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
-          const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
-          unsigned refinement_number, unsigned index, 
-          std::set<RtEvent> &applied_events);
-      virtual void compute_shard_equivalence_sets(EqSetTracker *target,
-          AddressSpaceID target_space, IndexSpaceExpression *expr,
-          LogicalPartition partition, std::set<RtEvent> &ready_events,
-          const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
-          const bool expr_covers);
-      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
-                                              IndexSpaceNode *color_space);
-      virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
-                                       const std::vector<ShardID> &participants,
-                                       std::vector<IndexPartNode*> &children);
-      virtual ShardedColorMap* find_all_local_children(IndexPartNode *node,
-                                       const std::vector<ShardID> &participants,
-                                       std::vector<ShardID> &child_participants,
-                                       std::vector<IndexSpaceNode*> &children);
-      virtual size_t count_total_leaves(size_t leaves,
-                                      const std::vector<ShardID> &participants);
-      void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
-                                                const FieldMask &mask);
-      virtual bool finalize_disjoint_complete_sets(RegionNode *region,
-          VersionManager *target, FieldMask mask, const UniqueID opid,
-          const AddressSpaceID source, RtUserEvent ready_event);
-      void invalidate_disjoint_complete_sets(RegionNode *region,
-                                             const FieldMask &mask);
-#endif
     public:
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
@@ -2122,12 +2089,6 @@ namespace Legion {
       mutable LocalLock                          instance_view_lock;
       std::map<PhysicalManager*,IndividualView*> instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>     pending_top_views;
-#if 0
-    protected:
-      mutable LocalLock                         pending_set_lock;
-      LegionMap<RegionNode*,
-        FieldMaskSet<PendingEquivalenceSet> >   pending_equivalence_sets;
-#endif
     protected:
       // Field allocation data
       std::map<FieldSpace,FieldAllocatorImpl*> field_allocators;
@@ -2303,24 +2264,6 @@ namespace Legion {
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
-#if 0
-    public:
-      struct DeferDisjointCompleteResponseArgs :
-        public LgTaskArgs<DeferDisjointCompleteResponseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
-      public:
-        DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
-                               AddressSpaceID space, VersionInfo *version_info,
-                               RtUserEvent done, const FieldMask *mask = NULL);
-      public:
-        VersionManager *const target;
-        VersionInfo *const version_info;
-        FieldMask *const request_mask;
-        const RtUserEvent done_event;
-        const AddressSpaceID target_space;
-      };
-#endif
     public:
       template<typename T, bool LOGICAL, bool SINGLE=false>
       class ReplBarrier {
@@ -2641,12 +2584,6 @@ namespace Legion {
                           const std::vector<EqKDTree*> &created_trees,
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
-#if 0
-      void receive_replicate_created_region_contexts(RegionTreeContext ctx,
-                          const std::vector<RegionNode*> &created_state, 
-                          const std::multimap<ShardID,ShardID> &src_to_dst,
-                          size_t num_srcs, std::set<RtEvent> &applied_events);
-#endif
       bool compute_shard_to_shard_mapping(const ShardMapping &src_mapping,
                 std::multimap<ShardID,ShardID> &src_to_dst_mapping) const;
       void handle_created_region_contexts(Deserializer &derez,
@@ -3070,21 +3007,8 @@ namespace Legion {
                                        bool replicate = false);
     public:
       void handle_collective_message(Deserializer &derez);
-#if 0
-      void handle_disjoint_complete_request(Deserializer &derez);
-      static void handle_disjoint_complete_response(Deserializer &derez, 
-                                                    Runtime *runtime);
-      static void handle_defer_disjoint_complete_response(Runtime *runtime,
-                                                          const void *args);
-      static void handle_defer_collective_message(const void *args);
-#endif
       void register_rendezvous(ShardRendezvous *rendezvous);
       void handle_rendezvous_message(Deserializer &derez);
-#if 0
-      static void finalize_disjoint_complete_response(Runtime *runtime,
-            UniqueID opid, VersionManager *target, AddressSpaceID target_space,
-            VersionInfo *version_info, RtUserEvent done_event);
-#endif
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -3134,37 +3058,9 @@ namespace Legion {
                       AddressSpaceID source_space, unsigned req_index,
                       EquivalenceSet *set, const FieldMask &mask);
       virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
-#if 0
-      virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
-          size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
-          const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
-          unsigned refinement_number, unsigned index,
-          std::set<RtEvent> &applied_events);
-#endif
       void handle_compute_equivalence_sets(Deserializer &derez);
       void handle_output_equivalence_set(Deserializer &derez);
       void handle_refine_equivalence_sets(Deserializer &derez);
-#if 0
-      virtual void compute_shard_equivalence_sets(EqSetTracker *target,
-          AddressSpaceID target_space, IndexSpaceExpression *expr,
-          LogicalPartition partition, std::set<RtEvent> &ready_events,
-          const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
-          const bool expr_covers);
-      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
-                                              IndexSpaceNode *color_space);
-      virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
-                                       const std::vector<ShardID> &participants,
-                                       std::vector<IndexPartNode*> &children);
-      virtual ShardedColorMap* find_all_local_children(IndexPartNode *node,
-                                       const std::vector<ShardID> &participants,
-                                       std::vector<ShardID> &child_participants,
-                                       std::vector<IndexSpaceNode*> &children);
-      virtual size_t count_total_leaves(size_t leaves,
-                                      const std::vector<ShardID> &participants);
-      virtual bool finalize_disjoint_complete_sets(RegionNode *region,
-          VersionManager *target, FieldMask mask, const UniqueID opid,
-          const AddressSpaceID source, RtUserEvent ready_event);
-#endif
     public:
       // Fence barrier methods
       inline RtBarrier get_next_mapping_fence_barrier(void)

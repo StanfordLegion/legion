@@ -832,63 +832,6 @@ namespace Legion {
       const bool covers; // whether the expr covers the ExprView its in
     };  
 
-#if 0
-    /**
-     * \struct ProjectionSummary
-     * A small helper class that tracks the triple that 
-     * uniquely defines a set of region requirements
-     * for a projection operation
-     */
-    struct ProjectionSummary {
-    public:
-      ProjectionSummary(void);
-      ProjectionSummary(IndexSpaceNode *is, 
-                        ProjectionFunction *p, 
-                        ShardingFunction *s,
-                        IndexSpaceNode *sd);
-      ProjectionSummary(const ProjectionInfo &info);
-      ProjectionSummary(ProjectionSummary &&rhs);
-      ProjectionSummary(const ProjectionSummary &rhs);
-      ~ProjectionSummary(void);
-    public:
-      ProjectionSummary& operator=(const ProjectionSummary &rhs);
-    public:
-      bool operator<(const ProjectionSummary &rhs) const;
-      bool operator==(const ProjectionSummary &rhs) const;
-      bool operator!=(const ProjectionSummary &rhs) const;
-    public:
-      void pack_summary(Serializer &rez) const;
-      static ProjectionSummary unpack_summary(Deserializer &derez,
-                        RegionTreeForest *context);
-    public:
-      IndexSpaceNode *domain;
-      ProjectionFunction *projection;
-      ShardingFunction *sharding;
-      IndexSpaceNode *sharding_domain;
-    };
-
-    /**
-     * \struct RefProjectionSummary
-     * A refinement projection summary is just a projection summary
-     * with support for reference counting and no copies
-     */
-    struct RefProjectionSummary : public ProjectionSummary, public Collectable {
-    public:
-      RefProjectionSummary(const ProjectionInfo &info);
-      RefProjectionSummary(ProjectionSummary &&rhs);
-      RefProjectionSummary(const RefProjectionSummary &rhs);
-      ~RefProjectionSummary(void);
-    public:
-      RefProjectionSummary& operator=(const RefProjectionSummary &rhs);
-    public:
-      void project_refinement(RegionTreeNode *node, 
-                              std::vector<RegionNode*> &regions) const;
-      void project_refinement(RegionTreeNode *node, ShardID shard,
-                              std::vector<RegionNode*> &regions,
-                              Provenance *provenance) const;
-    };
-#endif
-
     /**
      * \struct FieldState
      * Track the field state more accurately
@@ -955,122 +898,6 @@ namespace Legion {
       // Must remain constant since many things can refer to this
       const std::unordered_map<LegionColor,ShardID> color_shards;
     };
-
-#if 0
-    /**
-     * \class RefinementNode
-     * This data captures an actualized refinement tree to pass to a
-     * refinement operation to update which regions are being used for
-     * equivalence sets. It lives from the time that it is created 
-     * up to the point that it is invalidated by the version manager.
-     */
-    class RefinementNode {
-    public:
-      virtual ~RefinementNode(void) { }
-    public:
-      virtual RegionRefinementNode* as_region_refinement(void) { return NULL; }
-      virtual PartitionRefinementNode* as_partition_refinement(void)
-        { return NULL; };
-      virtual RegionTreeNode* get_region_tree_node(void) const = 0;
-      virtual RefinementNode* clone(void) const = 0;
-      virtual bool incorporate(RefinementNode *to_incorporate) = 0;
-      virtual void perform_versioning_analysis(ContextID ctx,
-          InnerContext *context, const FieldMask &mask, 
-          LegionMap<RegionNode*,VersionInfo> &version_infos,
-          UniqueID op_id, std::set<RtEvent> &ready_events) const = 0;
-      virtual void register_refinement(ContextID ctx, const FieldMask &mask,
-          InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
-          unsigned parent_req_index, std::set<RtEvent> &applied_events,
-          const LegionMap<RegionNode*,VersionInfo> &version_infos) const = 0;
-    public:
-      FieldMask increment_touches(const FieldMask &mask);
-      FieldMask dominates_touches(const FieldMask &mask,
-                                  const RefinementNode *rhs) const;
-      void filter_touches(const FieldMask &mask);
-      void record_refinement_tree(ContextID ctx, const FieldMask &mask) const;
-    public:
-      inline size_t count_children(void) const { return children.size(); }
-      bool is_mostly_complete(void) const;
-      bool matches(const RefinementNode *sibling) const;
-      bool matches_child(LegionColor color, RefinementNode *child) const;
-      void update_child(LegionColor color, RefinementNode *child);
-      RefinementNode* clone(void) const;
-    public:
-      RegionTreeNode *const node;
-      static constexpr unsigned REFINEMENT_CHANGE_COUNT = 16;
-    protected:
-      std::map<LegionColor,RefinementNode*> children;
-      std::map<LegionColor,ShardID> shard_children; // only for partitions
-      LegionMap<unsigned,FieldMask> touches;
-    };
-
-    /**
-     * \class RegionRefinementNode
-     * A region refinement node stores the meta-data required for 
-     * representing a logical region in a refinement tree
-     */
-    class RegionRefinementNode : public RefinementNode {
-    public:
-      RegionRefinementNode(RegionNode *owner,
-                           PartitionRefinementNode *child = NULL);
-      RegionRefinementNode(const RegionRefinementNode &rhs) = delete;
-      virtual ~RegionRefinementNode(void);
-    public:
-      RegionRefinementNode& operator=(const RegionRefinementNode &rhs) = delete;
-    public:
-      virtual RegionRefinementNode* as_region_refinement(void) { return this; }
-      virtual RegionTreeNode* get_region_tree_node(void) const;
-      virtual RefinementNode* clone(void) const;
-      virtual bool incorporate(RefinementNode *to_incorporate);
-      virtual void perform_versioning_analysis(ContextID ctx,
-          InnerContext *context, const FieldMask &mask, 
-          LegionMap<RegionNode*,VersionInfo> &version_infos,
-          UniqueID op_id, std::set<RtEvent> &ready_events) const;
-      virtual void register_refinement(ContextID ctx, const FieldMask &mask,
-          InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
-          unsigned parent_req_index, std::set<RtEvent> &applied_events,
-          const LegionMap<RegionNode*,VersionInfo> &version_infos) const;
-    public:
-      RegionNode *const node;
-      PartitionRefinementNode *child;
-      // Should only have refining shards at the leaves of the refinement
-      // tree and only in control replicated contexts
-      std::vector<ShardID> refining_shards; // this vector is sorted
-    };
-
-    /**
-     * \class RegionRefinementNode
-     * A region refinement node stores the meta-data required for 
-     * representing a logical region in a refinement tree
-     */
-    class PartitionRefinementNode : public RefinementNode {
-    public:
-      PartitionRefinementNode(PartitionNode *owner,ShardedColorMap *map = NULL);
-      PartitionRefinementNode(const PartitionRefinementNode &rhs) = delete;
-      virtual ~PartitionRefinementNode(void);
-    public:
-      PartitionRefinementNode& operator=(
-          const PartitionRefinementNode &rhs) = delete;
-    public:
-      virtual PartitionRefinementNode* as_partition_refinement(void)
-        { return this; }
-      virtual RegionTreeNode* get_region_tree_node(void) const;
-      virtual RefinementNode* clone(void) const;
-      virtual bool incorporate(RefinementNode *to_incorporate);
-      virtual void perform_versioning_analysis(ContextID ctx,
-          InnerContext *context, const FieldMask &mask, 
-          LegionMap<RegionNode*,VersionInfo> &version_infos,
-          UniqueID op_id, std::set<RtEvent> &ready_events) const;
-      virtual void register_refinement(ContextID ctx, const FieldMask &mask,
-          InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
-          unsigned parent_req_index, std::set<RtEvent> &applied_events,
-          const LegionMap<RegionNode*,VersionInfo> &version_infos) const;
-    public:
-      PartitionNode *const node;
-      ShardedColorMap *const children_shards;
-      std::unordered_map<LegionColor,RegionRefinementNode*> children;
-    };
-#endif
 
     /**
      * \class ProjectionNode
@@ -1194,9 +1021,6 @@ namespace Legion {
       virtual ProjectionPartition *as_partition_projection(void) 
         { return NULL; }
       virtual bool is_disjoint(void) const = 0;
-#if 0
-      virtual bool is_complete(void) const = 0;
-#endif
       virtual bool is_leaves_only(void) const = 0;
       virtual bool is_unique_shards(void) const = 0;
       virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
@@ -1208,9 +1032,6 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) = 0;
-#if 0
-      virtual RefinementNode* create_refinement(void) const = 0;
-#endif
     public:
       IntervalTree shard_children;
     };
@@ -1225,9 +1046,6 @@ namespace Legion {
     public:
       virtual ProjectionRegion* as_region_projection(void) { return this; }
       virtual bool is_disjoint(void) const;
-#if 0
-      virtual bool is_complete(void) const;
-#endif
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
@@ -1239,19 +1057,9 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
-#if 0
-      virtual RefinementNode* create_refinement(void) const;
-#endif
       bool has_interference(ProjectionRegion *other, ShardID local) const;
       void add_user(ShardID shard);
       void add_child(ProjectionPartition *child);
-#if 0
-      void convert(const std::vector<ShardID> *shard_to_shard_mapping);
-      void merge(ProjectionRegion *rhs,
-                 const std::vector<ShardID> *shard_to_shard_mapping);
-      void pack(Serializer &rez) const;
-      void unpack(Deserializer &derez);
-#endif
     public:
       RegionNode *const region;
       std::unordered_map<LegionColor,ProjectionPartition*> local_children;
@@ -1273,9 +1081,6 @@ namespace Legion {
       virtual ProjectionPartition* as_partition_projection(void)
         { return this; }
       virtual bool is_disjoint(void) const;
-#if 0
-      virtual bool is_complete(void) const;
-#endif
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
@@ -1287,18 +1092,8 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
-#if 0
-      virtual RefinementNode* create_refinement(void) const;
-#endif
       bool has_interference(ProjectionPartition *other, ShardID local) const;
       void add_child(ProjectionRegion *child);
-#if 0
-      void convert(const std::vector<ShardID> *shard_to_shard_mapping);
-      void merge(ProjectionPartition *rhs,
-                 const std::vector<ShardID> *shard_to_shard_mapping);
-      void pack(Serializer &rez) const;
-      void unpack(Deserializer &derez);
-#endif
     public:
       PartitionNode *const partition;
       std::unordered_map<LegionColor,ProjectionRegion*> local_children;
@@ -1308,25 +1103,6 @@ namespace Legion {
       ShardedColorMap *name_based_children_shards;
 #endif
     };
-
-#if 0
-    public:
-      ProjectionTree(bool all_children_disjoint);
-      ProjectionTree(const ProjectionTree &rhs) = delete;
-      ~ProjectionTree(void);
-    public:
-      ProjectionTree& operator=(const ProjectionTree &rhs) = delete;
-    public:
-      bool interferes(const ProjectionTree *other, ShardID other_shard) const;
-      bool uses_shard(ShardID other_shard) const;
-      void serialize(Serializer &rez) const;
-      void deserialize(Deserializer &derez);
-    public:
-      std::map<LegionColor,ProjectionTree*> children;
-      std::set<ShardID> users;
-      const bool all_children_disjoint;
-    };
-#endif 
 
     /**
      * \class ProjectionSummary
@@ -1421,27 +1197,6 @@ namespace Legion {
       virtual bool update_arrival(const RegionUsage &usage) = 0;
       virtual void invalidate_refinement(ContextID ctx, 
                                 const FieldMask &invalidation_mask) = 0;
-#if 0
-      virtual bool is_disjoint_complete(void) const = 0;
-      virtual bool needs_fallback_refinement(
-                                   const ProjectionInfo &proj_info) const = 0;
-      virtual bool update_refinement_child(RegionTreeNode *child_node) = 0;
-      virtual bool update_refinement_projection(
-                                           ProjectionNode *projection) = 0;
-      virtual void change_refinements(ContextID ctx, const FieldMask &mask,
-                        FieldMaskSet<RegionTreeNode> &new_children,
-                        FieldMaskSet<ProjectionNode> &new_projections) = 0;
-      virtual void invalidate_refinement(ContextID ctx, 
-                                      const FieldMask &invalidation_mask) = 0;
-      virtual void find_child_refinements(
-          std::set<RegionTreeNode*> &children) const = 0;
-      virtual void convert(
-          const std::vector<ShardID> *shard_to_shard_mapping) = 0;
-      virtual void merge(RefinementTracker *rhs,
-          const std::vector<ShardID> *shard_to_shard_mapping) = 0;
-      virtual void pack(Serializer &rez, 
-          std::map<LegionColor,RegionTreeNode*> &to_traverse) = 0;
-#endif
     public:
       // This is the number of return children or projections we need
       // to observe in total before we consider a change to a refinement
@@ -1478,11 +1233,6 @@ namespace Legion {
       public LegionHeapify<RegionRefinementTracker> {
     public:
       RegionRefinementTracker(RegionNode *node);
-#if 0
-      RegionRefinementTracker(RegionNode *node, bool current_refinement);
-      RegionRefinementTracker(RegionNode *node, RegionTreeNode *child);
-      RegionRefinementTracker(RegionNode *node, ProjectionRegion *projection);
-#endif
       RegionRefinementTracker(const RegionRefinementTracker &rhs) = delete;
       virtual ~RegionRefinementTracker(void);
     public:
@@ -1501,42 +1251,11 @@ namespace Legion {
       virtual bool update_arrival(const RegionUsage &usage);
       virtual void invalidate_refinement(ContextID ctx, 
                                          const FieldMask &invalidation_mask);
-#if 0
-      virtual bool is_disjoint_complete(void) const;
-      virtual bool needs_fallback_refinement(
-                                   const ProjectionInfo &proj_info) const;
-      virtual bool update_refinement_child(RegionTreeNode *child_node);
-      virtual bool update_refinement_projection(ProjectionNode *projection);
-      virtual void change_refinements(ContextID ctx, const FieldMask &mask,
-                        FieldMaskSet<RegionTreeNode> &new_children,
-                        FieldMaskSet<ProjectionNode> &new_projections);
-      virtual void invalidate_refinement(ContextID ctx, 
-                                         const FieldMask &invalidation_mask);
-      virtual void find_child_refinements(
-          std::set<RegionTreeNode*> &children) const;
-      virtual void convert(
-          const std::vector<ShardID> *shard_to_shard_mapping);
-      virtual void merge(RefinementTracker *rhs,
-          const std::vector<ShardID> *shard_to_shard_mapping);
-      virtual void pack(Serializer &rez, 
-          std::map<LegionColor,RegionTreeNode*> &to_traverse);
-      static RegionRefinementTracker* unpack(RegionNode *region,
-          Deserializer &derez, std::map<LegionColor,RegionTreeNode*> &traverse);
-#endif
     protected:
       bool is_dominant_candidate(double score, bool is_current);
       void invalidate_unused_candidates(void);
     public:
       RegionNode *const region;
-#if 0
-      // At most one of these will be non-NULL
-      PartitionNode *const refined_child;
-      ProjectionRegion *const refined_projection;
-      // This region can be part of the refinement tree even if it
-      // doesn't have a refined child or projection
-      const bool current_refinement;
-    
-#endif
     protected: 
       RefinementState refinement_state;
       PartitionNode *refined_child;
@@ -1566,10 +1285,6 @@ namespace Legion {
       public LegionHeapify<PartitionRefinementTracker> {
     public:
       PartitionRefinementTracker(PartitionNode *node);
-#if 0
-      PartitionRefinementTracker(PartitionNode *node, bool current_refinement);
-      PartitionRefinementTracker(PartitionNode *node,ProjectionPartition *proj);
-#endif
       PartitionRefinementTracker(
           const PartitionRefinementTracker &rhs) = delete;
       virtual ~PartitionRefinementTracker(void);
@@ -1590,39 +1305,11 @@ namespace Legion {
       virtual bool update_arrival(const RegionUsage &usage);
       virtual void invalidate_refinement(ContextID ctx, 
                                          const FieldMask &invalidation_mask);
-#if 0
-      virtual bool is_disjoint_complete(void) const;
-      virtual bool needs_fallback_refinement(
-                                   const ProjectionInfo &proj_info) const;
-      virtual bool update_refinement_child(RegionTreeNode *child_node);
-      virtual bool update_refinement_projection(ProjectionNode *projection);
-      virtual void change_refinements(ContextID ctx, const FieldMask &mask,
-                        FieldMaskSet<RegionTreeNode> &new_children,
-                        FieldMaskSet<ProjectionNode> &new_projections);
-      virtual void invalidate_refinement(ContextID ctx, 
-                                         const FieldMask &invalidation_mask);
-      virtual void find_child_refinements(
-          std::set<RegionTreeNode*> &children) const;
-      virtual void convert(
-          const std::vector<ShardID> *shard_to_shard_mapping);
-      virtual void merge(RefinementTracker *rhs,
-          const std::vector<ShardID> *shard_to_shard_mapping);
-      virtual void pack(Serializer &rez, 
-          std::map<LegionColor,RegionTreeNode*> &to_traverse);
-      static PartitionRefinementTracker* unpack(PartitionNode *partition,
-          Deserializer &derez, std::map<LegionColor,RegionTreeNode*> &traverse);
-#endif
     protected:
       bool is_dominant_candidate(double score, bool is_current);
       void invalidate_unused_candidates(void);
     public:
       PartitionNode *const partition;
-#if 0
-      ProjectionPartition *const refined_projection;
-      // A partition is only a current refinement if it has a
-      // refined_projection or all its children are part of the refinement
-      const bool current_refinement;
-#endif
     protected:
       ProjectionPartition *refined_projection;
       RefinementState refinement_state;
@@ -1669,18 +1356,6 @@ namespace Legion {
       void check_init(void);
       void clear(void);
       void clear_deleted_state(ContextID ctx, const FieldMask &deleted_mask);
-#if 0
-      void pack_refinements(Serializer &rez, 
-                std::map<LegionColor,RegionTreeNode*> &to_traverse) const;
-      void unpack_refinements(Deserializer &derez, 
-                  std::map<LegionColor,RegionTreeNode*> &to_traverse);
-      void merge_refinements(LogicalState &src,
-          const std::vector<ShardID> *shard_to_shard_mapping,
-          std::set<RegionTreeNode*> &to_traverse);
-      void convert_refinements(LogicalState &src,
-          const std::vector<ShardID> *shard_to_shard_mapping,
-          std::set<RegionTreeNode*> &to_traverse);
-#endif
       ProjectionSummary* find_or_create_projection_summary(
                                           Operation *op, unsigned index,
                                           const RegionRequirement &req,
@@ -1689,10 +1364,6 @@ namespace Legion {
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
                           ProjectionSummary *one, ProjectionSummary *two);
-#if 0
-      ProjectionNode* find_or_create_fallback_refinement(InnerContext *context,
-                                                  IndexSpaceNode *color_space);
-#endif
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1717,29 +1388,6 @@ namespace Legion {
                                          LogicalAnalysis &logical_analysis);
       void filter_timeout_users(LogicalAnalysis &logical_analysis);
       void promote_next_child(RegionTreeNode *child, FieldMask mask);
-#if 0
-      void initialize_unrefined_fields(const FieldMask &mask, 
-          const unsigned index, LogicalAnalysis &analysis);
-      void update_refinement_child(FieldMask &disjoint_complete_mask,
-          FieldMask traversal_mask, RegionTreeNode *child_node, 
-          FieldMask child_disjoint_complete,
-          const ProjectionInfo &info, LogicalAnalysis &analysis,
-          ContextID ctx, LogicalRegion privilege, unsigned req_index,
-          FieldMaskSet<RefinementOp> &refinement_operations);
-      void update_refinement_projection(FieldMask &disjoint_complete_mask,
-          FieldMask traversal_mask, ProjectionSummary *projection,
-          LogicalAnalysis &logical_analysis, ContextID ctx,
-          LogicalRegion privilege, unsigned req_index,
-          FieldMaskSet<RefinementOp> &refinement_operations);
-      void change_refinements(ContextID ctx, size_t total_shards,
-          FieldMask mask, FieldMaskSet<RefinementNode> &refinements);
-      void invalidate_refinements(ContextID ctx, FieldMask invalidation_mask);
-    public:
-      bool find_symbolic_elide_close_result(const ProjectionSummary &prev, 
-                            const ProjectionSummary &next, bool &result) const;
-      void record_symbolic_elide_close_result(const ProjectionSummary &prev,
-                            const ProjectionSummary &next, bool result);
-#endif
     public:
       RegionTreeNode *const owner;
     public:
@@ -1785,149 +1433,9 @@ namespace Legion {
       std::list<ProjectionSummary*> projection_summary_cache;
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,bool> > interfering_shards;
-#if 0
-    public:
-      // This is the fallback refinement for the logical region in this
-      // context on this node of the region tree. Note that we only need
-      // to compute this once and we can save it for the rest of the 
-      // context. It will only be invalidated when this part of the
-      // context is cleared out.
-      ProjectionNode* fallback_refinement;
-      // Track whether this node is part of the disjoint-complete tree
-      FieldMask disjoint_complete_tree;
-      // Use this data structure for tracking where the disjoint-complete
-      // tree is for this region tree. On region nodes there should be at
-      // most one child in this data structure. On partition nodes there
-      // can be any number of children with different field masks.
-      // Note that this might also be empty for partition nodes where
-      // we have issued projections
-      FieldMaskSet<RegionTreeNode> disjoint_complete_children;
-      // Keep track of the disjoint complete accesses that have been
-      // done in other children to track whether we want to change later
-      // For partitions we'll only store the children to help with the
-      // process of counting. After that we'll remove children and the
-      // summary mask will be all that remains to record which fields
-      // have disjoint and complete accesses
-      FieldMaskSet<RegionTreeNode> disjoint_complete_accesses;
-      // For partitions only, we record the counts of the numbers of
-      // children that we've observed for all fields to see when we're 
-      // close enough to be counted as being considered refined
-      // For regions, we keep two counts, one of the number of
-      // consecutive accesses to the most recent child in 
-      // disjoint_complete_accesses (expressed as an even number 2*count)
-      // and a second number the number of accesses to any child that
-      // is not the current one in disjoint_complete_children
-      // (expressed as an odd number 2*count+1)
-      typedef LegionMap<size_t,FieldMask,UNTRACKED_ALLOC,
-                        std::greater<size_t> > FieldSizeMap;
-      FieldSizeMap                 disjoint_complete_child_counts;
-      // If we have non-zero depth projection functions then we can get
-      // these at the bottom of the disjoint complete access trees to say
-      // how to project from a given node in the region tree
-      FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
-    public:
-      struct SymbolicCacheEntry {
-      public:
-        SymbolicCacheEntry(const ProjectionSummary o,
-                           const ProjectionSummary t, bool r)
-          : one(o), two(t), result(r) { }
-      public:
-        inline bool matches(const ProjectionSummary &prev, 
-                            const ProjectionSummary &next) const
-        {
-          if (one != prev) return false;
-          if (two != next) return false;
-          return true;
-        }
-      public:
-        ProjectionSummary one, two;
-        bool result;
-      };
-      // This helps to memoize expensive close operation elisions tests 
-      // within this context in a determinstic way for control replication
-      std::list<SymbolicCacheEntry> *symbolic_elide_close_results;
-#endif
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
-
-#if 0
-    /**
-     * \class LogicalCloser
-     * This structure helps keep track of the state
-     * necessary for performing a close operation
-     * on the logical region tree.
-     */
-    class LogicalCloser {
-    public:
-      LogicalCloser(ContextID ctx, const LogicalUser &u, 
-                    RegionTreeNode *root, bool validates);
-      LogicalCloser(const LogicalCloser &rhs) = delete;
-      ~LogicalCloser(void);
-    public:
-      LogicalCloser& operator=(const LogicalCloser &rhs) = delete;
-    public:
-      inline bool has_close_operations(FieldMask &already_closed_mask)
-        {
-          if (!close_mask)
-            return false;
-          if (!!already_closed_mask)
-          {
-            // Remove any fields which were already closed
-            // We only need one close per field for a traversal
-            // This handles the upgrade cases after we've already
-            // done a closer higher up in the tree
-            close_mask -= already_closed_mask;
-            if (!close_mask)
-              return false;
-          }
-          already_closed_mask |= close_mask;
-          return true;
-        }
-      // Record normal closes like this
-      void record_close_operation(const FieldMask &mask);
-      void record_closed_user(const LogicalUser &user, const FieldMask &mask);
-#ifndef LEGION_SPY
-      void pop_closed_user(void);
-#endif
-      void initialize_close_operations(LogicalState &state, 
-                                       Operation *creator,
-                                       const LogicalTraceInfo &trace_info,
-                                       const bool check_for_refinements,
-                                       const bool has_next_child);
-      void perform_dependence_analysis(const LogicalUser &current,
-                                       const FieldMask &open_below,
-             LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
-             LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers);
-      void update_state(LogicalState &state);
-      void register_close_operations(
-              LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &users);
-    protected:
-      void register_dependences(CloseOp *close_op, 
-                                const LogicalUser &close_user,
-                                const LogicalUser &current, 
-                                const FieldMask &open_below,
-             LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC> &husers,
-             LegionList<LogicalUser,LOGICAL_REC_ALLOC> &ausers,
-             LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
-             LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers);
-    public:
-      const ContextID ctx;
-      const LogicalUser &user;
-      RegionTreeNode *const root_node;
-      const bool validates;
-      const bool tracing;
-      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC> closed_users;
-    protected:
-      FieldMask close_mask;
-    protected:
-      // At most we will ever generate one close operation at a node
-      MergeCloseOp *close_op;
-    protected:
-      // Cache the generation IDs so we can kick off ops before adding users
-      GenerationID merge_close_gen;
-    }; 
-#endif
 
     /**
      * \class LogicalAnalysis 
@@ -1960,14 +1468,6 @@ namespace Legion {
     public:
       LogicalAnalysis& operator=(const LogicalAnalysis &rhs) = delete;
     public:
-#if 0
-      RefinementOp* create_refinement(const LogicalUser &user,
-          PartitionNode *partition, const FieldMask &refinement_mask,
-          LogicalRegion privilege_root);
-      bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
-      void record_unrefined_fields(RegionNode *node, unsigned index,
-                                   const FieldMask &unrefined);
-#endif
       void record_pending_refinement(LogicalRegion privilege,
                                      unsigned req_index,
                                      unsigned parent_req_index,
@@ -1993,10 +1493,6 @@ namespace Legion {
       // to ignore any refinement requests for them
       const unsigned output_region_offset;
     protected:
-#if 0
-      FieldMaskSet<RegionNode> unrefined_nodes;
-      std::map<RegionNode*,unsigned> unrefined_indexes;
-#endif
       // Keep these ordered by the order in which we make them so that
       // all shards will iterate over them in the same order for 
       // control replication cases, we do this by sorting them based
@@ -3683,10 +3179,6 @@ namespace Legion {
       void cancel_subscriptions(Runtime *runtime,
           const LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel,
           std::vector<RtEvent> *cancelled_events = NULL);
-#if 0
-      bool finish_subscription(EqKDTree *owner, AddressSpaceID space,
-                               const FieldMask &mask);
-#endif
       static void invalidate_subscriptions(Runtime *runtime, EqKDTree *source,
           LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &subscribers,
           std::vector<RtEvent> &applied_events);
@@ -4358,50 +3850,6 @@ namespace Legion {
       unsigned sample_count;
     };
 
-#if 0
-    /**
-     * \class PendingEquivalenceSet
-     * This is a helper class to store the equivalence sets for
-     * pending refinements where we have computed a new refinement
-     * but haven't made the equivalence set yet to represent it
-     */
-    class PendingEquivalenceSet : public LegionHeapify<PendingEquivalenceSet> {
-    public:
-      struct DeferFinalizePendingSetArgs : 
-        public LgTaskArgs<DeferFinalizePendingSetArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_FINALIZE_PENDING_SET_TASK_ID;
-      public:
-        DeferFinalizePendingSetArgs(PendingEquivalenceSet *p)
-          : LgTaskArgs<DeferFinalizePendingSetArgs>(implicit_provenance), 
-            pending(p) { }
-      public:
-        PendingEquivalenceSet *const pending;
-      };
-    public:
-      PendingEquivalenceSet(RegionNode *region_node, InnerContext *context);
-      PendingEquivalenceSet(const PendingEquivalenceSet &rhs) = delete;
-      ~PendingEquivalenceSet(void);
-    public:
-      PendingEquivalenceSet& operator=(const PendingEquivalenceSet&) = delete;
-    public:
-      void record_previous(EquivalenceSet *set, const FieldMask &mask);
-      void record_all(VersionInfo &version_info); 
-    public:
-      EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
-                      Runtime *runtime, std::set<RtEvent> &ready_events);
-      bool finalize(void);
-      static void handle_defer_finalize(const void *args);
-    public:
-      RegionNode *const region_node;
-      InnerContext *const context;
-    protected:
-      EquivalenceSet *new_set;
-      RtEvent clone_event;
-      FieldMaskSet<EquivalenceSet> previous_sets;
-    };
-#endif
-
     /**
      * \class VersionManager
      * The VersionManager class tracks the starting equivalence
@@ -4458,11 +3906,6 @@ namespace Legion {
       RtEvent finalize_output_equivalence_set(EquivalenceSet *set,
                                        InnerContext *context,
                                        unsigned parent_req_index);
-    protected:
-#if 0
-      void add_node_disjoint_complete_ref(void) const;
-      void remove_node_disjoint_complete_ref(void) const;
-#endif 
     public:
       virtual void add_subscription_reference(unsigned count = 1);
       virtual bool remove_subscription_reference(unsigned count = 1);
@@ -4473,73 +3916,6 @@ namespace Legion {
     public:
       void finalize_manager(void);
     public:
-#if 0
-      // Call these from region nodes
-      void initialize_versioning_analysis(EquivalenceSet *set,
-                                          const FieldMask &mask);
-      void initialize_nonexclusive_virtual_analysis(const FieldMask &mask,
-                                    const FieldMaskSet<EquivalenceSet> &sets);
-      void compute_equivalence_sets(IndexSpaceExpression *expr,
-                                    EqSetTracker *target, 
-                                    const AddressSpaceID target_space,
-                                    FieldMask mask,
-                                    std::set<RtEvent> &ready_events,
-                                    FieldMaskSet<PartitionNode> &children,
-                                    FieldMask &parent_traversal,
-                                    const bool downward_only);
-      void find_or_create_empty_equivalence_sets(EqSetTracker *target,
-                                    const AddressSpaceID target_space,
-                                    const FieldMask &mask,
-                                    const AddressSpaceID source,
-                                    std::set<RtEvent> &ready_events);
-      static void handle_compute_equivalence_sets_response(
-                  Deserializer &derez, Runtime *runtime, AddressSpaceID source);
-      // Call these from region nodes
-      void record_refinement(EquivalenceSet *set, const FieldMask &mask,
-                             FieldMask &parent_mask);
-      void record_empty_refinement(const FieldMask &mask);
-      // Call these from partition nodes
-      void record_refinement(ShardedColorMap *map, const FieldMask &mask,
-                             FieldMask &parent_mask);
-      void compute_equivalence_sets(IndexSpaceExpression *expr,
-                                    const FieldMask &mask, 
-                                    FieldMask &parent_traversal, 
-                                    FieldMaskSet<RegionNode> &children,
-                                    std::map<ShardID,
-                                      LegionMap<LegionColor,
-                                          FieldMask> > &shard_children,
-                                    const bool downward_only,
-                                    const bool expr_covers) const;
-      // Call these from either type of region tree node
-      void propagate_refinement(RegionTreeNode *child, 
-                                const FieldMask &child_mask, 
-                                FieldMask &parent_mask);
-      void invalidate_refinement(InnerContext &context,
-                                 const FieldMask &mask, bool invalidate_self,
-                                 FieldMaskSet<RegionTreeNode> &to_traverse,
-                                 LegionMap<AddressSpaceID,
-                                  SubscriberInvalidations> &subscribers,
-                                 std::vector<EquivalenceSet*> &to_release,
-                                 bool nonexclusive_virtual_mapping_root=false);
-      void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-               const std::vector<ShardID> *shard_to_shard_mapping);
-      void convert(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-               const std::vector<ShardID> *shard_to_shard_mapping);
-      void pack_manager(Serializer &rez, const bool invalidate, 
-                std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
-      void unpack_manager(Deserializer &derez,
-                          std::map<LegionColor,RegionTreeNode*> &to_traverse);
-      void filter_refinement_subscriptions(const FieldMask &mask,
-               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
-    public:
-      void print_physical_state(RegionTreeNode *node,
-                                const FieldMask &capture_mask,
-                                TreeStateLogger *logger);
-#endif
-    public:
       static void handle_finalize_output_eq_set(const void *args);
     public:
       const ContextID ctx;
@@ -4547,29 +3923,6 @@ namespace Legion {
       Runtime *const runtime;
     protected:
       mutable LocalLock manager_lock;
-#if 0
-    protected:
-      // The fields for which this node has disjoint complete information
-      FieldMask disjoint_complete;
-      // Track which disjoint and complete children we have from this
-      // node for representing the refinement tree. Note that if this
-      // context is control replicated this set might not be complete
-      // for partition nodes, Some sub-region nodes might only exist
-      // in contexts on remote shards. In those cases we will find an
-      // entry for those fields for disjoint_complete_children_shards.
-      FieldMaskSet<RegionTreeNode> disjoint_complete_children;
-      // This data structure tracks look-ups for children which only
-      // other shards no about for control replication. This data
-      // structure will only be non-empty on partition nodes
-      FieldMaskSet<ShardedColorMap> disjoint_complete_children_shards;
-      // Track all the equivalence set trackers that are tracking this
-      // refinement so that we can invalidate them whenever this refinement
-      // is invalidated. Note that we only need to record the fields that
-      // each tracker is following here because there is a one-to-one mapping
-      // between fields and equivalence sets in a node represeting a refinement
-      LegionMap<AddressSpaceID,
-                FieldMaskSet<EqSetTracker> > refinement_subscriptions;
-#endif
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 
