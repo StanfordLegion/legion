@@ -5995,6 +5995,11 @@ namespace Legion {
         }
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
+        if ((dst_requirements[idx].privilege == LEGION_READ_WRITE) &&
+            (launcher.src_indirect_requirements.size() <= idx) &&
+            (launcher.dst_indirect_requirements.size() <= idx) &&
+            (src_requirements[idx].region == dst_requirements[idx].region))
+          dst_requirements[idx].privilege |= LEGION_DISCARD_MASK;
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -8315,6 +8320,43 @@ namespace Legion {
                           parent_ctx->get_unique_id())
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
+        if ((dst_requirements[idx].privilege == LEGION_READ_WRITE) &&
+            (launcher.src_indirect_requirements.size() <= idx) &&
+            (launcher.dst_indirect_requirements.size() <= idx) &&
+            (launcher.src_requirements[idx].handle_type == 
+             launcher.dst_requirements[idx].handle_type))
+        {
+          switch (launcher.src_requirements[idx].handle_type)
+          {
+            case LEGION_SINGULAR_PROJECTION:
+              {
+                if (src_requirements[idx].region == 
+                    dst_requirements[idx].region)
+                  dst_requirements[idx].privilege |= LEGION_DISCARD_MASK;
+                break;
+              }
+            case LEGION_PARTITION_PROJECTION:
+              {
+                if ((src_requirements[idx].partition ==
+                      dst_requirements[idx].partition) &&
+                    (src_requirements[idx].projection ==
+                     dst_requirements[idx].projection))
+                  dst_requirements[idx].privilege |= LEGION_DISCARD_MASK;
+                break;
+              }
+            case LEGION_REGION_PROJECTION:
+              {
+                if ((src_requirements[idx].region ==
+                      dst_requirements[idx].region) &&
+                    (src_requirements[idx].projection ==
+                     dst_requirements[idx].projection))
+                  dst_requirements[idx].privilege |= LEGION_DISCARD_MASK;
+                break;
+              }
+            default:
+              assert(false);
+          }
+        }
       }
       if (!launcher.src_indirect_requirements.empty())
       {
