@@ -139,7 +139,7 @@ namespace Legion {
   template class Internal::IndexSpaceUnion<INST_N1,T>; \
   template class Internal::IndexSpaceIntersection<INST_N1,T>; \
   template class Internal::IndexSpaceDifference<INST_N1,T>; \
-  template class Internal::InstanceExpression<INST_N1,T>; \
+  template class Internal::InternalExpression<INST_N1,T>; \
   template class Internal::RemoteExpression<INST_N1,T>;
   
 

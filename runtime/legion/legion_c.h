@@ -426,6 +426,32 @@ extern "C" {
    * upper bound).
    */
   typedef
+    legion_logical_region_t (*legion_projection_functor_logical_region_args_t)(
+      legion_runtime_t /* runtime */,
+      legion_logical_region_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */,
+      const void * /* args */,
+      size_t /* size */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Partition
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_partition_args_t)(
+      legion_runtime_t /* runtime */,
+      legion_logical_partition_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */,
+      const void * /* args */,
+      size_t /* size */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Region
+   * upper bound).
+   */
+  typedef
     legion_logical_region_t (*legion_projection_functor_logical_region_mappable_t)(
       legion_runtime_t /* runtime */,
       legion_mappable_t /* mappable */,
@@ -2106,15 +2132,12 @@ extern "C" {
    *
    * @see Legion::Runtime::advise_analysis_subtree()
    */
-  void legion_advise_analysis_subtree(legion_runtime_t runtime,
-                                      legion_context_t ctx,
-                                      legion_logical_region_t parent,
-                                      int num_regions,
-                                      legion_logical_region_t* regions,
-                                      int num_parts,
-                                      legion_logical_partition_t* partitions,
-                                      int num_fields,
-                                      legion_field_id_t* fields);
+  void legion_reset_equivalence_sets(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_logical_region_t parent,
+                                     legion_logical_region_t region,
+                                     int num_fields,
+                                     legion_field_id_t* fields);
 
   // -----------------------------------------------------------------------
   // Region Requirement Operations
@@ -5891,6 +5914,41 @@ extern "C" {
     legion_projection_functor_logical_partition_t partition_functor);
 
   /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_args_t region_functor,
+    legion_projection_functor_logical_partition_args_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::preregister_projection_functor()
+   */
+  void
+  legion_runtime_preregister_projection_functor_args(
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_args_t region_functor,
+    legion_projection_functor_logical_partition_args_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor_args(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
    * @see Legion::Runtime::preregister_projection_functor()
    */
   void
@@ -5900,18 +5958,6 @@ extern "C" {
     unsigned depth,
     legion_projection_functor_logical_region_mappable_t region_functor,
     legion_projection_functor_logical_partition_mappable_t partition_functor);
-
-  /**
-   * @see Legion::Runtime::register_projection_functor()
-   */
-  void
-  legion_runtime_register_projection_functor(
-    legion_runtime_t runtime,
-    legion_projection_id_t id,
-    bool exclusive,
-    unsigned depth,
-    legion_projection_functor_logical_region_t region_functor,
-    legion_projection_functor_logical_partition_t partition_functor);
 
   /**
    * @see Legion::Runtime::register_projection_functor()

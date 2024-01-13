@@ -497,10 +497,10 @@ namespace Legion {
         }
 #ifdef LEGION_PROF_PROVENANCE
         info.provenance = prof_info->provenance;
+#endif
         Realm::ProfilingMeasurements::OperationFinishEvent finish;
         if (response.get_measurement(finish))
           info.finish_event = LgEvent(finish.finish_event);
-#endif
         const size_t diff = sizeof(GPUTaskInfo) + 
           num_intervals * sizeof(WaitInfo);
         owner->update_footprint(diff, this);
@@ -532,10 +532,10 @@ namespace Legion {
         }
 #ifdef LEGION_PROF_PROVENANCE
         info.provenance = prof_info->provenance;
+#endif
         Realm::ProfilingMeasurements::OperationFinishEvent finish;
         if (response.get_measurement(finish))
           info.finish_event = LgEvent(finish.finish_event);
-#endif
         const size_t diff = sizeof(TaskInfo) + num_intervals * sizeof(WaitInfo);
         owner->update_footprint(diff, this);
       }
@@ -584,10 +584,10 @@ namespace Legion {
       }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
+#endif
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
-#endif
       const size_t diff = sizeof(MetaInfo) + num_intervals * sizeof(WaitInfo);
       owner->update_footprint(diff, this);
     }
@@ -635,10 +635,10 @@ namespace Legion {
       }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
+#endif
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
-#endif
       const size_t diff = sizeof(MetaInfo) + num_intervals * sizeof(WaitInfo);
       owner->update_footprint(diff, this);
     }
@@ -923,7 +923,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_implicit(UniqueID op_id, TaskID tid,
         Processor proc, long long start_time, long long stop_time,
-        const std::vector<std::pair<long long,long long> > &waits)
+        const std::vector<std::pair<long long,long long> > &waits,
+        LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
       task_infos.emplace_back(TaskInfo()); 
@@ -949,6 +950,7 @@ namespace Legion {
           info.wait_intervals[idx].wait_end = waits[idx].second;
         }
       }
+      info.finish_event = finish_event;
     }
 
     //--------------------------------------------------------------------------
@@ -1031,9 +1033,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_mapper_call(Processor proc, 
                               MappingCallKind kind, UniqueID uid,
-                              unsigned long long start, unsigned long long stop)
+                              unsigned long long start, unsigned long long stop,
+                              LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
+      // Check to see if it exceeds the call threshold
+      if ((stop - start) < owner->minimum_call_threshold)
+        return;
       mapper_call_infos.emplace_back(MapperCallInfo());
       MapperCallInfo &info = mapper_call_infos.back();
       info.kind = kind;
@@ -1041,20 +1047,26 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = proc.id;
+      info.finish_event = finish_event;
       owner->update_footprint(sizeof(MapperCallInfo), this);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_runtime_call(Processor proc, 
-        RuntimeCallKind kind, unsigned long long start, unsigned long long stop)
+        RuntimeCallKind kind, unsigned long long start, unsigned long long stop,
+        LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
+      // Check to see if it exceeds the call threshold
+      if ((stop - start) < owner->minimum_call_threshold)
+        return;
       runtime_call_infos.emplace_back(RuntimeCallInfo());
       RuntimeCallInfo &info = runtime_call_infos.back();
       info.kind = kind;
       info.start = start;
       info.stop = stop;
       info.proc_id = proc.id;
+      info.finish_event = finish_event;
       owner->update_footprint(sizeof(RuntimeCallInfo), this);
     }
 
@@ -1062,7 +1074,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
 					     unsigned long long start,
-					     unsigned long long stop)
+					     unsigned long long stop,
+                                             LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
       prof_task_infos.emplace_back(ProfTaskInfo());
@@ -1071,6 +1084,7 @@ namespace Legion {
       info.op_id = op_id;
       info.start = start;
       info.stop = stop;
+      info.finish_event = finish_event;
       owner->update_footprint(sizeof(ProfTaskInfo), this);
     }
 #endif
@@ -1673,8 +1687,10 @@ namespace Legion {
                                    const size_t total_runtime_instances,
                                    const size_t footprint_threshold,
                                    const size_t target_latency,
+                                   const size_t call_threshold,
                                    const bool slow_config_ok)
       : runtime(rt), done_event(Runtime::create_rt_user_event()), 
+        minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency), target_proc(target), 
 #ifndef DEBUG_LEGION
@@ -1782,17 +1798,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : runtime(NULL), done_event(RtUserEvent::NO_RT_USER_EVENT),
-        output_footprint_threshold(0), output_target_latency(0), 
-        target_proc(rhs.target_proc)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     LegionProfiler::~LegionProfiler(void)
     //--------------------------------------------------------------------------
     {
@@ -1802,15 +1807,6 @@ namespace Legion {
 
       // remove our serializer
       delete serializer;
-    }
-
-    //--------------------------------------------------------------------------
-    LegionProfiler& LegionProfiler::operator=(const LegionProfiler &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2088,10 +2084,8 @@ namespace Legion {
       if (p.kind() == Processor::TOC_PROC)
         req.add_measurement<
           Realm::ProfilingMeasurements::OperationTimelineGPU>();
-#ifdef LEGION_PROF_PROVENANCE
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2115,10 +2109,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
-#ifdef LEGION_PROF_PROVENANCE
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2139,10 +2131,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
-#ifdef LEGION_PROF_PROVENANCE
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2284,10 +2274,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
-#ifdef LEGION_PROF_PROVENANCE
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2311,10 +2299,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
-#ifdef LEGION_PROF_PROVENANCE
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2528,9 +2514,10 @@ namespace Legion {
 #ifdef LEGION_PROF_SELF_PROFILE
       long long t_stop = Realm::Clock::current_time_in_nanoseconds();
       const Processor p = Realm::Processor::get_executing_processor();
+      const LgEvent finish_event(Processor::get_current_finish_event());
       thread_local_profiling_instance->process_proc_desc(p);
       thread_local_profiling_instance->record_proftask(p, info->op_id, 
-                                                       t_start, t_stop);
+                                       t_start, t_stop, finish_event);
 #endif
 #ifdef DEBUG_LEGION
       decrement_total_outstanding_requests(info->kind);
@@ -2576,9 +2563,13 @@ namespace Legion {
                               unsigned long long start, unsigned long long stop)
     //--------------------------------------------------------------------------
     {
+      LgEvent finish_event;
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
+        // Ignore mapper calls that happen from outside threads
+        if (implicit_context->owner_task == NULL)
+          return;
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
@@ -2586,12 +2577,17 @@ namespace Legion {
         assert(implicit_context != NULL);
 #endif
         current = implicit_context->get_executing_processor();
+        
+        TaskContext *ctx = implicit_context;
+        finish_event = ctx->owner_task->get_completion_event();
       }
+      else
+        finish_event = LgEvent(Processor::get_current_finish_event());
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(current);
       thread_local_profiling_instance->record_mapper_call(current, kind, uid, 
-                                                   start, stop);
+                                                   start, stop, finish_event);
     }
 
     //--------------------------------------------------------------------------
@@ -2613,9 +2609,13 @@ namespace Legion {
                               unsigned long long start, unsigned long long stop)
     //--------------------------------------------------------------------------
     {
+      LgEvent finish_event;
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
+        // Ignore runtime calls that happen from outside threads
+        if (implicit_context->owner_task == NULL)
+          return;
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
@@ -2623,25 +2623,29 @@ namespace Legion {
         assert(implicit_context != NULL);
 #endif
         current = implicit_context->get_executing_processor();
+        finish_event = implicit_context->owner_task->get_completion_event();
       }
+      else
+        finish_event = LgEvent(Processor::get_current_finish_event());
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(current);
-      thread_local_profiling_instance->record_runtime_call(current, kind, 
-                                                           start, stop);
+      thread_local_profiling_instance->record_runtime_call(current, kind, start,
+                                                           stop, finish_event);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfiler::record_implicit(UniqueID op_id, TaskID tid, 
         Processor proc, long long start, long long stop,
-        const std::vector<std::pair<long long,long long> > &waits)
+        const std::vector<std::pair<long long,long long> > &waits,
+        LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_proc_desc(proc);
-      thread_local_profiling_instance->process_implicit(op_id, tid, proc,
-                                                        start, stop, waits);
+      thread_local_profiling_instance->process_implicit(op_id, tid, proc, start,
+                                                     stop, waits, finish_event);
     }
 
 #ifdef DEBUG_LEGION

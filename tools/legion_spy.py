@@ -3960,6 +3960,11 @@ class LogicalVerificationState(object):
                 if prev_op.kind == DELETION_OP_KIND:
                     continue
                 need_fence = False
+            elif op.kind == REFINEMENT_OP_KIND or prev_op.kind == REFINEMENT_OP_KIND:
+                # Refinement operations are effectively a kind of fence in their
+                # own right so you don't need a fence on dependences to or from
+                # refinement operations from any other kind of operation
+                need_fence = False
             # Now determine whether we need to have a close operation along the
             # path between these two operations due to them being in different shards
             elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_logical:
@@ -4036,28 +4041,6 @@ class LogicalState(object):
                                            arrived, previous_deps):
             return (False,None,None,None,closed)
         if arrived: 
-            # Check to see if we have a refinement operation to handle
-            tree_field = (self.node.tree_id,self.field.fid)
-            refinement = op.has_refinement_operation(req, self.node, self.field)
-            if refinement is not None:
-                # Check to see that the refinement has dependences on
-                # everything that we also depended on
-                if not self.analyze_refinement(refinement, previous_deps, 
-                                               op, req, perform_checks):
-                    return False
-                init_fields.add(tree_field)
-                # Register the refinement user
-                refinement.reqs[0].logical_node.register_refinement_user(refinement,self.field)
-            elif tree_field not in init_fields:
-                # Verify that we have an initial close operation that
-                # would initialize the version information for this field
-                close = op.get_close_operation(req, req.parent, self.field, False)
-                if not self.analyze_initial_close(close, op, req, perform_checks):
-                    return False
-                init_fields.add(tree_field)
-                # Register the refinement user
-                if close is not None:
-                    close.reqs[0].logical_node.register_refinement_user(close, self.field)
             # Add ourselves as the current user
             self.register_logical_user(op, req)
             # Record if we have outstanding reductions
@@ -4685,39 +4668,6 @@ class LogicalState(object):
             dep = MappingDependence(refinement, op, refinement_req.index,
                                     req.index, dep_type)
             refinement.add_outgoing(dep)
-            op.add_incoming(dep)
-        return True
-
-    def analyze_initial_close(self, close, op, req, perform_checks):
-        if close is None:
-            # Check for the case where this is an output region
-            if op.mappings[req.index][self.field.fid].is_virtual():
-                return True
-            if perform_checks:
-                print(("ERROR: %s (UID %s) failed to generate an initial close "+
-                       "operation for field %s of region requirement %s") %
-                       (op, str(op.uid), self.field, req.index))
-            else:
-                print(("ERROR: %s (UID %s) failed to generate an initial close "+
-                       "operation that we normally would have expected for field "+
-                       "%s of region requirement %s. Re-run with detailed Legion "+
-                       "Spy logs to confirm.") % (op, str(op.uid), self.field, req.index))
-            if self.node.state.assert_on_error:
-                assert False
-            return False
-        close_req = close.reqs[0]
-        dep_type = compute_dependence_type(close_req, req)
-        if perform_checks:
-            if not op.has_mapping_dependence(req, close, close_req, dep_type, self.field):
-                print(("ERROR: region requirement %s of operation %s is missing a "+
-                       "mapping dependence on initial close op %s for field %s") %
-                       (req.index, op, close, self.field))
-                if self.node.state.assert_on_error:
-                    assert False
-                return False
-        else:
-            dep = MappingDependence(close, op, close_req.index, req.index, dep_type)
-            close.add_outgoing(dep)
             op.add_incoming(dep)
         return True
 
@@ -6224,7 +6174,7 @@ class Operation(object):
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance',
-                 'collective_rendezvous']
+                 'collective_rendezvous', 'equivalence_set_uses']
                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -6302,6 +6252,8 @@ class Operation(object):
         self.provenance = None
         # Any collective rendezvous that we need to perform
         self.collective_rendezvous = None
+        # Any uses of equivalence sets
+        self.equivalence_set_uses = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -6433,9 +6385,19 @@ class Operation(object):
         return self.launch_shape
 
     def add_internal_operation(self, internal):
+        assert self.kind != REFINEMENT_OP_KIND
+        assert self.kind != INTER_CLOSE_OP_KIND
+        assert internal.kind == REFINEMENT_OP_KIND or \
+                internal.kind == INTER_CLOSE_OP_KIND
         if self.internal_ops is None:
             self.internal_ops = list()
-        self.internal_ops.append(internal)
+        # Put internal close ops first and refinement ops last
+        # We do this so we analyze them in the right order for
+        # the logical analysis
+        if internal.kind == REFINEMENT_OP_KIND:
+            self.internal_ops.append(internal)
+        else:
+            self.internal_ops.insert(0, internal)
 
     def set_summary_operation(self, summary):
         self.summary_op = summary
@@ -6479,28 +6441,6 @@ class Operation(object):
             if not read_only and close.kind != INTER_CLOSE_OP_KIND:
                 continue
             return close
-        return None
-
-    def has_refinement_operation(self, req, node, field):
-        if self.internal_ops is None:
-            return None
-        for refinement in self.internal_ops:
-            if refinement.kind != REFINEMENT_OP_KIND:
-                continue
-            assert len(refinement.reqs) == 1
-            refinement_req = refinement.reqs[0]
-            if refinement_req.logical_node.tree_id != node.tree_id:
-                continue
-            if field not in refinement_req.fields:
-                continue
-            # Lastly check to see if the refinement node is an ancestor
-            if refinement_req.logical_node is node:
-                return refinement
-            ancestor = node.parent
-            while ancestor is not None:
-                if ancestor is refinement_req.logical_node:
-                    return refinement
-                ancestor = ancestor.parent
         return None
 
     def set_pending_partition_info(self, node, kind):
@@ -6708,6 +6648,14 @@ class Operation(object):
             self.collective_rendezvous = set()
         # Ignore the analysis index for now
         self.collective_rendezvous.add(req_index)
+
+    def record_equivalence_set_use(self, index, eq):
+        if self.equivalence_set_uses is None:
+            self.equivalence_set_uses = list()
+        while len(self.equivalence_set_uses) <= index:
+            self.equivalence_set_uses.append(list())
+        if eq not in self.equivalence_set_uses[index]:
+            self.equivalence_set_uses[index].append(eq)
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -7537,7 +7485,8 @@ class Operation(object):
                 self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
                 assert False
-        elif need_fence and (field,tree_id) not in previous_deps[prev_op]:
+        elif need_fence and (previous_deps[prev_op] is None or
+                (field,tree_id) not in previous_deps[prev_op]):
             print("ERROR: Missing internal fence operation on "+str(field)+" of tree "+
                     str(tree_id)+" between region requirement "+str(prev_req.index)+
                     " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
@@ -7602,6 +7551,13 @@ class Operation(object):
                     if current.reqs[0].logical_node.tree_id == tree_id and \
                             field in current.reqs[0].fields:
                         merge_close_ops.append(current)
+                # We also allow mapping fences and execution fences (which are
+                # also a kind of mapping fence to fulfill this purpose)
+                elif current.kind == MAPPING_FENCE_OP_KIND or \
+                        current.kind == EXECUTION_FENCE_OP_KIND: 
+                    merge_close_ops.append(current)
+                    # No need to keep scanning past a fence since it dominates
+                    continue
                 if not current.logical_incoming:
                     continue
                 for next_op in current.logical_incoming:
@@ -8354,18 +8310,18 @@ class Operation(object):
             # A little sanity check at the moment: nested control replication can only
             # come from tasks replicated from a single shard. When we break that invariant
             # then we'll need to do something here
-            assert not collective
+            if collective:
+                raise NotImplementedError("Need support for verification of "
+                        "collective region requirements on replicated tasks.")
             if self.reqs is not None:
                 self.compute_current_version_numbers()
-                assert self.mapping is None
-                # We have to do verification for all our replicants first
+                # We have to do verification for all our shards first
                 for shard in itervalues(self.task.replicants.shards):
-                    self.mapping = shard.op.mapping
+                    shard.op.version_numbers = self.version_numbers
                     for index,req in iteritems(self.reqs):
-                        if not self.verify_physical_requirement(index, req, perform_checks, 
-                                                                registration=False):
+                        if not shard.op.verify_physical_requirement(index, req, perform_checks, 
+                                                                    registration=False):
                             return False
-                    self.mapping = None
         else:
             if self.reqs:
                 # Compute our version numbers first
@@ -8418,25 +8374,15 @@ class Operation(object):
             assert not collective
             if self.reqs:
                 collective = dict()
-                # Do the registration for all our replicants
+                # Do the registration for all our shards
                 for shard in itervalues(self.task.replicants.shards):
-                    self.mapping = shard.op.mapping
                     for index,req in iteritems(self.reqs):
-                        if not self.verify_physical_requirement(index, req, perform_checks,
+                        if not shard.op.verify_physical_requirement(index, req, perform_checks,
                                                     registration=True, collective=collective):
                             return False
-                    self.mapping = None
-            # Last decided how to analyze each of the shards depending
-            # on whether we are control replicated or not
-            if self.task.replicants.control_replicated:
-                # Traverse it like a single logical task 
-                if not self.task.perform_task_physical_verification(perform_checks):
-                    return False
-            else:
-                # Can verify each of these separately 
-                for shard in itervalues(self.task.replicants.shards):
-                    if not shard.perform_task_physical_verification(perform_checks):
-                        return False
+            # Traverse it like a single logical task 
+            if not self.task.perform_task_physical_verification(perform_checks):
+                return False
         else:
             if self.reqs:
                 for index,req in iteritems(self.reqs):
@@ -8557,6 +8503,8 @@ class Operation(object):
             title += ' Point: ' + self.task.point.to_string()
         if self.replayed:
             title += '  (replayed)'
+        if self.task and self.task.shard is not None:
+            title += '  (Shard '+str(self.task.shard)+')'
         label = printer.generate_html_op_label(title, self.reqs, self.mappings,
                                        self.get_color(), self.state.detailed_graphs)
         if dataflow or self.task is None or len(self.task.operations) == 0:
@@ -8656,9 +8604,10 @@ class Operation(object):
             return
         # If this is a single task, recurse and generate our subgraph first
         if self.kind is SINGLE_TASK_KIND:
-            # Get our corresponding task
-            task = self.state.get_task(self.uid)   
-            task.print_event_graph_context(printer, elevate, all_nodes, top)
+            self.task.print_event_graph_context(printer, elevate, all_nodes, top)
+            # If the task is replicated then we don't print it out
+            if self.task.replicants:
+                return
         # Look through all our generated realm operations and emit them
         if self.realm_copies:
             for copy in self.realm_copies:
@@ -8833,7 +8782,7 @@ class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'used_instances', 'virtual_indexes', 'processor', 
                  'priority', 'premappings', 'postmappings', 'tunables', 
-                 'operation_indexes', 'close_indexes', 'variant', 'replicants', 'shard']
+                 'operation_indexes', 'variant', 'replicants', 'shard', 'original']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -8852,10 +8801,10 @@ class Task(object):
         self.postmappings = None
         self.tunables = None
         self.operation_indexes = None
-        self.close_indexes = None
         self.variant = None
         self.replicants = None
         self.shard = None
+        self.original = None
 
     def __str__(self):
         if self.op is None:
@@ -8912,7 +8861,8 @@ class Task(object):
     def set_shard(self, shard, original):
         assert not self.shard
         self.shard = shard
-        self.op.set_context(original)
+        self.original = original
+        self.op.set_context(original.op.context)
 
     def add_premapping(self, index):
         if not self.premappings:
@@ -8954,11 +8904,6 @@ class Task(object):
         if not self.operation_indexes:
             self.operation_indexes = dict()
         self.operation_indexes[index] = uid
-
-    def add_close_index(self, index, uid):
-        if not self.close_indexes:
-            self.close_indexes = dict()
-        self.close_indexes[index] = uid
 
     def get_parent_context(self):
         assert self.op.context is not None
@@ -9009,10 +8954,6 @@ class Task(object):
             self.operation_indexes = other.operation_indexes
         else:
             assert not other.operation_indexes
-        if not self.close_indexes:
-            self.close_indexes = other.close_indexes
-        else:
-            assert not other.close_indexes
         if not self.variant:
             self.variant = other.variant
         else:
@@ -9064,6 +9005,23 @@ class Task(object):
                         if logical_op.state.assert_on_warning:
                             assert False
                         continue
+                    # Check for any internal operations, if we have a refinement
+                    # operation then we need to analyze them now, they'll be the same
+                    # across the shards so we just need to do this once.
+                    # Note that we don't need to analyze close operations since they
+                    # are what we're implicitly checking when analyzing the individual
+                    # operations themselves
+                    if logical_op.internal_ops:
+                        for internal_op in logical_op.internal_ops:
+                            if internal_op.kind == INTER_CLOSE_OP_KIND:
+                                continue
+                            assert internal_op.kind == REFINEMENT_OP_KIND
+                            previous_deps = dict()
+                            if not internal_op.perform_op_logical_verification(internal_op, previous_deps):
+                                success = False
+                                break
+                        if not success:
+                            break
                     # Check to see if this is an index space operation in which case
                     # we need to run all the points across all the shards, otherwise
                     # we just run the operation like normal in this context
@@ -9125,6 +9083,19 @@ class Task(object):
                 # use them for adding/checking dependences on close operations
                 if self.op.state.verbose:
                     print('Verifying '+str(op))
+                # Check for any internal operations like refinement operations
+                # that need to be analyzed first
+                if op.internal_ops:
+                    for internal_op in op.internal_ops:
+                        if internal_op.kind == INTER_CLOSE_OP_KIND:
+                            continue
+                        assert internal_op.kind == REFINEMENT_OP_KIND
+                        previous_deps = dict()
+                        if not internal_op.perform_op_logical_verification(internal_op, previous_deps):
+                            success = False
+                            break
+                    if not success:
+                        break
                 previous_deps = dict()
                 if not op.perform_op_logical_verification(op, previous_deps):
                     success = False
@@ -9212,7 +9183,7 @@ class Task(object):
                         else:
                             assert self.shard is not None # Control replicated task
                             for fid,inst in iteritems(mappings):
-                                self.op.context.used_instances.add((inst,fid))
+                                self.original.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
         # If we get here this is a created privilege flowing back
@@ -9220,10 +9191,24 @@ class Task(object):
         return 0
 
     def perform_task_physical_verification(self, perform_checks):
+        # Check to see if this is a leaf with no operations
         if not self.operations:
             if not self.replicants:
                 return True
-            assert self.replicants.control_replicated 
+            # If it was replicated we need to look at the replicants
+            elif self.replicants.control_replicated:
+                # Check to make sure that all shards have the same count
+                count = None
+                for shard in self.replicants.shards.values():
+                    if count is None:
+                        count = len(shard.operations) if shard.operations else 0
+                    else:
+                        assert count == (len(shard.operations) if shard.operations else 0) 
+                if count == 0:
+                    return True
+            else:
+                # Not control replicated means they are all leaves
+                return True
         # Depth is a proxy for context 
         depth = self.get_depth()
         assert self.used_instances is None
@@ -9535,48 +9520,32 @@ class Task(object):
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
-            # Check to see if we were replicated
-            if self.replicants:
-                # If we're control replicated we need to alias all the single
-                # operations across shards so they have the same operation name
-                num_ops = -1
+            if not self.replicants:
+                return
+            # If we're control replicated we need to alias all the single
+            # operations across shards so they have the same operation name
+            num_ops = -1
+            for shard in itervalues(self.replicants.shards):
+                shard_ops = 0
+                for op in shard.operations:
+                    if not op.fully_logged:
+                        break
+                    else:
+                        shard_ops += 1
+                if num_ops == -1:
+                    num_ops = shard_ops
+                elif num_ops != shard_ops:
+                    print(('Warning: shard %s has %s operations which is '+
+                            'different than %s operations in other shards. '+
+                            'This is likely the result of a crash in a run.') %
+                            (str(shard.shard),str(shard_ops),str(num_ops)))
+                    if self.state.assert_on_warning:
+                        assert False
+                    num_ops = min(shard_ops,num_ops)
+            if num_ops <= 0:
                 for shard in itervalues(self.replicants.shards):
-                    shard_ops = 0
-                    for op in shard.operations:
-                        if not op.fully_logged:
-                            break
-                        else:
-                            shard_ops += 1
-                    if num_ops == -1:
-                        num_ops = shard_ops
-                    elif num_ops != shard_ops:
-                        print(('Warning: shard %s has %s operations which is '+
-                                'different than %s operations in other shards. '+
-                                'This is likely the result of a crash in a run.') %
-                                (str(shard.shard),str(shard_ops),str(num_ops)))
-                        if self.state.assert_on_warning:
-                            assert False
-                        num_ops = min(shard_ops,num_ops)
-                for idx in range(num_ops):
-                    owner_op = None
-                    # See if we have an owner op
-                    for shard in itervalues(self.replicants.shards):
-                        op = shard.operations[idx]
-                        if op.owner_shard is not None and \
-                                op.owner_shard == op.context.shard:
-                            owner_op = op
-                            break
-                    # We should only have owner ops for single operations
-                    if owner_op is not None:
-                        # Alias all the node names to the owner node name
-                        for shard in itervalues(self.replicants.shards):
-                            op = shard.operations[idx]
-                            if op is not owner_op:
-                                op.node_name = owner_op.node_name
-                # Now we can do the normal event graph print routine
-                for shard in itervalues(self.replicants.shards):
-                    shard.print_event_graph_context(printer, elevate, all_nodes, top)
-            return
+                    shard.op.print_event_graph(printer, elevate, all_nodes, top)
+                return
         if not top:
             # Start the cluster 
             title = self.html_safe_name + ' (UID: '+str(self.op.uid)+')'
@@ -9584,6 +9553,8 @@ class Task(object):
                 title += ' Point: ' + self.point.to_string()
             if self.op.replayed:
                 title += '  (replayed)'
+            if self.replicants:
+                title += '  (control replicated)'
             label = printer.generate_html_op_label(title, self.op.reqs,
                                                    self.op.mappings,
                                                    self.op.get_color(), 
@@ -9591,28 +9562,58 @@ class Task(object):
             self.op.cluster_name = printer.start_new_cluster(label)
             # Make an invisible node for this cluster
             printer.println(self.op.node_name + ' [shape=point,style=invis];')
-        # Generate the sub-graph
-        for op in self.operations:
-            if op.inlined:
-                continue
-            #if not op.fully_logged:
-            #    print(('Warning: skipping event graph printing of %s because it '+
-            #                'was not fully logged...') % str(op))
-            #    if op.state.assert_on_warning:
-            #        assert False
-            #    continue
-            op.print_event_graph(printer, elevate, all_nodes, False)
-        # Find our local nodes
-        local_nodes = list()
-        for node,context in iteritems(elevate):
-            if context is self:
-                local_nodes.append(node)
-                node.print_event_node(printer)
-                all_nodes.add(node)
-        # Hold off printing the edges until the very end
-        # Remove our nodes from elevate
-        for node in local_nodes:
-            del elevate[node] 
+        if self.replicants:
+            assert num_ops > 0
+            for idx in range(num_ops):
+                owner_op = None
+                # See if we have an owner op
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    if op.owner_shard is not None and \
+                            op.owner_shard == op.context.shard:
+                        owner_op = op
+                        break
+                # We should only have owner ops for single operations
+                if owner_op is not None:
+                    # Alias all the node names to the owner node name
+                    for shard in itervalues(self.replicants.shards):
+                        op = shard.operations[idx]
+                        if op is not owner_op:
+                            op.node_name = owner_op.node_name
+            # Now we can do the normal event graph print routine
+            for shard in itervalues(self.replicants.shards):
+                shard.op.print_event_graph(printer, elevate, all_nodes, top)
+                local_nodes = list()
+                for node,context in iteritems(elevate):
+                    if context is shard:
+                        local_nodes.append(node)
+                        node.print_event_graph(printer)
+                        all_nodes.add(node)
+                for node in local_nodes:
+                    del elevate[node]
+        else:
+            # Generate the sub-graph
+            for op in self.operations:
+                if op.inlined:
+                    continue
+                #if not op.fully_logged:
+                #    print(('Warning: skipping event graph printing of %s because it '+
+                #                'was not fully logged...') % str(op))
+                #    if op.state.assert_on_warning:
+                #        assert False
+                #    continue
+                op.print_event_graph(printer, elevate, all_nodes, False)
+            # Find our local nodes
+            local_nodes = list()
+            for node,context in iteritems(elevate):
+                if context is self:
+                    local_nodes.append(node)
+                    node.print_event_node(printer)
+                    all_nodes.add(node)
+            # Hold off printing the edges until the very end
+            # Remove our nodes from elevate
+            for node in local_nodes:
+                del elevate[node] 
         if not top:
             # End the cluster
             printer.end_this_cluster()
@@ -9675,14 +9676,6 @@ class Task(object):
                 replay_file.write(struct.pack('Q',self.operation_indexes[idx]))
         else:
             replay_file.write(struct.pack('I',0))
-        # Pack the close indexes
-        if self.close_indexes:
-            replay_file.write(struct.pack('I',len(self.close_indexes)))
-            for idx in xrange(len(self.close_indexes)):
-                assert idx in self.close_indexes
-                replay_file.write(struct.pack('Q',self.close_indexes[idx]))
-        else:
-            replay_file.write(struct.pack('I',0))
 
 class Future(object):
     __slots__ = ['state', 'did', 'creator_uid', 'logical_creator', 
@@ -9723,13 +9716,36 @@ class Future(object):
             self.physical_creators = set()
             if self.logical_creator.kind == INDEX_TASK_KIND:
                 # Deal with predication
-                if self.logical_creator.points:
+                if self.logical_creator.predicate_result:
+                    # Be very careful to handle control replication correctly
+                    # in all of these cases as well
                     if self.point.dim > 0:
-                        self.physical_creators.add(
-                                self.logical_creator.get_point_task(self.point).op)
+                        # Looking for a single point task
+                        if self.logical_creator.context.shard is not None:
+                            # Control-replicated case
+                            offset = self.logical_creator.context.operations.index(self.logical_creator)
+                            for shard in self.logical_creator.context.original.replicants.shards.values():
+                                shard_op = shard.operations[offset]
+                                if shard_op.points and self.point in shard_op.points:
+                                    self.physical_creators.add(shard_op.get_point_task(self.point).op)
+                                    break
+                        else:
+                            # Non-replicated case
+                            self.physical_creators.add(
+                                    self.logical_creator.get_point_task(self.point).op)
                     else:
-                        for point in itervalues(self.logical_creator.points):
-                            self.physical_creators.add(point.op)
+                        # Accumulating all the points that feed into this future
+                        if self.logical_creator.context.shard is not None:
+                            # Control-replicated case
+                            offset = self.logical_creator.context.operations.index(self.logical_creator)
+                            for shard in self.logical_creator.context.original.replicants.shards.values():
+                                if shard.operations[offset].points:
+                                    for point in shard.operations[offset].points.values():
+                                        self.physical_creators.add(point.op)
+                        else:
+                            # Non-replicated case
+                            for point in itervalues(self.logical_creator.points):
+                                self.physical_creators.add(point.op)
             else:
                 self.physical_creators.add(self.logical_creator) 
             for creator in self.physical_creators:
@@ -9854,6 +9870,7 @@ class Replicants(object):
     def update_shards(self):
         assert self.orig
         self.orig.replicants = self 
+        self.orig.op.fully_logged = True
         for sid,shard in iteritems(self.shards):
             shard.set_shard(sid, self.orig)
             shard.merge(self.orig)
@@ -11727,6 +11744,30 @@ class GraphPrinter(object):
         return '<table border="0" cellborder="1" cellpadding="3" cellspacing="0" bgcolor="%s">' % color + \
               "".join([self.wrap_with_trtd(line) for line in lines]) + '</table>'
 
+# Unlike the other equivalence set class that we use for actual verification, this
+# class helps track which equivalence sets were used by the runtime and their shapes
+class RuntimeEquivalenceSet(object):
+    __slots__ = ['did', 'expr', 'tree_id', 'creator', 'users']
+    def __init__(self, did):
+        self.did = did
+        self.expr = None
+        self.tree_id = None
+        self.creator = None
+        self.users = None
+
+    def initialize(self, expr, tid, creator):
+        assert self.expr == None and self.tree_id == None and self.creator == None
+        self.expr = expr
+        self.tree_id = tid
+        self.creator = creator
+
+    def record_user(self, op, index):
+        if self.users is None:
+            self.users = list()
+        key = (op,index)
+        if key not in self.users:
+            self.users.append(key)
+
 
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_spy\}: "
 prefix_pat               = re.compile(prefix)
@@ -11892,8 +11933,6 @@ op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 op_provenance_pat        = re.compile(
     prefix+"Operation Provenance (?P<uid>[0-9]+) (?P<provenance>.*)")
-close_index_pat          = re.compile(
-    prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 predicate_false_pat      = re.compile(
     prefix+"Predicate False (?P<uid>[0-9]+)")
 # Patterns for logical analysis and region requirements
@@ -12031,6 +12070,11 @@ barrier_wait_pat        = re.compile(
     prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 replay_op_pat           = re.compile(
     prefix+"Replay Operation (?P<uid>[0-9]+)")
+# Equivalence set patterns
+equivalence_set_pat     = re.compile(
+    prefix+"Equivalence Set (?P<did>[0-9a-f]+) (?P<expr>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+)")
+equivalence_use_pat     = re.compile(
+    prefix+"Equivalence Use (?P<did>[0-9a-f]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 
 def parse_legion_spy_line(line, state):
     # Quick test to see if the line is even worth considering
@@ -12494,7 +12538,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(REFINEMENT_OP_KIND)
-        op.set_name("Refinement Op "+m.group('uid'))
+        op.set_name("Refinement Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -12763,12 +12807,6 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.provenance = m.group('provenance')
         return True
-    m = close_index_pat.match(line)
-    if m is not None:
-        task = state.get_task(int(m.group('parent')))
-        task.add_close_index(int(m.group('index')),
-                             int(m.group('child')))
-        return True
     m = predicate_false_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
@@ -13000,6 +13038,22 @@ def parse_legion_spy_line(line, state):
             e2.add_incoming(e1)
             e1.add_outgoing(e2)
         return True
+    m = equivalence_set_pat.match(line)
+    if m is not None:
+        eq = state.get_equivalence_set(int(m.group('did'),16))
+        expr = state.get_index_expr(int(m.group('expr')))
+        tid = int(m.group('tid'))
+        op = state.get_operation(int(m.group('uid')))
+        eq.initialize(expr, tid, op)
+        return True
+    m = equivalence_use_pat.match(line)
+    if m is not None:
+        eq = state.get_equivalence_set(int(m.group('did'),16))
+        op = state.get_operation(int(m.group('uid')))
+        index = int(m.group('index'))
+        eq.record_user(op, index)
+        op.record_equivalence_set_use(index, eq)
+        return True
     return False
 
 class State(object):
@@ -13013,7 +13067,7 @@ class State(object):
                  'slice_slice', 'point_slice', 'point_point', 'futures', 'next_generation', 
                  'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
                  'assert_on_error', 'assert_on_warning', 'bad_graph_on_error', 
-                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants']
+                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants', 'eq_sets']
     def __init__(self, temp_dir, verbose, details, assert_on_error, 
                  assert_on_warning, bad_graph_on_error, eq_graph_on_error):
         self.temp_dir = temp_dir
@@ -13058,6 +13112,8 @@ class State(object):
         self.depparts = dict()
         self.no_event = Event(self, EventHandle(0))
         self.indirections = dict()
+        # Equivalence set things
+        self.eq_sets = dict()
         # For parsing only
         self.slice_index = dict()
         self.slice_slice = dict()
@@ -14178,6 +14234,13 @@ class State(object):
             return self.projection_functions[pid]
         result = ProjectionFunction(self, pid)
         self.projection_functions[pid] = result
+        return result
+
+    def get_equivalence_set(self, did):
+        if did in self.eq_sets:
+            return self.eq_sets[did]
+        result = RuntimeEquivalenceSet(did)
+        self.eq_sets[did] = result
         return result
 
     def get_instance(self, eid):

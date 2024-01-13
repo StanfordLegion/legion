@@ -295,11 +295,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::map_replicate_task(const MapperContext      ctx,
-                                          const Task&              task,
-                                          const MapTaskInput&      input,
-                                          const MapTaskOutput&     def_output,
-                                          MapReplicateTaskOutput&  output)
+    void ReplayMapper::replicate_task(MapperContext               ctx,
+                                      const Task&                 task,
+                                      const ReplicateTaskInput&   input,
+                                            ReplicateTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
       assert(false); // TODO

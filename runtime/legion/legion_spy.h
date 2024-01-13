@@ -603,10 +603,10 @@ namespace Legion {
         log_spy.print("Refinement Operation %llu %llu", context, unique_id);
       }
 
-      static inline void log_advisement_operation(UniqueID context,
-                                                  UniqueID unique_id)
+      static inline void log_reset_operation(UniqueID context,
+                                             UniqueID unique_id)
       {
-        log_spy.print("Advisement Operation %llu %llu", context, unique_id);
+        log_spy.print("Reset Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_internal_op_creator(UniqueID internal_op_id,
@@ -1062,12 +1062,6 @@ namespace Legion {
                                        size_t index, UniqueID child_id)
       {
         log_spy.print("Operation Index %llu %zd %llu",parent_id,index,child_id);
-      }
-
-      static inline void log_close_operation_index(UniqueID parent_id,
-                                        size_t index, UniqueID child_id)
-      {
-        log_spy.print("Close Index %llu %zd %llu", parent_id, index, child_id);
       }
 
       static inline void log_predicated_false_op(UniqueID unique_id)
@@ -1701,6 +1695,22 @@ namespace Legion {
       {
         log_spy.print("Replay Operation %llu", op_unique_id);
       } 
+
+      // Logging for equivalence set creation
+      static inline void log_equivalence_set(DistributedID did,
+                                             IndexSpaceExprID expr_id,
+                                             RegionTreeID tid,
+                                             UniqueID creator_uid)
+      {
+        log_spy.print("Equivalence Set %llx %lld %d %llu",
+            did, expr_id, tid, creator_uid);
+      }
+
+      static inline void log_equivalence_set_use(DistributedID did,
+                                                 UniqueID uid, unsigned index)
+      {
+        log_spy.print("Equivalence Use %llx %llu %d", did, uid, index);
+      }
 #endif
     }; // namespace LegionSpy
 

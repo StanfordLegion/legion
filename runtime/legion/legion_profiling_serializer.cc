@@ -283,12 +283,11 @@ namespace Legion {
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"   << sizeof(timestamp_t) << delim
          << "start:timestamp_t:"   << sizeof(timestamp_t) << delim
-         << "stop:timestamp_t:"    << sizeof(timestamp_t)
+         << "stop:timestamp_t:"    << sizeof(timestamp_t) << delim
 #ifdef LEGION_PROF_PROVENANCE
-         << delim
          << "provenance:"          << sizeof(LgEvent) << delim
-         << "finish_event:"        << sizeof(LgEvent)
 #endif
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "GPUTaskInfo {"
@@ -302,12 +301,11 @@ namespace Legion {
          << "start:timestamp_t:"     << sizeof(timestamp_t) << delim
          << "stop:timestamp_t:"      << sizeof(timestamp_t) << delim
          << "gpu_start:timestamp_t:" << sizeof(timestamp_t) << delim
-         << "gpu_stop:timestamp_t:"  << sizeof(timestamp_t)
+         << "gpu_stop:timestamp_t:"  << sizeof(timestamp_t) << delim
 #ifdef LEGION_PROF_PROVENANCE
-         << delim
          << "provenance:"            << sizeof(LgEvent) << delim
-         << "finish_event:"          << sizeof(LgEvent)
 #endif
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "MetaInfo {"
@@ -318,12 +316,11 @@ namespace Legion {
          << "create:timestamp_t:" << sizeof(timestamp_t)  << delim
          << "ready:timestamp_t:"  << sizeof(timestamp_t)  << delim
          << "start:timestamp_t:"  << sizeof(timestamp_t)  << delim
-         << "stop:timestamp_t:"   << sizeof(timestamp_t)
+         << "stop:timestamp_t:"   << sizeof(timestamp_t)  << delim
 #ifdef LEGION_PROF_PROVENANCE
-         << delim
          << "provenance:"         << sizeof(LgEvent) << delim
-         << "finish_event:"       << sizeof(LgEvent)
 #endif
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "CopyInfo {"
@@ -410,7 +407,8 @@ namespace Legion {
          << "op_id:UniqueID:"       << sizeof(UniqueID)           << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"     << sizeof(timestamp_t)        << delim
-         << "proc_id:ProcID:"       << sizeof(ProcID)
+         << "proc_id:ProcID:"       << sizeof(ProcID)             << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "RuntimeCallInfo {"
@@ -418,7 +416,8 @@ namespace Legion {
          << "kind:RuntimeCallKind:" << sizeof(RuntimeCallKind) << delim
          << "start:timestamp_t:"    << sizeof(timestamp_t)     << delim
          << "stop:timestamp_t:"     << sizeof(timestamp_t)     << delim
-         << "proc_id:ProcID:"       << sizeof(ProcID)
+         << "proc_id:ProcID:"       << sizeof(ProcID)          << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -427,7 +426,8 @@ namespace Legion {
          << "proc_id:ProcID:"         << sizeof(ProcID)      << delim
          << "op_id:UniqueID:"         << sizeof(UniqueID)    << delim
          << "start:timestamp_t:"      << sizeof(timestamp_t) << delim
-         << "stop:timestamp_t:"       << sizeof(timestamp_t)
+         << "stop:timestamp_t:"       << sizeof(timestamp_t) << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 #endif
 
@@ -875,9 +875,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.stop),      sizeof(task_info.stop));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(task_info.provenance),sizeof(task_info.provenance));
+#endif
       lp_fwrite(f, (char*)&(task_info.finish_event),
                                                 sizeof(task_info.finish_event));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -899,9 +899,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.gpu_stop),  sizeof(task_info.gpu_stop));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(task_info.provenance),sizeof(task_info.provenance));
+#endif
       lp_fwrite(f, (char*)&(task_info.finish_event),
                                                 sizeof(task_info.finish_event));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -920,9 +920,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(meta_info.stop),    sizeof(meta_info.stop));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(meta_info.provenance),sizeof(meta_info.provenance));
+#endif
       lp_fwrite(f, (char*)&(meta_info.finish_event),
                                                 sizeof(meta_info.finish_event));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1074,6 +1074,8 @@ namespace Legion {
                 sizeof(mapper_call_info.stop));
       lp_fwrite(f, (char*)&(mapper_call_info.proc_id), 
                 sizeof(mapper_call_info.proc_id));
+      lp_fwrite(f, (char*)&(mapper_call_info.finish_event),
+                sizeof(mapper_call_info.finish_event));
     }
 
     //--------------------------------------------------------------------------
@@ -1091,6 +1093,8 @@ namespace Legion {
                 sizeof(runtime_call_info.stop));
       lp_fwrite(f, (char*)&(runtime_call_info.proc_id), 
                 sizeof(runtime_call_info.proc_id));
+      lp_fwrite(f, (char*)&(runtime_call_info.finish_event),
+                sizeof(runtime_call_info.finish_event));
     }
 
     //--------------------------------------------------------------------------
@@ -1142,6 +1146,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proftask_info.op_id), sizeof(proftask_info.op_id));
       lp_fwrite(f, (char*)&(proftask_info.start), sizeof(proftask_info.start));
       lp_fwrite(f, (char*)&(proftask_info.stop),  sizeof(proftask_info.stop));
+      lp_fwrite(f, (char*)&(proftask_info.finish_event),
+                                            sizeof(proftask_info.finish_event));
     }
 #endif
 
@@ -1711,10 +1717,12 @@ namespace Legion {
                      task_info.start, task_info.stop, task_info.provenance.id,
                      task_info.finish_event.id);
 #else
-      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu",
+      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu "
+                     IDFMT,
                      task_info.op_id, task_info.task_id, task_info.variant_id, 
                      task_info.proc_id, task_info.create, task_info.ready, 
-                     task_info.start, task_info.stop);
+                     task_info.start, task_info.stop,
+                     task_info.finish_event.id);
 #endif
     }
 
@@ -1733,11 +1741,11 @@ namespace Legion {
                      task_info.finish_event.id);
 #else
       log_prof.print("Prof GPU Task Info %llu %u %u " IDFMT
-		     " %llu %llu %llu %llu %llu %llu",
+		     " %llu %llu %llu %llu %llu %llu " IDFMT,
                      task_info.op_id, task_info.task_id, task_info.variant_id,
                      task_info.proc_id, task_info.create, task_info.ready,
                      task_info.start, task_info.stop, task_info.gpu_start,
-		     task_info.gpu_stop);
+		     task_info.gpu_stop, task_info.finish_event.id);
 #endif
     }
 
@@ -1753,9 +1761,10 @@ namespace Legion {
          meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
          meta_info.provenance.id, meta_info.finish_event.id);
 #else
-      log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
-         meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
-         meta_info.create, meta_info.ready, meta_info.start, meta_info.stop);
+      log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu "
+          IDFMT, meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
+         meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
+         meta_info.finish_event.id);
 #endif
     }
 
@@ -1911,9 +1920,10 @@ namespace Legion {
                           const LegionProfInstance::ProfTaskInfo& proftask_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu",
+      log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu " IDFMT,
                      proftask_info.proc_id, proftask_info.op_id, 
-                     proftask_info.start, proftask_info.stop);
+                     proftask_info.start, proftask_info.stop,
+                     proftask_info.finish_event.id);
     }
 #endif
 

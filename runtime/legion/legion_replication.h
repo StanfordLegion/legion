@@ -53,13 +53,12 @@ namespace Legion {
       struct CloseCheckValue {
       public:
         CloseCheckValue(void);
-        CloseCheckValue(const LogicalUser &user, RtBarrier barrier,
+        CloseCheckValue(Operation *op, RtBarrier barrier,
                         RegionTreeNode *node, bool read_only);
       public:
         bool operator==(const CloseCheckValue &rhs) const;
       public:
         unsigned operation_index;
-        unsigned region_requirement_index;
         RtBarrier barrier;
         LogicalRegion region;
         LogicalPartition partition;
@@ -1188,31 +1187,31 @@ namespace Legion {
     };
 
     /**
-     * \class OutputSizeExchange
+     * \class OutputExtentExchange
      * This class exchanges sizes of output subregions that are globally
      * indexed.
      */
-    class OutputSizeExchange : public AllGatherCollective<false> {
+    class OutputExtentExchange : public AllGatherCollective<false> {
     public:
-      typedef std::map<DomainPoint,DomainPoint> SizeMap;
+      typedef std::map<DomainPoint,DomainPoint> OutputExtentMap;
     public:
-      OutputSizeExchange(ReplicateContext *ctx,
-                         CollectiveIndexLocation loc,
-                         std::map<unsigned,SizeMap> &all_output_sizes);
-      OutputSizeExchange(const OutputSizeExchange &rhs);
-      virtual ~OutputSizeExchange(void);
+      OutputExtentExchange(ReplicateContext *ctx, ReplIndexTask *owner,
+                           CollectiveIndexLocation loc,
+                           std::vector<OutputExtentMap> &all_output_extents);
+      OutputExtentExchange(const OutputExtentExchange &rhs) = delete;
+      virtual ~OutputExtentExchange(void);
     public:
-      OutputSizeExchange& operator=(const OutputSizeExchange &rhs);
+      OutputExtentExchange& operator=(const OutputExtentExchange &rhs) = delete;
     public:
       virtual MessageKind get_message_kind(void) const
         { return SEND_CONTROL_REPLICATION_OUTPUT_SIZE_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
     public:
-      RtEvent exchange_output_sizes(void);
-    public:
-      std::map<unsigned,SizeMap> &all_output_sizes;
+      ReplIndexTask *const owner;
+      std::vector<OutputExtentMap> &all_output_extents;
     };
 
     /**
@@ -1415,7 +1414,11 @@ namespace Legion {
       CollectiveViewRendezvous(CollectiveID, ReplicateContext *ctx, 
           Operation *op, Finalizer *finalizer, 
           const RendezvousKey &key, RegionTreeID tid);
+      CollectiveViewRendezvous(const CollectiveViewRendezvous &rhs) = delete;
       virtual ~CollectiveViewRendezvous(void);
+    public:
+      CollectiveViewRendezvous& operator=(
+          const CollectiveViewRendezvous &rhs) = delete;
     public:
       virtual MessageKind get_message_kind(void) const
         { return SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS; }
@@ -1431,6 +1434,47 @@ namespace Legion {
       Finalizer *const finalizer;
     protected:
       std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
+    };
+
+    /**
+     * \class CollectiveVersioningRendezvous
+     * A gather collective to perform the rendezvous for performing
+     * versioning analysis for collective region requirements
+     */
+    class CollectiveVersioningRendezvous : public GatherCollective {
+    public:
+      typedef CollectiveVersioningBase::RegionVersioning RegionVersioning;
+      class Finalizer {
+      public:
+        virtual void finalize_collective_versioning(unsigned index,
+            unsigned parent_req_index,
+            LegionMap<LogicalRegion,RegionVersioning> &pending_versions) = 0;
+      };
+    public:
+      CollectiveVersioningRendezvous(CollectiveID, ReplicateContext *ctx, 
+          Operation *op, Finalizer *finalizer, ShardID owner, unsigned index);
+      CollectiveVersioningRendezvous(
+          const CollectiveVersioningRendezvous &rhs) = delete;
+      virtual ~CollectiveVersioningRendezvous(void);
+    public:
+      CollectiveVersioningRendezvous& operator=(
+          const CollectiveVersioningRendezvous &rhs) = delete;
+    public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS; }
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_gather(void);
+    public:
+      void perform_rendezvous(unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &pending_versions);
+    public:
+      Operation *const op;
+      Finalizer *const finalizer;
+      const unsigned index;
+    protected:
+      LegionMap<LogicalRegion,RegionVersioning> pending_versions;
+      unsigned parent_req_index;
     };
 
     /**
@@ -1490,27 +1534,96 @@ namespace Legion {
     };
 
     /**
-     * \class ElideCloseExchange
-     * This class supports an exchange of symbolic projection trees to
-     * determine if it is safe to elide a close operation in the logical
-     * dependence analysis.
+     * \class ProjectionTreeExchange
+     * This class provides a way of exchanging the projection trees 
+     * data structures between the shards in a way that is memory 
+     * efficient and won't involve materializing all the data for
+     * each subtree on every node.
      */
-    class ElideCloseExchange : public AllGatherCollective<false> {
+    class ProjectionTreeExchange : public AllGatherCollective<false> {
     public:
-      ElideCloseExchange(ReplicateContext *ctx, CollectiveIndexLocation loc,
-                         ProjectionTree *t)
-        : AllGatherCollective<false>(ctx, 
-            ctx->get_next_collective_index(loc, true/*logical*/)), tree(t) { }
+      ProjectionTreeExchange(ProjectionNode *n, ReplicateContext *ctx,
+          CollectiveIndexLocation loc, bool &disjoint, 
+          bool &permits_name_based_self_analysis, bool &unique_shards);
+      ProjectionTreeExchange(const ProjectionTreeExchange &rhs) = delete;
+      ~ProjectionTreeExchange(void);
+    public:
+      ProjectionTreeExchange& operator=(const ProjectionTreeExchange&) = delete;
     public:
       virtual MessageKind get_message_kind(void) const
-        { return SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE; }
+        { return SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE; }
+      virtual void pack_collective_stage(ShardID target, 
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
+    public:
+      ProjectionNode *const node;
+      bool &disjoint;
+      bool &permits_name_based_self_analysis;
+      bool &unique_shards;
+      bool leaves_only;
+    protected:
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
+      typedef ProjectionNode::ShardSet ShardSet;
+#endif
+      typedef ProjectionNode::RegionSummary RegionSummary; 
+      typedef ProjectionNode::PartitionSummary PartitionSummary; 
+      std::map<LogicalRegion,RegionSummary> region_summaries;
+      std::map<LogicalPartition,PartitionSummary> partition_summaries;
+    };
+
+    /**
+     * \class TimeoutMatchExchange
+     * This class helps perform all all-reduce exchange between the shards
+     * to see which logical users that have timed out on their analyses
+     * can be collected across all the shards. To be collected all the 
+     * shards must agree on what they are pruning.
+     */
+    class TimeoutMatchExchange : public AllGatherCollective<false> {
+    public:
+      TimeoutMatchExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      TimeoutMatchExchange(const TimeoutMatchExchange &rhs) = delete;
+      virtual ~TimeoutMatchExchange(void);
+    public:
+      TimeoutMatchExchange& operator=(const TimeoutMatchExchange &rhs) = delete;
+    public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE; }
+      virtual void pack_collective_stage(ShardID target, 
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void perform_exchange(std::vector<LogicalUser*> &timeouts, bool ready);
+      bool complete_exchange(std::vector<LogicalUser*> &to_delete);
+    protected:
+      std::vector<LogicalUser*> timeout_users;
+      // Pair represents <context index,region requirement index> for each user
+      std::vector<std::pair<size_t,unsigned> > all_timeouts;
+      bool double_latency;
+    };
+
+    /**
+     * \class MaskExchange
+     * This class will perform an all-reduce of a field mask between
+     * the shards so that all participants either get the union or
+     * intersection of all the fields in the field mask
+     */
+    template<bool UNION>
+    class MaskExchange : public AllGatherCollective<false> {
+    public:
+      MaskExchange(FieldMask &m, ReplicateContext *ctx, CollectiveID id)
+        : AllGatherCollective<false>(ctx, id), mask(m) { }
+    public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_MASK_EXCHANGE; }
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage) 
-        { tree->serialize(rez); }
+        { rez.serialize(mask); }
       virtual void unpack_collective_stage(Deserializer &derez, int stage)
-        { tree->deserialize(derez); }
-    public:
-      ProjectionTree *const tree;
+        { FieldMask m; derez.deserialize(m);
+          if (UNION) mask |= m; else mask &= m; }
+    private:
+      FieldMask &mask;
     };
 
     /**
@@ -1586,7 +1699,95 @@ namespace Legion {
     };
 
     /**
-     * \class ShardedCollective
+     * \class ShardRendezvous
+     * A sharded rendezvous class is similar to a shard collective, but it
+     * instead of performing collective operations between all the shards
+     * in a control replicated context, it will support doing parallel
+     * rendezvous between a subset of shards in the context. Callers must
+     * provide a unique key for performing the rendezvous.
+     */
+    class ShardRendezvous {
+    public:
+      ShardRendezvous(ReplicateContext *ctx, ShardID origin,
+                      const std::vector<ShardID> &participants);
+      ShardRendezvous(const ShardRendezvous &rhs) = delete;
+      virtual ~ShardRendezvous(void) { }
+    public:
+      ShardRendezvous& operator=(const ShardRendezvous &rhs) = delete;
+    public:
+      virtual bool receive_message(Deserializer &derez) = 0;
+    public:
+      void prefix_message(Serializer &rez, ShardID target) const;
+      void register_rendezvous(void);
+      size_t get_total_participants(void) const;
+      ShardID get_parent(void) const;
+      size_t count_children(void) const;
+      void get_children(std::vector<ShardID> &children) const;
+    protected:
+      unsigned find_index(ShardID shard) const;
+      ShardID get_index(unsigned index) const;
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
+    public:
+      ReplicateContext *const context;
+      const ShardID origin_shard;
+      const ShardID local_shard;
+      const std::vector<ShardID> &participants;
+      const bool all_shards_participating;
+    protected:
+      mutable LocalLock rendezvous_lock;
+    };
+
+    /**
+     * \class ShardedChildrenBroadcast
+     * Broadcast out a set of child nodes across the set of shards
+     */
+    class ShardedChildrenBroadcast : public ShardRendezvous {
+    public:
+      ShardedChildrenBroadcast(ReplicateContext *ctx,
+          ShardID source, const std::vector<ShardID> &participants,
+          std::vector<IndexPartNode*> &children);
+      ShardedChildrenBroadcast(const ShardedChildrenBroadcast &rhs) = delete;
+      virtual ~ShardedChildrenBroadcast(void);
+    public:
+      ShardedChildrenBroadcast& operator=(
+          const ShardedChildrenBroadcast &rhs) = delete;
+    public:
+      virtual bool receive_message(Deserializer &derez);
+      void broadcast(void);
+      void receive(void);
+    protected:
+      std::vector<IndexPartNode*> &children;
+      RtUserEvent received_event;
+      bool received;
+    };
+
+    /**
+     * \class TotalLeavesRendezvous
+     * Perform an all-reduce to count the total number of leaves
+     * in a region-subtree for a subsets of shards in a control
+     * replicated context.
+     */
+    class TotalLeavesRendezvous : public ShardRendezvous {
+    public:
+      TotalLeavesRendezvous(ReplicateContext *ctx,
+          ShardID root, const std::vector<ShardID> &participants);
+      TotalLeavesRendezvous(const TotalLeavesRendezvous &rhs) = delete;
+      virtual ~TotalLeavesRendezvous(void) { }
+    public:
+      TotalLeavesRendezvous& operator=(
+          const TotalLeavesRendezvous &rhs) = delete;
+    public:
+      virtual bool receive_message(Deserializer &derez);
+      size_t accumulate(size_t leaves);
+    protected:
+      size_t total_leaves;
+      RtUserEvent received_event;
+      int remaining;
+    };
+
+    /**
+     * \class ShardedMapping
      * This class mirrors the CollectiveMapping class and provides helper
      * methods for doing collective-style tree broadcasts and reductions
      * on a unique set of shards.
@@ -1617,31 +1818,69 @@ namespace Legion {
     };
 
     /**
+     * \class ReplCollectiveVersioning
+     */
+    template<typename OP>
+    class ReplCollectiveVersioning : public OP,
+      public CollectiveVersioningRendezvous::Finalizer{
+    public:
+      typedef typename OP::RegionVersioning RegionVersioning;
+    public:
+      ReplCollectiveVersioning(Runtime *rt);
+      ReplCollectiveVersioning(
+          const ReplCollectiveVersioning<OP> &rhs) = delete;
+    public:
+      ReplCollectiveVersioning<OP>& operator=(
+          const ReplCollectiveVersioning<OP> &rhs) = delete;
+    public:
+      virtual void deactivate(bool free = true);
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      virtual void finalize_collective_versioning(unsigned index,
+            unsigned parent_req_index,
+            LegionMap<LogicalRegion,RegionVersioning> &pending_versions);
+    public:
+      void create_collective_rendezvous(unsigned requirement_index);
+      virtual void shard_off_collective_rendezvous(
+          std::set<RtEvent> &done_events);
+      virtual void elide_collective_rendezvous(void);
+    protected:
+      std::map<unsigned,
+             CollectiveVersioningRendezvous*> collective_versioning_rendezvous;
+    };
+
+    /**
      * \class ReplCollectiveViewCreator
      * This class provides additional functionality for creating collective
      * views in control replication contexts by helping to manage the 
      * rendezvous between the shards.
      */
     template<typename OP>
-    class ReplCollectiveViewCreator : public OP, 
+    class ReplCollectiveViewCreator : public ReplCollectiveVersioning<OP>, 
       public CollectiveViewRendezvous::Finalizer {
     public:
       typedef typename OP::RendezvousKey RendezvousKey;
       typedef typename OP::CollectiveRendezvous CollectiveRendezvous;
     public:
       ReplCollectiveViewCreator(Runtime *rt);
-      ReplCollectiveViewCreator(const ReplCollectiveViewCreator<OP> &rhs);
+      ReplCollectiveViewCreator(
+          const ReplCollectiveViewCreator<OP> &rhs) = delete;
     public:
-      virtual void deactivate(bool free = true);
+      ReplCollectiveViewCreator<OP>& operator=(
+          const ReplCollectiveViewCreator<OP> &rhs) = delete;
+    public:
+      virtual void deactivate(bool free = true); 
       virtual void construct_collective_mapping(const RendezvousKey &key,
                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       virtual void finalize_collective_mapping(const RendezvousKey &key,
                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
-      void create_collective_view_rendezvous(RegionTreeID tid,
+      void create_collective_rendezvous(RegionTreeID tid,
           unsigned requirement_index, unsigned analysis_index = 0);
-      void shard_off_collective_view_rendezvous(std::set<RtEvent> &done_events);
-      void predicate_false_collective_view_rendezvous(void);
-    protected:
+      virtual void shard_off_collective_rendezvous(
+          std::set<RtEvent> &done_events);
+      virtual void elide_collective_rendezvous(void);
+    protected: 
       std::map<RendezvousKey,
                CollectiveViewRendezvous*> collective_view_rendezvous;
     };
@@ -1673,6 +1912,10 @@ namespace Legion {
       // Override this so it can broadcast the future result
       virtual Future create_future(void);
     public:
+      // Override for saying when it is safe to use output region trees
+      virtual void record_output_registered(RtEvent registered,
+                                      std::set<RtEvent> &applied_events);
+    public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
     protected:
@@ -1680,6 +1923,7 @@ namespace Legion {
       IndexSpaceNode *launch_space;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      RtBarrier output_bar;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1697,10 +1941,10 @@ namespace Legion {
     class ReplIndexTask : public ReplCollectiveViewCreator<IndexTask> {
     public:
       ReplIndexTask(Runtime *rt);
-      ReplIndexTask(const ReplIndexTask &rhs);
+      ReplIndexTask(const ReplIndexTask &rhs) = delete;
       virtual ~ReplIndexTask(void);
     public:
-      ReplIndexTask& operator=(const ReplIndexTask &rhs);
+      ReplIndexTask& operator=(const ReplIndexTask &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -1712,7 +1956,6 @@ namespace Legion {
     protected:
       virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void finish_index_task_reduction(void);
-      virtual RtEvent finish_index_task_complete(void);
     public:
       // Have to override this too for doing output in the
       // case that we misspeculate
@@ -1735,8 +1978,10 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
-    protected:
-      virtual void finalize_output_regions(void);
+    public:
+      // Output regions
+      virtual void record_output_registered(RtEvent registered);
+      virtual void finalize_output_regions(bool first_invocation);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -1747,11 +1992,12 @@ namespace Legion {
       FutureAllReduceCollective *all_reduce_collective;
       FutureReductionCollective *reduction_collective;
       FutureBroadcastCollective *broadcast_collective;
-      OutputSizeExchange *output_size_collective;
+      OutputExtentExchange *output_size_collective;
       CollectiveID collective_check_id;
+      RtBarrier output_bar;
     protected:
       // Map of output sizes collected by this shard
-      std::map<unsigned,SizeMap> local_output_sizes;
+      std::vector<OutputExtentMap> local_output_extents;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
     protected:
@@ -1786,15 +2032,9 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
-      virtual void record_refinements(const FieldMask &refinement_mask,
-                                      const bool overwrite);
-      virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
-      RtBarrier refinement_barrier;
-      ValueBroadcast<DistributedID> *did_collective;
     };
 
     /**
@@ -1818,8 +2058,8 @@ namespace Legion {
 
     /**
      * \class ReplRefinementOp
-     * A refinement operatoin that is aware that it is being
-     * executed ina  control replication context.
+     * A refinement operation that is aware that it is being
+     * executed in a control replication context.
      */
     class ReplRefinementOp : public RefinementOp {
     public:
@@ -1834,30 +2074,34 @@ namespace Legion {
     public:
       void set_repl_refinement_info(RtBarrier mapped_barrier, 
                                     RtBarrier refinement_barrier);
-      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
-      void initialize_replicated_set(EquivalenceSet *set,
-          const FieldMask &mask, std::set<RtEvent> &applied_events) const;
-    protected:
       RtBarrier mapped_barrier;
       RtBarrier refinement_barrier;
-      std::vector<ValueBroadcast<DistributedID>*> collective_dids;
-      // Note that this data structure ensures that we do things
-      // for these partitions in a order that is consistent across
-      // shards because all shards will sort the keys the same way
-      std::map<LogicalPartition,PartitionNode*> replicated_partitions;
-      // Same thing for one-off regions
-      std::map<LogicalRegion,RegionNode*> replicated_regions;
-      // Version information objects for each of our local regions
-      // that we are own after sharding non-replicated partitions
-      LegionMap<RegionNode*,VersionInfo> sharded_region_version_infos;
-      // Regions for which we need to propagate refinements for
-      // non-replicated partition refinements
-      std::map<PartitionNode*,std::vector<RegionNode*> > sharded_regions;
-      // Fields for partitions that have refinement regions
-      FieldMaskSet<PartitionNode> sharded_partitions;
+    };
+
+    /**
+     * \class ReplResetOp
+     * A reset operation that is aware it is being executed
+     * in a control replicated context
+     */
+    class ReplResetOp : public ResetOp {
+    public:
+      ReplResetOp(Runtime *runtime);
+      ReplResetOp(const ReplResetOp &rhs) = delete;
+      virtual ~ReplResetOp(void);
+    public:
+      ReplResetOp& operator=(const ReplResetOp &rhs) = delete;
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    protected:
+      RtBarrier reset_barrier;
     };
 
     /**
@@ -1865,13 +2109,14 @@ namespace Legion {
      * A copy operation that is aware that it is being
      * executed in a control replication context.
      */
-    class ReplFillOp : public FillOp {
+    class ReplFillOp : 
+      public ReplCollectiveVersioning<CollectiveVersioning<FillOp> > {
     public:
       ReplFillOp(Runtime *rt);
-      ReplFillOp(const ReplFillOp &rhs);
+      ReplFillOp(const ReplFillOp &rhs) = delete;
       virtual ~ReplFillOp(void);
     public:
-      ReplFillOp& operator=(const ReplFillOp &rhs);
+      ReplFillOp& operator=(const ReplFillOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   DistributedID fresh_did,
@@ -1882,11 +2127,15 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       virtual bool is_collective_first_local_shard(void) const
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual RtEvent initialize_fill_view(void);
       virtual void predicate_false(void);
     public:
@@ -1946,7 +2195,8 @@ namespace Legion {
      * A discard operation that is aware that it is being
      * exected in a control replication context.
      */
-    class ReplDiscardOp : public DiscardOp {
+    class ReplDiscardOp : 
+      public ReplCollectiveVersioning<CollectiveVersioning<DiscardOp> > {
     public:
       ReplDiscardOp(Runtime *rt);
       ReplDiscardOp(const ReplDiscardOp &rhs) = delete;
@@ -1963,6 +2213,9 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2064,13 +2317,14 @@ namespace Legion {
      * A deletion operation that is aware that it is
      * being executed in a control replication context.
      */
-    class ReplDeletionOp : public DeletionOp {
+    class ReplDeletionOp : 
+      public ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> > {
     public:
       ReplDeletionOp(Runtime *rt);
-      ReplDeletionOp(const ReplDeletionOp &rhs);
+      ReplDeletionOp(const ReplDeletionOp &rhs) = delete;
       virtual ~ReplDeletionOp(void);
     public:
-      ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
+      ReplDeletionOp& operator=(const ReplDeletionOp &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2154,6 +2408,9 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
       void select_sharding_function(void);
       void find_remote_targets(std::vector<ApEvent> &preconditions);
@@ -2376,10 +2633,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<MapOp> > {
     public:
       ReplMapOp(Runtime *rt);
-      ReplMapOp(const ReplMapOp &rhs);
+      ReplMapOp(const ReplMapOp &rhs) = delete;
       virtual ~ReplMapOp(void);
     public:
-      ReplMapOp& operator=(const ReplMapOp &rhs);
+      ReplMapOp& operator=(const ReplMapOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx);
     public:
@@ -2393,6 +2650,9 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       CollectiveID mapping_check, sources_check;
@@ -2408,10 +2668,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<AttachOp> > {
     public:
       ReplAttachOp(Runtime *rt);
-      ReplAttachOp(const ReplAttachOp &rhs);
+      ReplAttachOp(const ReplAttachOp &rhs) = delete;
       virtual ~ReplAttachOp(void);
     public:
-      ReplAttachOp& operator=(const ReplAttachOp &rhs);
+      ReplAttachOp& operator=(const ReplAttachOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   bool collective_instances,
@@ -2433,6 +2693,9 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       RtBarrier collective_map_barrier;
@@ -2463,10 +2726,10 @@ namespace Legion {
     class ReplIndexAttachOp : public ReplCollectiveViewCreator<IndexAttachOp> {
     public:
       ReplIndexAttachOp(Runtime *rt);
-      ReplIndexAttachOp(const ReplIndexAttachOp &rhs);
+      ReplIndexAttachOp(const ReplIndexAttachOp &rhs) = delete;
       virtual ~ReplIndexAttachOp(void);
     public:
-      ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs);
+      ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2494,10 +2757,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<DetachOp> > {
     public:
       ReplDetachOp(Runtime *rt);
-      ReplDetachOp(const ReplDetachOp &rhs);
+      ReplDetachOp(const ReplDetachOp &rhs) = delete;
       virtual ~ReplDetachOp(void);
     public:
-      ReplDetachOp& operator=(const ReplDetachOp &rhs);
+      ReplDetachOp& operator=(const ReplDetachOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   bool collective_instances,
@@ -2511,6 +2774,9 @@ namespace Legion {
       virtual void detach_external_instance(PhysicalManager *manager);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       // Help for unordered detachments
@@ -2532,10 +2798,10 @@ namespace Legion {
     class ReplIndexDetachOp : public ReplCollectiveViewCreator<IndexDetachOp> {
     public:
       ReplIndexDetachOp(Runtime *rt);
-      ReplIndexDetachOp(const ReplIndexDetachOp &rhs);
+      ReplIndexDetachOp(const ReplIndexDetachOp &rhs) = delete;
       virtual ~ReplIndexDetachOp(void);
     public:
-      ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs);
+      ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2565,10 +2831,10 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<AcquireOp> > {
     public:
       ReplAcquireOp(Runtime *rt);
-      ReplAcquireOp(const ReplAcquireOp &rhs);
+      ReplAcquireOp(const ReplAcquireOp &rhs) = delete;
       virtual ~ReplAcquireOp(void);
     public:
-      ReplAcquireOp& operator=(const ReplAcquireOp &rhs);
+      ReplAcquireOp& operator=(const ReplAcquireOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *context,
                                   bool first_local_shard);
@@ -2578,10 +2844,14 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       virtual void predicate_false(void);
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2595,21 +2865,25 @@ namespace Legion {
       public ReplCollectiveViewCreator<CollectiveViewCreator<ReleaseOp> > {
     public:
       ReplReleaseOp(Runtime *rt);
-      ReplReleaseOp(const ReplReleaseOp &rhs);
+      ReplReleaseOp(const ReplReleaseOp &rhs) = delete;
       virtual ~ReplReleaseOp(void);
     public:
-      ReplReleaseOp& operator=(const ReplReleaseOp &rhs);
+      ReplReleaseOp& operator=(const ReplReleaseOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *context,
                                   bool first_local_shard);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_replay(void);
       virtual void predicate_false(void);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances); 
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent perform_collective_versioning_analysis(unsigned index,
+                       LogicalRegion handle, EqSetTracker *tracker,
+                       const FieldMask &mask, unsigned parent_req_index);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2728,7 +3002,7 @@ namespace Legion {
     public:
       ReplTraceReplayOp& operator=(const ReplTraceReplayOp &rhs);
     public:
-      void initialize_replay(ReplicateContext *ctx, LegionTrace *trace,
+      void initialize_replay(ReplicateContext *ctx, LogicalTrace *trace,
                              Provenance *provenance);
     public:
       virtual void activate(void);
@@ -2764,13 +3038,14 @@ namespace Legion {
     public:
       ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs);
     public:
-      void initialize_begin(ReplicateContext *ctx, LegionTrace *trace,
+      void initialize_begin(ReplicateContext *ctx, LogicalTrace *trace,
                             Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
     };
 
     /**
@@ -2822,11 +3097,13 @@ namespace Legion {
       AddressSpaceID operator[](unsigned idx) const;
       AddressSpaceID& operator[](unsigned idx);
     public:
+      inline bool empty(void) const { return address_spaces.empty(); }
       inline size_t size(void) const { return address_spaces.size(); }
       inline void resize(size_t size) { address_spaces.resize(size); }
     public:
       void pack_mapping(Serializer &rez) const;
       void unpack_mapping(Deserializer &derez);
+      static void pack_empty(Serializer &rez);
     protected:
       std::vector<AddressSpaceID> address_spaces;
     }; 
@@ -2839,20 +3116,8 @@ namespace Legion {
      * reductions, and exchanges of information between the 
      * variaous shard tasks.
      */
-    class ShardManager : public DistributedCollectable, 
+    class ShardManager : public CollectiveViewCreator<CollectiveHelperOp>,
                          public Mapper::SelectShardingFunctorInput {
-    public:
-      struct ShardManagerLaunchArgs :
-        public LgTaskArgs<ShardManagerLaunchArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
-      public:
-        ShardManagerLaunchArgs(ShardTask *s)
-          : LgTaskArgs<ShardManagerLaunchArgs>(s->get_unique_op_id()), 
-            shard(s) { }
-      public:
-        ShardTask *const shard;
-      };
     public:
       enum BroadcastMessageKind {
         RESOURCE_UPDATE_KIND,
@@ -2870,14 +3135,15 @@ namespace Legion {
       };
     public:
       ShardManager(Runtime *rt, DistributedID did,
-                   CollectiveMapping *mapping,
-                   bool control, bool top, bool isomorphic_points,
+                   CollectiveMapping *mapping, unsigned local_count,
+                   bool top, bool isomorphic_points, bool cr,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
                    std::vector<DomainPoint> &&sorted_points,
                    std::vector<ShardID> &&shard_lookup,
-                   AddressSpaceID owner_space, SingleTask *original = NULL,
-                   RtBarrier shard_task_barrier = RtBarrier::NO_RT_BARRIER);
+                   SingleTask *original = NULL,
+                   RtBarrier shard_task_bar = RtBarrier::NO_RT_BARRIER,
+                   RtBarrier callback_bar = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs) = delete;
       ~ShardManager(void);
     public:
@@ -2895,27 +3161,61 @@ namespace Legion {
         { return (*address_spaces)[sid]; }    
       inline bool is_first_local_shard(ShardTask *task) const
         { return (local_shards[0] == task); }
-      inline const std::set<AddressSpace>& get_unique_shard_spaces(void) const
-        { return unique_shard_spaces; }
       inline ReplicateContext* find_local_context(void) const
-        { return local_shards[0]->get_shard_execution_context(); }
-      inline size_t local_shard_count(void) const
+        { return local_shards[0]->get_replicate_context(); }
+      inline size_t count_local_shards(void) const 
         { return local_shards.size(); }
+      inline unsigned find_local_index(ShardTask *task) const
+        {
+          for (unsigned idx = 0; idx < local_shards.size(); idx++)
+            if (local_shards[idx] == task)
+              return idx;
+          assert(false);
+          return 0;
+        }
+      inline ContextID get_first_shard_tree_context(void) const
+        { return local_shards.front()->
+          get_replicate_context()->get_logical_tree_context(); }
+    public: // From CollectiveHelperOp
+      virtual InnerContext* get_context(void);
+      virtual InnerContext* find_physical_context(unsigned index);
+      virtual size_t get_collective_points(void) const;
     public:
-      void set_shard_mapping(const std::vector<Processor> &shard_mapping);
-      void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
-      void create_callback_barrier(size_t arrival_count);
-      ShardTask* create_shard(ShardID id, Processor target);
-      void launch(const std::vector<bool> &virtual_mapped);
-      void distribute_shards(AddressSpaceID target,
-                             const std::vector<ShardTask*> &shards);
-      void unpack_shards_and_launch(Deserializer &derez);
-      void launch_shard(ShardTask *task,
-                        RtEvent precondition = RtEvent::NO_RT_EVENT) const;
+      void distribute_explicit(SingleTask *task, VariantID chosen_variant,
+                               std::vector<Processor> &target_processors);
+      void distribute_implicit(TaskID top_task_id, MapperID mapper_id,
+                               Processor::Kind kind, unsigned shards_per_space,
+                               TopLevelContext *top_context);
+      void pack_shard_manager(Serializer &rez) const;
+      void set_shard_mapping(std::vector<Processor> &shard_mapping);
+      ShardTask* create_shard(ShardID id, Processor target,
+          VariantID variant, InnerContext *parent_ctx, SingleTask *source);
+      ShardTask* create_shard(ShardID id, Processor target,
+          VariantID variant, InnerContext *parent_ctx, Deserializer &derez);
+    public:
+      virtual void finalize_collective_versioning_analysis(unsigned index,
+          unsigned parent_req_index,
+          LegionMap<LogicalRegion,RegionVersioning> &to_perform);
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      void finalize_replicate_collective_versioning(unsigned index,
+          unsigned parent_req_index, LegionMap<LogicalRegion,
+            CollectiveVersioningBase::RegionVersioning> &to_perform);
+      void finalize_replicate_collective_views(
+          const CollectiveViewCreatorBase::RendezvousKey &key,
+          std::map<LogicalRegion,
+            CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
+      void rendezvous_check_virtual_mappings(ShardID shard,
+          MapperManager *mapper, const std::vector<bool> &virtual_mappings);
+    public:
       EquivalenceSet* get_initial_equivalence_set(unsigned idx,
-                      LogicalRegion region, InnerContext *context);
+              LogicalRegion region, InnerContext *context, bool first_shard);
+      // If the creating shards are NULL we'll assume that they are all
+      // participating in the creation of the index space
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
-                      InnerContext *context, DistributedID did, bool &first);
+          size_t op_ctx_index, unsigned refinement_number, 
+          InnerContext *context, bool first_shard,
+          const std::vector<ShardID> *creating_shards = NULL);
       FillView* deduplicate_fill_view_creation(DistributedID did, FillOp *op,
                                                bool &set_view);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
@@ -2971,8 +3271,18 @@ namespace Legion {
                                    Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
-      void send_disjoint_complete_request(ShardID target, Serializer &rez);
-      void handle_disjoint_complete_request(Deserializer &derez);
+      void send_rendezvous_message(ShardID target, Serializer &rez);
+      void handle_rendezvous_message(Deserializer &derez);
+    public:
+      void send_compute_equivalence_sets(ShardID target, Serializer &rez);
+      void handle_compute_equivalence_sets(Deserializer &derez);
+      void handle_equivalence_set_notification(Deserializer &derez);
+    public:
+      void send_output_equivalence_set(ShardID target, Serializer &rez);
+      void handle_output_equivalence_set(Deserializer &derez);
+    public:
+      void send_refine_equivalence_sets(ShardID target, Serializer &rez);
+      void handle_refine_equivalence_sets(Deserializer &derez);
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
@@ -2982,6 +3292,10 @@ namespace Legion {
     public:
       void broadcast_created_region_contexts(ShardTask *source, Serializer &rez,
                                              std::set<RtEvent> &applied_events);
+      void send_created_region_contexts(ShardID target, Serializer &rez,
+                                        std::set<RtEvent> &applied_events);
+      void handle_created_region_contexts(Deserializer &derez,
+                                          std::set<RtEvent> &applied_events);
     public:
       bool has_empty_shard_subtree(AddressSpaceID space, 
           ShardingFunction *sharding, IndexSpaceNode *full_space,
@@ -3015,20 +3329,28 @@ namespace Legion {
       void send_find_or_create_collective_view(ShardID target, Serializer &rez);
       void handle_find_or_create_collective_view(Deserializer &derez);
     public:
-      static void handle_launch(const void *args);
-    public:
-      static void handle_launch(Deserializer &derez, Runtime *rt, 
-                                AddressSpaceID source);
+      static void handle_distribution(Deserializer &derez, Runtime *rt); 
+      static void handle_collective_versioning(Deserializer &derez,Runtime *rt);
+      static void handle_collective_mapping(Deserializer &derez, Runtime *rt);
+      static void handle_virtual_rendezvous(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
-      static void handle_disjoint_complete_request(Deserializer &derez, 
-                                                   Runtime *rt);
+      static void handle_rendezvous_message(Deserializer &derez, Runtime *rt);
+      static void handle_compute_equivalence_sets(Deserializer &derez,
+                                                  Runtime *runtime);
+      static void handle_output_equivalence_set(Deserializer &derez,
+                                                Runtime *runtime);
+      static void handle_refine_equivalence_sets(Deserializer &derez,
+                                                 Runtime *runtime);
+      static void handle_equivalence_set_notification(Deserializer &derez, 
+                                                      Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
       static void handle_broadcast_update(Deserializer &derez, Runtime *rt);
+      static void handle_created_regions(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);
@@ -3057,16 +3379,17 @@ namespace Legion {
       const Domain shard_domain;
       const size_t total_shards;
       SingleTask *const original_task;
-      const bool control_replicated;
+      const unsigned local_constituents;
+      const unsigned remote_constituents;
       const bool top_level_task;
       const bool isomorphic_points;
+      const bool control_replicated; 
     protected:
       mutable LocalLock                manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
-      std::vector<DistributedID>       mapped_equivalence_dids;
     protected:
       // There are four kinds of signals that come back from 
       // the execution of the shards:
@@ -3080,18 +3403,53 @@ namespace Legion {
       unsigned    local_execution_complete, remote_execution_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
-      unsigned    remote_constituents;
       unsigned    semantic_attach_counter;
       FutureInstance *local_future_result;
       std::set<RtEvent> mapping_preconditions;
       std::vector<ApEvent> execution_effects;
     protected:
+      // These barriers only are needed for control replicated tasks
       RtBarrier shard_task_barrier;
       RtBarrier callback_barrier;
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     protected:
-      std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
+      // We need a triple here to uniquely identify creations and
+      // make sure the right equivalence set gets hooked up with
+      // in the right way.
+      // 1. index of the creator op in the context
+      // 2. number of the refinement for that creator op
+      // 3. logical region being refined
+      struct EquivalenceSetKey {
+      public:
+        inline EquivalenceSetKey(void)
+          : handle(LogicalRegion::NO_REGION), op_ctx_index(0), 
+            refinement_number(0) { }
+        inline EquivalenceSetKey(size_t op, unsigned number, LogicalRegion h)
+          : handle(h), op_ctx_index(op), refinement_number(number) { }
+      public:
+        inline bool operator<(const EquivalenceSetKey &rhs) const
+        {
+          if (op_ctx_index < rhs.op_ctx_index) return true;
+          if (op_ctx_index > rhs.op_ctx_index) return false;
+          if (refinement_number < rhs.refinement_number) return true;
+          if (refinement_number > rhs.refinement_number) return false;
+          return (handle < rhs.handle);
+        }
+      public:
+        LogicalRegion handle;
+        size_t op_ctx_index;
+        unsigned refinement_number;
+      };
+      struct NewEquivalenceSet {
+      public:
+        EquivalenceSet *new_set;
+        DistributedID did;
+        CollectiveMapping *mapping;
+        RtUserEvent ready_event;
+        size_t remaining;
+      };
+      std::map<EquivalenceSetKey,NewEquivalenceSet>
                                         created_equivalence_sets;
       std::map<DistributedID,std::pair<FutureImpl*,size_t> > created_futures;
       std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >
@@ -3100,10 +3458,8 @@ namespace Legion {
                                         created_fill_views;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
-    protected:
-      // A unique set of address spaces on which shards exist 
-      std::set<AddressSpaceID> unique_shard_spaces;
 #ifdef LEGION_USE_LIBDL
+    protected:
       std::set<Runtime::RegistrationKey> unique_registration_callbacks;
 #endif
     protected:
@@ -3119,6 +3475,14 @@ namespace Legion {
       std::map<std::pair<size_t,size_t>,ShardLocalData> shard_local_data;
     protected:
       AttachDeduplication *attach_deduplication;
+    protected:
+      struct VirtualMappingRendezvous {
+        std::vector<bool> virtual_mappings;
+        MapperManager *mapper;
+        ShardID shard;
+        unsigned remaining_arrivals;
+      };
+      VirtualMappingRendezvous *virtual_mapping_rendezvous;
     };
 
   }; // namespace Internal

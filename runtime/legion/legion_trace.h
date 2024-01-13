@@ -26,11 +26,18 @@ namespace Legion {
   namespace Internal {
 
     /**
-     * \class LegionTrace
-     * This is the abstract base class for a trace object
-     * and is used to support both static and dynamic traces
+     * \class LogicalTrace
+     * The logical trace class captures the tracing information
+     * for the logical dependence analysis so that it can be 
+     * replayed without needing to perform the analysis again
      */
-    class LegionTrace : public Collectable {
+    class LogicalTrace : public Collectable {
+    public:
+      enum TracingState {
+        LOGICAL_ONLY,
+        PHYSICAL_RECORD,
+        PHYSICAL_REPLAY,
+      };
     public:
       struct DependenceRecord {
       public:
@@ -63,49 +70,94 @@ namespace Legion {
         DependenceType dtype;
         FieldMask dependent_mask;
       };
-      struct AliasChildren {
+      struct CloseInfo {
       public:
-        AliasChildren(unsigned req_idx, unsigned dep, const FieldMask &m)
-          : req_index(req_idx), depth(dep), mask(m) { }
+        CloseInfo(MergeCloseOp *op, unsigned idx,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                  RegionTreeNode *n,
+#endif
+                  const RegionRequirement &r)
+          : close_op(op), requirement(r), creator_idx(idx)
+#ifdef DEBUG_LEGION_COLLECTIVES
+            , node(n)
+#endif
+        { }
       public:
-        unsigned req_index;
-        unsigned depth;
-        FieldMask mask;
+        MergeCloseOp *close_op; // only valid during capture
+        RegionRequirement requirement;
+        LegionVector<DependenceRecord> dependences;
+        FieldMask close_mask;
+        unsigned creator_idx;
+#ifdef DEBUG_LEGION_COLLECTIVES
+        RegionTreeNode *node;
+#endif
+      };
+      struct OperationInfo {
+      public:
+        OperationInfo(Operation *op)
+          : kind(op->get_operation_kind()),
+            region_count(op->get_region_count()) { }
+      public:
+        LegionVector<DependenceRecord> dependences;
+        LegionVector<CloseInfo> closes;
+        Operation::OpKind kind;
+        unsigned region_count;
+      };
+      class StaticTranslator {
+      public:
+        StaticTranslator(const std::set<RegionTreeID> *trs)
+        { if (trs != NULL) trees.insert(trs->begin(), trs->end()); }
+      public:
+        inline bool skip_analysis(RegionTreeID tid) const
+        { if (trees.empty()) return true; 
+          else return (trees.find(tid) != trees.end()); }
+        inline void push_dependences(const std::vector<StaticDependence> *deps)
+        {
+          AutoLock t_lock(translator_lock);
+          if (deps != NULL)
+            dependences.emplace_back(*deps);
+          else
+            dependences.resize(dependences.size() + 1);
+        }
+        inline void pop_dependences(std::vector<StaticDependence> &deps)
+        {
+          AutoLock t_lock(translator_lock);
+#ifdef DEBUG_LEGION
+          assert(!dependences.empty());
+#endif
+          deps.swap(dependences.front());
+          dependences.pop_front();
+        }
+      public:
+        LocalLock translator_lock;
+        std::deque<std::vector<StaticDependence> > dependences;
+        std::set<RegionTreeID> trees;
       };
     public:
-      enum TracingState {
-        LOGICAL_ONLY,
-        PHYSICAL_RECORD,
-        PHYSICAL_REPLAY,
-      };
+      LogicalTrace(InnerContext *ctx, TraceID tid, bool logical_only,
+                   bool static_trace, Provenance *provenance,
+                   const std::set<RegionTreeID> *trees);
+      ~LogicalTrace(void);
     public:
-      LegionTrace(InnerContext *ctx, TraceID tid, bool logical_only, 
-                  Provenance *provenance);
-      virtual ~LegionTrace(void);
-    public:
-      virtual bool is_static_trace(void) const = 0;
       inline TraceID get_trace_id(void) const { return tid; }
     public:
-      virtual bool handles_region_tree(RegionTreeID tid) const = 0;
-      virtual bool initialize_op_tracing(Operation *op,
-                     const std::vector<StaticDependence> *dependences,
-                     const LogicalTraceInfo *trace_info) = 0;
-      virtual size_t register_operation(Operation *op, GenerationID gen) = 0;
-      virtual void record_dependence(Operation *target, GenerationID target_gen,
-                                Operation *source, GenerationID source_gen) = 0;
-      virtual void record_region_dependence(
-                                    Operation *target, GenerationID target_gen,
+      bool initialize_op_tracing(Operation *op,
+                     const std::vector<StaticDependence> *dependences = NULL);
+      bool skip_analysis(RegionTreeID tid) const;
+      size_t register_operation(Operation *op, GenerationID gen);
+      void register_internal(InternalOp *op);
+      void register_close(MergeCloseOp *op, unsigned creator_idx,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                          RegionTreeNode *node,
+#endif
+                          const RegionRequirement &req);
+      bool record_dependence(Operation *target, GenerationID target_gen,
+                                Operation *source, GenerationID source_gen);
+      bool record_region_dependence(Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask) = 0;
-      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask) = 0;
-      virtual void record_aliased_children(unsigned req_index, unsigned depth,
-                                           const FieldMask &aliased_mask) = 0;
-      virtual void end_trace_capture(void) = 0;
+                                    const FieldMask &dependent_mask);
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }
@@ -114,7 +166,7 @@ namespace Legion {
       bool has_physical_trace(void) { return physical_trace != NULL; }
       PhysicalTrace* get_physical_trace(void) { return physical_trace; }
     public:
-      void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
+      void begin_trace_execution(FenceOp *fence_op);
       void end_trace_execution(FenceOp *fence_op);
     public:
       void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
@@ -131,176 +183,43 @@ namespace Legion {
       inline void reset_intermediate_operations(void)
         { has_intermediate_ops = false; }
       void invalidate_trace_cache(Operation *invalidator);
+    protected:
+      void replay_operation_dependences(Operation *op,
+          const LegionVector<DependenceRecord> &dependences);
+      void translate_dependence_records(Operation *op, const unsigned index,
+          const std::vector<StaticDependence> &dependences);
 #ifdef LEGION_SPY
-    public:
-      virtual void perform_logging(
-                          UniqueID prev_fence_uid, UniqueID curr_fence_uid) = 0;
     public:
       UniqueID get_current_uid_by_index(unsigned op_idx) const;
 #endif
     public:
-      InnerContext *const ctx;
+      InnerContext *const context;
       const TraceID tid;
       Provenance *const begin_provenance;
       // Set after end_trace is called
       Provenance *end_provenance;
     protected:
-      std::vector<std::pair<Operation*,GenerationID> > operations; 
-      // We also need a data structure to record when there are
-      // aliased but non-interfering region requirements. This should
-      // be pretty sparse so we'll make it a map
-      std::map<unsigned,LegionVector<AliasChildren> > aliased_children;
       std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
       bool blocking_call_observed;
       bool has_intermediate_ops;
       bool fixed;
+      bool recording;
+      size_t replay_index;
+      std::deque<OperationInfo> replay_info;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
+      std::vector<std::pair<Operation*,GenerationID> > operations;
+      // Only need this backwards lookup for trace capture
+      std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      FenceOp *trace_fence;
+      GenerationID trace_fence_gen;
+      StaticTranslator *static_translator;
 #ifdef LEGION_SPY
     protected:
       std::map<std::pair<Operation*,GenerationID>,UniqueID> current_uids;
       std::map<std::pair<Operation*,GenerationID>,unsigned> num_regions;
 #endif
-    };
-
-    /**
-     * \class StaticTrace
-     * A static trace is a trace object that is used for 
-     * handling cases where the application knows the dependneces
-     * for a trace of operations
-     */
-    class StaticTrace : public LegionTrace,
-                        public LegionHeapify<StaticTrace> {
-    public:
-      static const AllocationType alloc_type = STATIC_TRACE_ALLOC;
-    public:
-      StaticTrace(TraceID tid, InnerContext *ctx, bool logical_only,
-                  Provenance *p, const std::set<RegionTreeID> *trees);
-      StaticTrace(const StaticTrace &rhs);
-      virtual ~StaticTrace(void);
-    public:
-      StaticTrace& operator=(const StaticTrace &rhs);
-    public:
-      virtual bool is_static_trace(void) const { return true; }
-    public:
-      virtual bool handles_region_tree(RegionTreeID tid) const;
-      virtual bool initialize_op_tracing(Operation *op,
-                              const std::vector<StaticDependence> *dependences,
-                              const LogicalTraceInfo *trace_info);
-      virtual size_t register_operation(Operation *op, GenerationID gen);
-      virtual void record_dependence(Operation *target,GenerationID target_gen,
-                                     Operation *source,GenerationID source_gen);
-      virtual void record_region_dependence(
-                                    Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask);
-      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask);
-      virtual void record_aliased_children(unsigned req_index, unsigned depth,
-                                           const FieldMask &aliased_mask);
-      virtual void end_trace_capture(void);
-#ifdef LEGION_SPY
-    public:
-      virtual void perform_logging(
-                          UniqueID prev_fence_uid, UniqueID curr_fence_uid);
-#endif
-    protected:
-      const LegionVector<DependenceRecord>&
-                  translate_dependence_records(Operation *op, unsigned index);
-    protected:
-      std::deque<std::vector<StaticDependence> > static_dependences;
-      std::deque<LegionVector<DependenceRecord> > translated_deps;
-      std::set<RegionTreeID> application_trees;
-    };
-
-    /**
-     * \class DynamicTrace
-     * This class is used for memoizing the dynamic
-     * dependence analysis for series of operations
-     * in a given task's context.
-     */
-    class DynamicTrace : public LegionTrace,
-                         public LegionHeapify<DynamicTrace> {
-    public:
-      static const AllocationType alloc_type = DYNAMIC_TRACE_ALLOC;
-    public:
-      struct OperationInfo {
-      public:
-        OperationInfo(Operation *op)
-          : kind(op->get_operation_kind()), count(op->get_region_count()) { }
-      public:
-        Operation::OpKind kind;
-        unsigned count;
-      }; 
-    public:
-      DynamicTrace(TraceID tid, InnerContext *ctx, 
-                   bool logical_only, Provenance *p);
-      DynamicTrace(const DynamicTrace &rhs);
-      virtual ~DynamicTrace(void);
-    public:
-      DynamicTrace& operator=(const DynamicTrace &rhs);
-    public:
-      virtual bool is_static_trace(void) const { return false; }
-    public:
-      virtual bool initialize_op_tracing(Operation *op,
-                          const std::vector<StaticDependence> *dependences,
-                          const LogicalTraceInfo *trace_info);
-      virtual bool handles_region_tree(RegionTreeID tid) const;
-      // Called by analysis thread
-      virtual size_t register_operation(Operation *op, GenerationID gen);
-      virtual void record_dependence(Operation *target,GenerationID target_gen,
-                                     Operation *source,GenerationID source_gen);
-      virtual void record_region_dependence(
-                                    Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask);
-      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask);
-      virtual void record_aliased_children(unsigned req_index, unsigned depth,
-                                           const FieldMask &aliased_mask);
-      // Called by analysis thread
-      virtual void end_trace_capture(void);
-#ifdef LEGION_SPY
-    public:
-      virtual void perform_logging(
-                          UniqueID prev_fence_uid, UniqueID curr_fence_uid);
-#endif
-    protected:
-      // Insert a normal dependence for the current operation
-      void insert_dependence(const DependenceRecord &record);
-      // Insert an internal dependence for given key
-      void insert_dependence(const std::pair<InternalOp*,GenerationID> &key,
-                             const DependenceRecord &record);
-    protected:
-      // Only need this backwards lookup for recording dependences
-      std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
-      // Internal operations have a nasty interaction with traces because
-      // we can generate different sets of internal operations each time we
-      // run the trace depending on the state of the logical region tree.
-      // Therefore, we keep track of internal ops done when capturing the trace
-      // record transitive dependences on the other operations in the
-      // trace that we would have interfered with had the internal operations
-      // not been necessary.
-      std::map<std::pair<InternalOp*,GenerationID>,
-               LegionVector<DependenceRecord> > internal_dependences;
-    protected: 
-      // This is the generalized form of the dependences
-      // For each operation, we remember a list of operations that
-      // it dependens on and whether it is a validates the region
-      std::deque<LegionVector<DependenceRecord> > dependences;
-      // Metadata for checking the validity of a trace when it is replayed
-      std::vector<OperationInfo> op_info;
-    protected:
-      bool tracing;
     };
 
     class TraceOp : public FenceOp {
@@ -398,7 +317,7 @@ namespace Legion {
     public:
       TraceReplayOp& operator=(const TraceReplayOp &rhs);
     public:
-      void initialize_replay(InnerContext *ctx, LegionTrace *trace,
+      void initialize_replay(InnerContext *ctx, LogicalTrace *trace,
                              Provenance *provenance);
     public:
       virtual void activate(void);
@@ -426,13 +345,14 @@ namespace Legion {
     public:
       TraceBeginOp& operator=(const TraceBeginOp &rhs);
     public:
-      void initialize_begin(InnerContext *ctx, LegionTrace *trace,
+      void initialize_begin(InnerContext *ctx, LogicalTrace *trace,
                             Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
     };
 
     class TraceSummaryOp : public TraceOp {
@@ -449,7 +369,6 @@ namespace Legion {
                               PhysicalTemplate *tpl,
                               Operation *invalidator,
                               Provenance *provenance);
-      void perform_logging(void);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -472,7 +391,7 @@ namespace Legion {
      */
     class PhysicalTrace {
     public:
-      PhysicalTrace(Runtime *runtime, LegionTrace *logical_trace);
+      PhysicalTrace(Runtime *runtime, LogicalTrace *logical_trace);
       PhysicalTrace(const PhysicalTrace &rhs) = delete;
       ~PhysicalTrace(void);
     public:
@@ -517,7 +436,7 @@ namespace Legion {
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
       Runtime * const runtime;
-      const LegionTrace *logical_trace;
+      const LogicalTrace *logical_trace;
       const bool perform_fence_elision;
       ReplicateContext *const repl_ctx;
     private:
@@ -556,7 +475,7 @@ namespace Legion {
       };
     public:
       TraceViewSet(InnerContext *context, DistributedID owner_did,
-                   RegionNode *region);
+                   IndexSpaceExpression *expr, RegionTreeID tree_id);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
@@ -618,7 +537,8 @@ namespace Legion {
                         FieldMaskSet<IndexSpaceExpression> > ViewExprs;
     public:
       InnerContext *const context;
-      RegionNode *const region;
+      IndexSpaceExpression *const expression;
+      const RegionTreeID tree_id;
       const DistributedID owner_did;
     protected:
       // At most one expression per field
@@ -661,34 +581,25 @@ namespace Legion {
         Operation *const op;
         const RtUserEvent done_event;
       };
-      struct DeferTraceFinalizeSetsArgs :
-        public LgTaskArgs<DeferTraceFinalizeSetsArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID;
-      public:
-        DeferTraceFinalizeSetsArgs(TraceConditionSet *s, UniqueID uid)
-          : LgTaskArgs<DeferTraceFinalizeSetsArgs>(uid), set(s) { }
-      public:
-        TraceConditionSet *const set;
-      };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        RegionNode *region, const FieldMask &mask);
+                        unsigned parent_req_index, IndexSpaceExpression *expr,
+                        const FieldMask &mask, RegionTreeID tree_id);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
     public:
-      virtual void record_subscription(VersionManager *owner,
-                                       AddressSpaceID space);
-      virtual bool finish_subscription(VersionManager *owner,
-                                       AddressSpaceID space);
-    public:
-      virtual void record_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
-      virtual void record_pending_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
-      virtual void invalidate_equivalence_sets(const FieldMask &mask);
+      virtual void add_subscription_reference(unsigned count = 1)
+        { add_reference(count); }
+      virtual bool remove_subscription_reference(unsigned count = 1)
+        { return remove_reference(count); }
+      virtual RegionTreeID get_region_tree_id(void) const
+        { return tree_id; }
+      virtual IndexSpaceExpression* get_tracker_expression(void) const
+        { return condition_expr; }
+      virtual ReferenceSource get_reference_source_kind(void) const 
+        { return TRACE_REF; }
     public:
       void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, const FieldMask &mask,
@@ -709,21 +620,18 @@ namespace Legion {
     public:
       static void handle_precondition_test(const void *args);
       static void handle_postcondition_test(const void *args);
-      static void handle_finalize_sets(const void *args);
     public:
-      RtEvent recompute_equivalence_sets(UniqueID opid);
-      void finalize_computed_sets(void);
+      RtEvent recompute_equivalence_sets(UniqueID opid, 
+                        const FieldMask &invalid_mask);
     public:
       InnerContext *const context;
       RegionTreeForest *const forest;
-      RegionNode *const region;
       IndexSpaceExpression *const condition_expr;
       const FieldMask condition_mask;
+      const RegionTreeID tree_id;
+      const unsigned parent_req_index;
     private:
       mutable LocalLock set_lock;
-      FieldMaskSet<EquivalenceSet> current_sets;
-      FieldMaskSet<EquivalenceSet> pending_sets;
-      FieldMask invalid_mask;
     private:
       TraceViewSet *precondition_views;
       TraceViewSet *anticondition_views;
@@ -741,15 +649,6 @@ namespace Legion {
     private:
       std::vector<InvalidInstAnalysis*> precondition_analyses;
       std::vector<AntivalidInstAnalysis*> anticondition_analyses;
-    private:
-      // Keep track of our subscription owners
-      // Note that from the owners perspective it only has at most one
-      // reference to this subscriber at a time, but in practice the
-      // removal of references can be delayed arbitrarily so we need to
-      // keep a count of how many outstanding references there are for
-      // each owner so we know when it is done
-      std::map<std::pair<VersionManager*,AddressSpaceID>,
-               unsigned> subscription_owners;
     };
 
     /**
@@ -887,8 +786,8 @@ namespace Legion {
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
-      void finalize(InnerContext *context, UniqueID opid,
-                    bool has_blocking_call, ReplTraceOp *op = NULL);
+      void finalize(InnerContext *context, Operation *op,
+                    bool has_blocking_call);
     public:
       struct Replayable {
         explicit Replayable(bool r)
@@ -908,11 +807,10 @@ namespace Legion {
         std::string message;
       };
     protected:
-      virtual Replayable check_replayable(ReplTraceOp *op, 
-          InnerContext *context, UniqueID opid, bool has_blocking_call);
+      virtual Replayable check_replayable(Operation *op, 
+          InnerContext *context, bool has_blocking_call);
     public:
-      void optimize(ReplTraceOp *op,
-                    bool do_transitive_reduction);
+      void optimize(Operation *op, bool do_transitive_reduction);
     private:
       void find_all_last_instance_user_events(
                              std::vector<RtEvent> &frontier_events);
@@ -931,7 +829,7 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     protected:
-      virtual void sync_compute_frontiers(ReplTraceOp *op,
+      virtual void sync_compute_frontiers(Operation *op,
                           const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
@@ -1259,6 +1157,8 @@ namespace Legion {
       // this trace and then extract the different condition sets for this trace
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
       FieldMaskSet<RegionNode> trace_regions;
+      // Parent context requirement indexes for each of the regions
+      std::map<RegionNode*,unsigned> trace_region_parent_req_indexes;
       std::vector<TraceConditionSet*> conditions;
 #ifdef LEGION_SPY
     private:
@@ -1446,8 +1346,8 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
-      virtual Replayable check_replayable(ReplTraceOp *op, 
-          InnerContext *context, UniqueID opid, bool has_blocking_call);
+      virtual Replayable check_replayable(Operation *op,
+          InnerContext *context, bool has_blocking_call);
     protected:
       ShardID find_inst_owner(const UniqueInst &inst);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
@@ -1459,7 +1359,7 @@ namespace Legion {
                                            const FieldMask &mask,
                                            std::set<RtEvent> &applied_events);
       virtual bool are_read_only_users(InstUsers &inst_users);
-      virtual void sync_compute_frontiers(ReplTraceOp *op,
+      virtual void sync_compute_frontiers(Operation *op,
                           const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
