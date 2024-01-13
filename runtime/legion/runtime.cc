@@ -7727,7 +7727,7 @@ namespace Legion {
         Mapper::StealRequestOutput output;
         // Ask the mapper what it wants to allow be stolen
         if (!input.stealable_tasks.empty())
-          mapper->invoke_permit_steal_request(&input, &output);
+          mapper->invoke_permit_steal_request(input, output);
         // See which tasks we can succesfully steal
         std::vector<TaskOp*> local_stolen;
         if (!output.stolen_tasks.empty())
@@ -7995,7 +7995,7 @@ namespace Legion {
         for (std::list<TaskOp*>::const_iterator it = 
               queue_copy.begin(); it != queue_copy.end(); it++)
           input.ready_tasks.push_back(*it);
-        mapper->invoke_select_tasks_to_map(&input, &output);
+        mapper->invoke_select_tasks_to_map(input, output);
         // If we had no entry then we better have gotten a mapper event
         std::vector<TaskOp*> to_trigger;
         if (output.map_tasks.empty() && output.relocate_tasks.empty())
@@ -17909,7 +17909,7 @@ namespace Legion {
       result.mapper_event = args->event;
       result.result = args->future->get_untyped_result();
       result.result_size = args->future->get_untyped_size();
-      mapper->invoke_handle_task_result(&result);
+      mapper->invoke_handle_task_result(result);
 #else
       assert(false); // update this
 #endif
@@ -19207,21 +19207,14 @@ namespace Legion {
                               IDFMT " passed to begin mapper call.", target.id)
         manager = finder->second->find_mapper(id);
       }
-      RtEvent ready;
-      MappingCallInfo *result = manager->begin_mapper_call(
-          APPLICATION_MAPPER_CALL, NULL, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
+      return new MappingCallInfo(manager, APPLICATION_MAPPER_CALL, NULL);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::end_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      info->manager->finish_mapper_call(info);
+      delete info;
     }
 
     //--------------------------------------------------------------------------
@@ -32297,11 +32290,6 @@ namespace Legion {
               (InnerContext::IssueFrameArgs*)args;
             fargs->parent_ctx->perform_frame_issue(fargs->frame, 
                                                    fargs->frame_termination);
-            break;
-          }
-        case LG_MAPPER_CONTINUATION_TASK_ID:
-          {
-            MapperContinuation::handle_continuation(args);
             break;
           }
         case LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:

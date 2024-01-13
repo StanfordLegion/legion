@@ -4389,7 +4389,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(mappable != NULL);
 #endif
-        mapper->invoke_memoize_operation(mappable, &input, &output);
+        mapper->invoke_memoize_operation(mappable, input, output);
         if (output.memoize)
           memo_state = MEMO_REQ;
       }
@@ -4985,7 +4985,7 @@ namespace Legion {
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
               info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_inline_report_profiling(this, &info);
+              mapper->invoke_inline_report_profiling(this, info);
               free(info.buffer);
             }
             const int count = to_perform.size() + 
@@ -5004,7 +5004,7 @@ namespace Legion {
           Mapping::Mapper::InlineProfilingInfo info;
           info.total_reports = 0;
           info.fill_response = false; // make valgrind happy
-          mapper->invoke_inline_report_profiling(this, &info);    
+          mapper->invoke_inline_report_profiling(this, info);    
           Runtime::trigger_event(profiling_reported);
         }
       }
@@ -5042,7 +5042,7 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
-      mapper->invoke_select_inline_sources(this, &input, &output);
+      mapper->invoke_select_inline_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     } 
 
@@ -5333,7 +5333,7 @@ namespace Legion {
           prepare_for_mapping(valid_instances, collectives,
               input.valid_instances, input.valid_collectives);
       }
-      mapper->invoke_map_inline(this, &input, &output);
+      mapper->invoke_map_inline(this, input, output);
       copy_fill_priority = output.copy_fill_priority;
       if (!output.source_instances.empty())
         runtime->forest->physical_convert_sources(this, requirement,
@@ -5627,7 +5627,7 @@ namespace Legion {
       info.profiling_responses.attach_realm_profiling_response(response);
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
-      mapper->invoke_inline_report_profiling(this, &info);
+      mapper->invoke_inline_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -6889,7 +6889,7 @@ namespace Legion {
         }
       }
       // Now we can ask the mapper what to do 
-      mapper->invoke_map_copy(this, &input, &output);
+      mapper->invoke_map_copy(this, input, output);
       copy_fill_priority = output.copy_fill_priority;
       if (!output.profiling_requests.empty())
       {
@@ -7397,7 +7397,7 @@ namespace Legion {
             const Realm::ProfilingResponse resp(info.buffer, info.buffer_size);
             info.total_reports = outstanding_profiling_requests.load();
             info.profiling_responses.attach_realm_profiling_response(resp);
-            mapper->invoke_copy_report_profiling(this, &info);
+            mapper->invoke_copy_report_profiling(this, info);
             free(info.buffer);
           }
           const int count = to_perform.size() +
@@ -7418,7 +7418,7 @@ namespace Legion {
         info.src_index = 0;
         info.dst_index = 0;
         info.fill_response = false; // make valgrind happy
-        mapper->invoke_copy_report_profiling(this, &info);    
+        mapper->invoke_copy_report_profiling(this, info);    
         Runtime::trigger_event(profiling_reported);
       }
     }
@@ -7520,7 +7520,7 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
-      mapper->invoke_select_copy_sources(this, &input, &output);
+      mapper->invoke_select_copy_sources(this, input, output);
       // Fill in the ranking based on the output
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
@@ -8181,7 +8181,7 @@ namespace Legion {
       info.dst_index = op_info->dst;
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
-      mapper->invoke_copy_report_profiling(this, &info);
+      mapper->invoke_copy_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -11496,7 +11496,7 @@ namespace Legion {
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
               info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_close_report_profiling(this, &info);
+              mapper->invoke_close_report_profiling(this, info);
               free(info.buffer);
             }
             const int count = to_perform.size() +
@@ -11515,7 +11515,7 @@ namespace Legion {
           Mapping::Mapper::CloseProfilingInfo info;
           info.total_reports = 0;
           info.fill_response = false; // make valgrind happy
-          mapper->invoke_close_report_profiling(this, &info);    
+          mapper->invoke_close_report_profiling(this, info);    
           Runtime::trigger_event(profiling_reported);
         }
       }
@@ -11554,7 +11554,7 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
-      mapper->invoke_select_close_sources(this, &input, &output);
+      mapper->invoke_select_close_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -11621,7 +11621,7 @@ namespace Legion {
       info.profiling_responses.attach_realm_profiling_response(response);
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
-      mapper->invoke_close_report_profiling(this, &info);
+      mapper->invoke_close_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -12569,7 +12569,7 @@ namespace Legion {
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
               info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_acquire_report_profiling(this, &info);
+              mapper->invoke_acquire_report_profiling(this, info);
               free(info.buffer);
             }
             const int count = to_perform.size() +
@@ -12588,7 +12588,7 @@ namespace Legion {
           Mapping::Mapper::AcquireProfilingInfo info;
           info.total_reports = 0;
           info.fill_response = false; // make valgrind happy
-          mapper->invoke_acquire_report_profiling(this, &info);    
+          mapper->invoke_acquire_report_profiling(this, info);    
           Runtime::trigger_event(profiling_reported);
         }
       }
@@ -12863,7 +12863,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       output.copy_fill_priority = 0;
-      mapper->invoke_map_acquire(this, &input, &output);
+      mapper->invoke_map_acquire(this, input, output);
       copy_fill_priority = output.copy_fill_priority;
       if (!output.profiling_requests.empty())
       {
@@ -12932,7 +12932,7 @@ namespace Legion {
       info.profiling_responses.attach_realm_profiling_response(response);
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
-      mapper->invoke_acquire_report_profiling(this, &info);
+      mapper->invoke_acquire_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -13391,7 +13391,7 @@ namespace Legion {
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
               info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_release_report_profiling(this, &info);
+              mapper->invoke_release_report_profiling(this, info);
               free(info.buffer);
             }
             const int count = to_perform.size() +
@@ -13410,7 +13410,7 @@ namespace Legion {
           Mapping::Mapper::ReleaseProfilingInfo info;
           info.total_reports = 0;
           info.fill_response = false; // make valgrind happy
-          mapper->invoke_release_report_profiling(this, &info);    
+          mapper->invoke_release_report_profiling(this, info);    
           Runtime::trigger_event(profiling_reported);
         }
       }
@@ -13448,7 +13448,7 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
-      mapper->invoke_select_release_sources(this, &input, &output);
+      mapper->invoke_select_release_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -13712,7 +13712,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       output.copy_fill_priority = 0;
-      mapper->invoke_map_release(this, &input, &output);
+      mapper->invoke_map_release(this, input, output);
       copy_fill_priority = output.copy_fill_priority;
       if (!output.profiling_requests.empty())
       {
@@ -13785,7 +13785,7 @@ namespace Legion {
       info.profiling_responses.attach_realm_profiling_response(response);
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
-      mapper->invoke_release_report_profiling(this, &info);
+      mapper->invoke_release_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -15078,7 +15078,7 @@ namespace Legion {
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
       // We've got all our meta-data set up so go ahead and issue the call
-      mapper->invoke_map_must_epoch(this, &input, &output);
+      mapper->invoke_map_must_epoch(this, input, output);
       return mapper;
     }
 
@@ -17004,7 +17004,7 @@ namespace Legion {
           Processor exec_proc = parent_ctx->get_executing_processor();
           mapper = runtime->find_mapper(exec_proc, map_id);
         }
-        mapper->invoke_select_partition_projection(this, &input, &output);
+        mapper->invoke_select_partition_projection(this, input, output);
         // Check the output
         if (output.chosen_partition == LogicalPartition::NO_PART)
           return;
@@ -17273,7 +17273,7 @@ namespace Legion {
                             input.valid_instances, input.valid_collectives);
       }
       output.copy_fill_priority = 0;
-      mapper->invoke_map_partition(this, &input, &output);
+      mapper->invoke_map_partition(this, input, output);
       copy_fill_priority = output.copy_fill_priority;
       if (!output.source_instances.empty())
         runtime->forest->physical_convert_sources(this, requirement,
@@ -17477,7 +17477,7 @@ namespace Legion {
             const Realm::ProfilingResponse resp(info.buffer, info.buffer_size);
             info.total_reports = outstanding_profiling_requests.load();
             info.profiling_responses.attach_realm_profiling_response(resp);
-            mapper->invoke_partition_report_profiling(this, &info);
+            mapper->invoke_partition_report_profiling(this, info);
             free(info.buffer);
           }
           const int count = to_perform.size() +
@@ -17496,7 +17496,7 @@ namespace Legion {
         Mapping::Mapper::PartitionProfilingInfo info;
         info.total_reports = 0;
         info.fill_response = false; // make valgrind happy
-        mapper->invoke_partition_report_profiling(this, &info);    
+        mapper->invoke_partition_report_profiling(this, info);    
         Runtime::trigger_event(profiling_reported);
       }
     }
@@ -17793,7 +17793,7 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
-      mapper->invoke_select_partition_sources(this, &input, &output);
+      mapper->invoke_select_partition_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -17862,7 +17862,7 @@ namespace Legion {
       info.profiling_responses.attach_realm_profiling_response(response);
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
-      mapper->invoke_partition_report_profiling(this, &info);
+      mapper->invoke_partition_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -22749,7 +22749,7 @@ namespace Legion {
       output.size = 0;
       output.take_ownership = true;
       mapper->invoke_select_tunable_value(parent_ctx->get_owner_task(), 
-                                          &input, &output);
+                                          input, output);
       process_result(mapper, output.value, output.size);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
@@ -23106,7 +23106,7 @@ namespace Legion {
       output.serdez_upper_bound = SIZE_MAX;
       Processor exec_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
-      mapper->invoke_map_future_map_reduction(this, &input, &output);
+      mapper->invoke_map_future_map_reduction(this, input, output);
       serdez_upper_bound = output.serdez_upper_bound;
       if (!output.destination_memories.empty())
       {
@@ -23797,7 +23797,7 @@ namespace Legion {
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
-      mapper->invoke_select_inline_sources(this, &input, &output);
+      mapper->invoke_select_inline_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -23973,7 +23973,7 @@ namespace Legion {
       }
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
-      mapper->invoke_select_copy_sources(this, &input, &output);
+      mapper->invoke_select_copy_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -24116,7 +24116,7 @@ namespace Legion {
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
-      mapper->invoke_select_close_sources(this, &input, &output);
+      mapper->invoke_select_close_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -24376,7 +24376,7 @@ namespace Legion {
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
-      mapper->invoke_select_release_sources(this, &input, &output);
+      mapper->invoke_select_release_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -24717,7 +24717,7 @@ namespace Legion {
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
-      mapper->invoke_select_partition_sources(this, &input, &output);
+      mapper->invoke_select_partition_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 

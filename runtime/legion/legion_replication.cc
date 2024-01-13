@@ -686,7 +686,7 @@ namespace Legion {
           mapper = runtime->find_mapper(current_proc, map_id); 
         Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
         SelectShardingFunctorOutput output;
-        mapper->invoke_task_select_sharding_functor(this, input, &output);
+        mapper->invoke_task_select_sharding_functor(this, *input, output);
         if (output.chosen_functor == UINT_MAX)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Mapper %s failed to pick a valid sharding functor for "
@@ -1148,7 +1148,7 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id); 
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       SelectShardingFunctorOutput output;
-      mapper->invoke_task_select_sharding_functor(this, input, &output);
+      mapper->invoke_task_select_sharding_functor(this, *input, output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Mapper %s failed to pick a valid sharding functor for "
@@ -2597,7 +2597,7 @@ namespace Legion {
             parent_ctx->get_executing_processor(), map_id);
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       SelectShardingFunctorOutput output;
-      mapper->invoke_fill_select_sharding_functor(this, input, &output);
+      mapper->invoke_fill_select_sharding_functor(this, *input, output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Mapper %s failed to pick a valid sharding functor for "
@@ -3010,7 +3010,7 @@ namespace Legion {
             parent_ctx->get_executing_processor(), map_id); 
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       SelectShardingFunctorOutput output;
-      mapper->invoke_copy_select_sharding_functor(this, input, &output);
+      mapper->invoke_copy_select_sharding_functor(this, *input, output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Mapper %s failed to pick a valid sharding functor for "
@@ -3225,7 +3225,7 @@ namespace Legion {
             parent_ctx->get_executing_processor(), map_id); 
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       SelectShardingFunctorOutput output;
-      mapper->invoke_copy_select_sharding_functor(this, input, &output);
+      mapper->invoke_copy_select_sharding_functor(this, *input, output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Mapper %s failed to pick a valid sharding functor for "
@@ -4323,7 +4323,7 @@ namespace Legion {
             parent_ctx->get_executing_processor(), map_id);
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       SelectShardingFunctorOutput output;
-      mapper->invoke_partition_select_sharding_functor(this, input, &output);
+      mapper->invoke_partition_select_sharding_functor(this, *input, output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Mapper %s failed to pick a valid sharding functor for "
@@ -5037,7 +5037,7 @@ namespace Legion {
         output.constraint_mappings.resize(input.constraints.size());
         output.weights.resize(input.constraints.size());
         // Now we can do the mapper call
-        mapper->invoke_map_must_epoch(this, &input, &output);
+        mapper->invoke_map_must_epoch(this, input, output);
         // Now we need to exchange our mapping decisions between all the shards
 #ifdef DEBUG_LEGION
         assert(mapping_exchange == NULL);
@@ -5063,7 +5063,7 @@ namespace Legion {
         // Do the mapper call on shard 0 and then broadcast the results
         if (repl_ctx->owner_shard->shard_id == 0)
         {
-          mapper->invoke_map_must_epoch(this, &input, &output);
+          mapper->invoke_map_must_epoch(this, input, output);
           mapping_broadcast->broadcast(output.task_processors,
                                        output.constraint_mappings);
         }
@@ -5138,7 +5138,7 @@ namespace Legion {
       sharding_output.chosen_functor = UINT_MAX;
       sharding_output.collective_map_must_epoch_call = false;
       mapper->invoke_must_epoch_select_sharding_functor(this,
-                                    &sharding_input, &sharding_output);
+                                    sharding_input, sharding_output);
       // We can clear these now that we don't need them anymore
       individual_tasks.clear();
       index_space_tasks.clear();

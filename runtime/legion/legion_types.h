@@ -402,7 +402,6 @@ namespace Legion {
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
-      LG_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -516,7 +515,6 @@ namespace Legion {
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
         "Issue Frame",                                            \
-        "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
