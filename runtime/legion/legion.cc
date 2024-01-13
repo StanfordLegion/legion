@@ -2003,18 +2003,7 @@ namespace Legion {
     {
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // AttachLauncher
@@ -2060,15 +2049,7 @@ namespace Legion {
     {
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // PredicateLauncher
@@ -3377,18 +3358,8 @@ namespace Legion {
       return valid();
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     /////////////////////////////////////////////////////////////
     // Index Iterator  
     /////////////////////////////////////////////////////////////
@@ -3530,15 +3501,8 @@ namespace Legion {
                               "no longer supported");
       assert(false);
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // Field Allocator
@@ -3774,16 +3738,10 @@ namespace Legion {
     {
     }
 
-// FIXME: This exists for backwards compatibility but it is tripping
-// over our own deprecation warnings. Turn those off inside this method.
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    // FIXME: This exists for backwards compatibility but it is tripping
+    // over our own deprecation warnings. Turn those off inside this method.
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -3934,21 +3892,16 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
     }
 
@@ -3957,10 +3910,27 @@ namespace Legion {
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
     }
 
     //--------------------------------------------------------------------------
@@ -5947,13 +5917,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::advise_analysis_subtree(Context ctx, LogicalRegion parent,
-                                        const std::set<LogicalRegion> &regions,
-                                        const std::set<LogicalPartition> &parts,
-                                        const std::set<FieldID> &fields)
+    void Runtime::reset_equivalence_sets(Context ctx, LogicalRegion parent,
+                                         LogicalRegion region,
+                                         const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
-      ctx->advise_analysis_subtree(parent, regions, parts, fields);
+      ctx->reset_equivalence_sets(parent, region, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -6304,14 +6273,8 @@ namespace Legion {
       return runtime->get_parent_logical_partition(handle);
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
     //--------------------------------------------------------------------------
@@ -6322,12 +6285,8 @@ namespace Legion {
                                 "same task that created the index space.");
       return IndexAllocator(is, IndexIterator(this, ctx, is));
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
@@ -6704,18 +6663,7 @@ namespace Legion {
       ctx->progress_unordered_operations();
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
@@ -6758,15 +6706,7 @@ namespace Legion {
       return region;
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)

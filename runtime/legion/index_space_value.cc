@@ -68,7 +68,7 @@ IndexSpaceValue::as_expr() const
   if (expr != nullptr)
     return expr;
 
-  return InstanceExpressionCreator::create_with_domain(type_tag, dom);
+  return InternalExpressionCreator::create_with_domain(type_tag, dom);
 }
 
 } // namespace Internal

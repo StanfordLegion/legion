@@ -178,31 +178,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_map_replicate_task(TaskOp *task,
-                                     Mapper::MapTaskInput *input,
-                                     Mapper::MapTaskOutput *default_output,
-                                     Mapper::MapReplicateTaskOutput *output,
+    void MapperManager::invoke_replicate_task(TaskOp *task,
+                                     Mapper::ReplicateTaskInput *input,
+                                     Mapper::ReplicateTaskOutput *output,
                                      MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_REPLICATE_TASK_CALL,
+        info = begin_mapper_call(REPLICATE_TASK_CALL,
                                  task, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation4<TaskOp,Mapper::MapTaskInput,
-                              Mapper::MapTaskOutput,
-                              Mapper::MapReplicateTaskOutput,
-                              &MapperManager::invoke_map_replicate_task>
-                                continuation(this, task, input, 
-                                    default_output, output, info);
+          MapperContinuation3<TaskOp,Mapper::ReplicateTaskInput,
+                              Mapper::ReplicateTaskOutput,
+                              &MapperManager::invoke_replicate_task>
+                                continuation(this, task, input, output, info);
           continuation.defer(runtime, continuation_precondition, task);
           return;
         }
       }
-      mapper->map_replicate_task(info, *task, *input, *default_output, *output);
+      mapper->replicate_task(info, *task, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -2517,8 +2514,7 @@ namespace Legion {
     {
       if ((future.impl == NULL) || !memory.exists())
         return false;
-      if ((ctx->kind != MAP_TASK_CALL) && 
-          (ctx->kind != MAP_REPLICATE_TASK_CALL))
+      if (ctx->kind != MAP_TASK_CALL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
                         "Ignoring acquire future request in unsupported mapper "

@@ -1108,7 +1108,7 @@ namespace Legion {
     public:
       ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
-    protected:
+    public:
       void *projection_args; /**< projection arguments buffer*/
       size_t projection_args_size; /**< projection arguments buffer size*/
     };
@@ -4879,6 +4879,40 @@ namespace Legion {
                                     const Domain &launch_domain);
 
       /**
+       * This method will be invoked on functional projection functors
+       * for projecting from an upper bound logical region when the
+       * the corresponding region requirement has projection arguments
+       * associated with it.
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @param args pointer to the buffer of arguments
+       * @param size size of the buffer of arguments in bytes
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain,
+                                    const void *args, size_t size);
+
+      /**
+       * This method will be invoked on functional projection functors
+       * for projecting from an upper bound logical partition when the
+       * the corresponding region requirement has projection arguments
+       * associated with it.
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @param args pointer to the buffer of arguments
+       * @param size size of the buffer of arguments in bytes
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain,
+                                    const void *args, size_t size);
+
+      /**
        * @deprecated
        * Compute the projection for a logical region projection
        * requirement down to a specific logical region.
@@ -7084,28 +7118,26 @@ namespace Legion {
                                      const bool unordered = false);
 
       /**
-       * Internally the runtime selects sets of disjoint and complete
-       * partitions to use for guiding the dependence analysis that it
-       * performs on region trees. The runtime has heuristics for selecting
-       * these partitions, but users may want to suggest specific regions and
-       * partitions to use to aid improve runtime performance. This method
-       * allows users to suggest specific regions and partitions to use for
-       * this analysis. The suggested regions and partitions must all be from
-       * the same region tree and must constitute a covering of the parent
-       * region. Furthermore all the partitions in the tree must be disjoint
-       * and complete and any ancestor partitions must also be disjoint
-       * and complete. This call will have no bearing on correctness, but
-       * will influence the amount of runtime overhead observed.
+       * Internally the runtime creates "equivalence sets" which are
+       * subsets of logical regions that it uses for performing its analyses.
+       * In general, these equivalence sets are established on a first touch
+       * basis and then altered using runtime heuristics. However, you can 
+       * influence their selection using this API call which will reset the
+       * equivalence sets for certain fields on a arbitrary region in the
+       * region tree (note you must have privileges on this region). The 
+       * next task to use this region or any overlapping regions will create
+       * new equivalence sets. Therefore it is useful to use this to inform
+       * the runtime when switching from one partition to a new partition.
+       * Note that this method will only impact your performance and has no
+       * bearing on the correctness of your application.
        * @param ctx enclosing task context
        * @param parent the logical region where privileges are derived from
-       * @param regions recommended analysis regions
-       * @param parts recommended analysis partitions
+       * @param region the region to reset the equivalence sets for
        * @param fields the fields for which these should apply
        */
-      void advise_analysis_subtree(Context ctx, LogicalRegion parent,
-                                   const std::set<LogicalRegion> &regions,
-                                   const std::set<LogicalPartition> &parts,
-                                   const std::set<FieldID> &fields);
+      void reset_equivalence_sets(Context ctx, LogicalRegion parent, 
+                                  LogicalRegion region,
+                                  const std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
