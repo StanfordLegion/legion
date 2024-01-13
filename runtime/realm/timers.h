@@ -24,8 +24,10 @@
 
 #include <cstdint>
 
-#if defined(__i386__) || defined(__x86_64__)
-#define REALM_TIMERS_USE_RDTSC
+#if !defined(REALM_TIMERS_USE_RDTSC) && \
+    (defined(__i386__) || defined(__x86_64__) || \
+    defined(__aarch64__) || defined(__arm__))
+#define REALM_TIMERS_USE_RDTSC 1
 #endif
 
 namespace Realm {
@@ -94,8 +96,12 @@ namespace Realm {
     };
 
   protected:
-#ifdef REALM_TIMERS_USE_RDTSC
-    static uint64_t raw_cpu_tsc();
+#if REALM_TIMERS_USE_RDTSC
+    // Raw timestamp counter (in ticks of a given frequency)
+    static uint64_t raw_cpu_tsc(void);
+    // Raw timestamp counter frequency (in Hz) or zero if the frequency needs to
+    // be estimated
+    static uint64_t raw_cpu_tsc_freq(void);
 #endif
 
     // slower function-call version of native_time for platform portability
@@ -103,7 +109,7 @@ namespace Realm {
 
     static uint64_t zero_time;
     static TimescaleConverter native_to_nanoseconds;
-#ifdef REALM_TIMERS_USE_RDTSC
+#if REALM_TIMERS_USE_RDTSC
     static bool cpu_tsc_enabled;
 #endif
   };

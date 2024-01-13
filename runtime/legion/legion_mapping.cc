@@ -153,9 +153,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Domain::NO_DOMAIN;
-      Internal::ApEvent ready;
-      Domain domain = impl->instance_domain->get_domain(ready, true);
-      ready.wait_faultignorant();
+      Domain domain;
+      impl->instance_domain->get_domain(domain);
       return domain;
     }
 
@@ -498,14 +497,8 @@ namespace Legion {
     {
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     Mapper::PremapTaskInput::PremapTaskInput(void)
     //--------------------------------------------------------------------------
@@ -529,12 +522,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // MapperRuntime
@@ -1256,6 +1245,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::get_index_partition_color_space_name(
+                                      MapperContext ctx, IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_partition_color_space_name(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::get_index_space_partition_colors(MapperContext ctx,
                               IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
@@ -1687,7 +1684,7 @@ namespace Legion {
       held = true;
       Internal::local_lock_list = this;
       if (paused)
-        ctx->manager->resume_mapper_call(ctx);
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1734,7 +1731,7 @@ namespace Legion {
       Internal::local_lock_list = this;
       held = true;
       if (paused)
-        ctx->manager->resume_mapper_call(ctx);
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
   }; // namespace Mapping

@@ -16,12 +16,6 @@ import "regent"
 
 -- Tests for dynamic index launches.
 
--- Temporarily disable this test for multi-node legion spy
--- There is a known bug in Legion that needs to be fixed here
--- runs-with:
--- [
--- ]
-
 fspace fs {
   x : int,
   y : int,

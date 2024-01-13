@@ -21,14 +21,8 @@
 #include "realm/mem_impl.h"
 #include "realm/logging.h"
 
-#include "ucp_module.h"
-#include "ucp_internal.h"
-
-#include <ucp/api/ucp_version.h>
-#define REALM_UCP_API_VERSION_MIN UCP_VERSION(1, 14)
-#if UCP_API_VERSION < REALM_UCP_API_VERSION_MIN
-#error The UCX network module requires UCX 1.14.0 or above
-#endif
+#include "realm/ucx/ucp_module.h"
+#include "realm/ucx/ucp_internal.h"
 
 #ifdef REALM_UCX_MODULE_DYNAMIC
 REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::UCPModule);
@@ -74,14 +68,19 @@ err_del_mod:
     return NULL;
   }
 
+  void UCPModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    internal->get_shared_peers(shared_peers);
+  }
+
   void UCPModule::parse_command_line(RuntimeImpl *runtime,
-      std::vector<std::string>& cmdline)
+                                     std::vector<std::string> &cmdline)
   {
     CommandLineParser cp;
     Realm::UCP::UCPInternal::Config config;
     // deferred_allocs realm test always passes -ll:gsize
-    size_t global_mem_size;
-    cp.add_option_int_units("-ll:gsize", global_mem_size, 'm');
+    size_t deprecated_gsize = 0;
+    cp.add_option_int_units("-ll:gsize", deprecated_gsize, 'm');
 
     std::string am_mode;
     cp.add_option_string("-ucx:am_mode", am_mode);
@@ -92,6 +91,12 @@ err_del_mod:
 
     // maximum number of background work items to use for UCP polling
     cp.add_option_int("-ucx:pollers_max", config.pollers_max);
+
+    // number of message priority levels to support
+    cp.add_option_int("-ucx:num_priorities", config.num_priorities);
+
+    // maximum message size that is sent with higher priority
+    cp.add_option_int_units("-ucx:priority_size_max", config.priority_size_max);
 
     // check memory pools for leak
     cp.add_option_bool("-ucx:mpool_leakcheck", config.mpool_leakcheck);
@@ -106,6 +111,8 @@ err_del_mod:
     cp.add_option_bool("-ucx:use_wakeup", config.use_wakeup);
 
     cp.add_option_int("-ucx:prog_boff_max", config.prog_boff_max);
+    cp.add_option_int("-ucx:prog_itr_max", config.prog_itr_max);
+    cp.add_option_int("-ucx:rdesc_rel_max", config.rdesc_rel_max);
 
     // pbuf mpool
     cp.add_option_int("-ucx:pb_init_count", config.pbuf_init_count);
@@ -137,6 +144,12 @@ err_del_mod:
 
     bool ok = cp.parse_command_line(cmdline);
     assert(ok);
+
+    if(deprecated_gsize > 0) {
+      log_ucp.fatal() << "Realm UCX backend does not provide a 'global' memory."
+                      << " '-ll:gsize' not permitted";
+      abort();
+    }
 
     //// set internal config ////
 
@@ -196,6 +209,12 @@ err_del_mod:
       const void *val_in, void *vals_out, size_t bytes)
   {
     internal->gather(root, val_in, vals_out, bytes);
+  }
+
+  void UCPModule::allgatherv(const char *val_in, size_t bytes,
+                             std::vector<char> &vals_out, std::vector<size_t> &lengths)
+  {
+    internal->allgatherv(val_in, bytes, vals_out, lengths);
   }
 
   size_t UCPModule::sample_messages_received_count(void)

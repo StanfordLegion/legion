@@ -24,6 +24,7 @@ endif()
 
 add_executable(implicit_top_task implicit_top_task.cc)
 target_link_libraries(implicit_top_task Legion::Legion)
+target_compile_options(implicit_top_task PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME implicit_top_task COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:implicit_top_task> ${Legion_TEST_ARGS})
 endif()

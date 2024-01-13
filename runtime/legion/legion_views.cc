@@ -26,6 +26,7 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -641,6 +642,7 @@ namespace Legion {
       if (!subviews.empty() && 
           !(subviews.get_valid_mask() * user_mask))
       {
+        IndexSpaceValue user_expr_val(user_expr);
         FieldMaskSet<ExprView> to_traverse;
         std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
         for (FieldMaskSet<ExprView>::const_iterator it = 
@@ -662,12 +664,11 @@ namespace Legion {
             traverse_exprs[it->first] = user_expr;
             continue;
           }
-          IndexSpaceExpression *expr_overlap = 
-            forest->intersect_index_spaces(it->first->view_expr, user_expr);
-          if (!expr_overlap->is_empty())
+          IndexSpaceValue expr_overlap = user_expr_val & it->first->view_expr;
+          if (!expr_overlap.is_empty())
           {
             to_traverse.insert(it->first, overlap);
-            traverse_exprs[it->first] = expr_overlap;
+            traverse_exprs[it->first] = *expr_overlap;
           }
         }
         if (!to_traverse.empty())
@@ -896,6 +897,8 @@ namespace Legion {
     ExprView* ExprView::find_congruent_view(IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
+      IndexSpaceValue expr_val(expr);
+
       // Handle the base case first
       if ((expr == view_expr) || (expr->get_volume() == get_view_volume()))
         return const_cast<ExprView*>(this);
@@ -904,9 +907,9 @@ namespace Legion {
       {
         if (it->first->view_expr == expr)
           return it->first;
-        IndexSpaceExpression *overlap =
-          forest->intersect_index_spaces(expr, it->first->view_expr);
-        const size_t overlap_volume = overlap->get_volume();
+
+        IndexSpaceValue overlap = expr_val & it->first->view_expr;
+        const size_t overlap_volume = overlap.get_volume();
         if (overlap_volume == 0)
           continue;
         // See if we dominate or just intersect
@@ -940,6 +943,8 @@ namespace Legion {
         bool need_tighten = true;
         std::vector<ExprView*> to_delete;
         FieldMaskSet<ExprView> dominating_subviews;
+        IndexSpaceValue subview_val(subview->view_expr);
+
         for (FieldMaskSet<ExprView>::iterator it = 
               subviews.begin(); it != subviews.end(); it++)
         {
@@ -947,10 +952,8 @@ namespace Legion {
           FieldMask overlap_mask = it->second & subview_mask;
           if (!overlap_mask)
             continue;
-          IndexSpaceExpression *overlap =
-            forest->intersect_index_spaces(subview->view_expr,
-                                            it->first->view_expr);
-          const size_t overlap_volume = overlap->get_volume();
+          IndexSpaceValue overlap = subview_val & it->first->view_expr;
+          const size_t overlap_volume = overlap.get_volume();
           if (overlap_volume == 0)
             continue;
           // See if we dominate or just intersect
@@ -2446,6 +2449,7 @@ namespace Legion {
         else
           across_helper->compute_across_offsets(*src_mask, dst_fields);
         PhysicalManager *source_manager = source_view->get_manager();
+        assert(manager->instance.id != source_manager->instance.id);
         source_manager->compute_copy_offsets(*src_mask, src_fields);
         std::vector<Reservation> reservations;
         // If we're doing a reduction operation then set the reduction
@@ -2951,6 +2955,7 @@ namespace Legion {
 #endif
           // First local arrival
           finder->second.remaining_local_arrivals = local_collective_arrivals;
+          finder->second.local_initialized = true;
           finder->second.ready_event =
             Runtime::create_ap_user_event(&trace_info);
           finder->second.trace_info = new PhysicalTraceInfo(trace_info);
@@ -4953,14 +4958,10 @@ namespace Legion {
       assert(manager->is_physical_manager());
 #endif
       PhysicalManager *inst_manager = manager->as_physical_manager();
-      void *location;
-      MaterializedView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) MaterializedView(runtime, did, logical_owner,
-                                      inst_manager, false/*register now*/);
-      else
-        view = new MaterializedView(runtime, did, logical_owner,
-                                    inst_manager, false/*register now*/);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                      MaterializedView>(did);
+      MaterializedView *view = new(location) MaterializedView(runtime, did, 
+          logical_owner, inst_manager, false/*register now*/);
       // Register only after construction
       view->register_with_runtime();
     }
@@ -5124,46 +5125,25 @@ namespace Legion {
       size_t value_size;
       derez.deserialize(value_size);
       
-      void *location;
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                              FillView>(did);
       FillView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
+      if (value_size > 0)
       {
-        if (value_size > 0)
-        {
-          const void *value = derez.get_current_pointer();
-          view = new(location) FillView(runtime, did,
+        const void *value = derez.get_current_pointer();
+        view = new(location) FillView(runtime, did,
 #ifdef LEGION_SPY
-                                        op_uid,
+                                      op_uid,
 #endif
-                                        value,value_size,false/*register now*/);
-          derez.advance_pointer(value_size);
-        }
-        else
-          view = new(location) FillView(runtime, did,
-#ifdef LEGION_SPY
-                                        op_uid,
-#endif
-                                        false/*register now*/);
+                                      value, value_size, false/*register now*/);
+        derez.advance_pointer(value_size);
       }
       else
-      {
-        if (value_size > 0)
-        {
-          const void *value = derez.get_current_pointer();
-          view = new FillView(runtime, did,
+        view = new(location) FillView(runtime, did,
 #ifdef LEGION_SPY
-                              op_uid,
+                                      op_uid,
 #endif
-                              value, value_size, false/*register now*/);
-          derez.advance_pointer(value_size);
-        }
-        else
-          view = new FillView(runtime, did,
-#ifdef LEGION_SPY
-                              op_uid,
-#endif
-                              false/*register now*/);
-      }
+                                      false/*register now*/);
       view->register_with_runtime();
     }
 
@@ -5556,18 +5536,13 @@ namespace Legion {
           ready_events.insert(ready);
       }
       // Make the phi view but don't register it yet
-      void *location;
-      PhiView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) PhiView(runtime, did,
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                                PhiView>(did);
+      PhiView *view = new(location) PhiView(runtime, did,
                                      true_guard, false_guard,
                                      std::move(true_views),
                                      std::move(false_views),
                                      false/*register_now*/);
-      else
-        view = new PhiView(runtime, did, true_guard, 
-                           false_guard, std::move(true_views),
-                           std::move(false_views), false/*register now*/);
       if (!ready_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -6306,14 +6281,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_reduction_manager());
 #endif
-      void *location;
-      ReductionView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReductionView(runtime, did, logical_owner,
-                                           manager, false/*register now*/);
-      else
-        view = new ReductionView(runtime, did, logical_owner, manager,
-                                 false/*register now*/);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                          ReductionView>(did);
+      ReductionView *view = new(location) ReductionView(runtime, did, 
+          logical_owner, manager, false/*register now*/);
       // Only register after construction
       view->register_with_runtime();
     }
@@ -6513,7 +6484,7 @@ namespace Legion {
       derez.deserialize(did);
 
       CollectiveView *view = static_cast<CollectiveView*>(
-          runtime->find_distributed_collectable(did, true/*wait*/));
+          runtime->find_distributed_collectable(did));
       view->make_valid(true/*need lock*/);
     }
 
@@ -6672,7 +6643,7 @@ namespace Legion {
       derez.deserialize(generation);
 
       CollectiveView *view = static_cast<CollectiveView*>(
-          runtime->find_distributed_collectable(did, true/*wait*/));
+          runtime->find_distributed_collectable(did));
       if (view->perform_invalidate_request(generation, true/*need lock*/))
         delete view;
     }
@@ -6771,7 +6742,7 @@ namespace Legion {
       derez.deserialize(did);
 
       CollectiveView *view = static_cast<CollectiveView*>(
-          runtime->find_distributed_collectable(did, true/*wait*/));
+          runtime->find_distributed_collectable(did));
       view->add_base_valid_ref(REMOTE_DID_REF);
     }
 
@@ -7559,8 +7530,7 @@ namespace Legion {
       derez.deserialize(precondition);
       PredEvent predicate_guard;
       derez.deserialize(predicate_guard);
-      Operation *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -8420,7 +8390,8 @@ namespace Legion {
             PhysicalManager *manager = local_views[idx]->get_manager();
             if (manager->instance != it->inst)
               continue;
-            to_send.insert(local_views[idx]->did);
+            if (to_send.insert(local_views[idx]->did).second)
+              local_views[idx]->pack_global_ref();
             found = true;
             break;
           }
@@ -8433,7 +8404,8 @@ namespace Legion {
             {
               if (rit->first->instance != it->inst)
                 continue;
-              to_send.insert(rit->second->did);
+              if (to_send.insert(rit->second->did).second)
+                rit->second->pack_global_ref();
               found = true;
               break;
             }
@@ -8505,6 +8477,9 @@ namespace Legion {
           else if (view_ready.exists() && !view_ready.has_triggered())
             view_ready.wait();
           view->record_remote_instances(views);
+          for (std::vector<IndividualView*>::const_iterator it =
+                views.begin(); it != views.end(); it++)
+            (*it)->unpack_global_ref();
         }
         else
         {
@@ -8576,24 +8551,17 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(did, manager_ready);
-      std::set<RtEvent> applied_events;
       RemoteCollectiveAnalysis *analysis = 
-        RemoteCollectiveAnalysis::unpack(derez, runtime, applied_events);
+        RemoteCollectiveAnalysis::unpack(derez, runtime);
       analysis->add_reference();
       RtUserEvent applied;
       derez.deserialize(applied);
 
       if (view_ready.exists() && !view_ready.has_triggered())
-        applied_events.insert(view_ready);
+        view_ready.wait();
       if (manager_ready.exists() && !manager_ready.has_triggered())
-        applied_events.insert(manager_ready);
-      if (!applied_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(applied_events);
-        applied_events.clear();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        manager_ready.wait();
+      std::set<RtEvent> applied_events;
       collective_view->register_collective_analysis(manager, analysis,
                                                     applied_events);
       if (!applied_events.empty())
@@ -9322,7 +9290,7 @@ namespace Legion {
       Operation *op = NULL;
       std::set<RtEvent> ready_events;
       if (fill_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -9523,8 +9491,7 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask, dst_mask;
@@ -10463,7 +10430,7 @@ namespace Legion {
       derez.deserialize(copy_restricted);
       Operation *op = NULL;
       if (copy_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -10754,7 +10721,7 @@ namespace Legion {
       derez.deserialize(copy_restricted);
       Operation *op = NULL;
       if (copy_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -10832,7 +10799,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
       assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
+      assert(collective_mapping->contains(target));
 #endif
       if (target != local_space)
       {
@@ -10966,7 +10933,10 @@ namespace Legion {
         local_view->add_copy_user(false/*reading*/, source->redop, reduced,
             copy_mask, copy_expression, op_id, index, recorded_events,
             trace_info.recording, runtime->address_space);
-      // Do the broadcast out, start with any children
+      // Do the broadcast out, remove the redop from local fields
+      for (unsigned idx = 0; idx < local_fields.size(); idx++)
+        local_fields[idx].set_redop(0/*redop*/, false/*fold*/);
+      // Start with any children
       std::vector<AddressSpaceID> children;
       collective_mapping->get_children(local_space, local_space, children);
       ApBarrier all_bar;
@@ -11120,8 +11090,7 @@ namespace Legion {
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       std::set<RtEvent> ready_events;
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events); 
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime); 
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -11454,7 +11423,7 @@ namespace Legion {
       Operation *op = NULL;
       std::set<RtEvent> ready_events;
       if (copy_restricted)
-        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       IndexSpaceID match_space;
@@ -11593,15 +11562,11 @@ namespace Legion {
         mapping = new CollectiveMapping(derez, num_spaces);
         mapping->add_reference();
       }
-      void *location;
-      ReplicatedView *view = NULL;
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                        ReplicatedView>(did);
       std::vector<IndividualView*> no_views;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReplicatedView(runtime, did, ctx_did, no_views,
-                                  instances, false/*register now*/, mapping);
-      else
-        view = new ReplicatedView(runtime, did, ctx_did, no_views, instances,
-                                  false/*register now*/, mapping);
+      ReplicatedView *view = new(location) ReplicatedView(runtime, did, ctx_did,
+          no_views, instances, false/*register now*/, mapping);
       // Register only after construction
       view->register_with_runtime();
       if ((mapping != NULL) && mapping->remove_reference())
@@ -11695,16 +11660,11 @@ namespace Legion {
       }
       ReductionOpID redop;
       derez.deserialize(redop);
-      void *location;
-      AllreduceView *view = NULL;
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                          AllreduceView>(did);
       std::vector<IndividualView*> no_views;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) AllreduceView(runtime, did, ctx_did, no_views,
-                                           instances, false/*register now*/,
-                                           mapping, redop);
-      else
-        view = new AllreduceView(runtime, did, ctx_did, no_views, instances,
-                                 false/*register now*/, mapping, redop);
+      AllreduceView *view = new(location) AllreduceView(runtime, did, ctx_did,
+          no_views, instances, false/*register now*/, mapping, redop);
       // Register only after construction
       view->register_with_runtime();
       if ((mapping != NULL) && mapping->remove_reference())
@@ -11946,6 +11906,7 @@ namespace Legion {
           (source_fields != NULL) ? *source_fields : fields;
         std::map<unsigned,std::vector<Reservation> > local_reservations;
         std::map<unsigned,std::vector<ApEvent> > reduction_preconditions;
+        local_reservations[dst_index] = dst_reservations;
         // Note the reversed iterator <destination,source>
         for (std::vector<std::pair<unsigned,unsigned> >::const_reverse_iterator 
               it = spanning_copies.rbegin(); it != spanning_copies.rend(); it++)
@@ -11957,33 +11918,34 @@ namespace Legion {
           PhysicalManager *src_manager = src_view->get_manager();
           IndividualView *local_view = local_views[it->first];
           PhysicalManager *local_manager = local_view->get_manager();
-          ApEvent reduce_pre;
-          const bool writing = initialized[it->second];
-          if (writing)
+          if (initialized[it->second])
           {
-            // If the source has already been initialized we might have
-            // some preconditions to find here from other reductions
+            // Save any reduction events into the view
             std::map<unsigned,std::vector<ApEvent> >::iterator finder =
               reduction_preconditions.find(it->second);
-            if (finder != reduction_preconditions.end())
-            {
-              reduce_pre = Runtime::merge_events(&trace_info, finder->second);
-              reduction_preconditions.erase(finder);
-            }
+#ifdef DEBUG_LEGION
+            assert(it->second != dst_index);
+            assert(finder != reduction_preconditions.end());
+#endif
+            const ApEvent reduce_pre = 
+              Runtime::merge_events(&trace_info, finder->second);
+            if (reduce_pre.exists())
+              src_view->add_copy_user(false/*reading*/, redop, reduce_pre, 
+                  copy_mask, copy_expression, op_id, index, *recorded_events,
+                  trace_info.recording, runtime->address_space);
+            reduction_preconditions.erase(finder);
           }
           else
-          {
-            reduce_pre = src_view->find_copy_preconditions(
-                !prepare_allreduce, 0/*redop*/, copy_mask,
-                copy_expression, op_id, index, applied_events, trace_info);
-            src_manager->compute_copy_offsets(copy_mask, 
-                                              local_fields[it->second]);
-          }
+            src_manager->compute_copy_offsets(copy_mask,
+                              local_fields[it->second]);
+          ApEvent reduce_pre = src_view->find_copy_preconditions(
+              !prepare_allreduce, 0/*redop*/, copy_mask,
+              copy_expression, op_id, index, applied_events, trace_info);
           if (!initialized[it->first])
           {
             // Initialize the destination
             local_events[it->first] = local_view->find_copy_preconditions( 
-                false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+                false/*reading*/, redop, copy_mask, copy_expression,
                 op_id, index, applied_events, trace_info);
             local_manager->compute_copy_offsets(copy_mask,
                                                 local_fields[it->first]);
@@ -12016,7 +11978,7 @@ namespace Legion {
           if (local_events[it->second].exists())
           {
             if (!prepare_allreduce)
-              src_view->add_copy_user(!writing, 0/*redop*/,
+              src_view->add_copy_user(true/*reading*/, 0/*redop*/,
                   local_events[it->second], copy_mask, copy_expression,
                   op_id, index, *recorded_events, trace_info.recording,
                   runtime->address_space);
@@ -12153,8 +12115,7 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask, dst_mask;
@@ -12371,8 +12332,7 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      Operation *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      Operation *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask, dst_mask;
@@ -13003,9 +12963,9 @@ namespace Legion {
             instance_events[dst_inst_index] =
               Runtime::merge_events(&trace_info, dst_events);
           // Update the src and dst instances for the next stage
-          if (++src_inst_index == instances.size())
+          if (++src_inst_index == local_views.size())
             src_inst_index = 0;
-          if (++dst_inst_index == instances.size())
+          if (++dst_inst_index == local_views.size())
             dst_inst_index = 0;
         }
         // Send out the result to any non-participating ranks

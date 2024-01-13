@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionExample_future_instance)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -26,7 +26,10 @@ if(NOT Legion_USE_CUDA)
     "The future_instance example requires Legion to be built with CUDA")
 endif()
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 set(GPU_SOURCES future_instance.cu)
-cuda_add_executable(future_instance ${GPU_SOURCES})
+add_executable(future_instance ${GPU_SOURCES})
+set_target_cuda_standard(future_instance STANDARD ${Legion_CUDA_STANDARD})
+set_target_cuda_architectures(future_instance ARCHITECTURES ${Legion_CUDA_ARCH})
+set_target_cuda_warnings_and_errors(future_instance WARN_AS_ERROR ${Legion_BUILD_WARN_AS_ERROR})
+
 target_link_libraries(future_instance Legion::Legion)

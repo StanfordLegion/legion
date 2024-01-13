@@ -103,8 +103,10 @@ void top_level_task(const Task *task,
     std::vector<FieldID> fields(2);
     fields[0] = FID_X;
     fields[1] = FID_Y;
-    launcher.attach_array_aos(xy_ptr, true/*column major*/, fields);
-    launcher.privilege_fields.erase(FID_Y);
+    launcher.initialize_constraints(true/*column major*/, false/*soa*/, fields);
+    launcher.privilege_fields.insert(FID_X);
+    Realm::ExternalMemoryResource resource(xy_ptr, sizeof(xy_t)*num_elements*num_elements);
+    launcher.external_resource = &resource;
     pr_x = runtime->attach_external_resource(ctx, launcher);
   }
   PhysicalRegion pr_y; 
@@ -115,8 +117,10 @@ void top_level_task(const Task *task,
     std::vector<FieldID> fields(2);
     fields[0] = FID_X;
     fields[1] = FID_Y;
-    launcher.attach_array_aos(xy_ptr, false/*column major*/, fields);
-    launcher.privilege_fields.erase(FID_X);
+    launcher.initialize_constraints(false/*column major*/, false/*soa*/, fields);
+    launcher.privilege_fields.insert(FID_Y);
+    Realm::ExternalMemoryResource resource(xy_ptr, sizeof(xy_t)*num_elements*num_elements);
+    launcher.external_resource = &resource;
     pr_y = runtime->attach_external_resource(ctx, launcher);
   }
   PhysicalRegion pr_a;
@@ -125,7 +129,10 @@ void top_level_task(const Task *task,
             FID_A, a_ptr);
     AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
     std::vector<FieldID> fields(1, FID_A);
-    launcher.attach_array_soa(a_ptr, true/*column major*/, fields);
+    launcher.initialize_constraints(true/*column major*/, true/*soa*/, fields);
+    launcher.privilege_fields.insert(FID_A);
+    Realm::ExternalMemoryResource resource(a_ptr, sizeof(double)*num_elements*num_elements);
+    launcher.external_resource = &resource;
     pr_a = runtime->attach_external_resource(ctx, launcher);
   }
   PhysicalRegion pr_b;
@@ -133,7 +140,10 @@ void top_level_task(const Task *task,
     printf("Attach SOA array in c layout, fid %d, ptr %p\n", FID_B, b_ptr);
     AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
     std::vector<FieldID> fields(1, FID_B);
-    launcher.attach_array_soa(b_ptr, false/*column major*/, fields);
+    launcher.initialize_constraints(false/*column major*/, true/*soa*/, fields);
+    launcher.privilege_fields.insert(FID_B);
+    Realm::ExternalMemoryResource resource(b_ptr, sizeof(double)*num_elements*num_elements);
+    launcher.external_resource = &resource;
     pr_b = runtime->attach_external_resource(ctx, launcher);
   }
 

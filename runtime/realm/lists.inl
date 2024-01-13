@@ -164,6 +164,24 @@ namespace Realm {
   }
 
   template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
+  inline void IntrusiveList<T, LINK, LT>::push_front(T *new_entry)
+  {
+    lock.lock();
+#ifdef DEBUG_REALM_LISTS
+    assert(REALM_PMTA_DEREF(new_entry,LINK).current_list == 0);
+    REALM_PMTA_DEREF(new_entry,LINK).current_list = this;
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next == 0);
+#endif
+    REALM_PMTA_DEREF(new_entry, LINK).next = head.next;
+    if (lastlink == &head) {
+      lastlink = &REALM_PMTA_DEREF(new_entry, LINK);
+    }
+    head.next = new_entry;
+
+    lock.unlock();
+  }
+
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline T *IntrusiveList<T, LINK, LT>::pop_front(void)
   {
     T *popped = 0;

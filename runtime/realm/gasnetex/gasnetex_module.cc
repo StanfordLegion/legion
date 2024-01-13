@@ -472,6 +472,11 @@ namespace Realm {
     return mod;
   }
 
+  void GASNetEXModule::get_shared_peers(NodeSet &shared_peers)
+  {
+    internal->get_shared_peers(shared_peers);
+  }
+
   // actual parsing of the command line should wait until here if at all
   //  possible
   void GASNetEXModule::parse_command_line(RuntimeImpl *runtime,
@@ -613,6 +618,13 @@ namespace Realm {
   void GASNetEXModule::gather(NodeID root, const void *val_in, void *vals_out, size_t bytes)
   {
     internal->gather(root, val_in, vals_out, bytes);
+  }
+
+  void GASNetEXModule::allgatherv(const char *val_in, size_t bytes,
+                                  std::vector<char> &vals_out,
+                                  std::vector<size_t> &lengths)
+  {
+    internal->allgatherv(val_in, bytes, vals_out, lengths);
   }
 
   size_t GASNetEXModule::sample_messages_received_count(void)

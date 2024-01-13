@@ -472,6 +472,28 @@ namespace Realm {
     f_funcptr.param_types = v;
   }
 
+  inline FunctionPointerType::FunctionPointerType(const Type &_return_type,
+						  const Type &_param1_type,
+						  const Type &_param2_type,
+						  const Type &_param3_type,
+						  const Type &_param4_type,
+						  const Type &_param5_type,
+						  const Type &_param6_type,
+						  size_t _size_bits /*= 0*/,
+						  size_t _alignment_bits /*= 0*/)
+    : Type(KIND, _size_bits ? _size_bits : 8 * sizeof(void *), _alignment_bits)
+  {
+    f_funcptr.return_type = new Type(_return_type);
+    std::vector<Type> *v = new std::vector<Type>(6);
+    (*v)[0] = _param1_type;
+    (*v)[1] = _param2_type;
+    (*v)[2] = _param3_type;
+    (*v)[3] = _param4_type;
+    (*v)[4] = _param5_type;
+    (*v)[5] = _param6_type;
+    f_funcptr.param_types = v;
+  }
+
   template <typename S>
   bool Type::FunctionPointerFields::serialize(S& s) const
   {
@@ -505,11 +527,25 @@ namespace Realm {
       return OpaqueType(0, 0);
     }
 
-    // TODO: restrict this default to just things that are Realm-serializable?
+    // for unknown types, we'd like to at least disambiguate by size, but we
+    //  have to deal with incomplete types that don't allow sizeof(T), so use some
+    //  indirection, some SFINAE, and some careful prioritization of overloads...
     template <typename T>
-    inline Type from_cpp(CppTypeCapture<T>)
+    inline Type opaque_or_incomplete_type(CppTypeCapture<T>, ...)
+    {
+      return OpaqueType(0);
+    }
+
+    template <typename T, typename U = decltype(sizeof(T))>
+    inline Type opaque_or_incomplete_type(CppTypeCapture<T>, CppTypeCapture<T>)
     {
       return OpaqueType(8 * sizeof(T));
+    }
+
+    template <typename T>
+    inline Type from_cpp(CppTypeCapture<T> x)
+    {
+      return opaque_or_incomplete_type(x, x);
     }
 
     inline Type from_cpp(CppTypeCapture<int>)
@@ -588,6 +624,18 @@ namespace Realm {
 				 from_cpp_type<T3>(),
 				 from_cpp_type<T4>(),
 				 from_cpp_type<T5>());
+    }
+
+    template <typename RT, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
+    inline Type from_cpp(CppTypeCapture<RT (*)(T1, T2, T3, T4, T5, T6)>)
+    {
+      return FunctionPointerType(from_cpp_type<RT>(),
+				 from_cpp_type<T1>(),
+				 from_cpp_type<T2>(),
+				 from_cpp_type<T3>(),
+				 from_cpp_type<T4>(),
+				 from_cpp_type<T5>(),
+				 from_cpp_type<T6>());
     }
 
     template <typename T>

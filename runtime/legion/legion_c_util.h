@@ -148,7 +148,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_slice_task_output_t, Mapping::Mapper::SliceTaskOutput *);
       NEW_OPAQUE_WRAPPER(legion_physical_instance_t, Mapping::PhysicalInstance *);
       NEW_OPAQUE_WRAPPER(legion_mapper_runtime_t, Mapping::MapperRuntime *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
+      // nvcc wrongly complains about a meaningless qualifer on the return type,
+      // probably due to it not chasing the typedefs when doing the check.
+      // here we inline the type alias to suppress the warning
+      NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Internal::MappingCallInfo *);
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
       NEW_OPAQUE_WRAPPER(legion_point_transform_functor_t, PointTransformFunctor *);

@@ -299,18 +299,18 @@ void top_level_task(const void *args, size_t arglen,
 				      ProfilingRequestSet()).wait();
       assert(i.exists());
 
+      i.fetch_metadata(p).wait();
       launch_args.instances[p] = i;
       {
-	std::vector<CopySrcDstField> dsts(1);
-	dsts[0].inst = i;
-	dsts[0].field_id = FieldIDs::TASKDATA;
-	dsts[0].size = sizeof(TestTaskData);
-	TestTaskData ival;
-	ival.first_count = 0;
-	ival.last_count = 0;
-	ival.start_time = 0;
-	r.fill(dsts, ProfilingRequestSet(),
-	       &ival, sizeof(ival)).wait();
+        std::vector<CopySrcDstField> dsts(1);
+        dsts[0].inst = i;
+        dsts[0].field_id = FieldIDs::TASKDATA;
+        dsts[0].size = sizeof(TestTaskData);
+        TestTaskData ival;
+        ival.first_count = 0;
+        ival.last_count = 0;
+        ival.start_time = 0;
+        r.fill(dsts, ProfilingRequestSet(), &ival, sizeof(ival)).wait();
       }
     }
   }

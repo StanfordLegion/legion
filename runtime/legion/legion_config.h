@@ -259,6 +259,10 @@
 #ifndef LEGION_MAX_APPLICATION_SERDEZ_ID
 #define LEGION_MAX_APPLICATION_SERDEZ_ID      (1<<20)
 #endif
+// Maximum ID for layout constraint ID
+#ifndef LEGION_MAX_APPLICATION_LAYOUT_ID
+#define LEGION_MAX_APPLICATION_LAYOUT_ID      (1<<20)
+#endif
 // Default number of local fields per field space
 #ifndef DEFAULT_LOCAL_FIELDS // For backwards compatibility
 #ifndef LEGION_DEFAULT_LOCAL_FIELDS
@@ -363,19 +367,6 @@
 #define LEGION_DEFAULT_MAX_MESSAGE_SIZE        (DEFAULT_MAX_MESSAGE_SIZE)
 #endif
 #endif
-// Timeout before checking for whether a logical user
-// should be pruned from the logical region tree data strucutre
-// Making the value less than or equal to zero will
-// result in checks always being performed
-#ifndef DEFAULT_LOGICAL_USER_TIMEOUT // For backwards compatibility
-#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    32
-#endif
-#else
-#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    (DEFAULT_LOGICAL_USER_TIMEOUT)
-#endif
-#endif
 // Number of events to place in each GC epoch
 // Large counts improve efficiency but add latency to
 // garbage collection.  Smaller count reduce efficiency
@@ -465,23 +456,6 @@
 // Controls how many IDs are available for dynamic use
 #ifndef LEGION_INITIAL_LIBRARY_ID_OFFSET
 #define LEGION_INITIAL_LIBRARY_ID_OFFSET (1 << 30)
-#endif
-
-// Default number of consecutive accesses to the
-// same disjoint+complete partition before Legion
-// will switch physical analysis to using it
-// Pick prime numbers to avoid aliasing during sampling
-#ifndef LEGION_REFINEMENT_SAME_CHILD
-#define LEGION_REFINEMENT_SAME_CHILD      7
-#endif
-
-// Default number of consecutive accesses to any
-// disjoint+complete partition other than the current
-// one being used for analysis before Legion will
-// switch physical analysis to using a new partition
-// Pick prime numbers to avoid aliasing during sampling
-#ifndef LEGION_REFINEMENT_DIFF_CHILD
-#define LEGION_REFINEMENT_DIFF_CHILD      31
 #endif
 
 // Default percentage of the number of children in a
@@ -900,24 +874,31 @@
 
 #ifdef LEGION_DISABLE_DEPRECATED_ENUMS
 #define LEGION_DEPRECATED_ENUM(x)
+#define LEGION_DEPRECATED_ENUM_REAL(x)
 #define LEGION_DEPRECATED_ENUM_FROM(x,y)
 #elif defined(LEGION_WARN_DEPRECATED_ENUMS)
 #if defined(__cplusplus) && __cplusplus >= 201402L
 // c++14 and higher has nice deprecated warnings
 #define LEGION_DEPRECATED_ENUM(x)   \
   x [[deprecated("use LEGION_" #x " instead")]] = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_REAL(x)  \
+  x [[deprecated(#x " is no longer supported")]],
 #define LEGION_DEPRECATED_ENUM_FROM(x,y) \
   x [[deprecated("use " #y " instead")]] = y,
 #else
 // C and older versions of c++
 #define LEGION_DEPRECATED_ENUM(x)   \
   x __attribute__ ((deprecated ("use LEGION_" #x " instead"))) = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_REAL(x)  \
+  x __attribute__ ((deprecated (#x " is no longer supported")))
 #define LEGION_DEPRECATED_ENUM_FROM(x,y) \
   x __attribute__ ((deprecated ("use " #y " instead"))) = y,
 #endif
 #else
 #define LEGION_DEPRECATED_ENUM(x)   \
   x = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_REAL(x)  \
+  x,
 #define LEGION_DEPRECATED_ENUM_FROM(x,y) \
   x = y,
 #endif
@@ -1131,7 +1112,7 @@ typedef enum legion_error_t {
   ERROR_INDEX_SPACE_COPY = 237,
   ERROR_DEPRECATED_SHARDING = 238,
   ERROR_IMPLICIT_REPLICATED_SHARDING = 239,
-  //ERROR_DESTINATION_INDEX_SPACE2 = 240,
+  ERROR_MIXED_PARTITION_COLOR_ALLOCATION_MODES = 240,
   ERROR_EXCEEDED_CONFIGURATION_LIMIT = 241,
   ERROR_INVALID_PADDED_ACCESSOR = 242,
   ERROR_MAPPER_FAILED_ACQUIRE = 245,
@@ -1150,7 +1131,7 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_FILE_ATTACHMENT = 284,
   ERROR_REGION_REQUIREMENT_ATTACH = 293,
   ERROR_PARENT_TASK_DETACH = 295,
-  //ERROR_NONLOCAL_COLLECTIVE_ATTACH = 296,
+  ERROR_ILLEGAL_TOP_LEVEL_TASK_CREATION = 296,
   //ERROR_MAPPER_REQUESTED_EXECUTION = 297,
   ERROR_PARENT_TASK_TASK = 298,
   ERROR_INDEX_SPACE_NOTSUBSPACE = 299,
@@ -1164,7 +1145,7 @@ typedef enum legion_error_t {
   ERROR_INVALID_LOCATION_CONSTRAINT = 344,
   ERROR_ALIASED_INTERFERING_REGION = 356,
   ERROR_REDUCTION_OPERATION_INDEX = 357,
-  //ERROR_PREDICATED_INDEX_TASK = 358,
+  ERROR_ILLEGAL_FUTURE_USE = 358,
   ERROR_INDEX_SPACE_TASK = 359,
   ERROR_TRACE_VIOLATION_RECORDED = 363,
   ERROR_TRACE_VIOLATION_OPERATION = 364,
@@ -1400,13 +1381,14 @@ typedef enum legion_error_t {
   LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION = 1107,
   LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES = 1108,
   LEGION_WARNING_INLINING_NOT_SUPPORTED = 1109,
-  LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE = 1110,
+  LEGION_WARNING_IGNORING_EQUIVALENCE_SETS_RESET = 1110,
   LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS = 1111,
   LEGION_WARNING_PARTITION_VERIFICATION = 1112,
   LEGION_WARNING_IMPRECISE_ATTACH_MEMORY = 1113,
   LEGION_WARNING_KDTREE_REFINEMENT_FAILED = 1114,
   LEGION_WARNING_COLLECTIVE_HAMMER_REDUCTION = 1115,
   LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE = 1116,
+  LEGION_WARNING_UNSUPPORTED_REPLICATION = 1117,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
@@ -1429,11 +1411,19 @@ typedef enum legion_error_t {
   
 }  legion_error_t;
 
+#ifdef __cplusplus
+#include <cstdint>
+#endif
+
 // enum and namepsaces don't really get along well
 // We would like to make these associations explicit
 // but the python cffi parser is stupid as hell
-typedef enum legion_privilege_mode_t {
-  LEGION_NO_ACCESS       = 0x00000000, 
+typedef enum legion_privilege_mode_t
+#ifdef __cplusplus
+: std::uint32_t
+#endif
+{
+  LEGION_NO_ACCESS       = 0x00000000,
   LEGION_READ_PRIV       = 0x00000001,
   LEGION_READ_ONLY       = 0x00000001, // READ_PRIV,
   LEGION_WRITE_PRIV      = 0x00000002,
@@ -1456,6 +1446,10 @@ typedef enum legion_privilege_mode_t {
   LEGION_DEPRECATED_ENUM(WRITE_DISCARD)
 } legion_privilege_mode_t;
 
+#ifdef __cplusplus
+static_assert(sizeof(legion_privilege_mode_t) == sizeof(unsigned), "");
+#endif
+
 typedef enum legion_allocate_mode_t {
   LEGION_NO_MEMORY       = 0x00000000,
   LEGION_ALLOCABLE       = 0x00000001,
@@ -1475,10 +1469,16 @@ typedef enum legion_allocate_mode_t {
 } legion_allocate_mode_t;
 
 typedef enum legion_coherence_property_t {
-  LEGION_EXCLUSIVE    = 0,
-  LEGION_ATOMIC       = 1,
-  LEGION_SIMULTANEOUS = 2,
-  LEGION_RELAXED      = 3,
+  LEGION_EXCLUSIVE                = 0x00000000,
+  LEGION_ATOMIC                   = 0x00000001,
+  LEGION_SIMULTANEOUS             = 0x00000002,
+  LEGION_RELAXED                  = 0x00000003,
+  LEGION_COLLECTIVE_MASK          = 0x10000000,
+  // Can't make these associations explicit because the Python CFFI parsers is stupid
+  LEGION_COLLECTIVE_EXCLUSIVE     = 0x10000000, // LEGION_EXCLUSIVE | LEGION_COLLECTIVE_MASK,
+  LEGION_COLLECTIVE_ATOMIC        = 0x10000001, // LEGION_ATOMIC | LEGION_COLLECTIVE_MASK,
+  LEGION_COLLECTIVE_SIMULTANEOUS  = 0x10000002, // LEGION_SIMULTANEOUS | LEGION_COLLECTIVE_MASK,
+  LEGION_COLLECTIVE_RELAXED       = 0x10000003, // LEGION_RELAXED | LEGION_COLLECTIVE_MASK,
   // for backwards compatibility
   LEGION_DEPRECATED_ENUM(EXCLUSIVE)
   LEGION_DEPRECATED_ENUM(ATOMIC)
@@ -2083,8 +2083,8 @@ typedef enum legion_specialized_constraint_t {
   LEGION_COMPACT_REDUCTION_SPECIALIZE = 4,
   LEGION_VIRTUAL_SPECIALIZE = 5,
   // All file types must go below here, everything else above
-  LEGION_GENERIC_FILE_SPECIALIZE = 6,
-  LEGION_HDF5_FILE_SPECIALIZE = 7,
+  LEGION_GENERIC_FILE_SPECIALIZE,
+  LEGION_HDF5_FILE_SPECIALIZE,
   // for backards compatibility
   LEGION_DEPRECATED_ENUM(NO_SPECIALIZE)
   LEGION_DEPRECATED_ENUM(AFFINE_SPECIALIZE)

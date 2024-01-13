@@ -24,6 +24,7 @@ endif()
 
 add_executable(provenance provenance.cc)
 target_link_libraries(provenance Legion::Legion)
+target_compile_options(provenance PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME provenance COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:provenance> ${Legion_TEST_ARGS})
 endif()

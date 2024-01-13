@@ -46,7 +46,7 @@ namespace Realm {
 	uintptr_t ptr;
 	uintptr_t extra;
       };
-      unsigned char raw_bytes[256];
+      unsigned char raw_bytes[384];
     };
   };
   
@@ -55,6 +55,10 @@ namespace Realm {
     extern NodeID my_node_id;
     extern NodeID max_node_id;
     extern NodeSet all_peers;
+    // all peers that can access shared memory from this node
+    // NOTE: This is an over-estimation.  Users should be robust to the fact that this may
+    //       include peers that are not able to access shared memory.
+    extern NodeSet shared_peers;
 
     // in most cases, there will be a single network module - if so, we set
     //  this so we don't have to do a per-node lookup
@@ -158,6 +162,9 @@ namespace Realm {
     //static NetworkModule *create_network_module(RuntimeImpl *runtime,
     //                                            int *argc, const char ***argv);
 
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers) = 0;
+
     // actual parsing of the command line should wait until here if at all
     //  possible
     virtual void parse_command_line(RuntimeImpl *runtime,
@@ -179,6 +186,8 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes) = 0;
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes) = 0;
+    virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                            std::vector<size_t> &lengths) = 0;
 
     virtual size_t sample_messages_received_count(void) = 0;
     virtual bool check_for_quiescence(size_t sampled_receive_count) = 0;

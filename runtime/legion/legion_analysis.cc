@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <cmath>
 #include "legion.h"
 #include "legion/runtime.h"
 #include "legion/legion_ops.h"
@@ -26,6 +27,7 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
+#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -37,36 +39,30 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalUser::LogicalUser(void)
-      : GenericUser(), op(NULL), idx(0), gen(0), timeout(TIMEOUT)
-#ifdef LEGION_SPY
-        , uid(0)
-#endif
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                             const FieldMask &m)
-      : GenericUser(u, m), op(o), idx(id), 
-        gen(o->get_generation()), timeout(TIMEOUT)
+                             ProjectionSummary *p, unsigned internal)
+      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()),
+        internal_idx(internal), idx(id), gen(o->get_generation()),
+        shard_proj(p)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
     //--------------------------------------------------------------------------
     {
+      if (op != NULL)
+        op->add_mapping_reference(gen);
+      if (shard_proj != NULL)
+        shard_proj->add_reference();
     }
 
     //--------------------------------------------------------------------------
-    LogicalUser::LogicalUser(Operation *o, GenerationID g, unsigned id, 
-                             const RegionUsage &u, const FieldMask &m)
-      : GenericUser(u, m), op(o), idx(id), gen(g), timeout(TIMEOUT)
-#ifdef LEGION_SPY
-        , uid(o->get_unique_op_id())
-#endif
+    LogicalUser::~LogicalUser(void)
     //--------------------------------------------------------------------------
     {
+      if (op != NULL)
+        op->remove_mapping_reference(gen);
+      if ((shard_proj != NULL) && shard_proj->remove_reference())
+        delete shard_proj;
     }
 
     //--------------------------------------------------------------------------
@@ -239,12 +235,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalTraceInfo::LogicalTraceInfo(Operation *op, unsigned idx, 
                                        const RegionRequirement &r)
-      : trace(((op->get_trace() != NULL) && 
-                op->get_trace()->handles_region_tree(r.parent.get_tree_id())) ?
-                op->get_trace() : NULL), req_idx(idx), req(r),
-        already_traced((trace != NULL) && !op->is_tracing()),
-        recording_trace((trace != NULL) && trace->is_recording()),
-        replaying_trace((trace != NULL) && trace->is_replaying())
+      : trace(op->get_trace()), req_idx(idx), req(r),
+        skip_analysis((trace != NULL) && 
+                       trace->skip_analysis(r.parent.get_tree_id()))
     //--------------------------------------------------------------------------
     {
     }
@@ -425,7 +418,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!term_event.exists() || term_event.has_triggered());
+      assert(!term_event.exists() || term_event.has_triggered_faultignorant());
 #endif
       if (local_space != origin_space)
       {
@@ -958,7 +951,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_op_inst(const TraceLocalID &tlid,
-                                             unsigned idx,
+                                             unsigned parent_req_index,
                                              const UniqueInst &inst,
                                              RegionNode *node,
                                              const RegionUsage &usage,
@@ -977,7 +970,7 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_RECORD_OP_INST);
           rez.serialize(applied);
           tlid.serialize(rez);
-          rez.serialize(idx);
+          rez.serialize(parent_req_index);
           inst.serialize(rez);
           rez.serialize(node->handle);
           rez.serialize(usage);
@@ -989,7 +982,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_op_inst(tlid, idx, inst, node, usage,
+        remote_tpl->record_op_inst(tlid, parent_req_index, inst, node, usage,
                                    user_mask, update_validity, effects);
     }
 
@@ -1287,7 +1280,6 @@ namespace Legion {
               std::vector<ApEvent> rhs_events(num_rhs);
               for (unsigned idx = 0; idx < num_rhs; idx++)
               {
-                ApEvent event;
                 derez.deserialize(rhs_events[idx]);
               }
               tpl->record_merge_events(lhs, rhs_events, tlid);
@@ -1954,6 +1946,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTraceInfo::record_op_inst(const RegionUsage &usage,
+                                           const FieldMask &user_mask,
+                                           const UniqueInst &inst,
+                                           RegionNode *node, Operation *op,
+                                           std::set<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      sanity_check();
+      rec->record_op_inst(tlid, op->find_parent_index(index), inst, node,
+                          usage, user_mask, update_validity, applied);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTraceInfo::pack_trace_info(Serializer &rez,
                                             std::set<RtEvent> &applied) const 
     //--------------------------------------------------------------------------
@@ -2003,15 +2008,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
-                                   const RegionRequirement &req, 
+                                   const RegionRequirement *req,
                                    IndexSpaceNode *launch_space, 
-                                   ShardingFunction *func/*=NULL*/,
-                                   IndexSpace shard_space/*=NO_SPACE*/)
-      : sharding_function(func), sharding_space(shard_space.exists() ? 
-            runtime->forest->get_node(shard_space) : 
-              (func == NULL) ? NULL : launch_space)
+                                   ShardingFunction *func,
+                                   IndexSpace shard_space)
+      : projection(nullptr),
+        projection_type(LEGION_SINGULAR_PROJECTION),
+        projection_space(nullptr),
+        sharding_function(func),
+        sharding_space(nullptr)
     //--------------------------------------------------------------------------
     {
+      if (launch_space == nullptr)
+        return;
+
+      if (shard_space.exists())
+        sharding_space = runtime->forest->get_node(shard_space);
+      else if (func != nullptr) {
+        sharding_space = launch_space;
+      }
+
       // There is special logic here to handle the case of singular region 
       // requirements with sharding functions which we still want to treat as
       // projection region requirements for the logical analysis
@@ -2019,7 +2035,7 @@ namespace Legion {
       // Should always have a launch space with a sharding function
       assert((func == NULL) || (launch_space != NULL));
 #endif
-      if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+      if (req->handle_type == LEGION_SINGULAR_PROJECTION)
       {
         if (func != NULL)
         {
@@ -2032,14 +2048,14 @@ namespace Legion {
         else
         {
           projection = NULL;
-          projection_type = req.handle_type;
+          projection_type = req->handle_type;
           projection_space = NULL;
         }
       }
       else
       {
-        projection = runtime->find_projection_function(req.projection);
-        projection_type = req.handle_type;
+        projection = runtime->find_projection_function(req->projection);
+        projection_type = req->handle_type;
         projection_space = launch_space;
       }
     }
@@ -2179,35 +2195,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CurrentInvalidator::CurrentInvalidator(ContextID c, bool only)
-      : ctx(c), users_only(only)
+    CurrentInvalidator::CurrentInvalidator(ContextID c)
+      : ctx(c)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CurrentInvalidator::CurrentInvalidator(const CurrentInvalidator &rhs)
-      : ctx(0), users_only(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     CurrentInvalidator::~CurrentInvalidator(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CurrentInvalidator& CurrentInvalidator::operator=(
-                                                  const CurrentInvalidator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2221,7 +2218,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx, users_only); 
+      node->invalidate_current_state(ctx); 
       return true;
     }
 
@@ -2229,7 +2226,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx, users_only);
+      node->invalidate_current_state(ctx);
       return true;
     }
 
@@ -2245,28 +2242,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DeletionInvalidator::DeletionInvalidator(const DeletionInvalidator &rhs)
-      : ctx(0), deletion_mask(rhs.deletion_mask)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     DeletionInvalidator::~DeletionInvalidator(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    DeletionInvalidator& DeletionInvalidator::operator=(
-                                                 const DeletionInvalidator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2293,138 +2271,2315 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // ProjectionTree
+    // ProjectionNode
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ProjectionTree::ProjectionTree(bool all_disjoint)
-      : all_children_disjoint(all_disjoint)
+    void ProjectionNode::IntervalTree::add_child(LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      add_range(color, color+1);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::remove_child(LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      // Don't contain the color
+      if (ranges.empty())
+        return;
+      std::map<LegionColor,LegionColor>::iterator finder =
+        ranges.upper_bound(color);
+      // Don't contain the color
+      if (finder == ranges.begin())
+        return;
+      // Get the interval right before
+      finder = std::prev(finder);
+      // Don't have the color in the previous interval
+      if (finder->second <= color)
+        return;
+      // Start a new range if this wasn't the last color in the range
+      if ((color+1) < finder->second)
+        ranges[color+1] = finder->second;
+      // See if it is at the start of the range in which case this is easy
+      if (finder->first == color)
+        // Remove the old range
+        ranges.erase(finder);
+      else
+        // Update the range to end at the color which was removed
+        finder->second = color;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::add_range(LegionColor start,
+                                                 LegionColor stop)
+    //--------------------------------------------------------------------------
+    {
+      if (!ranges.empty())
+      {
+        // Find the first range that might contain the start point
+        std::map<LegionColor,LegionColor>::iterator next = 
+          ranges.upper_bound(start);
+        if (next != ranges.begin())
+        {
+          std::map<LegionColor,LegionColor>::iterator prev = std::prev(next);
+          // Note that prev->first <= start because of upper_bound
+          // Start is contained in this interval so we can merge it
+          if (start < prev->second)
+          {
+            // Interval contained in already existing range
+            if (stop <= prev->second)
+              return;
+            start = prev->first;
+            ranges.erase(prev);
+          }
+        }
+        // Now merge forwards with any future ranges
+        while ((next != ranges.end()) && (next->first <= stop))
+        {
+          if (stop < next->second)
+            stop = next->second;
+          std::map<LegionColor,LegionColor>::iterator to_delete = next++;
+          ranges.erase(to_delete);
+        }
+      }
+      // Add this range to the tree
+      ranges[start] = stop;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionNode::IntervalTree::has_child(LegionColor color) const
+    //--------------------------------------------------------------------------
+    {
+      if (ranges.empty())
+        return false;
+      // Find the first interval that starts after the color
+      std::map<LegionColor,LegionColor>::const_iterator finder =
+        ranges.upper_bound(color);
+      // If it's the first interval, then we can't contain the color
+      if (finder == ranges.begin())
+        return false;
+      // Otherwise step backwards to get the interval right before
+      finder = std::prev(finder);
+      // See if that interval includes it or not
+      // Note that (finder->first <= color) is already implied by upper_bound
+      return (color < finder->second);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(ranges.size());
+      for (std::map<LegionColor,LegionColor>::const_iterator it =
+            ranges.begin(); it != ranges.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_ranges;
+      derez.deserialize(num_ranges);
+      for (unsigned idx = 0; idx < num_ranges; idx++)
+      {
+        LegionColor start, end;
+        derez.deserialize(start);
+        derez.deserialize(end);
+        add_range(start, end);
+      }
+    }
+
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
+    //--------------------------------------------------------------------------
+    ProjectionNode::ShardSet::ShardSet(void)
+      : size(0), max(MAX_VALUES)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionTree::~ProjectionTree(void)
+    ProjectionNode::ShardSet::~ShardSet(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<LegionColor,ProjectionTree*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-        delete it->second;
+      if (max > MAX_VALUES)
+        free(set.buffer);
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionTree::interferes(const ProjectionTree *other,
-                                    ShardID other_shard) const
+    void ProjectionNode::ShardSet::insert(ShardID shard, unsigned total_shards)
+    //--------------------------------------------------------------------------
+    {
+      if (max == MAX_VALUES)
+      {
+        if (size == 0)
+          set.values[size++] = shard;
+        else if (!std::binary_search(&set.values[0], 
+              &set.values[size], shard, std::less<ShardID>()))
+        {
+          if (size == MAX_VALUES)
+          {
+            // Need to increase to intermediate size
+            unsigned new_max = max*2;
+            unsigned bit_max = 
+              (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+            if (new_max < bit_max)
+            {
+              // Going to sparse buffer representation
+              max = new_max;
+              ShardID *buffer = (ShardID*)malloc(new_max * sizeof(ShardID));
+              for (unsigned idx = 0; idx < MAX_VALUES; idx++)
+                buffer[idx] = set.values[idx];
+              buffer[size++] = shard;
+              std::sort(buffer, buffer+size, std::less<ShardID>());
+              set.buffer = buffer;
+            }
+            else
+            {
+              size = bit_max;
+              max = total_shards + 1;
+              ShardID *buffer = (ShardID*)malloc(bit_max * sizeof(ShardID));
+              constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+              for (unsigned idx = 0; idx < MAX_VALUES; idx++)
+              {
+                unsigned index = set.values[idx] >> power;
+                buffer[idx] |= 
+                  (1U << (set.values[index] & ((1U << power) - 1)));
+              }
+              unsigned index = shard >> power;
+              buffer[index] |= (1U << (shard & ((1U << power) - 1)));
+              set.buffer = buffer;
+            }
+          }
+          else
+          {
+            set.values[size++] = shard;
+            std::sort(&set.values[0], &set.values[size], std::less<ShardID>());
+          }
+        }
+      }
+      else if (total_shards < max)
+      {
+        // We're already in a bitmask mode
+        constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+        unsigned index = shard >> power;
+        set.buffer[index] |= (1U << (shard & ((1U << power) - 1)));
+      }
+      else if (!std::binary_search(&set.buffer[0], &set.buffer[size],
+                                   shard, std::less<ShardID>()))
+      {
+        if (size < max)
+        {
+          set.buffer[size++] = shard;
+          std::sort(set.buffer, set.buffer+size, std::less<ShardID>());
+        }
+        else
+        {
+          unsigned new_max = max*2;
+          unsigned bit_max = 
+            (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+          if (new_max < bit_max)
+          {
+            // Going to sparse buffer representation
+            max = new_max;
+            ShardID *buffer = (ShardID*)malloc(new_max * sizeof(ShardID));
+            for (unsigned idx = 0; idx < size; idx++)
+              buffer[idx] = set.buffer[idx];
+            buffer[size++] = shard;
+            std::sort(buffer, buffer+size, std::less<ShardID>());
+            free(set.buffer);
+            set.buffer = buffer;
+          }
+          else
+          {
+            max = total_shards + 1;
+            ShardID *buffer = (ShardID*)malloc(bit_max * sizeof(ShardID));
+            constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              unsigned index = set.buffer[idx] >> power;
+              buffer[index] |= (1U << (set.buffer[idx] & ((1U << power) - 1)));
+            }
+            unsigned index = shard >> power;
+            buffer[index] |= (1U << (shard & ((1U << power) - 1)));
+            free(set.buffer);
+            set.buffer = buffer;
+            size = bit_max;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ProjectionNode::ShardSet::find_nearest_shard(ShardID local,
+                                                    unsigned total_shards) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(all_children_disjoint == other->all_children_disjoint);
+      assert(size > 0);
 #endif
-      // Check all our uses here first
-      if (!users.empty())
+      if (max == MAX_VALUES)
       {
-        for (std::set<ShardID>::const_iterator it = 
-              users.begin(); it != users.end(); it++)
+        if (size == 1)
+          return set.values[0];
+        return find_nearest(local, total_shards, &set.values[0], size);
+      }
+      else if (total_shards < max)
+      {
+        constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+        const unsigned bit_max =
+          (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+        // Find the next set bit both above and below
+        ShardID lower = 0;
         {
-          if ((*it) == other_shard)
-            continue;
-          return true;
+          int index = local >> power;
+          int offset = local & ((1U << power) - 1);
+#ifdef DEBUG_LEGION
+          // Shouldn't exist in the set
+          assert(!(set.buffer[index] & (1U << offset)));
+#endif
+          offset--;
+          while (true)
+          {
+            while (offset >= 0)
+            {
+              if (set.buffer[index] & (1U << offset))
+              {
+                lower = (index << power) + offset; 
+                break;
+              }
+              else
+                offset--;
+            }
+            if (offset < 0)
+            {
+              offset = ((1U << power) - 1);
+              // Handle wrap around case
+              if (--index < 0)
+                index = bit_max - 1;
+            }
+            else
+              break;
+          }
+        }
+        ShardID upper = 0;
+        {
+          unsigned index = local >> power;
+          unsigned offset = (local & ((1U << power) - 1)) + 1;
+          while (true)
+          {
+            while (offset < (1U << power))
+            {
+              if (set.buffer[index] & (1U << offset))
+              {
+                upper = (index << power) + offset;
+                break;
+              }
+              else
+                offset++;
+            }
+            if (offset == (1U << power))
+            {
+              offset = 0;
+              // Handle wrap around case
+              if (++index == bit_max)
+                index = 0;
+            }
+            else
+              break;
+          }
+        }
+        unsigned lower_dist = find_distance(lower, local, total_shards);
+        unsigned upper_dist = find_distance(local, upper, total_shards);
+        if (lower_dist < upper_dist)
+          return lower;
+        else
+          return upper;
+      }
+      else
+        return find_nearest(local, total_shards, set.buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ProjectionNode::ShardSet::find_nearest(ShardID local,
+       unsigned total_shards, const ShardID *buffer, unsigned buffer_size) const
+    //--------------------------------------------------------------------------
+    {
+      // Find the upper bound if it exists
+      unsigned upper = 0;
+      unsigned count = buffer_size;
+      while (count > 0)
+      {
+        unsigned step = count / 2;
+        if (local >= buffer[upper+step])
+        {
+          upper = step + 1;
+          count -= step + 1;
+        }
+        else
+          count = step;
+      }
+#ifdef DEBUG_LEGION
+      assert(upper <= buffer_size);
+#endif
+      // Check to see if the upper bound exists or not
+      unsigned lower = 0;
+      if (upper == buffer_size)
+      {
+#ifdef DEBUG_LEGION
+        assert(buffer[upper-1] < local);
+#endif
+        lower = buffer_size-1;
+        upper = 0;
+      }
+      else if (upper == 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(local < buffer[0]);
+#endif
+        lower = buffer_size-1;
+      }
+      else
+      {
+        lower = buffer[upper-1];  
+#ifdef DEBUG_LEGION
+        assert(buffer[lower] < local);
+        assert(local < buffer[upper]);
+#endif
+      }
+      // Figure out which of the two is closer
+      unsigned lower_dist = find_distance(buffer[lower], local, total_shards);
+      unsigned upper_dist = find_distance(local, buffer[upper], total_shards);
+      if (lower_dist < upper_dist)
+        return buffer[lower];
+      else
+        return buffer[upper];
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned ProjectionNode::ShardSet::find_distance(
+                                ShardID one, ShardID two, unsigned total_shards)
+    //--------------------------------------------------------------------------
+    {
+      unsigned abs_diff = (one < two) ? (two - one) : (one - two);
+      // closest distance with wrap around
+      if (abs_diff < (total_shards / 2))
+        return abs_diff;
+      else
+        return (total_shards - abs_diff);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::ShardSet::serialize(Serializer &rez,
+                                             unsigned total_shards) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(max);
+      if (max == MAX_VALUES)
+      {
+        rez.serialize(size);
+        for (unsigned idx = 0; idx < size; idx++)
+          rez.serialize(set.values[idx]);
+      }
+      else if (total_shards < max)
+      {
+        for (unsigned idx = 0; idx < size; idx++)
+          rez.serialize(set.buffer[idx]);
+      }
+      else
+      {
+        rez.serialize(size);
+        for (unsigned idx = 0; idx < size; idx++)
+          rez.serialize(set.buffer[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::ShardSet::deserialize(Deserializer &derez,
+                                               unsigned total_shards)
+    //--------------------------------------------------------------------------
+    {
+      unsigned dmax;
+      derez.deserialize(dmax);
+      if (dmax == MAX_VALUES)
+      {
+        unsigned dsize;
+        derez.deserialize(dsize);
+        for (unsigned idx = 0; idx < dsize; idx++)
+        {
+          ShardID shard;
+          derez.deserialize(shard);
+          insert(shard, total_shards);
         }
       }
-      if (all_children_disjoint)
+      else if (total_shards < dmax)
       {
-        for (std::map<LegionColor,ProjectionTree*>::const_iterator it =
-              children.begin(); it != children.end(); it++)
+        if (total_shards < max)
         {
-          // All disjoint, so just need to do analysis on any children we find
-          std::map<LegionColor,ProjectionTree*>::const_iterator finder =
-            other->children.find(it->first);
-          if (finder == other->children.end())
-            continue;
-          if (it->second->interferes(finder->second, other_shard))
-            return true;
+          for (unsigned idx = 0; idx < size; idx++)
+          {
+            ShardID bits;
+            derez.deserialize(bits);
+            set.buffer[idx] |= bits;
+          }
+        }
+        else
+        {
+          unsigned bit_max = 
+            (((total_shards + 7)/8) + sizeof(ShardID) - 1) / sizeof(ShardID);
+          ShardID *buffer = (ShardID*)malloc(bit_max * sizeof(ShardID));
+          for (unsigned idx = 0; idx < bit_max; idx++)
+            derez.deserialize(buffer[idx]);
+#ifdef DEBUG_LEGION
+          assert(max < bit_max);
+#endif
+          constexpr size_t power = STATIC_LOG2(sizeof(ShardID));
+          if (max == MAX_VALUES)
+          {
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              unsigned index = set.values[idx] >> power;
+              buffer[index] |= (1U << (set.values[idx] & ((1U << power) - 1)));
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              unsigned index = set.buffer[idx] >> power;
+              buffer[index] |= (1U << (set.buffer[idx] & ((1U << power) - 1)));
+            }
+            free(set.buffer);
+          }
+          max = total_shards + 1;
+          size = bit_max;
+          set.buffer = buffer;
         }
       }
       else
       {
-        for (std::map<LegionColor,ProjectionTree*>::const_iterator it =
-              children.begin(); it != children.end(); it++)
+        unsigned dsize;
+        derez.deserialize(dsize);
+        for (unsigned idx = 0; idx < dsize; idx++)
         {
-          std::map<LegionColor,ProjectionTree*>::const_iterator finder =
-            other->children.find(it->first);
-          if (finder == other->children.end())
-          {
-            if (it->second->uses_shard(other_shard))
-              return true;
-          }
-          else if (it->second->interferes(finder->second, other_shard))
-            return true;
+          ShardID shard;
+          derez.deserialize(shard);
+          insert(shard, total_shards);
         }
       }
-      return false;
+    }
+#endif // LEGION_NAME_BASED_CHILDREN_SHARDS
+
+    /////////////////////////////////////////////////////////////
+    // ProjectionRegion
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionRegion::ProjectionRegion(RegionNode *node)
+      : region(node)
+    //--------------------------------------------------------------------------
+    {
+      region->add_base_gc_ref(PROJECTION_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionTree::uses_shard(ShardID other_shard) const
+    ProjectionRegion::~ProjectionRegion(void)
     //--------------------------------------------------------------------------
     {
-      if (users.find(other_shard) != users.end())
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (it->second->remove_reference())
+          delete it->second;
+      if (region->remove_base_gc_ref(PROJECTION_REF))
+        delete region;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_disjoint(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (local_children.size() > 1)
+        return false;
+      if (!local_children.empty() && 
+          !local_children.begin()->second->is_disjoint())
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_leaves_only(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (shard_users.empty())
+      {
+        for (std::unordered_map<LegionColor,
+                                ProjectionPartition*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
+          if (!it->second->is_leaves_only())
+            return false;
         return true;
-      for (std::map<LegionColor,ProjectionTree*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-        if (it->second->uses_shard(other_shard))
+      }
+      else
+        return local_children.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_unique_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (shard_users.size() > 1)
+        return false;
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_unique_shards())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::interferes(ProjectionNode *other,
+                                      ShardID local_shard) const 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ProjectionRegion *rhs = dynamic_cast<ProjectionRegion*>(other);
+      assert(rhs != NULL);
+      assert(region == rhs->region);
+      return has_interference(rhs, local_shard);
+#else
+      return has_interference(static_cast<ProjectionRegion*>(other),
+                              local_shard);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::extract_shard_summaries(bool supports_name_based,
+        ShardID local_shard, size_t total_shards,
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(region_summaries.find(region->handle) == region_summaries.end());
+#endif
+      RegionSummary &summary = region_summaries[region->handle];
+      summary.users = shard_users;
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        summary.children.add_child(it->first);
+        it->second->extract_shard_summaries(supports_name_based, local_shard,
+            total_shards, region_summaries, partition_summaries);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::update_shard_summaries(bool supports_name_based, 
+        ShardID local_shard, size_t total_shards,
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(region_summaries.find(region->handle) != region_summaries.end());
+#endif
+      RegionSummary &summary = region_summaries[region->handle];
+      shard_users.swap(summary.users);
+      shard_children.swap(summary.children);
+      if (supports_name_based && !shard_children.empty())
+      {
+        // Check to see if we have a child but haven't recorded a local
+        // one in which case we need to make a child for the partition
+        // locally and unpack it so we can have the knowledge of which
+        // shards know about the subregions of the partition
+#ifdef DEBUG_LEGION
+        assert(shard_children.ranges.size() == 1);
+#endif
+        std::map<LegionColor,LegionColor>::const_iterator it =
+          shard_children.ranges.begin();
+#ifdef DEBUG_LEGION
+        // Should only be one color
+        assert((it->first + 1) == it->second);
+#endif
+        if (local_children.empty())
+          local_children[it->first] =
+            new ProjectionPartition(region->get_child(it->first));
+#ifdef DEBUG_LEGION
+        else
+          assert(local_children.find(it->first) != local_children.end());
+        assert(local_children.size() == 1);
+#endif
+      }
+      // Remove all our local children from the shard children
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        shard_children.remove_child(it->first);
+        it->second->update_shard_summaries(supports_name_based, local_shard,
+            total_shards, region_summaries, partition_summaries);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::has_interference(ProjectionRegion *other,
+                                            ShardID local_shard) const
+    //--------------------------------------------------------------------------
+    {
+      // If either one has more than one shard ID then we're done
+      if ((shard_users.size() > 1) || (other->shard_users.size() > 1))
+        return true;
+      if (!shard_users.empty() && (shard_users.back() != local_shard))
+        return true;
+      if (!other->shard_users.empty() &&
+          (other->shard_users.back() != local_shard))
+        return true;
+      // If either has any shard children we're immediately interfering 
+      if (!shard_children.empty() || !other->shard_children.empty())
+        return true;
+      // If we have different numbers of partitions then we are definitely
+      // going ot be interfering on something
+      if (local_children.size() != other->local_children.size())
+        return true;
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+          finder = other->local_children.find(it->first);
+        if (finder == other->local_children.end())
           return true;
+        if (it->second->has_interference(finder->second, local_shard))
+          return true;
+      }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionTree::serialize(Serializer &rez) const
+    void ProjectionRegion::add_user(ShardID user)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(users.size());
-      for (std::set<ShardID>::const_iterator it =
-            users.begin(); it != users.end(); it++)
-        rez.serialize(*it);
-      rez.serialize<size_t>(children.size());
-      for (std::map<LegionColor,ProjectionTree*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
+      if (std::binary_search(shard_users.begin(), shard_users.end(), user))
+        return;
+      shard_users.push_back(user);
+      std::sort(shard_users.begin(), shard_users.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::add_child(ProjectionPartition *child)
+    //--------------------------------------------------------------------------
+    {
+      LegionColor color = child->partition->row_source->color;
+      if (local_children.insert(std::make_pair(color, child)).second)
+        child->add_reference();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ProjectionPartition
+    /////////////////////////////////////////////////////////////
+
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
+    //--------------------------------------------------------------------------
+    ProjectionPartition::ProjectionPartition(PartitionNode *node, 
+                                             ShardedColorMap *map)
+      : partition(node), name_based_children_shards(map)
+    //--------------------------------------------------------------------------
+    {
+      partition->add_base_gc_ref(PROJECTION_REF);
+      if (name_based_children_shards != NULL)
+        name_based_children_shards->add_reference();
+    }
+#else
+    //--------------------------------------------------------------------------
+    ProjectionPartition::ProjectionPartition(PartitionNode *node) 
+      : partition(node)
+    //--------------------------------------------------------------------------
+    {
+      partition->add_base_gc_ref(PROJECTION_REF);
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    ProjectionPartition::~ProjectionPartition(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (it->second->remove_reference())
+          delete it->second;
+      if (partition->remove_base_gc_ref(PROJECTION_REF))
+        delete partition;
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
+      if ((name_based_children_shards != NULL) &&
+          name_based_children_shards->remove_reference())
+        delete name_based_children_shards;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_disjoint(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!partition->row_source->is_disjoint(false/*from app*/))
+        return false;
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_disjoint())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_leaves_only(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_leaves_only())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_unique_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_unique_shards())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::interferes(ProjectionNode *other,
+                                         ShardID local_shard) const 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ProjectionPartition *rhs = dynamic_cast<ProjectionPartition*>(other);
+      assert(rhs != NULL);
+      assert(partition == rhs->partition);
+      return has_interference(rhs, local_shard);
+#else
+      return has_interference(static_cast<ProjectionPartition*>(other),
+                              local_shard);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::extract_shard_summaries(bool supports_name_based,
+        ShardID local_shard, size_t total_shards,
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition_summaries.find(partition->handle) ==
+              partition_summaries.end());
+#endif
+      PartitionSummary &summary = partition_summaries[partition->handle];
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        summary.children.add_child(it->first);
+        it->second->extract_shard_summaries(supports_name_based, local_shard,
+            total_shards, region_summaries, partition_summaries);
+      }
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
+      if (supports_name_based)
+      {
+        // Record that we know about all of our local children
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
+          summary.disjoint_complete_child_shards[it->first].insert(local_shard, 
+                                                                  total_shards);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::update_shard_summaries(bool supports_name_based,
+        ShardID local_shard, size_t total_shards,
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition_summaries.find(partition->handle) != 
+              partition_summaries.end());
+#endif
+      PartitionSummary &summary = partition_summaries[partition->handle];
+      shard_children.swap(summary.children);
+      // Remove all our local children from the shard children
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        shard_children.remove_child(it->first);
+        it->second->update_shard_summaries(supports_name_based, local_shard,
+            total_shards, region_summaries, partition_summaries);
+      }
+#ifdef LEGION_NAME_BASED_CHILDREN_SHARDS
+      if (supports_name_based &&
+          (local_children.size() < partition->get_num_children()))
+      {
+        // If necessary create a sharded color map for any children
+        // which we don't know about locally so we know the nearest
+        // shard which does have some information about it
+        std::unordered_map<LegionColor,ShardID> nearest_shards;  
+        for (std::unordered_map<LegionColor,ShardSet>::const_iterator it =
+              summary.disjoint_complete_child_shards.begin(); it !=
+              summary.disjoint_complete_child_shards.end(); it++)
+        {
+          if (local_children.find(it->first) != local_children.end())
+            continue;
+          nearest_shards[it->first] = 
+            it->second.find_nearest_shard(local_shard, total_shards);
+        }
+        // Now we can make our ShardedColorMap and save it
+#ifdef DEBUG_LEGION
+        assert(name_based_children_shards == NULL);
+#endif
+        name_based_children_shards =
+          new ShardedColorMap(std::move(nearest_shards));
+        name_based_children_shards->add_reference();
+      }
+#endif // LEGION_NAME_BASED_CHILDREN_SHARDS
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::has_interference(ProjectionPartition *other,
+                                               ShardID local_shard) const
+    //--------------------------------------------------------------------------
+    {
+      if (partition->row_source->is_disjoint(false/*from app*/))
+      {
+        // Disjoint partition, check all the children against each other
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
+        {
+          std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            finder = other->local_children.find(it->first);
+          if (finder == other->local_children.end())
+          {
+            // Check to see if there is a remote shard with that child
+            if (other->shard_children.has_child(it->first))
+              return true;
+          }
+          else if (it->second->has_interference(finder->second, local_shard))
+            return true;
+        }
+        // Check in the opposite direction too
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = other->local_children.begin();
+              it != other->local_children.end(); it++)
+        {
+          std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            finder = local_children.find(it->first);
+          if (finder == local_children.end())
+          {
+            if (shard_children.has_child(it->first))
+              return true;
+          }
+          // Else we've already done interferences with ourself locally
+        }
+        return false;
+      }
+      else
+      {
+        // Aliased partition
+        // If either has any shard children we're immediately interfering 
+        if (!shard_children.empty() || !other->shard_children.empty())
+          return true;
+        // If we have different numbers of partitions then we are definitely
+        // going to be interfering on something
+        if (local_children.size() != other->local_children.size())
+          return true;
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
+        {
+          std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            finder = other->local_children.find(it->first);
+          if (finder == other->local_children.end())
+            return true;
+          if (it->second->has_interference(finder->second, local_shard))
+            return true;
+        }
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::add_child(ProjectionRegion *child)
+    //--------------------------------------------------------------------------
+    {
+      LegionColor color = child->region->row_source->color;
+      if (local_children.insert(std::make_pair(color, child)).second)
+        child->add_reference();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ShardedColorMap
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardID ShardedColorMap::at(LegionColor color) const
+    //--------------------------------------------------------------------------
+    {
+      std::unordered_map<LegionColor,ShardID>::const_iterator finder =
+        color_shards.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != color_shards.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedColorMap::pack(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(color_shards.size());
+      for (std::unordered_map<LegionColor,ShardID>::const_iterator it =
+            color_shards.begin(); it != color_shards.end(); it++)
       {
         rez.serialize(it->first);
-        rez.serialize<bool>(it->second->all_children_disjoint);
-        it->second->serialize(rez);
+        rez.serialize(it->second);
       }
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionTree::deserialize(Deserializer &derez)
+    /*static*/ void ShardedColorMap::pack_empty(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      size_t num_users;
-      derez.deserialize(num_users);
-      for (unsigned idx = 0; idx < num_users; idx++)
-      {
-        ShardID user;
-        derez.deserialize(user);
-        users.insert(user);
-      }
-      size_t num_children;
-      derez.deserialize(num_children);
-      for (unsigned idx = 0; idx < num_children; idx++)
+      rez.serialize<size_t>(0);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardedColorMap* ShardedColorMap::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      if (num_colors == 0)
+        return NULL;
+      std::unordered_map<LegionColor,ShardID> color_shards;
+      for (unsigned idx = 0; idx < num_colors; idx++)
       {
         LegionColor color;
         derez.deserialize(color);
-        bool children_complete;
-        derez.deserialize(children_complete);
-        std::map<LegionColor,ProjectionTree*>::const_iterator finder =
-          children.find(color);
-        if (finder == children.end())
+        derez.deserialize(color_shards[color]);
+      }
+      return new ShardedColorMap(std::move(color_shards));
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ProjectionSummary
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
+                           ProjectionNode *node, Operation *op, unsigned index,
+                           const RegionRequirement &req, LogicalState *state)
+      : owner(state), domain(proj_info.projection_space),
+        projection(proj_info.projection), sharding(proj_info.sharding_function),
+        sharding_domain(proj_info.sharding_space), 
+        arglen(req.projection_args_size), 
+        args((arglen > 0) ? malloc(arglen) : NULL), tree(node), exchange(NULL), 
+        // Special case here: if we can't prove its disjoint by the region tree
+        // but we know that all the regions are writing and the projection
+        // function is not invertible then the user is guaranteeing use that all
+        // the point in this projection function are disjoint from each other
+        disjoint((IS_WRITE(req) && !proj_info.projection->is_invertible) ||
+                  tree->is_disjoint()),
+        complete(proj_info.projection->is_complete(state->owner, op, index,
+                                                   proj_info.projection_space)),
+        permits_name_based_self_analysis(disjoint && tree->is_leaves_only()),
+        unique_shard_users(true)/* no shard in non-control-replicated context */
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proj_info.is_projecting());
+      assert(tree != NULL);
+#endif
+      if (domain != NULL)
+        domain->add_base_gc_ref(PROJECTION_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      tree->add_reference();
+      if (arglen > 0)
+        memcpy(args, req.projection_args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
+                           ProjectionNode *node, Operation *op, unsigned index,
+                           const RegionRequirement &req, LogicalState *state,
+                           bool dis, bool unique)
+      : owner(state), domain(proj_info.projection_space),
+        projection(proj_info.projection), sharding(proj_info.sharding_function),
+        sharding_domain(proj_info.sharding_space),
+        arglen(req.projection_args_size), 
+        args((arglen > 0) ? malloc(arglen) : NULL), tree(node), exchange(NULL),
+        // Special case here: if we can't prove its disjoint by the region tree
+        // but we know that all the regions are writing and the projection
+        // function is not invertible then the user is guaranteeing use that all
+        // the point in this projection function are disjoint from each other
+        disjoint(dis || (IS_WRITE(req) &&
+              !proj_info.projection->is_invertible)),
+        complete(proj_info.projection->is_complete(state->owner, op, index,
+                                                   proj_info.projection_space)),
+        permits_name_based_self_analysis(disjoint), unique_shard_users(unique)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proj_info.is_projecting());
+      assert(tree != NULL);
+#endif
+      if (domain != NULL)
+        domain->add_base_gc_ref(PROJECTION_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      tree->add_reference();
+      if (arglen > 0)
+        memcpy(args, req.projection_args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
+                           ProjectionNode *node, Operation *op, unsigned index,
+                           const RegionRequirement &req, LogicalState *state,
+                           ReplicateContext *context)
+      : owner(state), domain(proj_info.projection_space),
+        projection(proj_info.projection), sharding(proj_info.sharding_function),
+        sharding_domain(proj_info.sharding_space),
+        arglen(req.projection_args_size), 
+        args((arglen > 0) ? malloc(arglen) : NULL), tree(node),
+        exchange(new ProjectionTreeExchange(tree, context, COLLECTIVE_LOC_50,
+              disjoint, permits_name_based_self_analysis, unique_shard_users)),
+        // Special case here: if we can't prove its disjoint by the region tree
+        // but we know that all the regions are writing and the projection
+        // function is not invertible then the user is guaranteeing use that all
+        // the point in this projection function are disjoint from each other
+        disjoint((IS_WRITE(req) && !proj_info.projection->is_invertible) || 
+                  tree->is_disjoint()),
+        complete(proj_info.projection->is_complete(state->owner, op, index,
+                                                   proj_info.projection_space)),
+        permits_name_based_self_analysis(true), 
+        unique_shard_users(tree->is_unique_shards())
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proj_info.is_projecting());
+      assert(tree != NULL);
+#endif
+      exchange->perform_collective_async();
+      if (domain != NULL)
+        domain->add_base_gc_ref(PROJECTION_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      tree->add_reference();
+      if (arglen > 0)
+        memcpy(args, req.projection_args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::~ProjectionSummary(void)
+    //--------------------------------------------------------------------------
+    {
+      owner->remove_projection_summary(this);
+      if ((domain != NULL) && domain->remove_base_gc_ref(PROJECTION_REF))
+        delete domain;
+      if ((sharding_domain != NULL) && 
+          sharding_domain->remove_base_gc_ref(PROJECTION_REF))
+        delete sharding_domain;
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);  
+        delete exchange;
+      }
+      if (tree->remove_reference())
+        delete tree;
+      if (args != NULL)
+        free(args);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::matches(const ProjectionInfo &rhs,
+                                    const RegionRequirement &req) const
+    //--------------------------------------------------------------------------
+    {
+      if (domain != rhs.projection_space)
+        return false;
+      if (projection != rhs.projection)
+        return false;
+      if (sharding != rhs.sharding_function)
+        return false;
+      if (sharding_domain != rhs.sharding_space)
+        return false;
+      size_t proj_arglen;
+      const void *projection_args = req.get_projection_args(&proj_arglen);
+      if (arglen != proj_arglen)
+        return false;
+      if ((arglen > 0) && (memcmp(args, projection_args, arglen) != 0))
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::is_disjoint(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return disjoint;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::can_perform_name_based_self_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return permits_name_based_self_analysis;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::has_unique_shard_users(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return unique_shard_users;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionNode* ProjectionSummary::get_tree(void)
+    //--------------------------------------------------------------------------
+    {
+      if (exchange != NULL)
+      {
+        exchange->perform_collective_wait(true/*block*/);
+        delete exchange;
+        exchange = NULL;
+      }
+      return tree;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RegionRefinementTracker
+    /////////////////////////////////////////////////////////////
+
+    /*static*/ constexpr uint64_t RefinementTracker::MAX_INCOMPLETE_WRITES;
+
+    //--------------------------------------------------------------------------
+    RegionRefinementTracker::RegionRefinementTracker(RegionNode *node)
+      : region(node), refinement_state(UNREFINED_STATE), refined_child(NULL),
+        refined_projection(NULL), total_traversals(0), return_timeout(0)
+    //--------------------------------------------------------------------------
+    {
+      region->add_base_resource_ref(REFINEMENT_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRefinementTracker::~RegionRefinementTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((refined_child != NULL) && 
+          refined_child->remove_base_resource_ref(REFINEMENT_REF))
+        delete refined_child;
+      if ((refined_projection != NULL) && 
+            refined_projection->remove_reference())
+        delete refined_projection;
+      for (std::unordered_map<PartitionNode*,
+                std::pair<double,uint64_t> >::const_iterator it =
+            candidate_partitions.begin(); it != 
+            candidate_partitions.end(); it++)
+        if (it->first->remove_base_resource_ref(REFINEMENT_REF))
+          delete it->first;
+      for (std::unordered_map<ProjectionRegion*,
+                std::pair<double,uint64_t> >::const_iterator it =
+            candidate_projections.begin(); it != 
+            candidate_projections.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      if (region->remove_base_resource_ref(REFINEMENT_REF))
+        delete region;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker* RegionRefinementTracker::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      RegionRefinementTracker *tracker = new RegionRefinementTracker(region);
+      tracker->refinement_state = refinement_state;
+      if (refined_child != NULL)
+      {
+        tracker->refined_child = refined_child;
+        refined_child->add_base_resource_ref(REFINEMENT_REF);
+      }
+      if (refined_projection != NULL)
+      {
+        tracker->refined_projection = refined_projection;
+        refined_projection->add_reference();
+      }
+      for (std::unordered_map<PartitionNode*,
+                std::pair<double,uint64_t> >::const_iterator it =
+            candidate_partitions.begin(); it != 
+            candidate_partitions.end(); it++)
+      {
+        it->first->add_base_resource_ref(REFINEMENT_REF);
+        tracker->candidate_partitions.insert(*it);
+      }
+      for (std::unordered_map<ProjectionRegion*,
+                std::pair<double,uint64_t> >::const_iterator it =
+            candidate_projections.begin(); it != 
+            candidate_projections.end(); it++)
+      {
+        it->first->add_reference();
+        tracker->candidate_projections.insert(*it);
+      }
+      tracker->total_traversals = total_traversals;
+      tracker->return_timeout = return_timeout;
+      return tracker;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::initialize_already_refined(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refined_child == NULL);
+      assert(refinement_state == UNREFINED_STATE);
+#endif
+      refinement_state = NO_REFINEMENT_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::update_child(RegionTreeNode *node,
+                               const RegionUsage &usage, bool &allow_refinement)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!allow_refinement);
+      assert(!node->is_region());
+#endif
+      PartitionNode *child = node->as_partition_node();
+      switch (refinement_state)
+      {
+        case UNREFINED_STATE:
+          {
+#ifdef DEBUG_LEGION
+            assert(refined_child == NULL);
+            assert(refined_projection == NULL);
+#endif
+            // If we don't have any refinements, we'll always allow them
+            if (child->row_source->is_complete())
+              refinement_state = IS_WRITE(usage) ? 
+                COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
+            else
+              refinement_state = IS_WRITE(usage) ?
+                INCOMPLETE_WRITE_REFINED_STATE : 
+                INCOMPLETE_NONWRITE_REFINED_STATE;
+            child->add_base_resource_ref(REFINEMENT_REF);
+            refined_child = child;
+            break;
+          }
+        case COMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            // Don't bother refining for other kinds of partitions 
+            break;
+          }
+        case INCOMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            if (child->row_source->is_complete())
+            {
+              // Swith over to non-write complete
+              // We can delete this tracker and make a new one to
+              // get any kind of field coalescing happening
+              return true;
+            }
+            break;
+          }
+        case COMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage) && child->row_source->is_complete())
+            {
+              // Comparing complete writes against each other
+              // Step the clock for a new traversal
+              total_traversals++;
+              // Check to see if we've observed this refinement before
+              std::unordered_map<PartitionNode*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_partitions.find(child);
+              if (finder != candidate_partitions.end())
+              {
+                // Update the score using exponentially weighted moving average
+                finder->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+                    (total_traversals - finder->second.second)) *
+                      finder->second.first + 1.0;
+                // Since CHANGE_REFINEMENT_RETURN_COUNT is a power of 2 the 
+                // compiler should be able to optimize integer division to a 
+                // basic bit shift
+                const uint64_t previous_epoch = 
+                  finder->second.second / CHANGE_REFINEMENT_RETURN_COUNT;
+                const uint64_t current_epoch = 
+                  total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+                finder->second.second = total_traversals;
+                // Reset the timeout since we saw a return
+                return_timeout = 0;
+                // If the last time we saw this child was in a previous epoch 
+                // then we can check to see if this is now the dominant child
+                if ((previous_epoch != current_epoch) &&
+                    is_dominant_candidate(finder->second.first,
+                                          (child == refined_child)))
+                {
+                  // If we're current refinement we don't switch but just end
+                  // invalidating all the other candidates so they can start again
+                  if (child == refined_child)
+                    invalidate_unused_candidates();
+                  else
+                    return true;
+                }
+              }
+              else if (child == refined_child)
+              {
+                // This counts as a return too since we're refined this way
+                candidate_partitions[child] = 
+                  std::pair<double,uint64_t>(1.0, total_traversals);
+                child->add_base_resource_ref(REFINEMENT_REF);
+                // Reset the timeout since we saw a return
+                return_timeout = 0;
+                // No need to switch, we're already the refinement
+              }
+              else
+              {
+                if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+                {
+                  invalidate_unused_candidates();
+                  return_timeout = 0;
+                }
+                child->add_base_resource_ref(REFINEMENT_REF);
+                candidate_partitions[child] = 
+                  std::pair<double,uint64_t>(0.0, total_traversals);
+              }
+            }
+            break;
+          }
+        case INCOMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              if (child->row_source->is_complete())
+              {
+                // Swith over to write complete
+                // We can delete this tracker and make a new one to
+                // get any kind of field coalescing happening
+                return true;
+              }
+              else
+              {
+                // Always allow refinements down writing incomplete children
+                allow_refinement = true;
+                // Don't both deleting this, we can stay in this mode as long
+                // as there are more incomplete writes
+                return false;
+              }
+            }
+            break;
+          }
+        case NO_REFINEMENT_STATE:
+          // Don't allow anything to happen here
+          break;
+        default:
+          assert(false); // should never hit this
+      }
+      // Allow alternative refinements of our current child
+      allow_refinement = (child == refined_child);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::update_projection(ProjectionSummary *summary,
+                               const RegionUsage &usage, bool &allow_refinement)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!allow_refinement);
+#endif
+      // If this is a projection with the identity projection on a region
+      // then we don't want to consider this like a projection and instead
+      // want to treat it like we're using this region directly
+      if (summary->projection->projection_id == 0)
+        return update_arrival(usage);
+      switch (refinement_state)
+      {
+        case UNREFINED_STATE:
+          {
+#ifdef DEBUG_LEGION
+            assert(refined_child == NULL);
+            assert(refined_projection == NULL);
+#endif
+            // If we don't have any refinements, we'll always allow them
+            allow_refinement = true;
+            if (summary->is_complete())
+              refinement_state = IS_WRITE(usage) ? 
+                COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
+            else
+              refinement_state = IS_WRITE(usage) ?
+                INCOMPLETE_WRITE_REFINED_STATE : 
+                INCOMPLETE_NONWRITE_REFINED_STATE;
+            refined_projection = summary->get_tree()->as_region_projection();
+            refined_projection->add_reference();
+            break;
+          }
+        case COMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            // Don't bother refining for other kinds of partitions 
+            break;
+          }
+        case INCOMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            if (summary->is_complete())
+            {
+              // Swith over to non-write complete
+              // We can delete this tracker and make a new one to
+              // get any kind of field coalescing happening
+              return true;
+            }
+            break;
+          }
+        case COMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage) && summary->is_complete())
+            {
+              ProjectionRegion *projection = 
+                summary->get_tree()->as_region_projection();
+              // Step the clock for a new traversal
+              total_traversals++;
+              // Check to see if we observed this refinement before
+              std::unordered_map<ProjectionRegion*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_projections.find(projection);
+              if (finder != candidate_projections.end())
+              {
+                // Update the score using exponentially weighted moving average
+                finder->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+                    (total_traversals - finder->second.second)) *
+                  finder->second.first + 1.0;
+                const uint64_t previous_epoch = 
+                  finder->second.second / CHANGE_REFINEMENT_RETURN_COUNT;
+                const uint64_t current_epoch = 
+                  total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+                finder->second.second = total_traversals;
+                // Reset the timeout since we saw a return
+                return_timeout = 0;
+                // If the last time we saw this projection was in a previous epoch 
+                // then we can check to see if this is now the dominant child
+                if ((previous_epoch != current_epoch) &&
+                    is_dominant_candidate(finder->second.first, 
+                                          (projection == refined_projection)))
+                {
+                  // If we're current refinement we don't switch but just end
+                  // invalidating all the other candidates so they can start again
+                  if (projection == refined_projection)
+                    invalidate_unused_candidates();
+                  else
+                    return true;
+                }
+              }
+              else if (projection == refined_projection)
+              {
+                // This counts as a return too since we're refined this way
+                candidate_projections[projection] =
+                  std::pair<double,uint64_t>(1.0, total_traversals);
+                projection->add_reference();
+                // Reset the timeout since we saw a return
+                return_timeout = 0;
+                // No need to switch, we're already using the refinement
+              }
+              else
+              {
+                if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+                {
+                  invalidate_unused_candidates();
+                  return_timeout = 0;
+                }
+                candidate_projections[projection] = 
+                  std::pair<double,uint64_t>(0.0, total_traversals);
+                projection->add_reference();
+              }
+            }
+            break;
+          }
+        case INCOMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              if (summary->is_complete())
+              {
+                // If this is a complete write then we're going to switch to it
+                return true;
+              }
+              // Otherwise we're only going to do a refinement for this 
+              // projection if it is the "first" time we've seen it. In 
+              // practice it's unreasonable to keep a memory of all prior
+              // disjoint and complete partitions, so we track a set of 
+              // the most recent MAX_INCOMPLETE_WRITES
+              ProjectionRegion *projection = 
+                summary->get_tree()->as_region_projection();
+              std::unordered_map<ProjectionRegion*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_projections.find(projection);
+              if (finder == candidate_projections.end())
+              {
+                // Didn't find it so decrement all the prior entries TTLs 
+                for (std::unordered_map<ProjectionRegion*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); /*nothing*/)
+                {
+                  if (--it->second.second == 0)
+                  {
+                    std::unordered_map<ProjectionRegion*,
+                      std::pair<double,uint64_t> >::iterator delete_it = it++;
+                    candidate_projections.erase(delete_it);
+                  }
+                  else
+                    it++;
+                }
+                projection->add_reference();
+                candidate_projections.emplace(std::make_pair(projection,
+                  std::pair<double,uint64_t>(0.0, MAX_INCOMPLETE_WRITES)));
+                allow_refinement = true;
+              }
+              else
+              {
+                // We already had it, so decrement all TTLs of everything that
+                // came before it and then add it back with a new TTL
+                for (std::unordered_map<ProjectionRegion*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); it++)
+                  if (finder->second.second < it->second.second)
+                    it->second.second--;
+                finder->second.second = MAX_INCOMPLETE_WRITES;
+              }
+            }
+            break;
+          }
+        case NO_REFINEMENT_STATE:
+          // Don't allow anything to happen here
+          break;
+        default:
+          assert(false); // should never hit this
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::update_arrival(const RegionUsage &usage)
+    //--------------------------------------------------------------------------
+    {
+      // We don't change the state because of an arrival right now
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::invalidate_refinement(ContextID ctx,
+                                             const FieldMask &invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+      if (refined_child != NULL)
+        refined_child->invalidate_logical_refinement(ctx, invalidation_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::is_dominant_candidate(double score, 
+                                                        bool is_current)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((refined_child != NULL) || (refined_projection != NULL));
+#endif
+      // Has to have the most returns
+      for (std::unordered_map<PartitionNode*,
+                              std::pair<double,uint64_t> >::iterator it =
+            candidate_partitions.begin(); it !=
+            candidate_partitions.end(); it++)
+      {
+        // Skip ourselves
+        if (it->second.second == total_traversals)
+          continue;
+        // Recompute the score before comparing
+        it->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - it->second.second)) * it->second.first;
+        it->second.second = total_traversals;
+        if (score < it->second.first)
+          return false;
+      }
+      for (std::unordered_map<ProjectionRegion*,
+                              std::pair<double,uint64_t> >::iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+      {
+        // Skip ourselves
+        if (it->second.second == total_traversals)
+          continue;
+        // Recompute the score before comparing
+        it->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - it->second.second)) * it->second.first;
+        it->second.second = total_traversals;
+        if (score < it->second.first)
+          return false;
+      }
+      // If we're the current refinement then just being the largest is enough
+      // to indicate that we're the dominant candidate
+      if (!is_current)
+      {
+        // If we're not the current refinement, then we want to make sure its
+        // obvious that we should switch and not just ping-pong so we need to
+        // have a score that is at least sqrt(total_candidates) more than the
+        // current refinement's score
+        if (refined_child != NULL)
         {
-          ProjectionTree *child = new ProjectionTree(children_complete);
-          child->deserialize(derez);
-          children[color] = child;
+          std::unordered_map<PartitionNode*,
+            std::pair<double,uint64_t> >::const_iterator finder =
+              candidate_partitions.find(refined_child);
+          // Current refinement is never observed
+          if (finder == candidate_partitions.end())
+            return true;
+          double total_candidates =
+            candidate_partitions.size() + candidate_projections.size();
+          double hysteresis = std::sqrt(total_candidates);
+          return ((finder->second.first * hysteresis) < score);
         }
         else
-          finder->second->deserialize(derez);
+        {
+#ifdef DEBUG_LEGION
+          assert(refined_projection != NULL);
+#endif
+          std::unordered_map<ProjectionRegion*,
+            std::pair<double,uint64_t> >::const_iterator
+              finder = candidate_projections.find(refined_projection);
+          // Current refinement is never observed
+          if (finder == candidate_projections.end())
+            return true;
+          double total_candidates =
+            candidate_partitions.size() + candidate_projections.size();
+          double hysteresis = std::sqrt(total_candidates);
+          return ((finder->second.first * hysteresis) < score);
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::invalidate_unused_candidates(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove any candidates that have gone too long without being observed
+      if (!candidate_partitions.empty())
+      {
+        for (std::unordered_map<PartitionNode*,
+                            std::pair<double,uint64_t> >::iterator it =
+              candidate_partitions.begin(); it !=
+              candidate_partitions.end(); /*nothing*/)
+        {
+          uint64_t last_observation = total_traversals - it->second.second;
+          if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          {
+            if (it->first->remove_base_resource_ref(REFINEMENT_REF))
+              delete it->first;
+            std::unordered_map<PartitionNode*,
+              std::pair<double,uint64_t> >::iterator to_delete = it++;
+            candidate_partitions.erase(to_delete);
+          }
+          else
+            it++;
+        }
+      }
+      if (!candidate_projections.empty())
+      {
+        for (std::unordered_map<ProjectionRegion*,
+                            std::pair<double,uint64_t> >::iterator it =
+              candidate_projections.begin(); it !=
+              candidate_projections.end(); /*nothing*/)
+        {
+          uint64_t last_observation = total_traversals - it->second.second;
+          if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          {
+            if (it->first->remove_reference())
+              delete it->first;
+            std::unordered_map<ProjectionRegion*,
+              std::pair<double,uint64_t> >::iterator to_delete = it++;
+            candidate_projections.erase(to_delete);
+          }
+          else
+            it++;
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PartitionRefinementTracker
+    ///////////////////////////////////////////////////////////// 
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementTracker::PartitionRefinementTracker(PartitionNode *node)
+      : partition(node), refined_projection(NULL),
+        refinement_state(UNREFINED_STATE), children_score(-1.0),
+        children_last(0), total_traversals(0), return_timeout(0)
+    //--------------------------------------------------------------------------
+    {
+      partition->add_base_resource_ref(REFINEMENT_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementTracker::~PartitionRefinementTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((refined_projection != NULL) && 
+          refined_projection->remove_reference())
+        delete refined_projection;
+      for (std::vector<RegionNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        if ((*it)->remove_base_resource_ref(REFINEMENT_REF))
+          delete (*it);
+      for (std::unordered_map<ProjectionPartition*,
+                std::pair<double,uint64_t> >::const_iterator it =
+            candidate_projections.begin(); it != 
+            candidate_projections.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      if (partition->remove_base_resource_ref(REFINEMENT_REF))
+        delete partition;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker* PartitionRefinementTracker::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      PartitionRefinementTracker *tracker = 
+        new PartitionRefinementTracker(partition);
+      if (refined_projection != NULL)
+      {
+        tracker->refined_projection = refined_projection;
+        refined_projection->add_reference();
+      }
+      tracker->refinement_state = refinement_state; 
+      if (!children.empty())
+      {
+        tracker->children = children;
+        for (std::vector<RegionNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+          (*it)->add_base_resource_ref(REFINEMENT_REF);
+      }
+      for (std::unordered_map<ProjectionPartition*,
+                std::pair<double,uint64_t> >::const_iterator it =
+            candidate_projections.begin(); it != 
+            candidate_projections.end(); it++)
+      {
+        it->first->add_reference();
+        tracker->candidate_projections.insert(*it);
+      }
+      tracker->children_score = children_score;
+      tracker->children_last = children_last;
+      tracker->total_traversals = total_traversals;
+      tracker->return_timeout = return_timeout;
+      return tracker;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::initialize_already_refined(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // this should never be called
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::update_child(RegionTreeNode *node,
+                               const RegionUsage &usage, bool &allow_refinement)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+      assert(!allow_refinement);
+#endif
+      RegionNode *child = node->as_region_node();
+      switch (refinement_state)
+      {
+        case UNREFINED_STATE:
+          {
+#ifdef DEBUG_LEGION
+            assert(children.empty());
+            assert(refined_projection == NULL);
+#endif
+            allow_refinement = true;
+            child->add_base_resource_ref(REFINEMENT_REF);
+            children.push_back(child);
+            if (((uint64_t)partition->row_source->total_children) <= 
+                CHANGE_REFINEMENT_PARTITION_FRACTION)
+              refinement_state = IS_WRITE(usage) ?
+                COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
+            else
+              refinement_state = IS_WRITE(usage) ?
+                INCOMPLETE_WRITE_REFINED_STATE :
+                INCOMPLETE_NONWRITE_REFINED_STATE;
+            break;
+          }
+        case COMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            // Only track non-write children if we're complete because of
+            // children and not because of a complete projection refinement
+            if (refined_projection == NULL)
+            {
+              allow_refinement = true;
+              if (!std::binary_search(children.begin(), children.end(), child))
+              {
+                child->add_base_resource_ref(REFINEMENT_REF);
+                children.push_back(child);
+                std::sort(children.begin(), children.end());
+              }
+            }
+            break;
+          }
+        case INCOMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            allow_refinement = true;
+            if (!std::binary_search(children.begin(), children.end(), child))
+            {
+              child->add_base_resource_ref(REFINEMENT_REF);
+              children.push_back(child);
+              std::sort(children.begin(), children.end());
+              if (((uint64_t)partition->row_source->total_children) <= 
+                  (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
+              {
+                refinement_state = COMPLETE_NONWRITE_REFINED_STATE;
+                // Remove any refined projections that we've done
+                if (refined_projection != NULL)
+                {
+                  if (refined_projection->remove_reference())
+                    delete refined_projection;
+                  refined_projection = NULL;
+                }
+              }
+            }
+            break;
+          }
+        case COMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              allow_refinement = true;
+              // Increment the count for total traversals
+              children_last = ++total_traversals;
+              if (!std::binary_search(children.begin(), children.end(), child))
+              {
+                child->add_base_resource_ref(REFINEMENT_REF);
+                children.push_back(child);
+                std::sort(children.begin(), children.end());
+                // See if we dominate the projection at this point
+                if ((refined_projection != NULL) && 
+                    (((uint64_t)partition->row_source->total_children) <=
+                     (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION)))
+                {
+                  if (refined_projection->remove_reference())
+                    delete refined_projection;
+                  refined_projection = NULL;
+                }
+              }
+            }
+            break;
+          }
+        case INCOMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              allow_refinement = true;
+              if (!std::binary_search(children.begin(), children.end(), child))
+              {
+                child->add_base_resource_ref(REFINEMENT_REF);
+                children.push_back(child);
+                std::sort(children.begin(), children.end());
+                if (((uint64_t)partition->row_source->total_children) <=
+                    (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
+                {
+                  refinement_state = COMPLETE_WRITE_REFINED_STATE;
+                  // Remove any refined projections that we've done
+                  if (refined_projection != NULL)
+                  {
+                    if (refined_projection->remove_reference())
+                      delete refined_projection;
+                    refined_projection = NULL;
+                  }
+                }
+              }
+            }
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::update_projection(
+                                                    ProjectionSummary *summary, 
+                                                    const RegionUsage &usage, 
+                                                    bool &allow_refinement)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!allow_refinement);
+#endif
+      switch (refinement_state)
+      {
+        case UNREFINED_STATE:
+          {
+#ifdef DEBUG_LEGION
+            assert(children.empty());
+            assert(refined_projection == NULL);
+#endif
+            allow_refinement = true;
+            refined_projection = summary->get_tree()->as_partition_projection();
+            refined_projection->add_reference();
+            if (summary->is_complete())
+              refinement_state = IS_WRITE(usage) ?
+                COMPLETE_WRITE_REFINED_STATE : COMPLETE_NONWRITE_REFINED_STATE;
+            else
+              refinement_state = IS_WRITE(usage) ?
+                INCOMPLETE_WRITE_REFINED_STATE :
+                INCOMPLETE_NONWRITE_REFINED_STATE;
+            break;
+          }
+        case COMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            // If we already have a non-write complete refinement
+            // then there is nothing more for us to do here
+            break;
+          }
+        case INCOMPLETE_NONWRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Switch over to write refinements as soon as we see one
+              // We can delete this tracker and make a new one to get
+              // any kind of field coalescing happening
+              return true;
+            }
+            // Check to see if we're a complete projection
+            if (summary->is_complete())
+            {
+              // We're a new complete non-write projection so 
+              // swtich to that
+              return true;
+            }
+            // Otherwise we don't bother switching
+            break;
+          }
+        case COMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage) && summary->is_complete())
+            {
+              // Testing against other writing-complete projections
+              // and/or the group of direct children
+              // Step the clock for a new traversal
+              total_traversals++;
+              ProjectionPartition *projection =
+                summary->get_tree()->as_partition_projection();
+              std::unordered_map<ProjectionPartition*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_projections.find(projection);
+              if (finder != candidate_projections.end())
+              {
+                // Update the score using exponentially weighted moving average
+                finder->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+                    (total_traversals - finder->second.second)) *
+                  finder->second.first + 1.0;
+                // Since CHANGE_REFINEMENT_RETURN_COUNT is a power of 2 the compiler
+                // should be able to optimize integer division to a basic bit shift
+                const uint64_t previous_epoch = 
+                  finder->second.second / CHANGE_REFINEMENT_RETURN_COUNT;
+                const uint64_t current_epoch = 
+                  total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+                finder->second.second = total_traversals;
+                // Reset the timeout since we saw a return
+                return_timeout = 0;
+                // If the last time we saw this projection was in a previous epoch 
+                // then we can check to see if this is now the dominant child
+                if ((previous_epoch != current_epoch) &&
+                    is_dominant_candidate(finder->second.first, 
+                                          (projection == refined_projection)))
+                {
+                  // If we're current refinement we don't switch but just end
+                  // invalidating all the other candidates so they can start again
+                  if (projection == refined_projection)
+                    invalidate_unused_candidates();
+                  else
+                    return true;
+                }
+              }
+              else if (projection == refined_projection)
+              {
+                // This counts as a return too since we're refined this way
+                candidate_projections[projection] = 
+                  std::pair<double,uint64_t>(1.0, total_traversals);
+                projection->add_reference();
+                // Reset the timeout since we saw a return
+                return_timeout = 0;
+                // No need to switch, we're already using the refinement
+              }
+              else
+              {
+                if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+                {
+                  invalidate_unused_candidates();
+                  return_timeout = 0;
+                }
+                candidate_projections[projection] = 
+                  std::pair<double,uint64_t>(0.0, total_traversals);
+                projection->add_reference();
+              }
+            }
+            break;
+          }
+        case INCOMPLETE_WRITE_REFINED_STATE:
+          {
+            if (IS_WRITE(usage))
+            {
+              // Check to see if we're a complete projection
+              if (summary->is_complete())
+              {
+                // We're a new complete writing projection so 
+                // swtich to that
+                return true; 
+              }
+              // Otherwise we're only going to do a refinement for this 
+              // projection if it is the "first" time we've seen it. In 
+              // practice it's unreasonable to keep a memory of all prior
+              // disjoint and complete partitions, so we track a set of 
+              // the most recent MAX_INCOMPLETE_WRITES
+              ProjectionPartition *projection = 
+                summary->get_tree()->as_partition_projection();
+              std::unordered_map<ProjectionPartition*,
+                std::pair<double,uint64_t> >::iterator finder =
+                  candidate_projections.find(projection);
+              if (finder == candidate_projections.end())
+              {
+                // Didn't find it so decrement all the prior entries TTLs 
+                for (std::unordered_map<ProjectionPartition*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); /*nothing*/)
+                {
+                  if (--it->second.second == 0)
+                  {
+                    std::unordered_map<ProjectionPartition*,
+                      std::pair<double,uint64_t> >::iterator delete_it = it++;
+                    candidate_projections.erase(delete_it);
+                  }
+                  else
+                    it++;
+                }
+                projection->add_reference();
+                candidate_projections.emplace(std::make_pair(projection,
+                  std::pair<double,uint64_t>(0.0, MAX_INCOMPLETE_WRITES)));
+                allow_refinement = true;
+              }
+              else
+              {
+                // We already had it, so decrement all TTLs of everything that
+                // came before it and then add it back with a new TTL
+                for (std::unordered_map<ProjectionPartition*,
+                      std::pair<double,uint64_t> >::iterator it =
+                      candidate_projections.begin(); it != 
+                      candidate_projections.end(); it++)
+                  if (finder->second.second < it->second.second)
+                    it->second.second--;
+                finder->second.second = MAX_INCOMPLETE_WRITES;
+              }
+            }
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::update_arrival(const RegionUsage &usage)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // should never arrive on a partition without a projection 
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::invalidate_refinement(ContextID ctx,
+                                             const FieldMask &invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<RegionNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        (*it)->invalidate_logical_refinement(ctx, invalidation_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::is_dominant_candidate(double score,
+                                                          bool is_current)
+    //--------------------------------------------------------------------------
+    {
+      if (((uint64_t)partition->row_source->total_children) <=
+          (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
+      {
+        // Recompute the children score and compare it
+        children_score = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - children_last)) * children_score;
+        children_last = total_traversals;
+        if (score < children_score)
+          return false;
+      }
+      for (std::unordered_map<ProjectionPartition*,
+                              std::pair<double,uint64_t> >::iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++) 
+      {
+        // Skip ourselves
+        if (it->second.second == total_traversals)
+          continue;
+        // Recompute the score before comparing
+        it->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - it->second.second)) * it->second.first;
+        it->second.second = total_traversals;
+        if (score < it->second.first)
+          return false;
+      }
+      if (!is_current)
+      {
+        if (refined_projection != NULL)
+        {
+          // If we're not the current refinement, then we want to make sure its
+          // obvious that we should switch and not just ping-pong so we need to
+          // have a score that is at least sqrt(total_candidates) more than the
+          // current refinement's score
+          std::unordered_map<ProjectionPartition*,
+              std::pair<double,uint64_t> >::const_iterator 
+                finder = candidate_projections.find(refined_projection);
+          // Current refinement is never observed
+          if (finder == candidate_projections.end())
+            return true;
+          double total_candidates =
+            (children_score >= 0.0) ? 1 : 0 + candidate_projections.size();
+          double hysteresis = std::sqrt(total_candidates);
+          return ((finder->second.first * hysteresis) < score);
+        }
+        else
+        {
+          // The children are refined so compute the total candidates
+          if (children_score < 0.0)
+            return true;
+          double total_candidates = candidate_projections.size() + 1;
+          double hysteresis = std::sqrt(total_candidates);
+          return ((children_score * hysteresis) < score);
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::invalidate_unused_candidates(void)
+    //--------------------------------------------------------------------------
+    {
+      if (children_score >= 0.0)
+      {
+        uint64_t last_observation = total_traversals - children_last;
+        if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          children_score = -1.0;
+      }
+      if (!candidate_projections.empty())
+      {
+        for (std::unordered_map<ProjectionPartition*,
+                            std::pair<double,uint64_t> >::iterator it =
+              candidate_projections.begin(); it !=
+              candidate_projections.end(); /*nothing*/)
+        {
+          uint64_t last_observation = total_traversals - it->second.second;
+          if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          {
+            if (it->first->remove_reference())
+              delete it->first;
+            std::unordered_map<ProjectionPartition*,
+              std::pair<double,uint64_t> >::iterator to_delete = it++;
+            candidate_projections.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
     }
 
@@ -2433,34 +4588,18 @@ namespace Legion {
     ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
-    LogicalState::LogicalState(RegionTreeNode *node, ContextID ctx)
-      : owner(node), elide_close_results(NULL)
+    LogicalState::LogicalState(RegionTreeNode *node, ContextID c)
+      : owner(node), total_timeout_check_iterations(MIN_TIMEOUT_CHECK_SIZE),
+        remaining_timeout_check_iterations(total_timeout_check_iterations),
+        timeout_exchange(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalState::LogicalState(const LogicalState &rhs)
-      : owner(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     LogicalState::~LogicalState(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalState& LogicalState::operator=(const LogicalState&rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2471,77 +4610,107 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
-      assert(!reduction_fields);
-      assert(!disjoint_complete_tree);
-      assert(disjoint_complete_accesses.empty());
-      assert(disjoint_complete_child_counts.empty());
-      assert(disjoint_complete_projections.empty());
-      assert(elide_close_results == NULL);
+      assert(timeout_exchange == NULL);
+      assert(refinement_trackers.empty());
+      assert(projection_summary_cache.empty());
+      assert(interfering_shards.empty());
 #endif
     }
 
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void LogicalState::clear_logical_users(void)
+    void LogicalState::sanity_check(void) const
     //--------------------------------------------------------------------------
     {
+      // For every child and every field, it should only be open in one mode
+      FieldMaskSet<RegionTreeNode> previous_children;
+      for (std::list<FieldState>::const_iterator fit = 
+            field_states.begin(); fit != field_states.end(); fit++)
+      {
+        FieldMask actually_valid;
+        for (FieldState::OrderedFieldMaskChildren::const_iterator it =
+              fit->open_children.begin(); it != 
+              fit->open_children.end(); it++)
+        {
+          actually_valid |= it->second;
+          FieldMaskSet<RegionTreeNode>::iterator finder = 
+            previous_children.find(it->first);
+          if (finder != previous_children.end())
+          {
+            assert(!(finder->second & it->second));
+            finder.merge(it->second);
+          }
+          else
+            previous_children.insert(it->first, it->second);
+        }
+        // Actually valid should be greater than or equal
+        assert(!(actually_valid - fit->valid_fields()));
+      }
+      // Make sure that each refinement has a disjoint set of fields
+      if (!refinement_trackers.empty())
+      {
+        FieldMask disjoint_refinements;
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              refinement_trackers.begin(); it != 
+              refinement_trackers.end(); it++)
+        {
+          assert(disjoint_refinements * it->second);
+          disjoint_refinements |= it->second;
+        }
+      }
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void LogicalState::clear(void)
+    //--------------------------------------------------------------------------
+    {
+      field_states.clear();
       if (!curr_epoch_users.empty())
       {
-        for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::const_iterator it =
+        for (OrderedFieldMaskUsers::const_iterator it =
               curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
-        {
-          it->op->remove_mapping_reference(it->gen); 
-        }
+          if (it->first->remove_reference())
+            delete it->first;
         curr_epoch_users.clear();
       }
       if (!prev_epoch_users.empty())
       {
-        for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::const_iterator it =
+        for (OrderedFieldMaskUsers::const_iterator it =
               prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
-        {
-          it->op->remove_mapping_reference(it->gen); 
-        }
+          if (it->first->remove_reference())
+            delete it->first;
         prev_epoch_users.clear();
+      }
+      total_timeout_check_iterations = MIN_TIMEOUT_CHECK_SIZE;
+      remaining_timeout_check_iterations = total_timeout_check_iterations;
+      if (timeout_exchange != NULL)
+      {
+        timeout_exchange->perform_collective_wait();
+        delete timeout_exchange;
+        timeout_exchange = NULL;
+      }
+      if (!refinement_trackers.empty())
+      {
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              refinement_trackers.begin(); it !=
+              refinement_trackers.end(); it++)
+          delete it->first;
+        refinement_trackers.clear();
+      }
+      while (!projection_summary_cache.empty())
+      {
+        ProjectionSummary *summary = projection_summary_cache.back();
+        projection_summary_cache.pop_back();
+        if ((projection_summary_cache.size() < PROJECTION_CACHE_SIZE) &&
+            summary->remove_reference())
+          delete summary;
       }
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::reset(void)
-    //--------------------------------------------------------------------------
-    {
-      field_states.clear();
-      clear_logical_users(); 
-      reduction_fields.clear();
-      outstanding_reductions.clear();
-      disjoint_complete_tree.clear();
-      if (!disjoint_complete_children.empty())
-      {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              disjoint_complete_children.begin(); it !=
-              disjoint_complete_children.end(); it++)
-          if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete it->first;
-        disjoint_complete_children.clear();
-      }
-      disjoint_complete_accesses.clear(); 
-      disjoint_complete_child_counts.clear();
-      if (!disjoint_complete_projections.empty())
-      {
-        for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
-              disjoint_complete_projections.begin(); it !=
-              disjoint_complete_projections.end(); it++)
-          if (it->first->remove_reference())
-            delete it->first;
-        disjoint_complete_projections.clear();
-      }
-      if (elide_close_results != NULL)
-      {
-        delete elide_close_results;
-        elide_close_results = NULL;
-      }
-    } 
-
-    //--------------------------------------------------------------------------
-    void LogicalState::clear_deleted_state(const FieldMask &deleted_mask)
+    void LogicalState::clear_deleted_state(ContextID ctx,
+                                           const FieldMask &deleted_mask)
     //--------------------------------------------------------------------------
     {
       for (LegionList<FieldState>::iterator it = field_states.begin();
@@ -2552,481 +4721,615 @@ namespace Legion {
         else
           it++;
       }
-      reduction_fields -= deleted_mask;
-      if (!outstanding_reductions.empty())
+      if (!curr_epoch_users.empty() && 
+          !(deleted_mask * curr_epoch_users.get_valid_mask()))
       {
-        std::vector<ReductionOpID> to_delete;
-        for (LegionMap<ReductionOpID,FieldMask>::iterator it = 
-              outstanding_reductions.begin(); it != 
-              outstanding_reductions.end(); it++)
+        std::vector<LogicalUser*> to_delete;
+        for (OrderedFieldMaskUsers::iterator it =
+              curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
         {
-          it->second -= deleted_mask;
+          it.filter(deleted_mask);
           if (!it->second)
             to_delete.push_back(it->first);
         }
-        for (std::vector<ReductionOpID>::const_iterator it = 
+        for (std::vector<LogicalUser*>::const_iterator it =
               to_delete.begin(); it != to_delete.end(); it++)
         {
-          outstanding_reductions.erase(*it);
+          curr_epoch_users.erase(*it);
+          if ((*it)->remove_reference())
+            delete (*it);
         }
+        curr_epoch_users.tighten_valid_mask();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalState::merge(LogicalState &src, 
-                             std::set<RegionTreeNode*> &to_traverse)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionList<FieldState>::iterator fit = 
-            src.field_states.begin(); fit != src.field_states.end(); fit++)
+      if (!prev_epoch_users.empty() &&
+          !(deleted_mask * prev_epoch_users.get_valid_mask()))
       {
-        for (FieldMaskSet<RegionTreeNode>::iterator it = 
-              fit->open_children.begin(); it != fit->open_children.end(); it++)
-          to_traverse.insert(it->first);
-        // See if we can add it to any of the existing field states
-        bool merged = false;
-        for (LegionList<FieldState>::iterator it = 
-              field_states.begin(); it != field_states.end(); it++)
+        std::vector<LogicalUser*> to_delete;
+        for (OrderedFieldMaskUsers::iterator it =
+              prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
         {
-          if (!it->overlaps(*fit))
+          it.filter(deleted_mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<LogicalUser*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          prev_epoch_users.erase(*it);
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
+        prev_epoch_users.tighten_valid_mask();
+      }
+      if (!refinement_trackers.empty() &&
+          !(deleted_mask * refinement_trackers.get_valid_mask()))
+      {
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+              refinement_trackers.begin(); it != 
+              refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = deleted_mask & it->second;
+          if (!it->second)
             continue;
-          it->merge(*fit, owner);
-          merged = true;
-          break;
+          it->first->invalidate_refinement(ctx, overlap);
+          it.filter(overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
         }
-        if (!merged)
-          field_states.push_back(*fit);
-      }
-      src.field_states.clear();
-      curr_epoch_users.splice(curr_epoch_users.end(), src.curr_epoch_users);
-      prev_epoch_users.splice(prev_epoch_users.end(), src.prev_epoch_users);
-      if (!!src.reduction_fields)
-      {
-        reduction_fields |= src.reduction_fields;
-        src.reduction_fields.clear();
-      }
-      if (!src.outstanding_reductions.empty())
-      {
-        for (LegionMap<ReductionOpID,FieldMask>::const_iterator it =
-              src.outstanding_reductions.begin(); it != 
-              src.outstanding_reductions.end(); it++)
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
         {
-          LegionMap<ReductionOpID,FieldMask>::iterator finder =
-            outstanding_reductions.find(it->first);
-          if (finder == outstanding_reductions.end())
-            outstanding_reductions.insert(*it);
-          else
-            finder->second |= it->second;
+          refinement_trackers.erase(*it);
+          delete (*it);
         }
-        src.outstanding_reductions.clear();
+        refinement_trackers.tighten_valid_mask();
       }
-      if (!!src.disjoint_complete_tree)
-      {
-        disjoint_complete_tree |= src.disjoint_complete_tree;
-        src.disjoint_complete_tree.clear();
-      }
-      if (!src.disjoint_complete_children.empty())
-      {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              src.disjoint_complete_children.begin(); it !=
-              src.disjoint_complete_children.end(); it++)
-        {
-          to_traverse.insert(it->first);
-          // Remove duplicate references if they are already there
-          // Otherwise the reference flows back with the node
-          if (disjoint_complete_children.insert(it->first, it->second))
-            it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
-        }
-        src.disjoint_complete_children.clear();
-      }
-      if (!src.disjoint_complete_accesses.empty())
-      {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              src.disjoint_complete_accesses.begin(); it !=
-              src.disjoint_complete_accesses.end(); it++)
-          disjoint_complete_accesses.insert(it->first, it->second);
-      }
-      if (!src.disjoint_complete_child_counts.empty())
-      {
-        for (LegionMap<size_t,FieldMask>::const_iterator it =
-              src.disjoint_complete_child_counts.begin(); it !=
-              src.disjoint_complete_child_counts.end(); it++)
-        {
-          LegionMap<size_t,FieldMask>::iterator finder =
-            disjoint_complete_child_counts.find(it->first);
-          if (finder == disjoint_complete_child_counts.end())
-            disjoint_complete_child_counts.insert(*it);
-          else
-            finder->second |= it->second;
-        }
-      }
-      if (!src.disjoint_complete_projections.empty())
-      {
-        for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
-              src.disjoint_complete_projections.begin(); it !=
-              src.disjoint_complete_projections.end(); it++)
-          disjoint_complete_projections.insert(it->first, it->second);
-        src.disjoint_complete_projections.clear();
-      }
-#ifdef DEBUG_LEGION
-      src.check_init();
-#endif
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::swap(LogicalState &src,
-                            std::set<RegionTreeNode*> &to_traverse)
+    ProjectionSummary* LogicalState::find_or_create_projection_summary(
+                   Operation *op, unsigned index, const RegionRequirement &req,
+                   LogicalAnalysis &analysis, const ProjectionInfo &proj_info)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if the projection functor is functional
+      if (proj_info.projection->is_functional)
+      {
+        // Check to see if we can find this in the cache
+        unsigned index = 0;
+        ProjectionSummary *invalidated = NULL;
+        for (std::list<ProjectionSummary*>::iterator it =
+              projection_summary_cache.begin(); it !=
+              projection_summary_cache.end(); it++, index++)
+        {
+          if ((*it)->matches(proj_info, req))
+          {
+            ProjectionSummary *result = *it;
+            // Move it to the front of the list if it wasn't already there
+            if (it != projection_summary_cache.begin())
+            {
+              projection_summary_cache.splice(projection_summary_cache.begin(),
+                  projection_summary_cache, it);
+              // If this wasn't already in the cache range with a reference
+              // then we need to update the reference counts
+              if (PROJECTION_CACHE_SIZE <= index)
+              {
+                // Add a reference to the result
+                result->add_reference();
+#ifdef DEBUG_LEGION
+                assert(invalidated != NULL);
+#endif
+                if (invalidated->remove_reference())
+                  delete invalidated;
+              }
+            }
+            return result;
+          }
+          if (index == (PROJECTION_CACHE_SIZE - 1))
+          {
+            // If we make it here then this is the last entry in the
+            // cache currenty and we're either going to match on an
+            // entry outside the cache and move it into the cache
+            // or we're going to make a new entry so this summary
+            // is going to be invalidated either way, so save it
+            // so we can do the invalidation after we're done 
+            // traversing the list when we won't mess with the iterator
+            invalidated = (*it);
+          }
+        }
+        if ((invalidated != NULL) && invalidated->remove_reference())
+          delete invalidated;
+      }
+      ProjectionSummary *result =
+        analysis.context->construct_projection_summary(op, index, req,
+                                                       this, proj_info);
+      // If the projection functor is functional then we can save it for
+      // the future and evict the least recently used projection
+      if (proj_info.projection->is_functional)
+      {
+        result->add_reference();
+        projection_summary_cache.push_front(result);
+      }
+      return result;
+    } 
+
+    //--------------------------------------------------------------------------
+    void LogicalState::remove_projection_summary(ProjectionSummary *summary)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      check_init();
+      assert(summary->owner == this);
 #endif
-      field_states.swap(src.field_states);
-      curr_epoch_users.swap(src.curr_epoch_users);
-      prev_epoch_users.swap(src.prev_epoch_users);
-      if (!!src.reduction_fields)
+      if (summary->projection->is_functional &&
+          (PROJECTION_CACHE_SIZE <= projection_summary_cache.size()))
       {
-        reduction_fields = src.reduction_fields;
-        src.reduction_fields.clear();
-      }
-      outstanding_reductions.swap(src.outstanding_reductions);
-      if (!!src.disjoint_complete_tree)
-      {
-        disjoint_complete_tree = src.disjoint_complete_tree;
-        src.disjoint_complete_tree.clear();
-      }
-      disjoint_complete_accesses.swap(src.disjoint_complete_accesses);
-      disjoint_complete_child_counts.swap(src.disjoint_complete_child_counts);
-      disjoint_complete_children.swap(src.disjoint_complete_children);
-      disjoint_complete_projections.swap(src.disjoint_complete_projections);
-      for (LegionList<FieldState>::const_iterator fit = 
-            field_states.begin(); fit != field_states.end(); fit++)
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              fit->open_children.begin(); it != fit->open_children.end(); it++)
-          to_traverse.insert(it->first);
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            disjoint_complete_children.begin(); it != 
-            disjoint_complete_children.end(); it++)
-        to_traverse.insert(it->first);
-#ifdef DEBUG_LEGION
-      src.check_init();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalState::ElideCloseResult::ElideCloseResult(
-        const std::set<ProjectionSummary> &proj, bool res)
-      : projections(proj), result(res)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalState::ElideCloseResult::matches(
-                     const std::set<ProjectionSummary> &other_projections) const
-    //--------------------------------------------------------------------------
-    {
-      if (projections.size() != other_projections.size())
-        return false;
-      std::set<ProjectionSummary>::const_iterator it1 = projections.begin();
-      std::set<ProjectionSummary>::const_iterator it2 = 
-        other_projections.begin();
-      while (it1 != projections.end())
-      {
-        if (it1 != it2)
-          return false;
-        it1++; it2++;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalState::find_elide_close_result(const ProjectionInfo &info,
-             const std::set<ProjectionSummary> &projections, bool &result) const
-    //--------------------------------------------------------------------------
-    {
-      if (elide_close_results == NULL)
-        return false;
-      ProjectionSummary key(info);
-      std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
-        finder = elide_close_results->find(key);
-      if (finder == elide_close_results->end())
-        return false;
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        if (it->matches(projections))
+        // Only need to filter from things not in the cache so start
+        // from the back and only go up to the last element not in the cache
+        // Note: handle the off-by-one case where we're deleting the last
+        // thing in the cache because we're about to add a new summary
+        const unsigned stop = 
+          (projection_summary_cache.size() - PROJECTION_CACHE_SIZE) + 1;
+        std::list<ProjectionSummary*>::reverse_iterator finder =
+          projection_summary_cache.rbegin();
+        for (unsigned idx = 0; idx < stop; idx++)
         {
-          result = it->result;
-          return true;
+          if ((*finder) == summary)
+          {
+            // Reverse iterators are stupid
+            projection_summary_cache.erase(std::next(finder).base());
+            break;
+          }
+          finder++;
         }
       }
-      return false;
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,bool> >::iterator finder =
+          interfering_shards.find(summary);
+      if (finder != interfering_shards.end())
+      {
+        for (std::unordered_map<ProjectionSummary*,bool>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+          interfering_shards[it->first].erase(summary);
+        interfering_shards.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::record_elide_close_result(const ProjectionInfo &info,
-                    const std::set<ProjectionSummary> &projections, bool result)
+    bool LogicalState::has_interfering_shards(LogicalAnalysis &analysis,
+                                 ProjectionSummary *one, ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
-      ProjectionSummary key(info);
-      if (elide_close_results == NULL)
-        elide_close_results =
-          new std::map<ProjectionSummary,std::vector<ElideCloseResult> >();
-      std::vector<ElideCloseResult> &close_results = 
-        (*elide_close_results)[key];
-      // See if someone else saved the result in between to avoid duplicates
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            close_results.begin(); it != close_results.end(); it++)
-        if (it->matches(projections))
-          return;
-      close_results.push_back(ElideCloseResult(projections, result));
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Projection Summary 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(void)
-      : domain(NULL), projection(NULL), sharding(NULL), sharding_domain(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(IndexSpaceNode *is, 
-                                         ProjectionFunction *p, 
-                                         ShardingFunction *s,
-                                         IndexSpaceNode *sd)
-      : domain(is), projection(p), sharding(s), sharding_domain(sd)
-    //--------------------------------------------------------------------------
-    {
-      if (domain != NULL)
-        domain->add_base_valid_ref(FIELD_STATE_REF);
-      if (sharding_domain != NULL)
-        sharding_domain->add_base_valid_ref(FIELD_STATE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(const ProjectionInfo &info)
-      : domain(info.projection_space), projection(info.projection), 
-        sharding(info.sharding_function), sharding_domain(info.sharding_space)
-    //--------------------------------------------------------------------------
-    {
-      if (domain != NULL)
-        domain->add_base_valid_ref(FIELD_STATE_REF);
-      if (sharding_domain != NULL)
-        sharding_domain->add_base_valid_ref(FIELD_STATE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(ProjectionSummary &&rhs)
-      : domain(rhs.domain), projection(rhs.projection),
-        sharding(rhs.sharding), sharding_domain(rhs.sharding_domain)
-    //--------------------------------------------------------------------------
-    {
-      rhs.domain = NULL;
-      rhs.projection = NULL;
-      rhs.sharding = NULL;
-      rhs.sharding_domain = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(const ProjectionSummary &rhs)
-      : domain(rhs.domain), projection(rhs.projection),
-        sharding(rhs.sharding), sharding_domain(rhs.sharding_domain)
-    //--------------------------------------------------------------------------
-    {
-      if (domain != NULL)
-        domain->add_base_valid_ref(FIELD_STATE_REF);
-      if (sharding_domain != NULL)
-        sharding_domain->add_base_valid_ref(FIELD_STATE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary::~ProjectionSummary(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((domain != NULL) && domain->remove_base_valid_ref(FIELD_STATE_REF))
-        delete domain;
-      if ((sharding_domain != NULL) && 
-            sharding_domain->remove_base_valid_ref(FIELD_STATE_REF))
-        delete sharding_domain;
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionSummary& ProjectionSummary::operator=(const ProjectionSummary &ps)
-    //--------------------------------------------------------------------------
-    {
-      if ((domain != NULL) && domain->remove_base_valid_ref(FIELD_STATE_REF))
-        delete domain;
-      if ((sharding_domain != NULL) && 
-            sharding_domain->remove_base_valid_ref(FIELD_STATE_REF))
-        delete sharding_domain;
-      domain = ps.domain;
-      projection = ps.projection;
-      sharding = ps.sharding;
-      sharding_domain = ps.sharding_domain;
-      if (domain != NULL)
-        domain->add_base_valid_ref(FIELD_STATE_REF);
-      if (sharding_domain != NULL)
-        sharding_domain->add_base_valid_ref(FIELD_STATE_REF);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionSummary::operator<(const ProjectionSummary &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (domain->handle < rhs.domain->handle)
-        return true;
-      else if (domain->handle > rhs.domain->handle)
-        return false;
-      else if (projection->projection_id < rhs.projection->projection_id)
-        return true;
-      else if (projection->projection_id > rhs.projection->projection_id)
-        return false;
-      else if ((sharding == NULL) && (rhs.sharding == NULL))
-        return false;
-      else if ((sharding == NULL) && (rhs.sharding != NULL))
-        return true;
-      else if (rhs.sharding == NULL)
-        return false;
-      else if (sharding->sharding_id < rhs.sharding->sharding_id)
-        return true;
-      else if (sharding->sharding_id > rhs.sharding->sharding_id)
-        return false;
-      else
-        return sharding_domain->handle < rhs.sharding_domain->handle;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionSummary::operator==(const ProjectionSummary &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (domain->handle != rhs.domain->handle)
-        return false;
-      else if (projection->projection_id != rhs.projection->projection_id)
-        return false;
-      else if ((sharding == NULL) && (rhs.sharding == NULL))
-        return true;
-      else if ((sharding == NULL) && (rhs.sharding != NULL))
-        return false;
-      else if (rhs.sharding == NULL)
-        return false;
-      if (sharding->sharding_id != rhs.sharding->sharding_id)
-        return false;
-      if (sharding_domain->handle != rhs.sharding_domain->handle)
-        return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionSummary::operator!=(const ProjectionSummary &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      return !(*this == rhs);
-    }
-
-    //--------------------------------------------------------------------------
-    void ProjectionSummary::pack_summary(Serializer &rez) const 
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(domain->handle);
-      rez.serialize(projection->projection_id);
-      domain->pack_valid_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ProjectionSummary ProjectionSummary::unpack_summary(
-                                 Deserializer &derez, RegionTreeForest *context)
-    //--------------------------------------------------------------------------
-    {
-      ProjectionSummary result;
-      IndexSpace handle;
-      derez.deserialize(handle);
-      result.domain = context->get_node(handle);
-      result.domain->add_base_valid_ref(FIELD_STATE_REF);
-      result.domain->unpack_valid_ref();
-      ProjectionID pid;
-      derez.deserialize(pid);
-      result.projection = context->runtime->find_projection_function(pid);
+#ifdef DEBUG_LEGION
+      assert(one->owner == this);
+      assert(two->owner == this);
+#endif
+      if (one == two)
+        // We can elide the close operation here if we can prove that
+        // all the regions used a disjoint from each other and they all
+        // have exactly one kind of shard user
+        return (!one->can_perform_name_based_self_analysis() ||
+                !one->has_unique_shard_users());
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,bool> >::const_iterator
+          one_finder = interfering_shards.find(one);
+      if (one_finder != interfering_shards.end())
+      {
+        std::unordered_map<ProjectionSummary*,bool>::const_iterator
+          two_finder = one_finder->second.find(two);
+        if (two_finder != one_finder->second.end())
+          return two_finder->second;
+      }
+      // Do the test and save the results for later
+      const bool result = analysis.context->has_interfering_shards(one,two);
+      interfering_shards[one][two] = result;
+      interfering_shards[two][one] = result;
       return result;
     }
 
-    /////////////////////////////////////////////////////////////
-    // RefProjectionSummary
-    /////////////////////////////////////////////////////////////
-
     //--------------------------------------------------------------------------
-    RefProjectionSummary::RefProjectionSummary(const ProjectionInfo &rhs)
-      : ProjectionSummary(rhs), Collectable()
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RefProjectionSummary::RefProjectionSummary(ProjectionSummary &&rhs)
-      : ProjectionSummary(rhs), Collectable()
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RefProjectionSummary::RefProjectionSummary(const RefProjectionSummary &rhs)
-      : ProjectionSummary(rhs), Collectable()
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RefProjectionSummary::~RefProjectionSummary(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RefProjectionSummary& RefProjectionSummary::operator=(
-                                                const RefProjectionSummary &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void RefProjectionSummary::project_refinement(RegionTreeNode *node,
-                                        std::vector<RegionNode*> &regions) const
+    void LogicalState::initialize_refined_fields(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(sharding == NULL);
+      assert(owner->is_region());
+      assert(mask * refinement_trackers.get_valid_mask());
 #endif
-      projection->project_refinement(domain, node, regions);
+      RefinementTracker *new_tracker = owner->create_refinement_tracker();
+      new_tracker->initialize_already_refined();
+      refinement_trackers.insert(new_tracker, mask);
     }
 
     //--------------------------------------------------------------------------
-    void RefProjectionSummary::project_refinement(RegionTreeNode *node,
-                      ShardID shard_id, std::vector<RegionNode*> &regions,
-                      Provenance *provenance) const
+    void LogicalState::update_refinement_child(ContextID ctx,
+                                               RegionTreeNode *child,
+                                               const RegionUsage &usage,
+                                               FieldMask &refinement_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(sharding != NULL);
+      assert(!!refinement_mask);
 #endif
-      // Find the domain of points for this shard
-      IndexSpace shard_handle = sharding->find_shard_space(shard_id, domain,
-          (sharding_domain != NULL) ? sharding_domain->handle : domain->handle,
-          provenance);
-      if (shard_handle.exists())
+      // This function filters through the refinement trackers and updates
+      // them as necessary. Since the refinement trackers are not field aware,
+      // this function will clone them and delete them as necessary to make
+      // sure that each field is accurately represented
+      FieldMask need_tracker = refinement_mask;
+      if (!(refinement_mask * refinement_trackers.get_valid_mask()))
       {
-        IndexSpaceNode *shard_domain = node->context->get_node(shard_handle);
-        projection->project_refinement(shard_domain, node, regions);
+        FieldMaskSet<RefinementTracker> to_add;
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+             refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = refinement_mask & it->second;
+          if (!overlap)
+            continue;
+          if (overlap != it->second)
+          {
+            RefinementTracker *diff = it->first->clone();
+            FieldMask diff_mask = it->second - overlap;
+            to_add.insert(diff, diff_mask);
+            it.filter(diff_mask);
+          }
+          bool allow_refinement = false;
+          if (it->first->update_child(child, usage, allow_refinement))
+          {
+            it->first->invalidate_refinement(ctx, overlap);
+            to_delete.push_back(it->first);
+          }
+          else 
+          {
+            if (!allow_refinement)
+              refinement_mask -= overlap;
+            need_tracker -= overlap;
+            if (!need_tracker)
+              break;
+          }
+        }
+        // Remove old entries
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+        // Add new entries
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          refinement_trackers.insert(it->first, it->second);
       }
+      if (!!need_tracker)
+      {
+        RefinementTracker *new_tracker = owner->create_refinement_tracker();
+        bool allow_refinement = false;
+        if (new_tracker->update_child(child, usage, allow_refinement))
+          assert(false); // should never get here
+        if (!allow_refinement)
+          refinement_mask -= need_tracker;
+        refinement_trackers.insert(new_tracker, need_tracker);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::update_refinement_projection(ContextID ctx,
+        ProjectionSummary *summary, const RegionUsage &usage,
+        FieldMask &refinement_mask)
+    //--------------------------------------------------------------------------
+    {
+      // This function filters through the refinement trackers and updates
+      // them as necessary. Since the refinement trackers are not field aware,
+      // this function will clone them and delete them as necessary to make
+      // sure that each field is accurately represented
+      FieldMask need_tracker = refinement_mask;
+      if (!(refinement_mask * refinement_trackers.get_valid_mask()))
+      {
+        FieldMaskSet<RefinementTracker> to_add;
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+             refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = refinement_mask & it->second;
+          if (!overlap)
+            continue;
+          if (overlap != it->second)
+          {
+            RefinementTracker *diff = it->first->clone();
+            FieldMask diff_mask = it->second - overlap;
+            to_add.insert(diff, diff_mask);
+            it.filter(diff_mask);
+          }
+          bool allow_refinement = false;
+          if (it->first->update_projection(summary, usage, allow_refinement))
+          {
+            it->first->invalidate_refinement(ctx, overlap);
+            to_delete.push_back(it->first);
+          }
+          else
+          {
+            if (!allow_refinement)
+              refinement_mask -= overlap;
+            need_tracker -= overlap;
+            if (!need_tracker)
+              break;
+          }
+        }
+        // Remove old entries
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+        // Add new entries
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          refinement_trackers.insert(it->first, it->second);
+      }
+      if (!!need_tracker)
+      {
+        RefinementTracker *new_tracker = owner->create_refinement_tracker();
+        bool allow_refinement = false;
+        if (new_tracker->update_projection(summary, usage, allow_refinement))
+          assert(false); // should never get here
+        if (!allow_refinement)
+          refinement_mask -= need_tracker;
+        refinement_trackers.insert(new_tracker, need_tracker);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::update_refinement_arrival(ContextID ctx, 
+                           const RegionUsage &usage, FieldMask &refinement_mask)
+    //--------------------------------------------------------------------------
+    {
+      // This function filters through the refinement trackers and updates
+      // them as necessary. Since the refinement trackers are not field aware,
+      // this function will clone them and delete them as necessary to make
+      // sure that each field is accurately represented
+      if (!(refinement_mask * refinement_trackers.get_valid_mask()))
+      {
+        FieldMaskSet<RefinementTracker> to_add;
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+             refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = refinement_mask & it->second;
+          if (!overlap)
+            continue;
+          if (overlap != it->second)
+          {
+            RefinementTracker *diff = it->first->clone();
+            FieldMask diff_mask = it->second - overlap;
+            to_add.insert(diff, diff_mask);
+            it.filter(diff_mask);
+          }
+          if (it->first->update_arrival(usage))
+          {
+            it->first->invalidate_refinement(ctx, overlap);
+            to_delete.push_back(it->first);
+          }
+          else
+          {
+            refinement_mask -= overlap;
+            if (!refinement_mask)
+              break;
+          }
+        }
+        // Remove old entries
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+        // Add new entries
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          refinement_trackers.insert(it->first, it->second);
+      }
+      if (!!refinement_mask)
+      {
+        RefinementTracker *new_tracker = owner->create_refinement_tracker();
+        if (new_tracker->update_arrival(usage))
+          assert(false); // should never get here
+        refinement_trackers.insert(new_tracker, refinement_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::invalidate_refinements(ContextID ctx, 
+                                              FieldMask invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RefinementTracker*> to_delete;
+      for (FieldMaskSet<RefinementTracker>::iterator it =
+            refinement_trackers.begin(); it != refinement_trackers.end(); it++) 
+      {
+        const FieldMask overlap = invalidation_mask & it->second;
+        if (!overlap)
+          continue;
+        it->first->invalidate_refinement(ctx, overlap);
+        it.filter(overlap);
+        if (!it->second)
+          to_delete.push_back(it->first);
+        invalidation_mask -= overlap;
+        if (!invalidation_mask)
+          break;
+      }
+#ifdef DEBUG_LEGION
+      assert(!invalidation_mask); // should have seen all the fields
+#endif
+      for (std::vector<RefinementTracker*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        refinement_trackers.erase(*it);
+        delete (*it);
+      }
+      refinement_trackers.tighten_valid_mask();
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::record_refinement_dependences(ContextID ctx,
+        const LogicalUser &refinement_user, const FieldMask &refinement_mask,
+        const ProjectionInfo &no_proj_info, RegionTreeNode *previous_child,
+        LogicalRegion privilege_root, LogicalAnalysis &logical_analysis)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask dummy_open_below;
+      // First register dependences on any local users, we can't dominate
+      // anything here since we need to leave things here for later
+      owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
+                       refinement_user, curr_epoch_users, 
+                       refinement_mask, dummy_open_below, false/*arrived*/,
+                       no_proj_info, *this, logical_analysis);
+      owner->perform_dependence_checks<false/*track dom*/>(privilege_root,
+                        refinement_user, prev_epoch_users,
+                        refinement_mask, dummy_open_below, false/*arrived*/,
+                        no_proj_info, *this, logical_analysis);
+      // If we have a previous child and all the children are independent
+      // then we know we don't need to traverse anything else
+      if ((previous_child == NULL) || !owner->are_all_children_disjoint())
+      {
+        // Now traverse any open children and record dependences on them as well
+        for (LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC>::const_iterator 
+              fit = field_states.begin(); fit != field_states.end(); fit++)
+        {
+          const FieldMask field_overlap = fit->valid_fields() & refinement_mask;
+          if (!field_overlap)
+            continue;
+          for (FieldState::OrderedFieldMaskChildren::const_iterator it =
+                fit->open_children.begin(); it != 
+                fit->open_children.end(); it++)
+          {
+            // Can skip the previous child if we've already done it
+            if (it->first == previous_child)
+              continue;
+            const FieldMask overlap = refinement_mask & it->second;
+            if (!overlap)
+              continue;
+            if ((previous_child != NULL) && owner->are_children_disjoint(
+                  previous_child->get_color(), it->first->get_color()))
+              continue;
+            it->first->record_refinement_dependences(ctx, refinement_user,
+                overlap, no_proj_info, NULL/*previous child*/,
+                privilege_root, logical_analysis);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::filter_timeout_users(LogicalAnalysis &analysis)
+    //--------------------------------------------------------------------------
+    {
+      // We only run this function if we're not doing legion spy verification
+      // as it will mess up the logical dependence analysis verification
+#ifndef LEGION_SPY
+      // Skip this if we're tracing
+      if (analysis.op->is_tracing())
+        return;
+      // First check to see if we have more users than the maximum allowed
+      if ((curr_epoch_users.size() + prev_epoch_users.size()) <= 
+          MIN_TIMEOUT_CHECK_SIZE)
+        return;
+      // Next check to see if we've hit the right number of remaining
+      // iterations to perform this check
+      if (--remaining_timeout_check_iterations > 0)
+        return;
+      // Go through and filter any current or previous epoch users that have
+      // been committed and therefore can no longer be rolled back
+      std::vector<LogicalUser*> timeout_users;
+      for (OrderedFieldMaskUsers::const_iterator it =
+            curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
+      {
+        if (!it->first->op->is_operation_committed(it->first->gen))
+          continue;
+        it->first->add_reference();
+        timeout_users.push_back(it->first);
+      }
+      const size_t prev_size = timeout_users.size();
+      for (OrderedFieldMaskUsers::const_iterator it =
+            prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
+      {
+        if (!it->first->op->is_operation_committed(it->first->gen))
+          continue;
+        if (std::binary_search(timeout_users.begin(), 
+              timeout_users.begin()+prev_size, it->first))
+          continue;
+        it->first->add_reference();
+        timeout_users.push_back(it->first);
+      }
+      // Now we do the exchange and record whether we need to double 
+      // the timeout check iterations
+      std::vector<LogicalUser*> to_delete;
+      if (analysis.context->match_timeouts(timeout_users, to_delete, 
+                                           timeout_exchange))
+        total_timeout_check_iterations *= 2;
+      remaining_timeout_check_iterations = total_timeout_check_iterations;
+      for (std::vector<LogicalUser*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        // One reference from when we were added in the 
+        // perform dependence checks function
+        unsigned references_to_remove = 1;
+        OrderedFieldMaskUsers::iterator finder = curr_epoch_users.find(*it);
+        if (finder != curr_epoch_users.end())
+        {
+          curr_epoch_users.erase(finder);
+          references_to_remove++;
+        }
+        finder = prev_epoch_users.find(*it);
+        if (finder != prev_epoch_users.end())
+        {
+          prev_epoch_users.erase(finder);
+          references_to_remove++;
+        }
+        if ((*it)->remove_reference(references_to_remove))
+          delete (*it);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::promote_next_child(RegionTreeNode *child, FieldMask mask)
+    //--------------------------------------------------------------------------
+    {
+      // This will promote the child up to a read-write field state
+      for (LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC>::iterator it =
+            field_states.begin(); it != field_states.end(); it++)
+      {
+        const FieldMask overlap = mask & it->valid_fields();
+        if (!overlap)
+          continue;
+        FieldState::OrderedFieldMaskChildren::iterator finder =
+          it->open_children.find(child);
+        if (finder == it->open_children.end())
+          continue;
+        if ((it->open_children.size() == 1) && (overlap == finder->second))
+        {
+          // We can just update this state directly
+          it->open_state = OPEN_READ_WRITE;
+          it->redop = 0;
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+        else
+        {
+          // Remove the child from the state
+          finder.filter(overlap);
+          if (!finder->second)
+            it->remove_child(child);
+          it->open_children.tighten_valid_mask();
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      // If we get here we still have fields so we need to introduce a new
+      // field state here for this child in read-write mode
+      field_states.emplace_back(FieldState(OPEN_READ_WRITE, mask, child));
     }
 
     /////////////////////////////////////////////////////////////
@@ -3041,55 +5344,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
+    FieldState::FieldState(OpenState state, const FieldMask &m,
                            RegionTreeNode *child)
-      : redop(0)
+      : open_state(state), redop(0)
     //--------------------------------------------------------------------------
     {
-      if (IS_READ_ONLY(user.usage))
-        open_state = OPEN_READ_ONLY;
-      else if (IS_WRITE(user.usage))
-        open_state = OPEN_READ_WRITE;
-      else if (IS_REDUCE(user.usage))
-      {
-        open_state = OPEN_SINGLE_REDUCE;
-        redop = user.usage.redop;
-      }
       if (open_children.insert(child, m))
         child->add_base_gc_ref(FIELD_STATE_REF);
     }
 
     //--------------------------------------------------------------------------
-    FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
-                           ProjectionFunction *proj, IndexSpaceNode *proj_space,
-                           ShardingFunction *fn, IndexSpaceNode *shard_space,
-                           RegionTreeNode *node)
+    FieldState::FieldState(const RegionUsage &usage, const FieldMask &m, 
+                           RegionTreeNode *child)
       : redop(0)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(proj != NULL);
-#endif
-      open_children.relax_valid_mask(m);
       if (IS_READ_ONLY(usage))
-      {
-        open_state = OPEN_READ_ONLY_PROJ;
-        if (fn != NULL)
-          shard_projections.insert(ProjectionSummary(proj_space, proj, fn,
-                                                     shard_space));
-      }
+        open_state = OPEN_READ_ONLY;
+      else if (IS_WRITE(usage))
+        open_state = OPEN_READ_WRITE;
       else if (IS_REDUCE(usage))
       {
-        open_state = OPEN_REDUCE_PROJ;
+        open_state = OPEN_SINGLE_REDUCE;
         redop = usage.redop;
       }
-      else
-      {
-        open_state = OPEN_READ_WRITE_PROJ;
-        if (fn != NULL)
-          shard_projections.insert(ProjectionSummary(proj_space, proj, fn,
-                                                     shard_space));
-      }
+      if (open_children.insert(child, m))
+        child->add_base_gc_ref(FIELD_STATE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3099,7 +5379,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(rhs.open_children.empty());
-      assert(rhs.shard_projections.empty());
 #endif
     }
 
@@ -3110,14 +5389,13 @@ namespace Legion {
       open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
-      shard_projections.swap(rhs.shard_projections);
     }
 
     //--------------------------------------------------------------------------
     FieldState::~FieldState(void)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+      for (OrderedFieldMaskChildren::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
         if (it->first->remove_base_gc_ref(FIELD_STATE_REF))
           delete it->first;
@@ -3130,8 +5408,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(open_children.empty());
       assert(rhs.open_children.empty());
-      assert(shard_projections.empty());
-      assert(rhs.shard_projections.empty());
 #endif
       open_state = rhs.open_state;
       redop = rhs.redop;
@@ -3145,7 +5421,6 @@ namespace Legion {
       open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
-      shard_projections.swap(rhs.shard_projections);
       return *this;
     }
 
@@ -3155,18 +5430,6 @@ namespace Legion {
     {
       if (redop != rhs.redop)
         return false;
-      if (is_projection_state())
-      {
-        if (!rhs.is_projection_state())
-          return false;
-        // Both projection spaces, check to see if they have the same
-        // set of projections
-        if (!projections_match(rhs))
-          return false;
-        // if we make it past here they are all the same
-      }
-      else if (rhs.is_projection_state())
-        return false;
       // Now check the privilege states
       if (redop == 0)
         return (open_state == rhs.open_state);
@@ -3174,11 +5437,9 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert((open_state == OPEN_SINGLE_REDUCE) ||
-               (open_state == OPEN_MULTI_REDUCE) ||
-               (open_state == OPEN_REDUCE_PROJ));
+               (open_state == OPEN_MULTI_REDUCE));
         assert((rhs.open_state == OPEN_SINGLE_REDUCE) ||
-               (rhs.open_state == OPEN_MULTI_REDUCE) ||
-               (rhs.open_state == OPEN_REDUCE_PROJ));
+               (rhs.open_state == OPEN_MULTI_REDUCE));
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
@@ -3187,32 +5448,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::projections_match(const FieldState &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (shard_projections.size() != rhs.shard_projections.size())
-        return false;
-      std::set<ProjectionSummary>::const_iterator it1 =
-        shard_projections.begin();
-      std::set<ProjectionSummary>::const_iterator it2 =
-        rhs.shard_projections.begin();
-      // zip the projections so we can compare them
-      while (it1 != shard_projections.end())
-      {
-        if ((*it1) != (*it2))
-          return false;
-        it1++; it2++;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     void FieldState::merge(FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
       if (!rhs.open_children.empty())
       {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+        for (OrderedFieldMaskChildren::const_iterator it = 
               rhs.open_children.begin(); it != rhs.open_children.end(); it++)
           // Remove duplicate references if we already had it
           if (!open_children.insert(it->first, it->second))
@@ -3223,7 +5464,6 @@ namespace Legion {
         open_children.relax_valid_mask(rhs.open_children.get_valid_mask());
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
-      assert(projections_match(rhs));
 #endif
       if (redop > 0)
       {
@@ -3246,52 +5486,40 @@ namespace Legion {
             open_state = OPEN_MULTI_REDUCE;
         }
       }
-      // no need to merge projections, we know they are the same
     }
 
     //--------------------------------------------------------------------------
     bool FieldState::filter(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      if (is_projection_state())
+      std::vector<RegionTreeNode*> to_delete;
+      for (OrderedFieldMaskChildren::iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
       {
-#ifdef DEBUG_LEGION
-        assert(open_children.empty());
-#endif
-        open_children.filter_valid_mask(mask);
-        return !open_children.get_valid_mask();
+        it.filter(mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      if (to_delete.size() < open_children.size())
+      {
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          open_children.erase(*it);
+          if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
+            delete (*it);
+        }
       }
       else
       {
-        std::vector<RegionTreeNode*> to_delete;
-        for (FieldMaskSet<RegionTreeNode>::iterator it = 
-              open_children.begin(); it != open_children.end(); it++)
-        {
-          it.filter(mask);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        if (to_delete.size() < open_children.size())
-        {
-          for (std::vector<RegionTreeNode*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            open_children.erase(*it);
-            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
-              delete (*it);
-          }
-        }
-        else
-        {
-          open_children.clear();
-          for (std::vector<RegionTreeNode*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
-              delete (*it);
-        }
-        open_children.tighten_valid_mask();
-        return open_children.empty();
+        open_children.clear();
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
+            delete (*it);
       }
+      open_children.tighten_valid_mask();
+      return open_children.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -3306,7 +5534,7 @@ namespace Legion {
     void FieldState::remove_child(RegionTreeNode *child)
     //--------------------------------------------------------------------------
     {
-      FieldMaskSet<RegionTreeNode>::iterator finder = 
+      OrderedFieldMaskChildren::iterator finder = 
         open_children.find(child);
 #ifdef DEBUG_LEGION
       assert(finder != open_children.end());
@@ -3315,291 +5543,6 @@ namespace Legion {
       open_children.erase(finder);
       if (child->remove_base_gc_ref(FIELD_STATE_REF))
         delete child;
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::can_elide_close_operation(LogicalState &state,
-                        Operation *op, unsigned index,
-                        const ProjectionInfo &info, RegionTreeNode *node) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // should be in a projection mode
-      assert(is_projection_state());
-      assert(!shard_projections.empty() == info.is_sharding());
-#endif
-      // This function is super important! It decides whether this new
-      // projection info can be added to the current projection epoch, if
-      // it can't then we will need a close operation to be inserted
-      // Technically we only need to do this analysis to insert close operations
-      // if we're control replicated because close operations are the only way
-      // to enforce dependences between points in different shards. Without
-      // control replication, each index space operations guarantees that all
-      // its points are mapped before it is mapped so we get an implicit fence
-      // and there is no need for an explicit close operation.
-      if (!info.is_sharding())
-        return true;
-      // First we try to prove that it is safe to elide this close operation
-      // symbolically. What we've got is a list of all the writing projections
-      // being done from this region. The crucial invariant is that if two 
-      // points in any of these projections overlap, then they must be on the 
-      // same shard (if they weren't then a fence would have been required).
-      bool singular = false;
-      bool shallow_disjoint = false;
-      if (info.projection->projection_id == 0)
-      {
-        // Special cases for the identity projection function we understand
-        if (!node->is_region())
-        {
-          PartitionNode *part = node->as_partition_node();
-          shallow_disjoint = part->row_source->is_disjoint(false/*from app*/);
-        }
-        else
-          singular = true;
-      }
-      bool elide = true;
-      ProjectionFunction *non_functional = info.projection;
-      bool all_functional = info.projection->is_functional;
-      for (std::set<ProjectionSummary>::const_iterator it =
-            shard_projections.begin(); it != shard_projections.end(); it++)
-      {
-        // If we're singular do a quick test to see if we can elide because
-        // we are testing singular projections
-        if (singular)
-        {
-          if (elide_singular_same_shard(*it, info))
-            continue;
-          else
-            return false;
-        }
-        if (shallow_disjoint && (it->projection->projection_id != 0))
-          shallow_disjoint = false;
-        if (all_functional && !it->projection->is_functional)
-        {
-          all_functional = false;
-          non_functional = it->projection;
-        }
-        if (elide && (it->projection == info.projection) &&
-            // invertible is not safe to elide unless we know its the
-            // identity projection function 
-            (!it->projection->is_invertible ||
-             (it->projection->projection_id == 0)) &&
-            (it->sharding == info.sharding_function) &&
-            (it->sharding_domain == info.sharding_space) &&
-            ((it->domain == info.projection_space) ||
-             it->domain->dominates(info.projection_space)))
-          continue;
-        elide = false;
-        // Need to keep going to check shallow disjoint but if we've
-        // already disproven that then we're done
-        if (!shallow_disjoint && !all_functional)
-          break;
-      }
-      if (!elide && shallow_disjoint)
-      {
-        // If we know that this a shallow-disjoint projection 
-        // (e.g. projection 0) from a (disjoint because we're writing) 
-        // partition then we know the only way for these points to alias on 
-        // regions is if they are litterally the same point in the index
-        // space. Therefore independent index spaces can be non-overlapping
-        // and if they do overlap, then all we just need to check to see if
-        // the overlapping points shard to the same shards.
-        elide = true;
-        Domain launch_domain;
-        info.projection_space->get_launch_space_domain(launch_domain);
-        const size_t launch_volume = info.projection_space->get_volume();
-        for (std::set<ProjectionSummary>::const_iterator it =
-              shard_projections.begin(); it != shard_projections.end(); it++)
-        {
-          // See if all the points shard to the same shards
-          if ((it->sharding == info.sharding_function) &&
-              (it->sharding_domain == info.sharding_space))
-            continue;
-          // Test all the overlapping points to see if their shards are the same
-          Domain shard_domain_prev, shard_domain_next;
-          it->sharding_domain->get_launch_space_domain(shard_domain_prev);
-          info.sharding_space->get_launch_space_domain(shard_domain_next);
-          // Iterte over whichever one has fewer points
-          if (it->domain->get_volume() < launch_volume)
-          {
-            Domain prev_domain;
-            it->domain->get_launch_space_domain(prev_domain);
-            for (Domain::DomainPointIterator itr(prev_domain); itr; itr++)
-            {
-              // Check for overlap
-              if (!info.projection_space->contains_point(*itr))
-                continue;
-              const ShardID prev = 
-                it->sharding->find_owner(*itr, shard_domain_prev);
-              const ShardID next =
-                info.sharding_function->find_owner(*itr, shard_domain_next);
-              if (prev == next)
-                continue;
-              elide = false;
-              break;
-            }
-          }
-          else
-          {
-            for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-            {
-              // Check for overlap
-              if (!it->domain->contains_point(*itr))
-                continue;
-              const ShardID prev = 
-                it->sharding->find_owner(*itr, shard_domain_prev);
-              const ShardID next =
-                info.sharding_function->find_owner(*itr, shard_domain_next);
-              if (prev == next)
-                continue;
-              elide = false;
-              break;
-            }
-          }
-          if (!elide)
-            break;
-        }
-      }
-      if (!elide)
-      {
-        // If we get here, then it is time to try the really expensive
-        // elision test which will test all the points from each previous
-        // projection against all the points for the next projection to see
-        // if any overlapping regions map to the same shard. This requires
-        // an expensive exchange of a symbolic representation of all the 
-        // different projection trees between all the shards
-        if (all_functional)
-        {
-          if (!state.find_elide_close_result(info, shard_projections, elide))
-          {
-            elide = expensive_elide_test(op, index, info, node);
-            // Now memoize the results for later
-            state.record_elide_close_result(info, shard_projections, elide);
-          }
-        }
-        else
-          REPORT_LEGION_WARNING(LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION,
-            "We strongly encourage all projection functors to be functional, "
-            "however, projection function %d is not and therefore an "
-            "expensive analysis cannot be memoized leading to additional "
-            "synchronization in the logical dependence analysis stage of the "
-            "pipeline. Please consider making it functional for more precise "
-            "analysis and overall better performance.",
-            non_functional->projection_id)
-      }
-      return elide;
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldState::record_projection_summary(const ProjectionInfo &info,
-                                               RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(info.is_sharding());
-#endif
-      shard_projections.insert(ProjectionSummary(info));
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::elide_singular_same_shard(
-                const ProjectionSummary &prev, const ProjectionInfo &next) const
-    //--------------------------------------------------------------------------
-    {
-      // Do a quick check for the special case where they are both
-      // single point projections from this region and we can actually 
-      // evaluate the sharding functions directly to see if the two points
-      // are on the same shard and can elide the close operation
-      if (prev.projection->projection_id != 0)
-        return false;
-#ifdef DEBUG_LEGION
-      // Should have the same projeciton function if we're here
-      assert(next.projection->projection_id == 0);
-#endif
-      if (prev.domain->get_volume() != 1)
-        return false;
-      if (next.projection_space->get_volume() != 1)
-        return false;
-      Domain prev_domain, next_domain;
-      prev.domain->get_launch_space_domain(prev_domain);
-      next.projection_space->get_launch_space_domain(next_domain);
-#ifdef DEBUG_LEGION
-      assert(prev_domain.lo() == prev_domain.hi());
-      assert(next_domain.lo() == next_domain.hi());
-#endif
-      Domain prev_sharding, next_sharding;
-      if (prev.domain != prev.sharding_domain)
-        prev.sharding_domain->get_launch_space_domain(prev_sharding);
-      else
-        prev_sharding = prev_domain;
-      if (next.sharding_space != next.projection_space)
-        next.sharding_space->get_launch_space_domain(next_sharding);
-      else
-        next_sharding = next_domain;
-      const ShardID prev_shard =
-        prev.sharding->find_owner(prev_domain.lo(), prev_sharding);
-      const ShardID next_shard =
-        next.sharding_function->find_owner(next_domain.lo(), next_sharding);
-      return (prev_shard == next_shard);
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::expensive_elide_test(Operation *op, unsigned index,
-                         const ProjectionInfo &info, RegionTreeNode *node) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(info.is_sharding());
-      assert(info.is_projecting());
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(op->get_context()); 
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(op->get_context());
-#endif
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      // First build the projection tree for the new projection and then 
-      // exchange it with all the other shards that are participating in
-      // this logical analysis
-      ProjectionTree *next = 
-        info.projection->construct_projection_tree(op, index, local_shard, node,
-            info.projection_space, info.sharding_function, info.sharding_space);
-      ElideCloseExchange exchange(repl_ctx, COLLECTIVE_LOC_90, next);
-      exchange.perform_collective_async();
-      // While we're waiting for the exchange, build the projection tree
-      // for all of our local previous projections
-      IndexTreeNode *root_source = node->get_row_source();
-      ProjectionTree *prev = new ProjectionTree(root_source);
-      std::map<IndexTreeNode*,ProjectionTree*> node_map;
-      node_map[root_source] = prev;
-      for (std::set<ProjectionSummary>::const_iterator it = 
-            shard_projections.begin(); it != shard_projections.end(); it++)
-        it->projection->construct_projection_tree(op, index, local_shard,
-            node, it->domain, it->sharding, it->sharding_domain, node_map);
-      // Get the result and check the invariants for all the new projection
-      // points in the index space launch
-      // We need to prove one of two things for every point
-      // 1. It is disjoint from all our local projections, if that is
-      // the case then it can't interfere with any local points. Note that
-      // our analysis for disjointness is sound, but not precise since we
-      // only do this analysis symbolically based on knowledge of the region
-      // tree and not by testing all the regions for intersection. Therefore
-      // we might still infer dependences where they don't need to be, but
-      // that's ok because this is logical analysis. We're mainly just trying
-      // to catch the cases here where we points use the same regions but
-      // are found with different projection and sharding functions.
-      // 2. If it is potentially interfering then it must come from the
-      // same shard to ensure that mapping dependences are abided.
-      exchange.perform_collective_wait(); 
-      const bool elide = next->interferes(prev, local_shard);
-      // Perform an all-reduce to see if all the shards agree on the answer
-      AllReduceCollective<ProdReduction<bool> > all_elide(repl_ctx,
-       repl_ctx->get_next_collective_index(COLLECTIVE_LOC_93, true/*logical*/));
-      all_elide.async_all_reduce(elide);
-      delete prev;
-      delete next;
-      return all_elide.get_result();
     }
 
     //--------------------------------------------------------------------------
@@ -3640,29 +5583,11 @@ namespace Legion {
                         redop, open_children.size());
             break;
           }
-        case OPEN_READ_ONLY_PROJ:
-          {
-            logger->log("Field State: OPEN READ-ONLY PROJECTION %zd",
-                        shard_projections.size());
-            break;
-          }
-        case OPEN_READ_WRITE_PROJ:
-          {
-            logger->log("Field State: OPEN READ WRITE PROJECTION %zd",
-                        shard_projections.size());
-            break;
-          }
-        case OPEN_REDUCE_PROJ:
-          {
-            logger->log("Field State: OPEN REDUCE PROJECTION %zd Mode %d",
-                        shard_projections.size(), redop);
-            break;
-          }
         default:
           assert(false);
       }
       logger->down();
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+      for (OrderedFieldMaskChildren::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second & capture_mask;
@@ -3713,29 +5638,11 @@ namespace Legion {
                         redop, open_children.size());
             break;
           }
-        case OPEN_READ_ONLY_PROJ:
-          {
-            logger->log("Field State: OPEN READ-ONLY PROJECTION %zd",
-                        shard_projections.size()); 
-            break;
-          }
-        case OPEN_READ_WRITE_PROJ:
-          {
-            logger->log("Field State: OPEN READ WRITE PROJECTION %zd",
-                        shard_projections.size());
-            break;
-          }
-        case OPEN_REDUCE_PROJ:
-          {
-            logger->log("Field State: OPEN REDUCE PROJECTION %zd Mode %d",
-                        shard_projections.size());
-            break;
-          }
         default:
           assert(false);
       }
       logger->down();
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+      for (OrderedFieldMaskChildren::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         IndexSpaceNode *color_space = node->row_source->color_space;
@@ -3835,192 +5742,12 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Logical Closer 
+    // Logical Analysis
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
-                                 RegionTreeNode *r, bool val)
-      : ctx(c), user(u), root_node(r), validates(val),
-        tracing(user.op->is_tracing()), close_op(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalCloser::~LogicalCloser(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::record_close_operation(const FieldMask &mask) 
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
-      close_mask |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::record_closed_user(const LogicalUser &user,
-                                           const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      closed_users.push_back(user);
-      LogicalUser &closed_user = closed_users.back();
-      closed_user.field_mask = mask;
-    }
-
-#ifndef LEGION_SPY
-    //--------------------------------------------------------------------------
-    void LogicalCloser::pop_closed_user(void)
-    //--------------------------------------------------------------------------
-    {
-      closed_users.pop_back();
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::initialize_close_operations(LogicalState &state, 
-                                             Operation *creator,
-                                             const LogicalTraceInfo &trace_info,
-                                             const bool check_for_refinements,
-                                             const bool has_next_child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // These sets of fields better be disjoint
-      assert(!!close_mask);
-      assert(close_op == NULL);
-#endif
-      // Construct a reigon requirement for this operation
-      // All privileges are based on the parent logical region
-      RegionRequirement req;
-      if (root_node->is_region())
-        req = RegionRequirement(root_node->as_region_node()->handle,
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
-      else
-        req = RegionRequirement(root_node->as_partition_node()->handle, 0,
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
-      InnerContext *context = creator->get_context();
-#ifdef DEBUG_LEGION_COLLECTIVES
-      close_op = context->get_merge_close_op(user, root_node);
-#else
-      close_op = context->get_merge_close_op();
-#endif
-      merge_close_gen = close_op->get_generation();
-      req.privilege_fields.clear();
-      root_node->column_source->get_field_set(close_mask,
-                                             trace_info.req.privilege_fields,
-                                             req.privilege_fields);
-      close_op->initialize(context, req, trace_info, trace_info.req_idx, 
-                           close_mask, creator);
-      if (check_for_refinements && !!state.disjoint_complete_tree)
-      {
-        const FieldMask refinement_mask = 
-          close_mask & state.disjoint_complete_tree; 
-        if (!!refinement_mask)
-        {
-          // Record that this close op should make a new equivalence
-          // set at this region and invalidate all the ones below
-          const bool overwriting = HAS_WRITE_DISCARD(user.usage) &&
-                    !has_next_child && !user.op->is_predicated_op() && 
-                    !trace_info.recording_trace;
-          close_op->record_refinements(refinement_mask, overwriting);
-#ifdef DEBUG_LEGION
-          assert(state.owner->is_region());
-#endif
-          // We're closing to a region, so invalidate all the children
-          std::vector<RegionTreeNode*> to_delete;
-          for (FieldMaskSet<RegionTreeNode>::iterator it = 
-                state.disjoint_complete_children.begin(); it !=
-                state.disjoint_complete_children.end(); it++)
-          {
-            const FieldMask overlap = refinement_mask & it->second;
-            if (!overlap)
-              continue;
-            it->first->invalidate_disjoint_complete_tree(ctx, overlap, true);
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<RegionTreeNode*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              state.disjoint_complete_children.erase(*it);
-              if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-                delete (*it);
-            }
-            state.disjoint_complete_children.tighten_valid_mask();
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::perform_dependence_analysis(const LogicalUser &current,
-                                                    const FieldMask &open_below,
-                             LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
-                             LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers)
-    //--------------------------------------------------------------------------
-    {
-      // We also need to do dependence analysis against all the other operations
-      // that this operation recorded dependences on above in the tree so we
-      // don't run too early.
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC> &above_users = 
-                                              current.op->get_logical_records();
-      const LogicalUser merge_close_user(close_op, 0/*idx*/, RegionUsage(
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/), close_mask);
-      register_dependences(close_op, merge_close_user, current, 
-          open_below, closed_users, above_users, cusers, pusers);
-      // Now we can remove our references on our local users
-      for (LegionList<LogicalUser>::const_iterator it = 
-            closed_users.begin(); it != closed_users.end(); it++)
-      {
-        it->op->remove_mapping_reference(it->gen);
-      }
-    }
-
-    // If you are looking for LogicalCloser::register_dependences it can 
-    // be found in region_tree.cc to make sure that templates are instantiated
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::update_state(LogicalState &state)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(state.owner == root_node);
-#endif
-      root_node->filter_prev_epoch_users(state, close_mask);
-      root_node->filter_curr_epoch_users(state, close_mask, tracing);
-      root_node->filter_disjoint_complete_accesses(state, close_mask); 
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::register_close_operations(
-                              LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &users)
-    //--------------------------------------------------------------------------
-    {
-      // No need to add mapping references, we did that in 
-      // Note we also use the cached generation IDs since the close
-      // operations have already been kicked off and might be done
-      // LogicalCloser::register_dependences
-      const LogicalUser close_user(close_op, merge_close_gen,0/*idx*/,
-        RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE,0/*redop*/),close_mask);
-      users.push_back(close_user);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // KDNode
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    LogicalAnalysis::LogicalAnalysis(Operation *o,std::set<RtEvent> &events)
-      : op(o), context(op->get_context()), applied_events(events)
+    LogicalAnalysis::LogicalAnalysis(Operation *o, unsigned out_off)
+      : op(o), context(op->get_context()), output_region_offset(out_off)
     //--------------------------------------------------------------------------
     {
     }
@@ -4029,104 +5756,186 @@ namespace Legion {
     LogicalAnalysis::~LogicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
-      if (!pending_refinements.empty())
+      // If we have any pending refinements, have them record dependences
+      // on any pending closes that were done along their path and then
+      // issue the refinements 
+      unsigned internal_index = 0;
+      for (OrderedRefinements::const_iterator it =
+            pending_refinements.begin(); it != pending_refinements.end(); it++)
       {
-        const RegionTreeContext ctx = context->get_context();
-        // Note that we walk these refinements in order for control replication
-        for (LegionVector<PendingRefinement>::const_iterator it =
-             pending_refinements.begin(); it != pending_refinements.end(); it++)
+        RegionTreeNode *node = it->first->get_refinement_node();
+        RegionTreeNode *path_node = node;
+        while (path_node != NULL)
         {
-          // Update the disjoint-complete tree for this refinement
-          RegionNode *root = it->partition->parent;
-          root->refine_disjoint_complete_tree(ctx.get_id(), it->partition, 
-                  it->refinement_op, it->refinement_mask, applied_events);
-#ifdef DEBUG_LEGION
-          // Sanity check that we recorded refinements for
-          // all the fields in the refinement mask
-          it->refinement_op->verify_refinement_mask(it->refinement_mask);
-#endif
-          // Trigger this here so it happens in a determinsitic order
-          // for control replication. It has to happen after we've got
-          // the list of refinements to make from updating the 
-          // disjoint-complete tree
-          it->refinement_op->trigger_dependence_analysis();
-          // Now we can finish the dependence analysis for this refinement
-          // Grab these before we end the dependence analysis which will
-          // dump the refinement op into the pipeline
-          const GenerationID refinement_gen = 
-            it->refinement_op->get_generation();
+          std::map<RegionTreeNode*,MergeCloseOp*>::const_iterator finder =
+            pending_closes.find(path_node);
+          if (finder != pending_closes.end())
+          {
+            FieldMask overlap = it->second & finder->second->get_close_mask();
+            if (!!overlap)
+            {
 #ifdef LEGION_SPY
-          const UniqueID refinement_uid = it->refinement_op->get_unique_op_id();
+              LegionSpy::log_mapping_dependence(context->get_unique_id(),
+                  finder->second->get_unique_op_id(), 0/*index*/,
+                  it->first->get_unique_op_id(), 0/*index*/,
+                  LEGION_TRUE_DEPENDENCE);
 #endif
-          it->refinement_op->end_dependence_analysis();
-          // Record that our operation depends on this refinement
-          op->register_region_dependence(it->index, it->refinement_op, 
-              refinement_gen, 0/*index*/, LEGION_TRUE_DEPENDENCE,
-              false/*validates*/, it->refinement_mask);
-#ifdef LEGION_SPY
-          LegionSpy::log_mapping_dependence(context->get_unique_id(),
-              refinement_uid, 0/*index*/, op->get_unique_op_id(), it->index,
-              LEGION_TRUE_DEPENDENCE);
-#endif
+              it->first->register_region_dependence(0/*index*/, finder->second,
+                  finder->second->get_generation(), 0/*index*/,
+                  LEGION_TRUE_DEPENDENCE, false/*validates*/, overlap);
+            }
+          }
+          path_node = path_node->get_parent();
+        }
+        it->first->record_refinement_mask(internal_index, it->second);
+        issue_internal_operation(node, it->first, it->second, internal_index++);
+      }
+      // Issue the pending closes
+      if (!pending_closes.empty())
+      {
+        // Need to issue these close operations in order in case we are
+        // control replicated and therefore all the shards need to see 
+        // the closes in the same order for things to work correctly
+        std::map<LogicalRegion,RegionTreeNode*> ordered_region_closes;
+        std::map<LogicalPartition,RegionTreeNode*> ordered_partition_closes;
+        for (std::map<RegionTreeNode*,MergeCloseOp*>::const_iterator it =
+              pending_closes.begin(); it != pending_closes.end(); it++)
+        {
+          if (it->first->is_region())
+          {
+            RegionNode *region = it->first->as_region_node();
+            ordered_region_closes[region->handle] = it->first;
+          }
+          else
+          {
+            PartitionNode *partition = it->first->as_partition_node();
+            ordered_partition_closes[partition->handle] = it->first;
+          }
+        }
+        for (std::map<LogicalRegion,RegionTreeNode*>::const_iterator it =
+              ordered_region_closes.begin(); it !=
+              ordered_region_closes.end(); it++)
+        {
+          MergeCloseOp *close = pending_closes[it->second];
+          issue_internal_operation(it->second, close, close->get_close_mask(),
+                                   internal_index++);
+        }
+        for (std::map<LogicalPartition,RegionTreeNode*>::const_iterator it =
+              ordered_partition_closes.begin(); it !=
+              ordered_partition_closes.end(); it++)
+        {
+          MergeCloseOp *close = pending_closes[it->second];
+          issue_internal_operation(it->second, close, close->get_close_mask(),
+                                   internal_index++);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    RefinementOp* LogicalAnalysis::create_refinement(const LogicalUser &user,
-                     PartitionNode *partition, const FieldMask &refinement_mask,
-                     const LogicalTraceInfo &trace_info)
+    void LogicalAnalysis::record_pending_refinement(LogicalRegion privilege,
+                                            unsigned req_index,
+                                            unsigned parent_req_index,
+                                            RegionTreeNode *refinement_node,
+                                            const FieldMask &refinement_mask,
+                                            FieldMaskSet<RefinementOp> &pending)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(op == user.op);
-#endif
-      RegionNode *root = partition->parent;
+      // Ignore any requests for refinements for output region requirmeents
+      if (output_region_offset <= req_index)
+        return;
+      // See if we already have a refinement for handling this node
+      for (OrderedRefinements::iterator it =
+            pending_refinements.begin(); it != pending_refinements.end(); it++)
+      {
+        if (it->first->get_refinement_node() != refinement_node)
+          continue;
+        it.merge(refinement_mask);
+        pending.insert(it->first, refinement_mask);
+        return;
+      }
 #ifdef DEBUG_LEGION_COLLECTIVES
-      RefinementOp *refinement_op = context->get_refinement_op(user, root);
+      RefinementOp *refinement_op = context->get_refinement_op(op,
+                                                  refinement_node);
 #else
       RefinementOp *refinement_op = context->get_refinement_op();
 #endif
-      refinement_op->initialize(op, user.idx, trace_info, root,refinement_mask);
-      pending_refinements.emplace_back(
-        PendingRefinement(refinement_op, partition, refinement_mask, user.idx));
+      refinement_op->initialize(op, req_index, privilege,
+                                refinement_node, parent_req_index);
       // Start the dependence analysis for this refinement now
-      // We'll finish the dependence analysis in the destructor when we
-      // know all the region requirements are traversed and we can safely
-      // update the disjoint-complete tree
+      // We'll finish the dependence analysis in the destructor
       refinement_op->begin_dependence_analysis();
-      return refinement_op;
+      pending_refinements.insert(refinement_op, refinement_mask);
+      pending.insert(refinement_op, refinement_mask);
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalAnalysis::deduplicate(PartitionNode *child, FieldMask &mask)
+    void LogicalAnalysis::record_close_dependence(LogicalRegion parent,
+                                 unsigned req_index, RegionTreeNode *path_node,
+                                 const LogicalUser *user, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      for (LegionVector<PendingRefinement>::iterator it =
-            pending_refinements.begin(); it != pending_refinements.end(); it++)
+      std::map<RegionTreeNode*,MergeCloseOp*>::const_iterator finder =
+        pending_closes.find(path_node);
+      if (finder == pending_closes.end())
       {
-        if (it->partition->parent != child->parent)
-          continue;
-        const FieldMask overlap = it->refinement_mask & mask;
-        if (!overlap)
-          continue;
-        if (it->partition != child)
-        {
-          if (overlap != it->refinement_mask)
-          {
-            // Filter off the fields we'll do later
-            it->refinement_mask -= overlap;
-            continue;
-          }
-          else
-            // We can co-opt this refinement op to do this child instead
-            it->partition = child;
-        }
-        mask -= overlap;
-        if (!mask)
-          return false;
+        // Start a new close operation for this node in the region tree
+        // Construct a reigon requirement for this operation
+        // All privileges are based on the parent logical region
+        RegionRequirement req;
+        if (path_node->is_region())
+          req = RegionRequirement(path_node->as_region_node()->handle,
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+        else
+          req = RegionRequirement(path_node->as_partition_node()->handle, 0,
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+#ifdef DEBUG_LEGION_COLLECTIVES
+        MergeCloseOp *close_op = context->get_merge_close_op(op, path_node);
+#else
+        MergeCloseOp *close_op = context->get_merge_close_op();
+#endif
+        close_op->initialize(context, req, req_index, op);
+        // Mark that we are starting our dependence analysis
+        close_op->begin_dependence_analysis();
+        finder = pending_closes.insert(
+            std::make_pair(path_node, close_op)).first;
       }
-      return true;
+#ifdef LEGION_SPY
+      LegionSpy::log_mapping_dependence(context->get_unique_id(),
+          user->uid, user->idx, finder->second->get_unique_op_id(),
+          0/*index*/, LEGION_TRUE_DEPENDENCE);
+#endif
+      finder->second->register_region_dependence(0/*index*/, user->op,
+        user->gen, user->idx, LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+      finder->second->update_close_mask(mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalAnalysis::issue_internal_operation(RegionTreeNode *node,
+                  InternalOp *internal_op, const FieldMask &internal_mask,
+                  const unsigned internal_index) const
+    //--------------------------------------------------------------------------
+    {
+      // Do any other work for the dependence analysis
+      internal_op->trigger_dependence_analysis();
+      // Record a user for this internal operation in the region tree 
+      LogicalUser *user = new LogicalUser(internal_op, 0/*region index*/,
+          RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/),
+          NULL/*projection*/, internal_index);
+      LogicalState &state = node->get_logical_state(
+                context->get_logical_tree_context());
+      // This will take ownership of the user
+      node->register_local_user(state, *user, internal_mask);
+      // Record a dependence on the internal operation for ourself
+      op->register_region_dependence(internal_op->get_internal_index(),
+          internal_op, internal_op->get_generation(), 0/*internal idx*/,
+          LEGION_TRUE_DEPENDENCE, false/*validates*/, internal_mask);
+#ifdef LEGION_SPY
+      LegionSpy::log_mapping_dependence(context->get_unique_id(),
+          internal_op->get_unique_op_id(), 0/*index*/, op->get_unique_op_id(),
+          internal_op->get_internal_index(), LEGION_TRUE_DEPENDENCE);
+#endif
+      // Mark that we are done, this puts the op in the pipeline!
+      internal_op->end_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4359,6 +6168,7 @@ namespace Legion {
       :  CopyFillGuard(Runtime::create_rt_user_event()), 
 #endif
         forest(f), local_space(f->runtime->address_space), analysis(a), 
+        collective_mapping(analysis->get_replicated_mapping()),
         src_index(analysis->index), dst_index(analysis->index),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         guard_precondition((previous == NULL) ? RtEvent::NO_RT_EVENT :
@@ -4390,6 +6200,7 @@ namespace Legion {
       : CopyFillGuard(Runtime::create_rt_user_event()),
 #endif
         forest(f), local_space(f->runtime->address_space), analysis(a),
+        collective_mapping(analysis->get_replicated_mapping()),
         src_index(src_idx), dst_index(dst_idx),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         guard_precondition((previous == NULL) ? alternative_precondition :
@@ -5047,7 +6858,8 @@ namespace Legion {
                       const PhysicalTraceInfo &trace_info,
                       ApEvent precondition, const bool restricted_output,
                       const bool manage_dst_events,
-                      std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
+                      std::map<InstanceView*,std::vector<ApEvent> > *dst_events,
+                      int stage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5059,7 +6871,8 @@ namespace Legion {
           summary_event = Runtime::create_ap_user_event(&trace_info);
         CopyFillAggregation args(this, trace_info, precondition,
                                  manage_dst_events, restricted_output,
-                                 analysis->op->get_unique_op_id(), dst_events);
+                                 analysis->op->get_unique_op_id(), 
+                                 stage, dst_events);
         analysis->runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return summary_event;
@@ -5071,20 +6884,76 @@ namespace Legion {
 #ifndef NON_AGGRESSIVE_AGGREGATORS
       std::set<RtEvent> recorded_events;
 #endif
+      // This is really subtle so pay attention: 
+      // Copy across aggregators issue copies and fills to destination
+      // instances. In some cases those destination instances are filled
+      // and copied to multiple times across the initial sources and then
+      // reductions of this copy fill aggregator. We need a way to make
+      // sure that all the updates to the views for those destination 
+      // instances for the copy users are recorded in the right order.
+      // To facilitate that we have a fast path and slow path. In the
+      // fast path, if all the updates are coming from this node
+      // (in the case with no collective analysis) or from all the nodes
+      // in the collective analysis then we can issue all those copies
+      // back-to-back without interruption because we know that the 
+      // messages being sent are all pipelined and run through ordered
+      // virtual channels. However, if any copies need to be issued 
+      // to a destination that does not share the collective mapping
+      // then we don't have that pipelining guarantee so we need to
+      // block the issuing of the copies between those stages. Whether
+      // we can do this pipelining or not after each stage is tracked
+      // by the 'pipeline' variable. This method will defer itself and
+      // restart when this pipelining is not possible.
+      bool pipeline = true;
       // Perform updates from any sources first
-      if (!sources.empty())
-        perform_updates(sources, trace_info, precondition, 
-#ifdef NON_AGGRESSIVE_AGGREGATORS
-            effects,
-#else
-            recorded_events,
+      if (stage < 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
 #endif
-            -1/*redop index*/, manage_dst_events, restricted_output,dst_events);
+        if (!sources.empty())
+        {
+
+          pipeline = perform_updates(sources, trace_info, precondition,
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+              effects,
+#else
+              recorded_events,
+#endif
+              stage, manage_dst_events, restricted_output, dst_events);
+        }
+        stage = 0;
+      }
       // Then apply any reductions that we might have
       if (!reductions.empty())
       {
         // Skip any passes that we might have already done
-        for (unsigned idx = 0; idx < reductions.size(); idx++)
+        for (unsigned idx = stage; idx < reductions.size(); idx++)
+        {
+          if (!pipeline)
+          {
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+            const RtEvent stage_pre = Runtime::merge_events(effects);
+            effects.clear();
+#else
+            const RtEvent stage_pre = Runtime::merge_events(recorded_events);
+            recorded_events.clear();
+#endif
+            if (stage_pre.exists() && !stage_pre.has_triggered())
+            {
+              // If it's not safe to pipeline the launching of these copies
+              // with the copies from the previous stage then we need to 
+              // defer launching those copies until the previous ones have
+              // run and registered all of their users
+              CopyFillAggregation args(this, trace_info, precondition,
+                                   manage_dst_events, restricted_output,
+                                   analysis->op->get_unique_op_id(), 
+                                   idx, dst_events);
+              analysis->runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, stage_pre);
+              return summary_event;
+            }
+          }
           perform_updates(reductions[idx], trace_info, precondition,
 #ifdef NON_AGGRESSIVE_AGGREGATORS
                           effects,
@@ -5093,6 +6962,7 @@ namespace Legion {
 #endif
                           idx/*redop index*/, manage_dst_events,
                           restricted_output, dst_events);
+        }
       }
       // Make sure we do this before we trigger the effects_applied
       // event as it could result in the deletion of this object
@@ -5171,7 +7041,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::perform_updates(
+    bool CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> > &updates,
          const PhysicalTraceInfo &trace_info, const ApEvent precondition,
          std::set<RtEvent> &recorded_events, const int redop_index,
@@ -5179,6 +7049,7 @@ namespace Legion {
          std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
     //--------------------------------------------------------------------------
     {
+      bool pipelined = true;
       std::vector<ApEvent> *target_events = NULL;
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
             uit = updates.begin(); uit != updates.end(); uit++)
@@ -5239,7 +7110,21 @@ namespace Legion {
                          dst_mask, trace_info, manage_dst_events,
                          restricted_output, target_events);
         }
+        // Check whether later stages can be pipelined with respect to this
+        // current stage. The requirement for pipelining is that the target
+        // view have the same collective 
+        if (!pipelined || 
+            (collective_mapping == uit->first->collective_mapping))
+          continue;
+        // If the collective mapping of the target view does not match the
+        // collective mapping of the analysis then we cannot pipeline 
+        // the view analysis for issuing of copies
+        if ((collective_mapping == NULL) ||
+            (uit->first->collective_mapping == NULL) ||
+            (*collective_mapping != *(uit->first->collective_mapping)))
+          pipelined = false;
       }
+      return pipelined;
     }
 
     //--------------------------------------------------------------------------
@@ -5582,7 +7467,7 @@ namespace Legion {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
       cfargs->aggregator->issue_updates(*cfargs, cfargs->pre, 
           cfargs->restricted_output, cfargs->manage_dst_events,
-          cfargs->dst_events);
+          cfargs->dst_events, cfargs->stage);
       cfargs->remove_recorder_reference();
       if (cfargs->dst_events != NULL)
         delete cfargs->dst_events;
@@ -5668,22 +7553,25 @@ namespace Legion {
     {
       if (!precondition.exists() || precondition.has_triggered())
       {
+#ifdef LEGION_SPY_EQUIVALENCE_SETS
+        LegionSpy::log_equivalence_set_use(set->did, 
+            op->get_unique_op_id(), index);
+#endif
         if (set->set_expr == analysis_expr)
           set->analyze(*this, analysis_expr, true/*covers*/, mask,
                        deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
-          IndexSpaceExpression *expr = 
-           runtime->forest->intersect_index_spaces(set->set_expr,analysis_expr);
-          if (expr->is_empty())
+          IndexSpaceValue expr = IndexSpaceValue(set->set_expr) & analysis_expr;
+          if (expr.is_empty())
             return;
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
-          if (expr->get_volume() == set->set_expr->get_volume())
+          if (expr.get_volume() == set->set_expr->get_volume())
             set->analyze(*this, set->set_expr, true/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
           else
-            set->analyze(*this, expr, false/*covers*/, mask,
+            set->analyze(*this, *expr, false/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
         }
         else
@@ -6457,7 +8345,7 @@ namespace Legion {
         {
           const UniqueInst unique_inst(individual_views[idx]);
           trace_info.record_op_inst(usage, target_views[idx].get_valid_mask(),
-                                    unique_inst, region, applied_events);
+                                    unique_inst, region, op, applied_events);
         }
       }
       if (!registered_events.empty())
@@ -6517,7 +8405,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteCollectiveAnalysis* RemoteCollectiveAnalysis::unpack(
-         Deserializer &derez, Runtime *runtime, std::set<RtEvent> &ready_events)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       size_t context_index;
@@ -6526,8 +8414,7 @@ namespace Legion {
       derez.deserialize(requirement_index);
       IndexSpaceID match_space;
       derez.deserialize(match_space);
-      RemoteOp *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       return new RemoteCollectiveAnalysis(context_index, requirement_index,
                                           match_space, op, derez, runtime);
     }
@@ -6756,8 +8643,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op =
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       ReductionOpID redop;
@@ -6972,8 +8858,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMaskSet<LogicalView> valid_instances;
@@ -7202,8 +9087,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMaskSet<LogicalView> antivalid_instances;
@@ -7505,14 +9389,38 @@ namespace Legion {
       // Should always be local
       assert(original_source == runtime->address_space);
 #endif
-      if (precondition.exists() && ! precondition.has_triggered())
+      if (precondition.exists() && !precondition.has_triggered())
         return defer_registration(precondition, usage, applied_events,
          trace_info, init_precondition, termination, instances_ready, symbolic);
+
       // Invoke the base implementation to see if we actually do it now
       const RtEvent registered = 
         CollectiveCopyFillAnalysis::perform_registration(precondition,
                               usage, applied_events, init_precondition,
                               termination, instances_ready, symbolic);
+      // If we're doing a collective read-write then check to make sure that
+      // we have exactly one arrival on each of the instances, if we don't
+      // then we're not going to have the isolation that we expect. We make
+      // an exception for this in the case of write-only where we allow for
+      // multiple point tasks to stomp on the same instance since we know
+      // that they are all writing the same values in the end anyway.
+      if (!collective_arrivals.empty() && IS_WRITE(usage) && HAS_READ(usage))
+      {
+#ifdef DEBUG_LEGION
+        assert(IS_COLLECTIVE(usage));
+#endif
+        for (std::map<InstanceView*,size_t>::const_iterator it =
+              collective_arrivals.begin(); it !=
+              collective_arrivals.end(); it++)
+          if ((it->second > 1) && (it->first->is_individual_view() ||
+              (it->first->as_collective_view()->local_views.size()<it->second)))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Illegal mapper output: detected multiple write-collective "
+                "users of the same instance on region requirement %d of %s "
+                "(UID %lld). For read-write collectives it is mandatory "
+                "that every point map to a separate instance.",
+                index, op->get_logging_name(), op->get_unique_op_id())
+      }
       if (user_registered.exists())
       {
         Runtime::trigger_event(user_registered, registered);
@@ -7574,8 +9482,7 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         user_mask |= eq_masks[idx];
       }
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       LogicalRegion handle;
@@ -7868,8 +9775,7 @@ namespace Legion {
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionNode *region = runtime->forest->get_node(handle);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       RtUserEvent returned;
@@ -8187,8 +10093,7 @@ namespace Legion {
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionNode *region = runtime->forest->get_node(handle);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       ApEvent precondition;
@@ -8569,8 +10474,7 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         src_mask |= eq_masks[idx];
       }
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned src_index, dst_index;
       derez.deserialize(src_index);
       derez.deserialize(dst_index);
@@ -9100,8 +11004,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr =
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       RegionUsage usage;
@@ -9349,8 +11252,7 @@ namespace Legion {
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionNode *region = runtime->forest->get_node(handle);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       FieldMaskSet<InstanceView> filter_views;
@@ -9398,7 +11300,6 @@ namespace Legion {
                           applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())     
         analysis->perform_remote(traversal_done, applied_events);
       // Now we can trigger our applied event
@@ -9418,8 +11319,7 @@ namespace Legion {
     CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
                Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
       : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/, false/*immutable*/,
-                         true/*exclusive*/),
-        sources(std::move(srcs))
+                         true/*exclusive*/), sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
     }
@@ -9451,8 +11351,11 @@ namespace Legion {
                                          const bool already_deferred)
     //--------------------------------------------------------------------------
     {
+      std::vector<RtEvent> applied;
       set->clone_set(*this, expr, expr_covers, mask, deferral_events,
-                     applied_events, already_deferred);
+                     applied, already_deferred);
+      if (!applied.empty())
+        applied_events.insert(applied.begin(), applied.end());
       // No check for migration after this
       return false;
     }
@@ -9532,8 +11435,7 @@ namespace Legion {
       }
       IndexSpaceExpression *expr =
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
-      RemoteOp *op = 
-        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
       derez.deserialize(index);
       size_t num_sources;
@@ -10331,34 +12233,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID id,
                                    AddressSpaceID logical,
-                                   RegionNode *node, InnerContext *ctx,
+                                   IndexSpaceExpression *expr,
+                                   RegionTreeID tid, InnerContext *ctx,
                                    bool reg_now,
-                                   CollectiveMapping *mapping /*= NULL*/)
+                                   CollectiveMapping *mapping /*= NULL*/,
+                                   bool replicate_logical_owner /* = false*/)
       : DistributedCollectable(rt,
           LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
-          reg_now, mapping), context(ctx), region_node(node), 
-        set_expr(node->row_source), tracing_preconditions(NULL),
-        tracing_anticonditions(NULL), tracing_postconditions(NULL), 
-        logical_owner_space(logical), replicated_owner_state(NULL), 
-        migration_index(0), sample_count(0)
+          reg_now, mapping), context(ctx), set_expr(expr), tree_id(tid),
+        tracing_preconditions(NULL), tracing_anticonditions(NULL),
+        tracing_postconditions(NULL), logical_owner_space(logical),
+        replicated_owner_state(NULL), migration_index(0), sample_count(0)
     //--------------------------------------------------------------------------
     {
       context->add_nested_resource_ref(did);
       context->add_nested_gc_ref(did);
       set_expr->add_nested_expression_reference(did);
-      region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
-      // If we have a collective mapping then we know that everyone agrees
-      // on who the current logical owner is
-      if ((mapping != NULL) && mapping->contains(local_space))
+      if (replicate_logical_owner)
       {
+        // If we've been told to replicate the logical owner space knowledge
+        // than we do that now, note that this will preclude migration of
+        // this equivalence set for its entire lifetime
+#ifdef DEBUG_LEGION
+        assert(mapping != NULL);
+        assert(mapping->contains(logical_owner_space));
+        assert(mapping->contains(local_space));
+#endif
         replicated_owner_state = new ReplicatedOwnerState(true/*valid*/);
-        mapping->get_children(owner_space, local_space,
+        mapping->get_children(logical_owner_space, local_space,
                               replicated_owner_state->children);
       }
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
+#endif
+#ifdef LEGION_SPY_EQUIVALENCE_SETS
+      if (is_logical_owner())
+        LegionSpy::log_equivalence_set(did, expr->expr_id, tree_id, 
+                                       implicit_provenance);
 #endif
     }
 
@@ -10371,6 +12284,7 @@ namespace Legion {
       assert(partial_valid_instances.empty());
       assert(!partial_valid_fields);
       assert(initialized_data.empty());
+      assert(partial_invalidations.empty());
       assert(reduction_instances.empty());
       assert(!reduction_fields);
       assert(restricted_instances.empty());
@@ -10380,15 +12294,13 @@ namespace Legion {
       assert(tracing_preconditions == NULL);
       assert(tracing_anticonditions == NULL);
       assert(tracing_postconditions == NULL);
-#endif
+#endif 
       if (replicated_owner_state != NULL)
         delete replicated_owner_state;
       if (context->remove_nested_resource_ref(did))
         delete context;
       if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
-      if (region_node->remove_nested_resource_ref(did))
-        delete region_node;
     }
 
     //--------------------------------------------------------------------------
@@ -10428,6 +12340,15 @@ namespace Legion {
           if (it->first->remove_nested_expression_reference(did))
             delete it->first;
         initialized_data.clear();
+      }
+      if (!partial_invalidations.empty())
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              partial_invalidations.begin(); it != 
+              partial_invalidations.end(); it++)
+          if (it->first->remove_nested_expression_reference(did))
+            delete it->first;
+        partial_invalidations.clear();
       }
       if (!reduction_instances.empty())
       {
@@ -10541,7 +12462,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_logical_owner() || region_node->row_source->is_empty());
+      assert(is_logical_owner() || set_expr->is_empty());
       assert(sources.size() == corresponding.size());
 #endif
       AutoLock eq(eq_lock);
@@ -10639,9 +12560,45 @@ namespace Legion {
       // Should only be here if we're the owner
       assert(is_logical_owner());
 #endif
-      if (analysis.perform_analysis(this, expr, expr_covers, traversal_mask,
-                          deferral_events, applied_events, already_deferred))
-        check_for_migration(analysis, applied_events, expr_covers); 
+      bool check_migration = false;
+      if (!partial_invalidations.empty()) 
+      {
+        // Check for any fields which have partial invalid expressions that we
+        // also need to remove from from this analysis
+        FieldMask invalid_mask = 
+          traversal_mask & partial_invalidations.get_valid_mask();
+        if (!!invalid_mask)
+        {
+          traversal_mask -= invalid_mask;
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                partial_invalidations.begin(); it !=
+                partial_invalidations.end(); it++)
+          {
+            const FieldMask overlap = invalid_mask & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            // Should never be trying to do a traversal on an equivalence
+            // set that has been completely invalidated
+            assert(it->first != set_expr);
+#endif
+            IndexSpaceExpression *remainder = 
+              runtime->forest->subtract_index_spaces(expr, it->first);
+            if (!remainder->is_empty() && analysis.perform_analysis(this, 
+                  remainder, false/*expr covers*/, overlap, 
+                  deferral_events, applied_events, already_deferred))
+                check_migration = true;
+            invalid_mask -= overlap;
+            if (!invalid_mask)
+              break;
+          }
+        }
+      }
+      if (!!traversal_mask && analysis.perform_analysis(this, expr, expr_covers,
+            traversal_mask, deferral_events, applied_events, already_deferred))
+        check_migration = true;
+      if (check_migration)
+        check_for_migration(analysis, applied_events); 
     }
 
     //--------------------------------------------------------------------------
@@ -11697,7 +13654,8 @@ namespace Legion {
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
-          tracing_postconditions = new TraceViewSet(context, did, region_node);
+          tracing_postconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
           for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -11711,13 +13669,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::check_for_migration(PhysicalAnalysis &analysis,
-                                 std::set<RtEvent> &applied_events, bool covers)
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifndef LEGION_DISABLE_EQUIVALENCE_SET_MIGRATION
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
+      // If we've replicated the logical owner state then it is not safe to
+      // migrate this equivalence set because we can't currently establish
+      // when all the collective analyses that might be relying on that
+      // replicated knowledge are in a consistent state. If you ever want
+      // to change this then you need to establish a consistent point in 
+      // time where all the collective analyses have all concluded that 
+      // the logical owner is the same. You cannot safely migrate this
+      // equivalence set if some participants in a collective analysis
+      // conclude there is one logical owner while other participants will
+      // conclude that there is a different logical owner. That is very hard
+      // to do right now because we don't track when analyses are done using
+      // an equivalence set, so it's hard to know when we're in a 
+      // consistent state to be able to do the migration.
+      if (replicated_owner_state != NULL)
+        return;
       const AddressSpaceID eq_source = analysis.original_source;
       // Record our user in the set of previous users
       bool found = false;
@@ -11761,14 +13734,12 @@ namespace Legion {
       if (current_samples.size() == SAMPLES_PER_MIGRATION_TEST)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_LARGE_EQUIVALENCE_SET_NODE_USAGE,
-            "Internal runtime performance warning: equivalence set %llx of "
-            "region (%d,%d,%d) has %zd different users which is the same as "
+            "Internal runtime performance warning: equivalence set %llx "
+            "has %zd different users which is the same as "
             "the sampling rate of %d. Region requirement %d of operation %s "
             "(UID %lld) triggered this warning. Please report this "
             "application use case to the Legion developers mailing list.",
-            did, region_node->handle.get_index_space().get_id(),
-            region_node->handle.get_field_space().get_id(),
-            region_node->handle.get_tree_id(), current_samples.size(),
+            did, current_samples.size(),
             SAMPLES_PER_MIGRATION_TEST, analysis.index,
             (analysis.op->get_operation_kind() == Operation::TASK_OP_KIND) ?
               static_cast<TaskOp*>(analysis.op)->get_task_name() :
@@ -11778,12 +13749,6 @@ namespace Legion {
         sample_count = 0;
         return;
       }
-      // If we're replicated and the analysis is not exclusive and covering
-      // then it's not even safe to consider migrating this equivalence set
-      CollectiveMapping *collective_mapping = analysis.get_replicated_mapping();
-      if ((replicated_owner_state != NULL) && (!analysis.exclusive || !covers ||
-          (collective_mapping != NULL)))
-        return;
       // Sort the current samples so that they are in order for
       // single epoch cases, for multi-epoch cases they will be
       // sorted by the summary computation below
@@ -11904,43 +13869,12 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        pack_state(rez, logical_owner_space, did, region_node, set_expr,
-                    true/*covers*/, all_ones, true/*pack guards*/);
+        pack_state(rez, logical_owner_space, did, set_expr, set_expr,
+          true/*covers*/, all_ones, true/*pack guards*/, true/*pack invalids*/);
+        pack_global_ref();
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
-      invalidate_state(set_expr, true/*covers*/, all_ones);
-      // If we have any replicated state then we need to invalidate that
-      // Note that this is only safe because we know that there is an
-      // exclusive user here without any collective mapping which means that
-      // they are blocking the mapping of all other potential users so its
-      // safe for them to perform the invalidation asynchronously
-      if (replicated_owner_state != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(analysis.exclusive && covers);
-        assert(collective_mapping == NULL); 
-#endif
-        // Note this is only safe because of the check above stating that
-        // the analysis is exclusive and not collective
-        // Send out invalidations to all the replicated owner nodes and
-        // make sure nothing else can map until they are done
-        for (std::vector<AddressSpaceID>::const_iterator it =
-              replicated_owner_state->children.begin(); it !=
-              replicated_owner_state->children.end(); it++)
-        {
-          const RtUserEvent done = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(done);
-          }
-          runtime->send_equivalence_set_replication_invalidation(*it, rez);
-          applied_events.insert(done);
-        }
-        delete replicated_owner_state;
-        replicated_owner_state = NULL;
-      }
+      invalidate_state(set_expr, true/*covers*/, all_ones, false/*record*/);
 #endif // LEGION_DISABLE_EQUIVALENCE_SET MIGRATION
     }
 
@@ -11978,12 +13912,13 @@ namespace Legion {
       // Check to see if the analysis is replicated or not
       if (analysis.is_replicated())
       {
+        const CollectiveMapping *mapping = analysis.get_replicated_mapping();
 #ifdef DEBUG_LEGION
+        assert(mapping != NULL);
         assert(!analysis.immutable);
 #endif
-        const CollectiveMapping &mapping = *analysis.get_replicated_mapping();
         // Check to see if we have a replicated owner node
-        if (!replicate_logical_owner_space(local_space, &mapping,false/*lock*/))
+        if (!replicate_logical_owner_space(local_space, mapping, false/*lock*/))
         {
 #ifdef DEBUG_LEGION
           assert(replicated_owner_state->ready.exists());
@@ -11999,7 +13934,7 @@ namespace Legion {
         // the mapping then we'll simply pick the space in our collective
         // that is closest to the owner in the set of linear space names
         // (assuming some degree of locality).
-        if (!mapping.contains(logical_owner_space))
+        if (!mapping->contains(logical_owner_space))
         {
           // If we're on the logical owner then that means we're the analysis
           // that already got migrated to the logical owner
@@ -12007,14 +13942,14 @@ namespace Legion {
           {
 #ifdef DEBUG_LEGION
             assert(analysis.original_source ==
-                mapping.find_nearest(local_space));
+                mapping->find_nearest(local_space));
             assert(analysis.is_collective_first_local());
 #endif
             return false;
           }
           // There aren't any analyses that will be local to the
           // logical owner space so we need to pick the closest one
-          if ((local_space == mapping.find_nearest(logical_owner_space)) &&
+          if ((local_space == mapping->find_nearest(logical_owner_space)) &&
               analysis.is_collective_first_local())
             analysis.record_remote(this, mask, logical_owner_space);
         }
@@ -12044,7 +13979,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(bool val)
       : ready(val ? RtUserEvent::NO_RT_USER_EVENT : 
-              Runtime::create_rt_user_event()), valid(val), subscribed(false)
+              Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
     }
@@ -12059,44 +13994,62 @@ namespace Legion {
         AutoLock eq(eq_lock);
         return replicate_logical_owner_space(source,mapping,false/*need lock*/);
       }
+      if (mapping == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(source != local_space);
+#endif
+        // We're just chasing the logical owner at this point
+        if (is_logical_owner())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(local_space);
+          }
+          runtime->send_equivalence_set_replication_response(source, rez);
+          if (replicated_owner_state == NULL)
+            replicated_owner_state = new ReplicatedOwnerState(true/*valid*/);
+          replicated_owner_state->children.push_back(source);
+        }
+        else
+        {
+          // Keep forwarding this on searching for the owner space
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            CollectiveMapping::pack_null(rez);
+            rez.serialize(source);
+          }
+          runtime->send_equivalence_set_replication_request(
+                                    logical_owner_space, rez);
+        }
+        return false;
+      }
       if (replicated_owner_state == NULL)
       {
         replicated_owner_state = new ReplicatedOwnerState(is_logical_owner());
         if (!is_logical_owner())
         {
-          // Send the request to the next parent in the map
-          if (mapping != NULL)
-          {
 #ifdef DEBUG_LEGION
-            assert(mapping->contains(local_space));
+          assert(mapping->contains(local_space));
 #endif
-            const AddressSpaceID origin = mapping->get_origin();
-            if (local_space != origin)
+          const AddressSpaceID origin = mapping->get_origin();
+          if (local_space != origin)
+          {
+            const AddressSpaceID parent =
+              mapping->get_parent(origin, local_space);
+            // Send the request on to our parent space
+            Serializer rez;
             {
-              const AddressSpaceID parent =
-                mapping->get_parent(origin, local_space);
-              // Send the request on to our parent space
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                mapping->pack(rez);
-              }
-              runtime->send_equivalence_set_replication_request(parent, rez);
+              RezCheck z(rez);
+              rez.serialize(did);
+              mapping->pack(rez);
+              rez.serialize(local_space);
             }
-            else
-            {
-              // Send the request on to whomever we thought was the previous owner
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                rez.serialize<size_t>(0); // no mapping
-              }
-              runtime->send_equivalence_set_replication_request(
-                                        logical_owner_space, rez);
-              replicated_owner_state->subscribed = true;
-            }
+            runtime->send_equivalence_set_replication_request(parent, rez);
           }
           else
           {
@@ -12105,16 +14058,18 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize<size_t>(0); // no mapping
+              CollectiveMapping::pack_null(rez);
+              rez.serialize(local_space);
             }
             runtime->send_equivalence_set_replication_request(
                                       logical_owner_space, rez);
-            replicated_owner_state->subscribed = true;
           }
         }
       }
       if (source != local_space)
+      {
         replicated_owner_state->children.push_back(source);
+      }
       if (replicated_owner_state->is_valid())
       {
         // If we're already replicated send back the response now
@@ -12131,22 +14086,8 @@ namespace Legion {
         return true;
       }
       else
-      {
-        // If we're not already subscribed, then perform the subscription
-        if (!replicated_owner_state->is_subscribed() && (mapping == NULL))
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize<size_t>(0); // no mapping
-          }
-          runtime->send_equivalence_set_replication_request(
-                                    logical_owner_space, rez);
-          replicated_owner_state->subscribed = true;
-        }
+        // We're just waiting on the response here to send out the result
         return false;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -12158,64 +14099,37 @@ namespace Legion {
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
         assert(replicated_owner_state != NULL);
-#endif
-        // Handle loops created by collective mappings that then wrap back
-        // through theselves tracing the chain of previous logical owner spaces
-        if (replicated_owner_state->is_valid())
-          return;
-#ifdef DEBUG_LEGION
+        assert(!replicated_owner_state->is_valid());
         assert(!is_logical_owner());
 #endif
         logical_owner_space = owner;
         // Send out messages to all the other nodes that requested them
-        for (std::vector<AddressSpaceID>::const_iterator it =
+        for (std::vector<AddressSpaceID>::iterator it =
               replicated_owner_state->children.begin(); it !=
-              replicated_owner_state->children.end(); it++)
+              replicated_owner_state->children.end(); /*nothing*/)
         {
-          Serializer rez;
+          if ((*it) != owner)
           {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(owner);
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(owner);
+            }
+            runtime->send_equivalence_set_replication_response(*it, rez);
+            it++;
           }
-          runtime->send_equivalence_set_replication_response(*it, rez);
+          else
+            // If one of our children ended up becoming the owner then
+            // this is where we break the dependence with it
+            // This happens when we are making a new replicated owner
+            // state after a migration has taken place to a new node
+            it = replicated_owner_state->children.erase(it);
         }
         to_trigger = replicated_owner_state->ready;
-        replicated_owner_state->valid = true;
+        replicated_owner_state->ready = RtUserEvent::NO_RT_USER_EVENT;
       }
       Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_invalidation(
-                                           std::vector<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock);
-      // Handle loops created by collective mappings that then wrap back
-      // through theselves tracing the chain of previous logical owner spaces
-      if (replicated_owner_state == NULL)
-        return;
-#ifdef DEBUG_LEGION
-      assert(replicated_owner_state->is_valid());
-#endif
-      // Forward on this message to any children
-      for (std::vector<AddressSpaceID>::const_iterator it =
-            replicated_owner_state->children.begin(); it !=
-            replicated_owner_state->children.end(); it++)
-      {
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(done);
-        }
-        runtime->send_equivalence_set_replication_invalidation(*it, rez);
-        applied_events.push_back(done);
-      }
-      delete replicated_owner_state;
-      replicated_owner_state = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -12435,6 +14349,18 @@ namespace Legion {
               rebuild_partial = true;
               if (!(finder->second.get_valid_mask() - it->second))
               {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_nested_expression_reference(did))
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+              else
+              {
                 // Filter out the ones we now subsume
                 std::vector<IndexSpaceExpression*> to_delete;    
                 for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
@@ -12460,18 +14386,6 @@ namespace Legion {
                 }
                 else
                   finder->second.tighten_valid_mask();
-              }
-              else
-              {
-                // We're pruning everything so remove them all now
-                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
-                     finder->second.begin(); eit != finder->second.end(); eit++)
-                  if (eit->first->remove_nested_expression_reference(did))
-                    delete eit->first;
-                // Remove the reference, no need to check for deletion
-                // since we know we added the same reference above
-                finder->first->remove_nested_valid_ref(did);
-                partial_valid_instances.erase(finder);
               }
             }
           } 
@@ -12504,6 +14418,18 @@ namespace Legion {
               rebuild_partial = true;
               if (!(finder->second.get_valid_mask() - valid_mask))
               {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_nested_expression_reference(did))
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+              else
+              {
                 // Filter out the ones we now subsume
                 std::vector<IndexSpaceExpression*> to_delete;    
                 for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
@@ -12529,18 +14455,6 @@ namespace Legion {
                 }
                 else
                   finder->second.tighten_valid_mask();
-              }
-              else
-              {
-                // We're pruning everything so remove them all now
-                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
-                     finder->second.begin(); eit != finder->second.end(); eit++)
-                  if (eit->first->remove_nested_expression_reference(did))
-                    delete eit->first;
-                // Remove the reference, no need to check for deletion
-                // since we know we added the same reference above
-                finder->first->remove_nested_valid_ref(did);
-                partial_valid_instances.erase(finder);
               }
             }
           }
@@ -13365,7 +15279,7 @@ namespace Legion {
                   const LegionVector<FieldMaskSet<InstanceView> > &target_views,
                   const std::vector<IndividualView*> &source_views,
                   const PhysicalTraceInfo &trace_info,
-                  const bool record_valid)
+                  const bool record_valid, const bool record_release)
     //--------------------------------------------------------------------------
     {
       // Read-write or read-only
@@ -13455,7 +15369,18 @@ namespace Legion {
       }
       if (is_write)
       {
-        if (!!restricted_mask)
+        if (record_release)
+        {
+#ifdef DEBUG_LEGION
+          assert(record_valid);
+          assert(restricted_mask == user_mask);
+#endif
+          // Releases are a bit strange, we actually want to invalidate
+          // all the current valid instances since we're making them all
+          // restricted so their are no partial unrestricted cases
+          filter_valid_instances(expr, expr_covers, user_mask);
+        }
+        else if (!!restricted_mask)
         {
           const FieldMask non_restricted_mask = user_mask - restricted_mask;
           if (!!non_restricted_mask)
@@ -13635,7 +15560,7 @@ namespace Legion {
               LegionMap<InstanceView*,
                 FieldMaskSet<IndexSpaceExpression> > updates;
               alias_analysis.visit_leaves(needed_mask, context, runtime->forest,
-                  region_node->handle.get_tree_id(), updates);
+                  tree_id, updates);
               for (LegionMap<InstanceView*,
                     FieldMaskSet<IndexSpaceExpression> >::const_iterator 
                     uit = updates.begin(); uit != updates.end(); uit++)
@@ -14149,7 +16074,7 @@ namespace Legion {
             // Record any fill operations that need to be performed as a result
             // and update the reduction instances with new reductions
             alias_analysis.visit_leaves(reduction_mask, context, analysis,
-                fill_aggregator, fill_view, region_node->handle.get_tree_id(),
+                fill_aggregator, fill_view, tree_id,
                 this, did, reduction_instances);
           }
           else
@@ -14736,7 +16661,7 @@ namespace Legion {
         const FieldMask overlap = sources.get_valid_mask() & restricted_mask;
         if (!overlap)
           continue;
-        copy_out(expr, expr_covers, restricted_mask, sources, analysis,
+        copy_out(expr, expr_covers, overlap, sources, analysis,
                  trace_info, aggregator);
       }
     }
@@ -15184,7 +17109,7 @@ namespace Legion {
                                 it->first, (it->first == set_expr),
                                 it->second.get_valid_mask(), targets, views, 
                                 analysis.source_views, analysis.trace_info,
-                                true/*record valid*/);
+                                true/*record valid*/, true/*record release*/);
             // Finally update the tracing postconditions now that we've recorded
             // any copies as part of the trace
             if (tracing_postconditions != NULL)
@@ -15224,7 +17149,8 @@ namespace Legion {
                             &analysis, release_usage, expr, expr_covers, 
                             release_mask, analysis.target_instances, 
                             analysis.target_views, analysis.source_views,
-                            analysis.trace_info, true/*record valid*/);
+                            analysis.trace_info, true/*record valid*/,
+                            true/*record release*/);
       }
     }
 
@@ -15821,7 +17747,7 @@ namespace Legion {
         {
           ExprViewMaskSets::iterator finder =
             restricted_instances.find(ait->first);
-          if (finder != restricted_instances.end())
+          if (finder == restricted_instances.end())
           {
             ait->first->add_nested_expression_reference(did);
             restricted_instances[ait->first].swap(ait->second);
@@ -15855,9 +17781,9 @@ namespace Legion {
             delete (*it);
         }
         // Rebuild the restricted fields
+        restricted_fields.clear();
         if (!restricted_instances.empty())
         {
-          restricted_fields.clear();
           for (ExprViewMaskSets::const_iterator rit =
                 restricted_instances.begin(); rit != 
                 restricted_instances.end(); rit++)
@@ -16092,7 +18018,7 @@ namespace Legion {
         {
           ExprViewMaskSets::iterator finder =
             released_instances.find(ait->first);
-          if (finder != released_instances.end())
+          if (finder == released_instances.end())
           {
             ait->first->add_nested_expression_reference(did);
             released_instances[ait->first].swap(ait->second);
@@ -16401,7 +18327,8 @@ namespace Legion {
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
-          tracing_postconditions = new TraceViewSet(context, did, region_node);
+          tracing_postconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
         const RegionUsage usage(LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, 0);
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
@@ -16674,7 +18601,7 @@ namespace Legion {
       if (analysis.filter_views.empty())
       {
         // This is the fast path for when we're just invalidating everything
-        invalidate_state(expr, expr_covers, filter_mask);
+        invalidate_state(expr, expr_covers, filter_mask, false/*record*/);
         return;
       }
       // We're filtering specific views from this set
@@ -17054,7 +18981,7 @@ namespace Legion {
                                    const bool expr_covers, 
                                    const FieldMask &clone_mask, 
                                    std::set<RtEvent> &deferral_events,
-                                   std::set<RtEvent> &applied_events,
+                                   std::vector<RtEvent> &applied_events,
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
@@ -17062,18 +18989,20 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)
       {
+        // Skip cloning to ourselves
+        if (it->first == this)
+          continue;
         // Check that the fields overlap 
         const FieldMask overlap = clone_mask & it->second;
         if (!overlap)
           continue;
         // Check that the expressions overlap
         IndexSpaceExpression *overlap_expr = 
-          runtime->forest->intersect_index_spaces(expr,
-              it->first->region_node->row_source);
+          runtime->forest->intersect_index_spaces(expr, it->first->set_expr);
         if (overlap_expr->is_empty())
           continue;
-        it->first->clone_to_local(this, overlap, applied_events,
-            false/*invalidate overlap*/, true/*forward to owner*/);
+        it->first->clone_to_local(this, overlap, overlap_expr, applied_events,
+            false/*invalidate overlap*/, false/*record invalidate*/);
       }
     }
 
@@ -17107,7 +19036,8 @@ namespace Legion {
             not_dominated.insert(expr, user_mask);
         }
         if ((tracing_preconditions == NULL) && !not_dominated.empty())
-          tracing_preconditions = new TraceViewSet(context, did, region_node);
+          tracing_preconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second);
@@ -17131,7 +19061,8 @@ namespace Legion {
           tracing_postconditions->invalidate_all_but(view, expr, user_mask);
       }
       else
-        tracing_postconditions = new TraceViewSet(context, did, region_node);
+        tracing_postconditions =
+          new TraceViewSet(context, did, set_expr, tree_id);
       tracing_postconditions->insert(view, expr, user_mask);
     }
 
@@ -17142,7 +19073,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (tracing_anticonditions == NULL)
-        tracing_anticonditions = new TraceViewSet(context, did, region_node);
+        tracing_anticonditions =
+          new TraceViewSet(context, did, set_expr, tree_id);
       tracing_anticonditions->insert(view, expr, mask);
     }
 
@@ -17180,19 +19112,19 @@ namespace Legion {
       // Compute the views to send back
       if (tracing_preconditions != NULL)
       {
-        previews = new TraceViewSet(context, 0/*no owner*/, region_node);
+        previews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
         tracing_preconditions->find_overlaps(*previews, expr, 
                                              (expr == set_expr), mask);
       }
       if (tracing_anticonditions != NULL)
       {
-        antiviews = new TraceViewSet(context, 0/*no owner*/, region_node);
+        antiviews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
         tracing_anticonditions->find_overlaps(*antiviews, expr,
                                              (expr == set_expr), mask);
       }
       if (tracing_postconditions != NULL)
       {
-        postviews = new TraceViewSet(context, 0/*no owner*/, region_node);
+        postviews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
         tracing_postconditions->find_overlaps(*postviews, expr,
                                              (expr == set_expr), mask);
       }
@@ -17208,7 +19140,8 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(target);
-          rez.serialize(region_node->handle);
+          set_expr->pack_expression(rez, target_space);
+          rez.serialize(tree_id);
           if (previews != NULL)
             previews->pack(rez, target_space, true/*pack references*/);
           else
@@ -17328,7 +19261,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17345,6 +19278,8 @@ namespace Legion {
         mapping = new CollectiveMapping(derez, num_spaces);
         mapping->add_reference();
       }
+      AddressSpaceID source;
+      derez.deserialize(source);
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       set->replicate_logical_owner_space(source, mapping, true/*need lock*/);
@@ -17372,31 +19307,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_replication_invalidation(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-
-      std::vector<RtEvent> applied_events;
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->process_replication_invalidation(applied_events);
-      if (!applied_events.empty())
-        Runtime::trigger_event(done_event,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
     void EquivalenceSet::send_equivalence_set(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -17404,17 +19314,21 @@ namespace Legion {
       assert(is_owner());
       // We should have had a request for this already
       assert(!has_remote_instance(target));
-      assert((collective_mapping == NULL) || 
-              !collective_mapping->contains(target));
 #endif
+      // If the target is in the collective mapping then we don't need to
+      // bother sending the result since that just means that something
+      // requested the equivalence set on a remote node before the equivalence
+      // set creation could propagate there yet
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+        return;
       update_remote_instances(target);
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(region_node->handle);
-        rez.serialize(context->get_replication_id());
-        rez.serialize(context->did);
+        set_expr->pack_expression(rez, target);
+        rez.serialize(tree_id);
+        context->pack_inner_context(rez);
         // There be dragons here!
         // In the case where we first make a new equivalence set on a
         // remote node that is about to be the owner, we can't mark it
@@ -17477,68 +19391,41 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      DistributedID repl_id, ctx_did;
-      derez.deserialize(repl_id);
-      derez.deserialize(ctx_did);
-      RegionNode *node = runtime->forest->get_node(handle);
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+                                        runtime->determine_owner(did));
+      RegionTreeID tid;
+      derez.deserialize(tid);
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      
-      InnerContext *context = NULL;
-      if (repl_id > 0)
-      {
-        // See if there is a local shard manager
-        ShardManager *manager = 
-          runtime->find_shard_manager(repl_id, true/*can fail*/);
-        if (manager != NULL)
-          context = manager->find_local_context();
-      }
-      if (context == NULL)
-      {
-        RtEvent ctx_ready;
-        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
-        if (ctx_ready.exists() && !ctx_ready.has_triggered())
-          ctx_ready.wait();
-      }
-      void *location;
-      EquivalenceSet *set = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        set = new(location) EquivalenceSet(runtime, did, logical_owner,
-                                           node, context,false/*register now*/);
-      else
-        set = new EquivalenceSet(runtime, did, logical_owner,
-                                 node, context, false/*register now*/);
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                        EquivalenceSet>(did);
+      EquivalenceSet *set = new(location) EquivalenceSet(runtime, did, 
+          logical_owner, expr, tid, context, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::clone_from(const AddressSpaceID target_space,
-                                    EquivalenceSet *src, const FieldMask &mask,
-                                    const bool forward_to_owner,
-                                    std::set<RtEvent> &applied_events,
+    void EquivalenceSet::clone_from(EquivalenceSet *src, const FieldMask &mask,
+                                    IndexSpaceExpression *clone_expr,
+                                    const bool record_invalidate,
+                                    std::vector<RtEvent> &applied_events,
                                     const bool invalidate_overlap)
     //--------------------------------------------------------------------------
     {
-      if (this == src)
-      {
-        // Empty equivalence sets can sometimes be asked to clone to themself
 #ifdef DEBUG_LEGION
-        assert(region_node->row_source->is_empty());
+      assert(this != src);
+      assert(src->tree_id == tree_id);
 #endif
-        return;
-      }
-      if (target_space == local_space)
-      {
-        AutoLock eq(eq_lock); 
-        src->clone_to_local(this, mask, applied_events, 
-                            invalidate_overlap, forward_to_owner);
-      }
+      AutoLock eq(eq_lock);
+      if (is_logical_owner())
+        src->clone_to_local(this, mask, clone_expr, applied_events,
+            invalidate_overlap, record_invalidate);
       else
-        src->clone_to_remote(did, target_space, region_node,
-             mask, applied_events, invalidate_overlap, forward_to_owner);
+        src->clone_to_remote(did, logical_owner_space, set_expr, clone_expr,
+             mask, applied_events, invalidate_overlap, record_invalidate);
     }
 
     //--------------------------------------------------------------------------
@@ -17556,32 +19443,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent EquivalenceSet::make_owner(AddressSpaceID new_owner, RtEvent pre)
+    void EquivalenceSet::make_owner(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-      if (new_owner != local_space)
-      {
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(pre);
-          rez.serialize(done);
-        }
-        runtime->send_equivalence_set_make_owner(new_owner, rez);
-        return done;
-      }
+      RtUserEvent to_trigger;
       if (pre.exists() && !pre.has_triggered())
       {
         const DeferMakeOwnerArgs args(this);
-        return runtime->issue_runtime_meta_task(args, 
+        runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_DEFERRED_PRIORITY, pre);
       }
-      // If we make it here then we can finally mark ourselves the owner
-      AutoLock eq(eq_lock);
-      logical_owner_space = local_space;
-      return RtEvent::NO_RT_EVENT;
+      else
+      {
+        // If we make it here then we can finally mark ourselves the owner
+        AutoLock eq(eq_lock);
+        logical_owner_space = local_space;
+        if (replicated_owner_state != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!replicated_owner_state->is_valid());
+#endif
+          // Send notifications to the children now that we know the owner
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                replicated_owner_state->children.begin(); it !=
+                replicated_owner_state->children.end(); it++)
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(local_space);
+            }
+            runtime->send_equivalence_set_replication_response(*it, rez);
+          }
+          to_trigger = replicated_owner_state->ready;
+          replicated_owner_state->ready = RtUserEvent::NO_RT_USER_EVENT;
+        }
+        unpack_global_ref();
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -17589,35 +19490,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferMakeOwnerArgs *dargs = (const DeferMakeOwnerArgs*)args;
-      dargs->set->make_owner(dargs->set->local_space, RtEvent::NO_RT_EVENT);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_make_owner(Deserializer &derez,
-                                                      Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      RtUserEvent done;
-      derez.deserialize(done);
-
-      if ((ready.exists() && !ready.has_triggered()) ||
-          (precondition.exists() && !precondition.has_triggered()))
-      {
-        const DeferMakeOwnerArgs args(set);
-        Runtime::trigger_event(done,
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-              Runtime::merge_events(ready, precondition)));
-      }
-      else
-        Runtime::trigger_event(done, 
-            set->make_owner(set->local_space, precondition));
+      dargs->set->make_owner();
     }
 
     //--------------------------------------------------------------------------
@@ -17651,27 +19524,27 @@ namespace Legion {
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
 
-      std::set<RtEvent> ready_events;
+      std::vector<RtEvent> ready_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_state_and_apply(derez, source, false/*forward*/,ready_events);
+      set->unpack_state_and_apply(derez, source, ready_events,false/*forward*/);
       // Check to see if we're ready or we need to defer this
       if (!ready_events.empty())
-        set->make_owner(runtime->address_space, 
-            Runtime::merge_events(ready_events));
+        set->make_owner(Runtime::merge_events(ready_events));
       else
-        set->make_owner(runtime->address_space);
+        set->make_owner();
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::pack_state(Serializer &rez,const AddressSpaceID target,
-                          DistributedID target_did, RegionNode *target_region,
-                          IndexSpaceExpression *expr, const bool expr_covers, 
-                          const FieldMask &mask, const bool pack_guards)
+                    DistributedID target_did, IndexSpaceExpression *target_expr,
+                    IndexSpaceExpression *expr, const bool expr_covers, 
+                    const FieldMask &mask, const bool pack_guards,
+                    const bool pack_invalidates)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
-      FieldMaskSet<IndexSpaceExpression> initialized_updates;
+      FieldMaskSet<IndexSpaceExpression> initialized_updates, invalid_updates;
       std::map<unsigned,std::list<
         std::pair<InstanceView*,IndexSpaceExpression*> > > reduction_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >
@@ -17680,17 +19553,19 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
-      find_overlap_updates(expr, expr_covers, mask, valid_updates,
-                           initialized_updates, reduction_updates, 
+      find_overlap_updates(expr, expr_covers, mask, pack_invalidates,
+                           valid_updates, initialized_updates, 
+                           invalid_updates, reduction_updates, 
                            restricted_updates, released_updates,
                            pack_guards ? &read_only_guards : NULL, 
                            pack_guards ? &reduction_fill_guards : NULL, 
                            precondition_updates, anticondition_updates, 
-                           postcondition_updates, target_did, target_region);
+                           postcondition_updates, target_did, target_expr);
       pack_updates(rez, target, valid_updates, initialized_updates,
-           reduction_updates, restricted_updates, released_updates, 
-           &read_only_guards, &reduction_fill_guards, precondition_updates, 
-           anticondition_updates, postcondition_updates, true/*pack refs*/);
+           invalid_updates, reduction_updates, restricted_updates, 
+           released_updates, &read_only_guards, &reduction_fill_guards, 
+           precondition_updates, anticondition_updates,
+           postcondition_updates, true/*pack refs*/);
       if (precondition_updates != NULL)
         delete precondition_updates;
       if (anticondition_updates != NULL)
@@ -17705,6 +19580,7 @@ namespace Legion {
               const LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> > &valid_updates,
               const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+              const FieldMaskSet<IndexSpaceExpression> &invalidated_updates,
               const std::map<unsigned,std::list<std::pair<InstanceView*,
                   IndexSpaceExpression*> > > &reduction_updates,
               const LegionMap<IndexSpaceExpression*,
@@ -17738,6 +19614,13 @@ namespace Legion {
       rez.serialize<size_t>(initialized_updates.size());
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             initialized_updates.begin(); it != initialized_updates.end(); it++)
+      {
+        it->first->pack_expression(rez, target);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(invalidated_updates.size());
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            invalidated_updates.begin(); it != invalidated_updates.end(); it++)
       {
         it->first->pack_expression(rez, target);
         rez.serialize(it->second);
@@ -17833,12 +19716,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::unpack_state_and_apply(Deserializer &derez,
-                       const AddressSpaceID source, const bool forward_to_owner,
-                       std::set<RtEvent> &applied_events)
+                       const AddressSpaceID source,
+                       std::vector<RtEvent> &applied_events,
+                       const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
-      FieldMaskSet<IndexSpaceExpression> initialized_updates;
+      FieldMaskSet<IndexSpaceExpression> initialized_updates, invalid_updates;
       std::map<unsigned,std::list<
         std::pair<InstanceView*,IndexSpaceExpression*> > > reduction_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >
@@ -17876,6 +19760,16 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);
         initialized_updates.insert(expr, mask);
+      }
+      size_t num_invalidated;
+      derez.deserialize(num_invalidated);
+      for (unsigned idx = 0; idx < num_invalidated; idx++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+        FieldMask mask;
+        derez.deserialize(mask);
+        invalid_updates.insert(expr, mask);
       }
       size_t num_reductions;
       derez.deserialize(num_reductions);
@@ -17991,7 +19885,8 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       if (num_preconditions > 0)
       {
-        precondition_updates = new TraceViewSet(context, did, region_node);
+        precondition_updates =
+          new TraceViewSet(context, did, set_expr, tree_id);
         precondition_updates->unpack(derez, num_preconditions, 
                                      source, ready_events);
       }
@@ -18000,7 +19895,8 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       if (num_anticonditions > 0)
       {
-        anticondition_updates = new TraceViewSet(context, did, region_node);
+        anticondition_updates =
+          new TraceViewSet(context, did, set_expr, tree_id);
         anticondition_updates->unpack(derez, num_anticonditions, 
                                      source, ready_events);
       }
@@ -18009,7 +19905,8 @@ namespace Legion {
       TraceViewSet *postcondition_updates = NULL;
       if (num_postconditions > 0)
       {
-        postcondition_updates = new TraceViewSet(context, did, region_node);
+        postcondition_updates =
+          new TraceViewSet(context, did, set_expr, tree_id);
         postcondition_updates->unpack(derez, num_postconditions, 
                                      source, ready_events);
       }
@@ -18019,9 +19916,8 @@ namespace Legion {
         if (ready_event.exists() && !ready_event.has_triggered())
         {
           // Defer this until it is ready to be performed
-          const RtUserEvent applied_event = Runtime::create_rt_user_event();
-          DeferApplyStateArgs args(this, applied_event, forward_to_owner,
-              applied_events, valid_updates, initialized_updates, 
+          DeferApplyStateArgs args(this, forward_to_owner, applied_events, 
+              valid_updates, initialized_updates, invalid_updates, 
               reduction_updates, restricted_updates, released_updates,
               read_only_updates, reduction_fill_updates, precondition_updates,
               anticondition_updates, postcondition_updates);
@@ -18031,20 +19927,21 @@ namespace Legion {
         }
       }
       // All the views are ready so we can add them now
-      apply_state(valid_updates, initialized_updates, reduction_updates, 
-                  restricted_updates, released_updates, precondition_updates,
-                  anticondition_updates, postcondition_updates, 
-                  &read_only_updates, &reduction_fill_updates,
-                  applied_events, true/*need lock*/, forward_to_owner, 
-                  true/*unpack references*/);
+      apply_state(valid_updates, initialized_updates, invalid_updates,
+                  reduction_updates, restricted_updates, released_updates,
+                  precondition_updates, anticondition_updates,
+                  postcondition_updates, &read_only_updates, 
+                  &reduction_fill_updates, applied_events, true/*need lock*/,
+                  forward_to_owner, true/*unpack references*/);
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
-                                       RtUserEvent done, bool forward,
-                                       std::set<RtEvent> &applied_events,
+                                       bool forward,
+                                       std::vector<RtEvent> &applied_events,
                                        ExprLogicalViews &valid,
                                        FieldMaskSet<IndexSpaceExpression> &init,
+                                       FieldMaskSet<IndexSpaceExpression> &invd,
                                        ExprReductionViews &reductions,
                                        ExprInstanceViews &restricted,
                                        ExprInstanceViews &released,
@@ -18057,6 +19954,7 @@ namespace Legion {
         valid_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<LogicalView> >()),
         initialized_updates(new FieldMaskSet<IndexSpaceExpression>()),
+        invalidated_updates(new FieldMaskSet<IndexSpaceExpression>()),
         reduction_updates(new std::map<unsigned,std::list<std::pair<
             InstanceView*,IndexSpaceExpression*> > >()),
         restricted_updates(new LegionMap<IndexSpaceExpression*,
@@ -18068,7 +19966,7 @@ namespace Legion {
         precondition_updates(preconditions),
         anticondition_updates(anticonditions),
         postcondition_updates(postconditions),
-        done_event(done), forward_to_owner(forward)
+        done_event(Runtime::create_rt_user_event()), forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
       for (ExprLogicalViews::const_iterator it =
@@ -18079,6 +19977,10 @@ namespace Legion {
             init.begin(); it != init.end(); it++)
         it->first->add_base_expression_reference(META_TASK_REF);
       initialized_updates->swap(init);
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            invd.begin(); it != invd.end(); it++)
+        it->first->add_base_expression_reference(META_TASK_REF);
+      invalidated_updates->swap(invd);
       for (ExprReductionViews::const_iterator rit =
             reductions.begin(); rit != reductions.end(); rit++)
         for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
@@ -18096,7 +19998,7 @@ namespace Legion {
       released_updates->swap(released);
       read_only_updates->swap(read_only);
       reduction_fill_updates->swap(reduc_fill);
-      applied_events.insert(done_event);
+      applied_events.push_back(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -18109,6 +20011,10 @@ namespace Legion {
           delete it->first;
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
            initialized_updates->begin(); it != initialized_updates->end(); it++)
+        if (it->first->remove_base_expression_reference(META_TASK_REF))
+          delete it->first;
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+           invalidated_updates->begin(); it != invalidated_updates->end(); it++)
         if (it->first->remove_base_expression_reference(META_TASK_REF))
           delete it->first;
       for (ExprReductionViews::const_iterator rit =
@@ -18133,14 +20039,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferApplyStateArgs *dargs = (const DeferApplyStateArgs*)args;
-      std::set<RtEvent> applied_events;
+      std::vector<RtEvent> applied_events;
       dargs->set->apply_state(*(dargs->valid_updates), 
-          *(dargs->initialized_updates), *(dargs->reduction_updates),
-          *(dargs->restricted_updates), *(dargs->released_updates),
-          dargs->precondition_updates, dargs->anticondition_updates,
-          dargs->postcondition_updates, dargs->read_only_updates,
-          dargs->reduction_fill_updates, applied_events, 
-          true/*needs lock*/, dargs->forward_to_owner, true/*unpack refs*/);
+          *(dargs->initialized_updates), *(dargs->invalidated_updates),
+          *(dargs->reduction_updates), *(dargs->restricted_updates),
+          *(dargs->released_updates), dargs->precondition_updates, 
+          dargs->anticondition_updates, dargs->postcondition_updates,
+          dargs->read_only_updates, dargs->reduction_fill_updates, 
+          applied_events, true/*needs lock*/, dargs->forward_to_owner,
+          true/*unpack refs*/);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(applied_events));
@@ -18149,6 +20056,7 @@ namespace Legion {
       dargs->release_references();
       delete dargs->valid_updates;
       delete dargs->initialized_updates;
+      delete dargs->invalidated_updates;
       delete dargs->reduction_updates;
       delete dargs->restricted_updates;
       delete dargs->released_updates;
@@ -18158,7 +20066,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::invalidate_state(IndexSpaceExpression *expr,
-                                  const bool expr_covers, const FieldMask &mask)
+       const bool expr_covers, const FieldMask &mask, bool record_invalidations)
     //--------------------------------------------------------------------------
     {
       filter_valid_instances(expr, expr_covers, mask); 
@@ -18193,14 +20101,73 @@ namespace Legion {
           tracing_postconditions = NULL;
         }
       }
+      if (record_invalidations)
+      {
+        if (!(mask * partial_invalidations.get_valid_mask()))
+        {
+#ifdef DEBUG_LEGION
+          // Should never invalidate things twice
+          assert(!expr_covers);
+#endif
+          FieldMask remaining = mask;
+          FieldMaskSet<IndexSpaceExpression> to_add;
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                partial_invalidations.begin(); it !=
+                partial_invalidations.end(); it++)
+          {
+            const FieldMask overlap = remaining & it->second;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *union_expr = 
+              runtime->forest->union_index_spaces(it->first, expr);
+            const size_t union_volume = union_expr->get_volume();
+#ifdef DEBUG_LEGION
+            // There shouldn't have been any overlap here
+            assert(union_volume == 
+                (it->first->get_volume() + expr->get_volume()));
+#endif
+            if (union_volume == set_expr->get_volume())
+              to_add.insert(set_expr, overlap);
+            else
+              to_add.insert(union_expr, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            partial_invalidations.erase(*it);
+            if ((*it)->remove_nested_expression_reference(did))
+              delete (*it);
+          }
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
+            if (partial_invalidations.insert(it->first, it->second))
+              it->first->add_nested_expression_reference(did);
+          if (!!remaining && partial_invalidations.insert(expr, remaining))
+            expr->add_nested_expression_reference(did);
+        }
+        else if (partial_invalidations.insert(expr, mask))
+          expr->add_nested_expression_reference(did);
+      }
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_local(EquivalenceSet *dst, FieldMask mask,
-                     std::set<RtEvent> &applied_events, 
-                     const bool invalidate_overlap, const bool forward_to_owner)
+                     IndexSpaceExpression *overlap,
+                     std::vector<RtEvent> &applied_events, 
+                     const bool invalidate_overlap,
+                     const bool record_invalidate)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(dst->tree_id == tree_id);
+#endif
       // Lock in exclusive mode if we're doing an invalidate
       AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
       if (!is_logical_owner())
@@ -18212,19 +20179,20 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(dst->did);
           rez.serialize(local_space);
-          rez.serialize(dst->region_node->handle);
+          dst->set_expr->pack_expression(rez, logical_owner_space);
+          overlap->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
-          rez.serialize<bool>(forward_to_owner);
+          rez.serialize<bool>(record_invalidate);
         }
         runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
-        applied_events.insert(done_event);
+        applied_events.push_back(done_event);
         return;
       }
       // If we get here, we're performing the clone locally for these fields
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
-      FieldMaskSet<IndexSpaceExpression> initialized_updates;
+      FieldMaskSet<IndexSpaceExpression> initialized_updates, invalid_updates;
       std::map<unsigned,std::list<
         std::pair<InstanceView*,IndexSpaceExpression*> > > reduction_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >
@@ -18232,56 +20200,66 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
-      IndexSpaceExpression *overlap = NULL;
       if (!set_expr->is_empty())
       {
-        overlap = runtime->forest->intersect_index_spaces(set_expr, 
-                                      dst->region_node->row_source);
         const size_t overlap_volume = overlap->get_volume();
 #ifdef DEBUG_LEGION
         assert(overlap_volume > 0);
 #endif
         const bool overlap_covers = (overlap_volume == set_expr->get_volume());
-        find_overlap_updates(overlap, overlap_covers, mask, valid_updates,
-                             initialized_updates, reduction_updates, 
+        find_overlap_updates(overlap, overlap_covers, mask, false/*invalids*/,
+                             valid_updates, initialized_updates,
+                             invalid_updates, reduction_updates, 
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates, dst->did, dst->region_node);
+                             postcondition_updates, dst->did, dst->set_expr);
       }
       else if (dst->set_expr->is_empty())
-        find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
-                             initialized_updates, reduction_updates, 
+        find_overlap_updates(set_expr, true/*covers*/, mask, false/*invalids*/,
+                             valid_updates, initialized_updates,
+                             invalid_updates, reduction_updates, 
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates, dst->did, dst->region_node);
+                             postcondition_updates, dst->did, dst->set_expr);
       // We hold the lock so calling back into the destination is safe
-      dst->apply_state(valid_updates, initialized_updates, reduction_updates,
-            restricted_updates, released_updates, precondition_updates,
-            anticondition_updates, postcondition_updates, NULL/*guards*/,
-            NULL/*guards*/, applied_events, false/*no lock*/, forward_to_owner,
-            false/*unpack references*/);
+      dst->apply_state(valid_updates, initialized_updates, invalid_updates,
+            reduction_updates, restricted_updates, released_updates, 
+            precondition_updates, anticondition_updates, postcondition_updates,
+            NULL/*guards*/, NULL/*guards*/, applied_events, false/*no lock*/,
+            true/*forward to owner*/, false/*unpack references*/);
       if (invalidate_overlap)
-      {
+      { 
         if (!set_expr->is_empty())
         {
           const bool overlap_covers = 
             (overlap->get_volume() == set_expr->get_volume());
-          invalidate_state(overlap, overlap_covers, mask);
+          invalidate_state(overlap, overlap_covers, mask, record_invalidate);
         }
         else
-          invalidate_state(set_expr, true/*cover*/, mask);
+          invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
       }
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_remote(DistributedID target, 
-                     AddressSpaceID target_space, RegionNode *target_region, 
-                     FieldMask mask, std::set<RtEvent> &applied_events, 
-                     const bool invalidate_overlap, const bool forward_to_owner)
+                     AddressSpaceID target_space, 
+                     IndexSpaceExpression *target_expr, 
+                     IndexSpaceExpression *overlap,
+                     FieldMask mask, std::vector<RtEvent> &applied_events, 
+                     const bool invalidate_overlap,
+                     const bool record_invalidate)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!overlap->is_empty());
+#endif
+      const size_t overlap_volume = overlap->get_volume();
+      const size_t set_volume = set_expr->get_volume();
+      const bool overlap_covers = (overlap_volume == set_volume); 
+      if (overlap_covers)
+        overlap = set_expr;
       // Lock in exclusive mode if we're doing an invalidate
       AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
       if (!is_logical_owner())
@@ -18293,57 +20271,49 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(target);
           rez.serialize(target_space);
-          rez.serialize(target_region->handle);
+          target_expr->pack_expression(rez, logical_owner_space);
+          overlap->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
-          rez.serialize<bool>(forward_to_owner);
+          rez.serialize<bool>(record_invalidate);
         }
         runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
-        applied_events.insert(done_event);
-        return;
+        applied_events.push_back(done_event);
       }
-      IndexSpaceExpression *overlap = runtime->forest->intersect_index_spaces(
-                                          set_expr, target_region->row_source);
-#ifdef DEBUG_LEGION
-      assert(!overlap->is_empty());
-#endif
-      const size_t overlap_volume = overlap->get_volume();
-      const size_t set_volume = set_expr->get_volume();
-      const bool overlap_covers = (overlap_volume == set_volume); 
-      if (overlap_covers)
-        overlap = set_expr;
-      else if (overlap_volume == target_region->row_source->get_volume())
-        overlap = target_region->row_source;
-      // If we make it here, then we've got valid data for the all the fields
-      const RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
+      else
       {
-        RezCheck z(rez);
-        rez.serialize(target);
-        rez.serialize(local_space);
-        rez.serialize(done_event);
-        rez.serialize<bool>(forward_to_owner);
-        pack_state(rez, target_space, target, target_region, overlap,
-                   overlap_covers, mask, false/*pack guards*/);
+        // If we make it here, then we've got valid data for the all the fields
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(local_space);
+          rez.serialize(done_event);
+          pack_state(rez, target_space, target, target_expr, overlap,
+            overlap_covers, mask, false/*pack guards*/, false/*pack invalids*/);
+        }
+        runtime->send_equivalence_set_clone_response(target_space, rez);
+        if (invalidate_overlap)
+        {
+          if (!set_expr->is_empty())
+            invalidate_state(overlap, overlap_covers, mask, record_invalidate);
+          else
+            invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
+        }
+        applied_events.push_back(done_event);
       }
-      runtime->send_equivalence_set_clone_response(target_space, rez);
-      if (invalidate_overlap)
-      {
-        if (!set_expr->is_empty())
-          invalidate_state(overlap, overlap_covers, mask);
-        else
-          invalidate_state(set_expr, true/*cover*/, mask);
-      }
-      applied_events.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::find_overlap_updates(
               IndexSpaceExpression *overlap_expr, const bool overlap_covers, 
-              const FieldMask &mask, LegionMap<IndexSpaceExpression*,
+              const FieldMask &mask, const bool find_invalidates,
+              LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> > &valid_updates,
               FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+              FieldMaskSet<IndexSpaceExpression> &invalidated_updates,
               std::map<unsigned,std::list<std::pair<InstanceView*,
                   IndexSpaceExpression*> > > &reduction_updates,
               LegionMap<IndexSpaceExpression*,
@@ -18355,7 +20325,7 @@ namespace Legion {
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
               TraceViewSet *&postcondition_updates,
-              DistributedID target_did, RegionNode *target_region) const
+              DistributedID target_did, IndexSpaceExpression *target_expr) const
     //--------------------------------------------------------------------------
     {
       // Get updates from the total valid instances
@@ -18489,6 +20459,16 @@ namespace Legion {
         }
         else
           initialized_updates = initialized_data;
+      }
+      if (find_invalidates && !partial_invalidations.empty())
+      {
+#ifdef DEBUG_LEGION
+        // The only time we should be packing partial invalidations 
+        // should be if we're moving the entire equivalence set
+        assert(overlap_covers);
+        assert(!(partial_invalidations.get_valid_mask() - mask));
+#endif
+        invalidated_updates = partial_invalidations;
       }
       // Get updates from the reductions
       if (!reduction_instances.empty() && !(mask * reduction_fields))
@@ -18643,7 +20623,7 @@ namespace Legion {
         if (precondition_updates == NULL)
         {
           precondition_updates = 
-            new TraceViewSet(context, target_did, target_region);
+            new TraceViewSet(context, target_did, target_expr, tree_id);
           tracing_preconditions->find_overlaps(*precondition_updates,
                                  overlap_expr, overlap_covers, mask);
           if (precondition_updates->empty())
@@ -18661,7 +20641,7 @@ namespace Legion {
         if (anticondition_updates == NULL)
         {
           anticondition_updates =
-            new TraceViewSet(context, target_did, target_region);
+            new TraceViewSet(context, target_did, target_expr, tree_id);
           tracing_anticonditions->find_overlaps(*anticondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (anticondition_updates->empty())
@@ -18679,7 +20659,7 @@ namespace Legion {
         if (postcondition_updates == NULL)
         {
           postcondition_updates = 
-            new TraceViewSet(context, target_did, target_region);
+            new TraceViewSet(context, target_did, target_expr, tree_id);
           tracing_postconditions->find_overlaps(*postcondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (postcondition_updates->empty())
@@ -18698,6 +20678,7 @@ namespace Legion {
     void EquivalenceSet::apply_state(LegionMap<IndexSpaceExpression*,
                       FieldMaskSet<LogicalView> > &valid_updates,
                   FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+                  FieldMaskSet<IndexSpaceExpression> &invalidated_updates,
                   std::map<unsigned,std::list<std::pair<InstanceView*,
                       IndexSpaceExpression*> > > &reduction_updates,
                   LegionMap<IndexSpaceExpression*,
@@ -18709,7 +20690,7 @@ namespace Legion {
                   TraceViewSet *postcondition_updates,
                   FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
                   FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
-                  std::set<RtEvent> &applied_events, 
+                  std::vector<RtEvent> &applied_events, 
                   const bool needs_lock, const bool forward_to_owner,
                   const bool unpack_references)
     //--------------------------------------------------------------------------
@@ -18717,15 +20698,16 @@ namespace Legion {
       if (needs_lock)
       {
         AutoLock eq(eq_lock);
-        apply_state(valid_updates, initialized_updates, reduction_updates,
-                    restricted_updates, released_updates, precondition_updates,
-                    anticondition_updates, postcondition_updates, 
-                    read_only_guard_updates, reduction_fill_guard_updates,
-                    applied_events, false/*needs lock*/, forward_to_owner,
+        apply_state(valid_updates, initialized_updates, invalidated_updates,
+                    reduction_updates, restricted_updates, released_updates,
+                    precondition_updates, anticondition_updates, 
+                    postcondition_updates, read_only_guard_updates, 
+                    reduction_fill_guard_updates, applied_events,
+                    false/*needs lock*/, forward_to_owner,
                     unpack_references);
         return;
       }
-      if (forward_to_owner && !is_logical_owner())
+      if (!is_logical_owner() && forward_to_owner)
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
         // Filter out any guard updates that have been pruned out
@@ -18771,14 +20753,15 @@ namespace Legion {
           rez.serialize(done_event);
           rez.serialize<bool>(true); // forward to owner
           pack_updates(rez, logical_owner_space, valid_updates, 
-                     initialized_updates, reduction_updates, restricted_updates,
+                     initialized_updates, invalidated_updates,
+                     reduction_updates, restricted_updates,
                      released_updates, read_only_guard_updates, 
                      reduction_fill_guard_updates, precondition_updates,
                      anticondition_updates, postcondition_updates, 
                      !unpack_references);
         }
         runtime->send_equivalence_set_clone_response(logical_owner_space, rez);
-        applied_events.insert(done_event);
+        applied_events.push_back(done_event);
         return;
       }
       const size_t dst_volume = set_expr->get_volume();
@@ -18806,6 +20789,20 @@ namespace Legion {
           update_initialized_data(set_expr, true/*covers*/, it->second);
         else
           update_initialized_data(it->first,false/*covers*/,it->second);
+      }
+      if (!invalidated_updates.empty())
+      {
+#ifdef DEBUG_LEGION
+        // The only reaon we are moving partial invalidations is if we're
+        // moving the entire equivalence sets so this should be empty and
+        // we should just be able to swap it in
+        assert(partial_invalidations.empty());
+#endif
+        partial_invalidations.swap(invalidated_updates);
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              partial_invalidations.begin(); it != 
+              partial_invalidations.end(); it++)
+          it->first->add_nested_expression_reference(did);
       }
       for (std::map<unsigned,std::list<
             std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
@@ -18861,7 +20858,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(precondition_updates->owner_did == did);
-        assert(precondition_updates->region == region_node);
+        assert(precondition_updates->expression == set_expr);
+        assert(precondition_updates->tree_id == tree_id);
 #endif
         if (tracing_preconditions == NULL)
         {
@@ -18881,7 +20879,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(anticondition_updates->owner_did == did);
-        assert(anticondition_updates->region == region_node);
+        assert(anticondition_updates->expression == set_expr);
+        assert(anticondition_updates->tree_id == tree_id);
 #endif
         if (tracing_anticonditions == NULL)
         {
@@ -18901,7 +20900,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(postcondition_updates->owner_did == did);
-        assert(postcondition_updates->region == region_node);
+        assert(postcondition_updates->expression == set_expr);
+        assert(postcondition_updates->tree_id == tree_id);
 #endif
         if (tracing_postconditions == NULL)
         {
@@ -18921,7 +20921,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_clone_request(Deserializer &derez,
-                                                         Runtime *runtime)
+                                        Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -18933,16 +20933,18 @@ namespace Legion {
       derez.deserialize(target);
       AddressSpaceID target_space;
       derez.deserialize(target_space);
-      LogicalRegion handle;
-      derez.deserialize(handle);
+      IndexSpaceExpression *target_expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpaceExpression *overlap =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
       derez.deserialize(mask);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool invalidate_overlap, forward_to_owner;
+      bool invalidate_overlap, record_invalidate;
       derez.deserialize<bool>(invalidate_overlap);
-      derez.deserialize<bool>(forward_to_owner);
-      std::set<RtEvent> applied_events;   
+      derez.deserialize<bool>(record_invalidate);
+      std::vector<RtEvent> applied_events;   
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       // Add a reference to make sure we don't race with sending the response
@@ -18954,15 +20956,12 @@ namespace Legion {
           runtime->find_or_request_equivalence_set(target, ready);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        dst->clone_from(target_space, set, mask, forward_to_owner,
-                        applied_events, invalidate_overlap);
+        dst->clone_from(set, mask, overlap,
+            record_invalidate, applied_events, invalidate_overlap);
       }
       else
-      {
-        RegionNode *target_region = runtime->forest->get_node(handle);
-        set->clone_to_remote(target, target_space, target_region, mask,
-                  applied_events, invalidate_overlap, forward_to_owner);
-      }
+        set->clone_to_remote(target, target_space, target_expr, overlap, mask,
+            applied_events, invalidate_overlap, record_invalidate);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -18986,13 +20985,11 @@ namespace Legion {
       derez.deserialize(source);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool forward_to_owner;
-      derez.deserialize(forward_to_owner);
 
-      std::set<RtEvent> applied_events;
+      std::vector<RtEvent> applied_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_state_and_apply(derez,source,forward_to_owner,applied_events);
+      set->unpack_state_and_apply(derez, source, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -19033,38 +21030,33 @@ namespace Legion {
       DerezCheck z(derez);
       TraceConditionSet *target;
       derez.deserialize(target);
-      LogicalRegion handle;
-      derez.deserialize(handle);
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      RegionTreeID tid;
+      derez.deserialize(tid);
       TraceViewSet *previews = NULL;
       TraceViewSet *antiviews = NULL;
       TraceViewSet *postviews = NULL;
-      RegionNode *region_node = NULL;
       size_t num_previews;
       derez.deserialize(num_previews);
       std::set<RtEvent> ready_events;
       if (num_previews > 0)
       {
-        if (region_node == NULL)
-          region_node = runtime->forest->get_node(handle);
-        previews = new TraceViewSet(target->context, 0/*no owner*/,region_node);
+        previews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
         previews->unpack(derez, num_previews, source, ready_events); 
       }
       size_t num_antiviews;
       derez.deserialize(num_antiviews);
       if (num_antiviews > 0)
       {
-        if (region_node == NULL)
-          region_node = runtime->forest->get_node(handle);
-        antiviews = new TraceViewSet(target->context,0/*no owner*/,region_node);
+        antiviews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
         antiviews->unpack(derez, num_antiviews, source, ready_events);
       }
       size_t num_postviews;
       derez.deserialize(num_postviews);
       if (num_postviews > 0)
       {
-        if (region_node == NULL)
-          region_node = runtime->forest->get_node(handle);
-        postviews = new TraceViewSet(target->context,0/*no owner*/,region_node);
+        postviews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
         postviews->unpack(derez, num_postviews, source, ready_events);
       }
       RtUserEvent done_event;
@@ -19094,163 +21086,2056 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Pending Equivalence Set 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node, 
-                                                 InnerContext *ctx) 
-      : region_node(node), context(ctx), new_set(NULL)
-    //--------------------------------------------------------------------------
-    {
-      region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    PendingEquivalenceSet::~PendingEquivalenceSet(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((new_set != NULL) && 
-          new_set->remove_base_gc_ref(PENDING_REFINEMENT_REF))
-        delete new_set;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            previous_sets.begin(); it != previous_sets.end(); it++)
-        if (it->first->remove_base_gc_ref(PENDING_REFINEMENT_REF))
-          delete it->first;
-      if (region_node->remove_base_resource_ref(PENDING_REFINEMENT_REF))
-        delete region_node;
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingEquivalenceSet::record_previous(EquivalenceSet *set,
-                                                const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            previous_sets.begin(); it != previous_sets.end(); it++)
-        assert((set->region_node != it->first->region_node) ||
-            (mask * it->second));
-      if (previous_sets.insert(set, mask))
-        set->add_base_gc_ref(PENDING_REFINEMENT_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingEquivalenceSet::record_all(VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(previous_sets.empty());
-#endif
-      version_info.swap(previous_sets);
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            previous_sets.begin(); it != previous_sets.end(); it++)
-        it->first->add_base_gc_ref(PENDING_REFINEMENT_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet* PendingEquivalenceSet::compute_refinement(
-                                        AddressSpaceID suggested_owner, 
-                                        Runtime *runtime,
-                                        std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      if (new_set == NULL)
-      {
-        new_set = new EquivalenceSet(runtime, 
-            runtime->get_available_distributed_id(),
-            suggested_owner, region_node, context, true/*register now*/);
-        new_set->add_base_gc_ref(PENDING_REFINEMENT_REF);
-        std::set<RtEvent> preconditions;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              previous_sets.begin(); it != previous_sets.end(); it++)
-          new_set->clone_from(suggested_owner, it->first, it->second, 
-                              false/*forward to owner*/, preconditions);
-        if (!preconditions.empty())
-          clone_event = new_set->make_owner(suggested_owner, 
-              Runtime::merge_events(preconditions));
-        else
-          clone_event = new_set->make_owner(suggested_owner);
-      }
-      if (clone_event.exists())
-      {
-        if (!clone_event.has_triggered())
-          ready_events.insert(clone_event);
-        else
-          clone_event = RtEvent::NO_RT_EVENT;
-      }
-      return new_set;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PendingEquivalenceSet::finalize(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!clone_event.exists() || clone_event.has_triggered())
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              previous_sets.begin(); it != previous_sets.end(); it++)
-          if (it->first->remove_base_gc_ref(PENDING_REFINEMENT_REF))
-            delete it->first;
-        previous_sets.clear();
-        // Indicate that we can delete this now
-        return true;
-      }
-      else
-      {
-        // Launch a meta-task to remove these references and delete
-        // the object once we know that the clone event has triggered
-        DeferFinalizePendingSetArgs args(this);
-        region_node->context->runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, clone_event);
-        // Do no delete this now
-        return false;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PendingEquivalenceSet::handle_defer_finalize(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferFinalizePendingSetArgs *dargs = 
-        (const DeferFinalizePendingSetArgs*)args;
-      delete dargs->pending;
-    }
-
-    /////////////////////////////////////////////////////////////
     // Equivalence Set Tracker
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    EqSetTracker::EqSetTracker(LocalLock &lock)
+      : tracker_lock(lock), pending_equivalence_sets(NULL),
+        created_equivalence_sets(NULL),
+        equivalence_sets_ready(NULL), waiting_infos(NULL),
+        creation_requests(NULL), creation_rectangles(NULL),
+        creation_sources(NULL), remaining_responses(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    EqSetTracker::~EqSetTracker(void) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(equivalence_sets.empty());
+      assert(pending_equivalence_sets == NULL);
+      assert(created_equivalence_sets == NULL);
+      assert(equivalence_sets_ready == NULL);
+      assert(waiting_infos == NULL);
+      assert(current_subscriptions.empty());
+      assert(!pending_invalidations);
+      assert(creation_requests == NULL);
+      assert(creation_rectangles == NULL);
+      assert(creation_sources == NULL);
+      assert(remaining_responses == NULL);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_equivalence_sets(InnerContext *context,
+                                const FieldMask &mask,
+                                FieldMaskSet<EquivalenceSet> &eq_sets,
+                                FieldMaskSet<EqKDTree> &to_create,
+                                std::map<EqKDTree*,Domain> &creation_rects,
+                                std::map<EquivalenceSet*,
+                                  LegionMap<Domain,FieldMask> > &creation_srcs,
+                                FieldMaskSet<EqKDTree> &new_subscriptions,
+                                unsigned new_references, AddressSpaceID source,
+                                unsigned total_responses,
+                                std::vector<RtEvent> &ready_events,
+                                const CollectiveMapping &target_mapping,
+                                const std::vector<EqSetTracker*> &targets,
+                                const AddressSpaceID creation_target_space)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!targets.empty());
+      assert(total_responses > 0);
+      assert(target_mapping.size() == targets.size());
+      assert(target_mapping.contains(creation_target_space));
+      assert(target_mapping.contains(context->runtime->address_space));
+      assert(this == targets[
+          target_mapping.find_index(context->runtime->address_space)]);
+      assert((creation_target_space == context->runtime->address_space) ||
+              (target_mapping.size() > 1));
+#endif
+      // If there are multiple targets then we only want to perform any
+      // creations on the first target and then we'll broadcast the results
+      // out to any other targets when we create the equivalence sets
+      if (!to_create.empty() && 
+          (context->runtime->address_space != creation_target_space))
+      {
+        to_create.clear();
+        creation_rects.clear();
+        creation_srcs.clear();
+      }
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > create_now;
+      LegionMap<Domain,FieldMask> create_now_rectangles;
+      std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > create_now_sources;
+      // If we have just one response, we can just move things over
+      if ((total_responses == 1) && !to_create.empty())
+      {
+        for (std::map<EqKDTree*,Domain>::const_iterator it =
+              creation_rects.begin(); it != creation_rects.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(to_create.find(it->first) != to_create.end());
+#endif
+          LegionMap<Domain,FieldMask>::iterator finder = 
+            create_now_rectangles.find(it->second);
+          if (finder != create_now_rectangles.end())
+            finder->second |= to_create[it->first];
+          else
+            create_now_rectangles[it->second] = to_create[it->first];
+        }
+        create_now[source].swap(to_create);
+        create_now_sources.swap(creation_srcs);
+      }
+      {
+        AutoLock t_lock(tracker_lock);
+#ifdef DEBUG_LEGION
+        // A little sanity check, we should never be receiving racy
+        // creations for fields that were also being invalidated because
+        // mapping dependences should guarantee non-overlapping of these
+        // two processes
+        if (!!pending_invalidations)
+        {
+          if (!create_now_rectangles.empty())
+          {
+            for (LegionMap<Domain,FieldMask>::const_iterator it =
+                  create_now_rectangles.begin(); it != 
+                  create_now_rectangles.end(); it++)
+              assert(pending_invalidations * it->second);
+          }
+          else
+            assert(pending_invalidations * to_create.get_valid_mask());
+        }
+#endif
+        // Record pending equivalence sets
+        if (!eq_sets.empty())
+        {
+          if (pending_equivalence_sets == NULL)
+          {
+            pending_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
+            pending_equivalence_sets->swap(eq_sets);
+          }
+          else
+          {
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  eq_sets.begin(); it != eq_sets.end(); it++)
+              pending_equivalence_sets->insert(it->first, it->second);
+          }
+        }
+        if (new_references > 0)
+          add_subscription_reference(new_references);
+        // Record subscription owners
+        if (!new_subscriptions.empty())
+        {
+          FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
+          if (subscriptions.empty())
+            subscriptions.swap(new_subscriptions);
+          else
+            record_subscriptions(source, new_subscriptions);
+        }
+        if (!to_create.empty())
+          // Even though we're going to make these equivalence sets, we'll
+          // still effectively be recorded as subscribers of these nodes
+          // once we're done with the creation
+          record_subscriptions(source, to_create);
+        if (!create_now.empty())
+          // Also handle the case where we already swapped to_create into
+          // the create_now data structure
+          record_subscriptions(source, create_now[source]);
+        // Record any creations that we need to perform
+        if (total_responses > 1)
+        {
+          if (!to_create.empty())
+            record_creation_sets(to_create,creation_rects,source,creation_srcs);
+          // Now see which fields are done
+          FieldMask remaining = mask;
+          if (remaining_responses != NULL)
+          {
+            for (LegionMap<unsigned,FieldMask>::iterator it = 
+                  remaining_responses->begin(); it != 
+                  remaining_responses->end(); /*nothing*/)
+            {
+              const FieldMask overlap = remaining & it->second;
+              if (!overlap)
+              {
+                it++;
+                continue;
+              }
+              if (it->first > 1) // Update it lower down the entries
+                (*remaining_responses)[it->first-1] |= overlap;
+              else
+                // We've seen the last response for these fields
+                // so we can now merge things over to be handled
+                extract_creation_sets(overlap, create_now, 
+                    create_now_rectangles, create_now_sources);
+              it->second -= overlap;
+              if (!it->second)
+              {
+                LegionMap<unsigned,FieldMask>::iterator to_delete = it++;
+                remaining_responses->erase(to_delete);
+              }
+              else
+                it++;
+              remaining -= overlap;
+              if (!remaining)
+                break;
+            }
+            if (remaining_responses->empty())
+            {
+              delete remaining_responses;
+              remaining_responses = NULL;
+            }
+          }
+          if (!!remaining)
+          {
+            if (remaining_responses == NULL)
+              remaining_responses = new LegionMap<unsigned,FieldMask>();
+            (*remaining_responses)[total_responses-1] |= remaining;
+          }
+        }
+      }
+      // See if we have any equivalence sets for us to create right now
+      if (!create_now.empty())
+        create_new_equivalence_sets(context, ready_events,
+            create_now, create_now_rectangles, create_now_sources,
+            target_mapping, targets);
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_output_subscriptions(AddressSpaceID source,
+                                      FieldMaskSet<EqKDTree> &new_subscriptions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!new_subscriptions.empty());
+#endif
+      AutoLock t_lock(tracker_lock);
+      FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
+      if (!subscriptions.empty())
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((subscriptions.find(it->first) == subscriptions.end()) ||
+              (subscriptions.find(it->first)->second * it->second));
+#endif
+          subscriptions.insert(it->first, it->second);
+        }
+      }
+      else
+        subscriptions.swap(new_subscriptions);
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_subscriptions(AddressSpaceID source,
+                                const FieldMaskSet<EqKDTree> &new_subscriptions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!new_subscriptions.empty());
+#endif
+      FieldMaskSet<EqKDTree> &subscriptions = current_subscriptions[source];
+      if (!subscriptions.empty())
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              new_subscriptions.begin(); it != new_subscriptions.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((subscriptions.find(it->first) == subscriptions.end()) ||
+              (subscriptions.find(it->first)->second * it->second));
+#endif
+          subscriptions.insert(it->first, it->second);
+        }
+      }
+      else
+        subscriptions = new_subscriptions;
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_creation_sets(FieldMaskSet<EqKDTree> &to_create,
+        std::map<EqKDTree*,Domain> &creation_rects, AddressSpaceID source,
+        std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs)
+    //--------------------------------------------------------------------------
+    {
+      // Lock held by caller
+      // Save these into the creation requests 
+      for (std::map<EqKDTree*,Domain>::const_iterator it =
+            creation_rects.begin(); it != creation_rects.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_create.find(it->first) != to_create.end());
+#endif
+        if (creation_rectangles != NULL)
+        {
+          LegionMap<Domain,FieldMask>::iterator finder = 
+            creation_rectangles->find(it->second);
+          if (finder != creation_rectangles->end())
+            finder->second |= to_create[it->first];
+          else
+            (*creation_rectangles)[it->second] = to_create[it->first];
+        }
+        else
+        {
+          creation_rectangles = new LegionMap<Domain,FieldMask>();
+          (*creation_rectangles)[it->second] = to_create[it->first];
+        }
+      }
+      if (creation_requests == NULL)
+        creation_requests = 
+          new LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >();
+      FieldMaskSet<EqKDTree> &requests = (*creation_requests)[source];
+      if (!requests.empty())
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              to_create.begin(); it != to_create.end(); it++)
+          requests.insert(it->first, it->second);
+      }
+      else
+        requests.swap(to_create);
+      // Save the creation sources
+      if (creation_sources != NULL)
+      {
+        for (std::map<EquivalenceSet*,
+                      LegionMap<Domain,FieldMask> >::iterator sit =
+              creation_srcs.begin(); sit != creation_srcs.end(); sit++)
+        {
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> >::iterator
+            finder = creation_sources->find(sit->first);
+          if (finder != creation_sources->end())
+          {
+            for (LegionMap<Domain,FieldMask>::const_iterator it =
+                  sit->second.begin(); it != sit->second.end(); it++)
+              finder->second[it->first] |= it->second;
+          }
+          else
+            (*creation_sources)[sit->first].swap(sit->second);
+        }
+      }
+      else
+      {
+        creation_sources =
+          new std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> >();
+        creation_sources->swap(creation_srcs);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::extract_creation_sets(const FieldMask &mask,
+     LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+     LegionMap<Domain,FieldMask> &create_now_rectangles,
+     std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &create_now_sources)
+    //--------------------------------------------------------------------------
+    {
+      // Lock held by caller
+#ifdef DEBUG_LEGION
+      assert(equivalence_sets_ready != NULL);
+#endif
+      const size_t outstanding_requests = equivalence_sets_ready->size();
+#ifdef DEBUG_LEGION
+      assert(outstanding_requests > 0);
+#endif
+      if (outstanding_requests > 1)
+      {
+        // Pull out the entries just for our fields
+        if (creation_requests != NULL)
+        {
+          for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+                cit = creation_requests->begin(); 
+                cit != creation_requests->end(); /*nothing*/)
+          {
+            if (mask * cit->second.get_valid_mask())
+              cit++;
+            else if (mask == cit->second.get_valid_mask())
+            {
+              create_now[cit->first].swap(cit->second);
+              LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+                to_delete = cit++;
+              creation_requests->erase(to_delete);
+            }
+            else
+            {
+              std::vector<EqKDTree*> to_delete;
+              for (FieldMaskSet<EqKDTree>::iterator it =
+                    cit->second.begin(); it != cit->second.end(); it++)
+              {
+                const FieldMask overlap = mask & it->second;
+                if (!overlap)
+                  continue;
+                create_now[cit->first].insert(it->first, overlap);
+                it.filter(overlap);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              for (std::vector<EqKDTree*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                cit->second.erase(*it);
+              if (cit->second.empty())
+              {
+                LegionMap<AddressSpaceID,
+                  FieldMaskSet<EqKDTree> >::iterator to_delete = cit++;
+                creation_requests->erase(to_delete);
+              }
+              else
+              {
+                cit->second.tighten_valid_mask();
+                cit++;
+              }
+            }
+          }
+          if (creation_requests->empty())
+          {
+            delete creation_requests;
+            creation_requests = NULL;
+          }
+        }
+        if (creation_rectangles != NULL)
+        {
+          for (LegionMap<Domain,FieldMask>::iterator it =
+                creation_rectangles->begin(); it != 
+                creation_rectangles->end(); /*nothing*/)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+            {
+              it++;
+              continue;
+            }
+            create_now_rectangles[it->first] = overlap;
+            it->second -= overlap;
+            if (!it->second)
+            {
+              LegionMap<Domain,FieldMask>::iterator to_delete = it++;
+              creation_rectangles->erase(to_delete);
+            }
+            else
+              it++;
+          }
+          if (creation_rectangles->empty())
+          {
+            delete creation_rectangles;
+            creation_rectangles = NULL;
+          }
+        }
+        if (creation_sources != NULL)
+        {
+          for (std::map<EquivalenceSet*,
+                        LegionMap<Domain,FieldMask> >::iterator sit =
+                creation_sources->begin(); sit != 
+                creation_sources->end(); /*nothing*/)
+          {
+            for (LegionMap<Domain,FieldMask>::iterator it =
+                  sit->second.begin(); it != 
+                  sit->second.end(); /*nothing*/)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!!overlap)
+              {
+                create_now_sources[sit->first][it->first] = overlap;
+                it->second -= overlap;
+                if (!it->second)
+                {
+                  LegionMap<Domain,FieldMask>::iterator to_delete = it++;
+                  sit->second.erase(to_delete);
+                }
+                else
+                  it++;
+              }
+              else
+                it++;
+            }
+            if (sit->second.empty())
+            {
+              std::map<EquivalenceSet*,
+                LegionMap<Domain,FieldMask> >::iterator to_delete = sit++;
+              creation_sources->erase(to_delete);
+            }
+            else
+              sit++;
+          }
+          if (creation_sources->empty())
+          {
+            delete creation_sources;
+            creation_sources = NULL;
+          }
+        }
+      }
+      else
+      {
+        // If we're just doing one compute call then we
+        // know we're going to do this for everything
+        if (creation_requests != NULL)
+        {
+          creation_requests->swap(create_now);
+          delete creation_requests;
+          creation_requests = NULL;
+        }
+        if (creation_rectangles != NULL)
+        {
+          creation_rectangles->swap(create_now_rectangles);
+          delete creation_rectangles;
+          creation_rectangles = NULL;
+        }
+        if (creation_sources != NULL)
+        {
+          creation_sources->swap(create_now_sources);
+          delete creation_sources;
+          creation_sources = NULL;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    EqSetTracker::SourceState::~SourceState(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((source_expr != NULL) && 
+          source_expr->remove_base_expression_reference(DISJOINT_COMPLETE_REF))
+        delete source_expr;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* EqSetTracker::SourceState::get_expression(void) const
+    //--------------------------------------------------------------------------
+    {
+      return source_expr;
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::SourceState::set_expression(IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(source_expr == NULL);
+#endif
+      source_expr = expr;
+      source_expr->add_base_expression_reference(DISJOINT_COMPLETE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::create_new_equivalence_sets(InnerContext *context,
+         std::vector<RtEvent> &ready_events,
+         LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+         LegionMap<Domain,FieldMask> &create_now_rectangles,
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+         const CollectiveMapping &target_mapping,
+         const std::vector<EqSetTracker*> &targets)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = context->runtime;
+      // Compute the rectangle sets for all the source equivalence sets
+      // Also track which source equivalence sets have a unique set of fields
+      // as we can use those to check for dominating the new set of rectangles
+      // so we might be able to skip making a new equivalence set
+      FieldMaskSet<EquivalenceSet> unique_sources;
+      std::map<EquivalenceSet*,LegionList<SourceState> > set_sources;
+      {
+        FieldMask multiple_sources;
+        for (std::map<EquivalenceSet*,
+                      LegionMap<Domain,FieldMask> >::const_iterator
+              eit = creation_srcs.begin(); eit != creation_srcs.end(); eit++)
+        {
+          LegionList<SourceState> &src_rects = set_sources[eit->first];
+          compute_field_sets(FieldMask(), eit->second, src_rects);
+          FieldMask src_fields;
+          for (LegionList<SourceState>::const_iterator it =
+                src_rects.begin(); it != src_rects.end(); it++)
+            src_fields |= it->set_mask;
+          if (!!multiple_sources)
+          {
+            src_fields -= multiple_sources;
+            if (!src_fields)
+              continue;
+          }
+          // Now deduplicate with prior fields
+          if (!(src_fields * unique_sources.get_valid_mask()))
+          {
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it =
+                  unique_sources.begin(); it != unique_sources.end(); it++)
+            {
+              const FieldMask overlap = src_fields & it->second;
+              if (!overlap)
+                continue;
+              multiple_sources |= overlap;
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+              src_fields -= overlap;
+              if (!src_fields)
+                break;
+            }
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              unique_sources.erase(*it);
+            if (!src_fields)
+              continue;
+          }
+          // We only allow the unique source optimization when the 
+          // equivalence set comes from the same context. If it 
+          // doesn't then we don't have any way to scope its
+          // invalidation set down to just this set of points safely
+          if (eit->first->context->get_depth() == context->get_depth())
+            unique_sources.insert(eit->first, src_fields);
+          else
+            multiple_sources |= src_fields;
+        }
+      }
+      // Sort the rectangles into field sets and make an equivlaence set
+      // for each of them if their sources are not the same
+      LegionList<FieldSet<Domain> > rectangle_sets;
+      // In release mode we just leave the unverse mask empty as that tells
+      // the field sets routine to just make sets for the represented field
+      // In debug mode, we populate the universe mask to make sure it aligns
+      // with all the kd-nodes that we're supposed to target
+      FieldMask universe_mask;
+#ifdef DEBUG_LEGION
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+            it = create_now.begin(); it != create_now.end(); it++)
+        universe_mask |= it->second.get_valid_mask();
+#endif
+      compute_field_sets(universe_mask, create_now_rectangles, rectangle_sets);
+      FieldMaskSet<EquivalenceSet> created_sets;
+      IndexSpaceExpression *tracker_expr = get_tracker_expression();
+      for (LegionList<FieldSet<Domain> >::iterator rit =
+            rectangle_sets.begin(); rit != rectangle_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->elements.empty());
+#endif
+        // Check for the case where we have an existing equivalence set
+        // that already has all the data that we need in which case there
+        // is no point in making a new one and copying the data if we can
+        // just reuse the existing one
+        if (!(rit->set_mask * unique_sources.get_valid_mask()) &&
+            check_for_congruent_source_equivalence_sets(*rit, runtime,
+              ready_events, created_sets, unique_sources,
+              create_now, set_sources, target_mapping, targets))
+          continue;
+        // First we need an expression for this equivalence set
+        IndexSpaceExpression *expr =
+          tracker_expr->create_from_rectangles(rit->elements);
+        // Extract the things that we need to notify about this set
+        LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+        if (rectangle_sets.size() == 1)
+        {
+          to_notify.swap(create_now);
+          // But swap our local space back out if there is one
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator 
+            finder = to_notify.find(runtime->address_space);
+          if (finder != to_notify.end())
+          {
+            create_now[runtime->address_space].swap(finder->second);
+            to_notify.erase(finder);
+          }
+        }
+        else
+          extract_remote_notifications(rit->set_mask, 
+              runtime->address_space, create_now, to_notify);
+        // Next compute the CollectiveMapping for the equivalence set
+        std::vector<AddressSpaceID> spaces;
+        spaces.reserve(to_notify.size());
+        for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+              it = to_notify.begin(); it != to_notify.end(); it++)
+          spaces.push_back(it->first);
+        // Also add in any spaces for any targets that we need to send to also
+        bool need_sort = false;
+        for (unsigned idx = 0; idx < target_mapping.size(); idx++)
+        {
+          const AddressSpace target_space = target_mapping[idx];
+          if (to_notify.find(target_space) != to_notify.end())
+            continue;
+          spaces.push_back(target_space);
+          need_sort = true;
+        }
+        if (need_sort)
+          std::sort(spaces.begin(), spaces.end());
+        CollectiveMapping *mapping = NULL;
+        if (spaces.size() > 1)
+        {
+          mapping = 
+            new CollectiveMapping(spaces, runtime->legion_collective_radix);
+          mapping->add_reference();
+        }
+        // Do a check to see if we already have an existing equivalence set
+        // that is congruent with these points but aren't used for the fields
+        // so we can reuse it if possible
+        bool set_created = false;
+        EquivalenceSet *set = find_congruent_existing_equivalence_set(expr,
+            rit->set_mask, created_sets, context);
+        if (set == NULL)
+        {
+          const DistributedID did = runtime->get_available_distributed_id();
+          set = new EquivalenceSet(runtime, did,
+              runtime->address_space/*logical owner*/, expr, 
+              get_region_tree_id(), context, true/*register*/, mapping,
+              (target_mapping.size() > 1));
+          if (created_sets.insert(set, rit->set_mask))
+            set->add_base_gc_ref(VERSION_MANAGER_REF);
+          set_created = true;
+        }
+        // Clone any meta-data from the source equivalence sets to
+        // bring this new equivalence set up to date 
+        RtEvent ready;
+        if (!set_sources.empty())
+        {
+          ready = initialize_new_equivalence_set(set, rit->set_mask, 
+                                                 runtime, set_sources);
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
+        // Notify any equivalence set kd tree nodes about the new set 
+        if (mapping != NULL)
+        {
+          // Broadcast this out to all the spaces and have them notify
+          // their EqKDTree objects
+          const AddressSpaceID local_space = runtime->address_space;
+          std::vector<AddressSpaceID> children;
+          mapping->get_children(local_space, local_space, children);
+#ifdef DEBUG_LEGION
+          assert(!children.empty());
+#endif
+          if (set_created)
+          {
+            // See if this is an index space node for easy packing
+            // otherwise we're going to pack all the rectangles so
+            // we can make an expression on the remote nodes
+            IndexSpaceNode *node = NULL;
+            if (expr == tracker_expr)
+              node = dynamic_cast<IndexSpaceNode*>(expr);
+            for (std::vector<AddressSpaceID>::const_iterator cit =
+                  children.begin(); cit != children.end(); cit++)
+            {
+              const RtUserEvent notified = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(this);
+                rez.serialize(set->did);
+                if (node == NULL)
+                {
+                  rez.serialize(IndexSpace::NO_SPACE);
+                  rez.serialize(rit->elements.size());
+                  for (std::set<Domain>::const_iterator it =
+                        rit->elements.begin(); it != rit->elements.end(); it++)
+                    rez.serialize(*it);
+                }
+                else
+                  rez.serialize(node->handle);
+                rez.serialize(set->tree_id);
+                context->pack_inner_context(rez);
+                mapping->pack(rez);
+                rez.serialize(ready);
+                rez.serialize<size_t>(to_notify.size());
+                for (LegionMap<AddressSpaceID,
+                               FieldMaskSet<EqKDTree> >::const_iterator nit =
+                      to_notify.begin(); nit != to_notify.end(); nit++)
+                {
+                  rez.serialize(nit->first);
+                  rez.serialize(nit->second.size());
+                  for (FieldMaskSet<EqKDTree>::const_iterator it =
+                        nit->second.begin(); it != nit->second.end(); it++)
+                  {
+                    rez.serialize(it->first);
+                    rez.serialize(it->second);
+                  }
+                }
+                // Also pack up any targets
+                target_mapping.pack(rez);
+                for (unsigned idx = 0; idx < targets.size(); idx++)
+                  rez.serialize(targets[idx]);
+                rez.serialize(rit->set_mask);
+                rez.serialize(notified);
+              }
+              runtime->send_equivalence_set_creation(*cit, rez);
+              ready_events.push_back(notified);
+            }
+          }
+          else
+          {
+            for (std::vector<AddressSpaceID>::const_iterator cit =
+                  children.begin(); cit != children.end(); cit++)
+            {
+              const RtUserEvent notified = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(set->did);
+                rez.serialize(this);
+                rez.serialize(local_space);
+                mapping->pack(rez);
+                rez.serialize(ready);
+                rez.serialize<size_t>(to_notify.size());
+                for (LegionMap<AddressSpaceID,
+                               FieldMaskSet<EqKDTree> >::const_iterator nit =
+                      to_notify.begin(); nit != to_notify.end(); nit++)
+                {
+                  rez.serialize(nit->first);
+                  rez.serialize(nit->second.size());
+                  for (FieldMaskSet<EqKDTree>::const_iterator it =
+                        nit->second.begin(); it != nit->second.end(); it++)
+                  {
+                    rez.serialize(it->first);
+                    rez.serialize(it->second);
+                  }
+                }
+                // Also pack up any targets
+                target_mapping.pack(rez);
+                for (unsigned idx = 0; idx < targets.size(); idx++)
+                  rez.serialize(targets[idx]);
+                rez.serialize(rit->set_mask);
+                rez.serialize(notified);
+              }
+              runtime->send_equivalence_set_reuse(*cit, rez);
+              ready_events.push_back(notified);
+            }
+          }
+        }
+        // Notify any local EqKDTree objects
+        LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+          finder = create_now.find(runtime->address_space);
+        if (finder != create_now.end())
+        {
+          std::vector<EqKDTree*> to_delete;
+          for (FieldMaskSet<EqKDTree>::iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            const FieldMask overlap = rit->set_mask & it->second;
+            if (!overlap)
+              continue;
+            it->first->record_equivalence_set(set, overlap, ready,
+                                              target_mapping, targets);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          for (std::vector<EqKDTree*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            finder->second.erase(*it);
+          if (finder->second.empty())
+            create_now.erase(finder);
+        }
+        if ((mapping != NULL) && mapping->remove_reference())
+          delete mapping;
+      }
+#ifdef DEBUG_LEGION
+      assert(!created_sets.empty());
+#endif
+      // Retake the lock and record these pending equivalence sets
+      AutoLock t_lock(tracker_lock); 
+      if (created_equivalence_sets == NULL)
+      {
+        created_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
+        created_equivalence_sets->swap(created_sets);
+      }
+      else
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              created_sets.begin(); it != created_sets.end(); it++)
+        {
+          // Add the new set and remove any duplicate references
+          // which should never lead to the deletion of the set
+          // since we should already be holding a reference
+          if (!created_equivalence_sets->insert(it->first, it->second) &&
+              it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+            assert(false); // should never actaully delete the object
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool EqSetTracker::check_for_congruent_source_equivalence_sets(
+        FieldSet<Domain> &dest, Runtime *runtime,
+        std::vector<RtEvent> &ready_events,
+        FieldMaskSet<EquivalenceSet> &created_sets,
+        FieldMaskSet<EquivalenceSet> &unique_sources,
+        LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+        std::map<EquivalenceSet*,LegionList<SourceState> > &set_sources,
+        const CollectiveMapping &target_mapping,
+        const std::vector<EqSetTracker*> &targets)
+    //--------------------------------------------------------------------------
+    {
+      size_t destination_volume = 0;
+      for (std::set<Domain>::const_iterator it =
+            dest.elements.begin(); it != dest.elements.end(); it++)
+        destination_volume += it->get_volume();
+      std::vector<EquivalenceSet*> to_remove;
+      const AddressSpaceID local_space = runtime->address_space;
+      for (FieldMaskSet<EquivalenceSet>::iterator eit =
+            unique_sources.begin(); eit != unique_sources.end(); eit++)
+      {
+        const FieldMask src_mask = dest.set_mask & eit->second;
+        if (!src_mask)
+          continue; 
+        std::map<EquivalenceSet*,LegionList<SourceState> >::iterator
+          source_finder = set_sources.find(eit->first);
+#ifdef DEBUG_LEGION
+        assert(source_finder != set_sources.end());
+#endif
+        for (LegionList<SourceState>::iterator sit = 
+              source_finder->second.begin(); sit !=
+              source_finder->second.end(); /*nothing*/)
+        {
+          const FieldMask overlap = src_mask & sit->set_mask;
+          if (!overlap)
+          {
+            sit++;
+            continue;
+          }
+          if (sit->source_volume == 0)
+          {
+#ifdef DEBUG_LEGION
+            assert(!sit->elements.empty());
+#endif
+            for (std::set<Domain>::const_iterator it =
+                  sit->elements.begin(); it != sit->elements.end(); it++)
+              sit->source_volume += it->get_volume();
+          }
+#ifdef DEBUG_LEGION
+          assert(sit->source_volume <= destination_volume);
+          assert(sit->source_volume <= eit->first->set_expr->get_volume());
+#endif
+          if ((sit->source_volume == destination_volume) &&
+              (sit->source_volume == eit->first->set_expr->get_volume()))
+          {
+            // This equivalence set is already valid for exactly the 
+            // point of the overlapping fields
+            // Get the set of EqKDTree nodes that we need to notify
+            LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+            extract_remote_notifications(overlap, runtime->address_space,
+                                         create_now, to_notify);
+            std::vector<AddressSpaceID> spaces;
+            spaces.reserve(to_notify.size());
+            for (LegionMap<AddressSpaceID,
+                           FieldMaskSet<EqKDTree> >::const_iterator
+                  it = to_notify.begin(); it != to_notify.end(); it++)
+              spaces.push_back(it->first);
+            bool need_sort = false;
+            for (unsigned idx = 0; idx < target_mapping.size(); idx++)
+            {
+              const AddressSpaceID target_space = target_mapping[idx];
+              if (to_notify.find(target_space) != to_notify.end())
+                continue;
+              spaces.push_back(target_space);
+              need_sort = true;
+            }
+            if (need_sort)
+              std::sort(spaces.begin(), spaces.end());
+            if (spaces.size() > 1)
+            {
+              CollectiveMapping mapping(spaces, 
+                  runtime->legion_collective_radix);
+              std::vector<AddressSpaceID> children;
+              mapping.get_children(local_space, local_space, children);
+              for (std::vector<AddressSpaceID>::const_iterator cit =
+                    children.begin(); cit != children.end(); cit++)
+              {
+                const RtUserEvent notified = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  // Reference still held by at least one EqKDTree 
+                  // for which this is in the previous set
+                  rez.serialize(eit->first->did);
+                  rez.serialize(this);
+                  rez.serialize(local_space);
+                  mapping.pack(rez);
+                  rez.serialize(RtEvent::NO_RT_EVENT);
+                  rez.serialize<size_t>(to_notify.size());
+                  for (LegionMap<AddressSpaceID,
+                                 FieldMaskSet<EqKDTree> >::const_iterator nit =
+                        to_notify.begin(); nit != to_notify.end(); nit++)
+                  {
+                    rez.serialize(nit->first);
+                    rez.serialize(nit->second.size());
+                    for (FieldMaskSet<EqKDTree>::const_iterator it =
+                          nit->second.begin(); it != nit->second.end(); it++)
+                    {
+#ifdef DEBUG_LEGION
+                      assert(!(it->second - overlap));
+#endif
+                      rez.serialize(it->first);
+                      rez.serialize(it->second);
+                    }
+                  }
+                  // Also pack information about targets
+                  target_mapping.pack(rez);
+                  for (unsigned idx = 0; idx < targets.size(); idx++)
+                    rez.serialize(targets[idx]);
+                  rez.serialize(overlap);
+                  rez.serialize(notified);
+                }
+                runtime->send_equivalence_set_reuse(*cit, rez);
+                ready_events.push_back(notified);
+              }
+            }
+            // Check to see if there are any local notifications to perform
+            LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator 
+              local_finder = create_now.find(local_space);
+            if ((local_finder != create_now.end()) && 
+                !(overlap * local_finder->second.get_valid_mask()))
+            {
+              std::vector<EqKDTree*> to_delete;
+              for (FieldMaskSet<EqKDTree>::iterator it = 
+                    local_finder->second.begin(); it != 
+                    local_finder->second.end(); it++)
+              {
+                const FieldMask local_overlap = overlap & it->second;
+                if (!local_overlap)
+                  continue;
+                it->first->record_equivalence_set(eit->first, local_overlap,
+                    RtEvent::NO_RT_EVENT, target_mapping, targets);
+                it.filter(local_overlap);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (to_delete.size() < local_finder->second.size())
+              {
+                for (std::vector<EqKDTree*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  local_finder->second.erase(*it);
+                local_finder->second.tighten_valid_mask();
+              }
+              else if (to_delete.size() == local_finder->second.size())
+                create_now.erase(local_finder);
+            }
+            if (created_sets.insert(eit->first, overlap))
+              eit->first->add_base_gc_ref(VERSION_MANAGER_REF);
+            dest.set_mask -= overlap;
+            sit->set_mask -= overlap;
+            if (!sit->set_mask)
+            {
+              LegionList<SourceState>::iterator to_delete = sit++;
+              source_finder->second.erase(to_delete);
+            }
+            else
+              sit++;
+          }
+          else
+            sit++;
+        }
+        if (source_finder->second.empty())
+          set_sources.erase(source_finder);
+        eit.filter(src_mask);
+        if (!eit->second)
+          to_remove.push_back(eit->first);
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it =
+            to_remove.begin(); it != to_remove.end(); it++)
+        unique_sources.erase(*it);
+      return !dest.set_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* EqSetTracker::find_congruent_existing_equivalence_set(
+        IndexSpaceExpression *expr, const FieldMask &mask,
+        FieldMaskSet<EquivalenceSet> &created_sets, InnerContext *context)
+    //--------------------------------------------------------------------------
+    {
+      const int depth = context->get_depth();
+      RegionTreeForest *forest = context->runtime->forest;
+      // Find the canonical expression for this expr and then we can use that
+      // to compare against the canonical expression of each of the existing
+      // equivalence sets to see if we can find a match
+      const size_t volume = expr->get_volume();
+      expr = expr->get_canonical_expression(forest); 
+      // Need the lock since the equivalence set data structure might 
+      // change at the same time that we're iterating over it
+      // We're just reading though so we don't need exclusive access
+      AutoLock t_lock(tracker_lock,1,false/*exclusive*/);
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+      {
+        // Only allow this optimization for equivalence sets made
+        // in the same context, which we check by depth because we
+        // still want to allow equivalence sets from the other
+        // ReplicateContexts in the case of control replication
+        if (depth != it->first->context->get_depth())
+          continue;
+        // If the volumes are not the same then the shapes can't be the same
+        if (volume != it->first->set_expr->get_volume())
+          continue;
+        IndexSpaceExpression *set_expr = 
+          it->first->set_expr->get_canonical_expression(forest);
+        if (expr == set_expr)
+        {
+          // Found one, add it to the pending sets and add a reference
+          // if its the first time we're reusing it
+          if (created_sets.insert(it->first, mask))
+            it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+          return it->first;
+        }
+      }
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::extract_remote_notifications(const FieldMask &mask,
+          AddressSpaceID local_space,
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_notify)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<AddressSpaceID,
+                     FieldMaskSet<EqKDTree> >::iterator cit =
+            create_now.begin(); cit != create_now.end(); /*nothing*/)
+      {
+        if (cit->first == local_space)
+        {
+          cit++;
+          continue;
+        }
+        if (mask * cit->second.get_valid_mask())
+        {
+          cit++;
+          continue;
+        }
+        FieldMaskSet<EqKDTree> &notify = to_notify[cit->first];
+        if (mask != cit->second.get_valid_mask())
+        {
+          std::vector<EqKDTree*> to_delete;
+          for (FieldMaskSet<EqKDTree>::iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            notify.insert(it->first, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          for (std::vector<EqKDTree*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            cit->second.erase(*it);
+        }
+        else
+          notify.swap(cit->second);
+        if (cit->second.empty())
+        {
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+            to_delete = cit++;
+          create_now.erase(to_delete);
+        }
+        else
+          cit++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent EqSetTracker::initialize_new_equivalence_set(EquivalenceSet *target,
+           const FieldMask &mask, Runtime *runtime, 
+           std::map<EquivalenceSet*,LegionList<SourceState> > &set_sources)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RtEvent> ready_events;
+      for (std::map<EquivalenceSet*,LegionList<SourceState> >::iterator eit =
+            set_sources.begin(); eit != set_sources.end(); /*nothing*/)
+      {
+        for (LegionList<SourceState>::iterator sit =
+              eit->second.begin(); sit != eit->second.end(); /*nothing*/)
+        {
+          const FieldMask overlap = mask & sit->set_mask;
+          if (!overlap)
+          {
+            sit++;
+            continue;
+          }
+          // Sometimes the source can become the target when we find a 
+          // congruent equivalence set to use as the target, so we skip
+          // the cloning of the equivalence set data in that case
+          if (eit->first != target)
+          {
+            IndexSpaceExpression *expression = sit->get_expression();
+            if (expression == NULL)
+            {
+              IndexSpaceExpression *intersection = 
+                runtime->forest->intersect_index_spaces(
+                    eit->first->set_expr, target->set_expr);
+              if (intersection->get_volume() == target->set_expr->get_volume())
+                intersection = target->set_expr;
+              else if (intersection->get_volume() == 
+                  eit->first->set_expr->get_volume())
+                intersection = eit->first->set_expr;
+              expression = intersection->create_from_rectangles(sit->elements);
+              sit->set_expression(expression);
+            }
+            // We only record the partial invalidation if we're cloning between
+            // two equivalence sets in the same context. Note that because of
+            // control replication you can't just check that both sets are from
+            // the same equivalence set, but what you can do is check to see if
+            // they are at the same depth in the task tree
+            const bool record_invalidate = 
+             (target->context->get_depth() == eit->first->context->get_depth());
+            target->clone_from(eit->first, overlap, expression,
+                record_invalidate, ready_events, true/*invalidate overlap*/);
+          }
+          sit->set_mask -= overlap;
+          if (!sit->set_mask)
+          {
+            LegionList<SourceState>::iterator to_delete = sit++;
+            eit->second.erase(to_delete);
+          }
+          else
+            sit++;
+        }
+        if (eit->second.empty())
+        {
+          std::map<EquivalenceSet*,LegionList<SourceState> >::iterator
+            to_delete = eit++;
+          set_sources.erase(to_delete);
+        }
+        else
+          eit++;
+      }
+      if (ready_events.empty())
+        return RtEvent::NO_RT_EVENT;
+      else
+        return Runtime::merge_events(ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_pending_equivalence_set(EquivalenceSet *set,
+                                                      const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(tracker_lock);
+      if (pending_equivalence_sets == NULL)
+        pending_equivalence_sets = new FieldMaskSet<EquivalenceSet>();
+      pending_equivalence_sets->insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::finalize_equivalence_sets(RtUserEvent done_event,
+        InnerContext *context, Runtime *runtime, unsigned parent_req_index,
+        IndexSpaceExpression *expr, UniqueID opid)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock t_lock(tracker_lock);
+#ifdef DEBUG_LEGION
+        assert(equivalence_sets_ready != NULL);
+#endif
+        LegionMap<RtUserEvent,FieldMask>::iterator finder =
+          equivalence_sets_ready->find(done_event);
+#ifdef DEBUG_LEGION
+        assert(finder != equivalence_sets_ready->end());
+#endif
+        // Check for the pending invalidations case. This occurs due to 
+        // false aliasing in the Equivalence Set KD tree, were we might
+        // have found some equivalence sets for a subset of points for
+        // this analysis, but some other invalidation came through for
+        // an independent set of points which required refining the 
+        // node in the equivalence set KD tree. This will invalidate
+        // the subscriptions so we'll need to recompute the equivalence 
+        // sets. Note that we're guaranteed that this is only false
+        // aliasing because of the logical dependence analysis which 
+        // implies if there were true aliasing then there would have been
+        // a mapping dependence that prevented this race.
+        FieldMask invalidated = finder->second & pending_invalidations;
+        while (!!invalidated)
+        {
+          // We have pending invalidations that we deferred until we had
+          // seen all the responses for the compute_equivalence_sets call
+          // We've now seen all the responses, so we need to do the actual
+          // work of the invalidations now that we're in a consistent state
+          // First invalidate any subscriptions 
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
+          find_cancellations(invalidated, to_cancel);
+          // Then we can prune states out of the pending equivalence sets
+          if ((pending_equivalence_sets != NULL) &&
+              !(invalidated * pending_equivalence_sets->get_valid_mask()))
+          {
+            if (!(pending_equivalence_sets->get_valid_mask() - invalidated))
+            {
+              // Invalidate everything so we can just delete the sets
+              delete pending_equivalence_sets;
+              pending_equivalence_sets = NULL;
+            }
+            else
+            {
+              // Partial invalidation of only some fields
+              std::vector<EquivalenceSet*> to_delete;
+              for (FieldMaskSet<EquivalenceSet>::iterator it =
+                    pending_equivalence_sets->begin(); it !=
+                    pending_equivalence_sets->end(); it++)
+              {
+                it.filter(invalidated);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (!to_delete.empty())
+              {
+                for (std::vector<EquivalenceSet*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  pending_equivalence_sets->erase(*it);
+              }
+#ifdef DEBUG_LEGION
+              assert(!pending_equivalence_sets->empty());
+#endif
+              pending_equivalence_sets->tighten_valid_mask();
+            }
+          }
+          // Also need to prune states out of the created equivalence sets
+          if ((created_equivalence_sets != NULL) &&
+              !(invalidated * created_equivalence_sets->get_valid_mask()))
+          {
+            if (!(created_equivalence_sets->get_valid_mask() - invalidated))
+            {
+              // Invalidate everyhting so we can just delete things
+              for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                    created_equivalence_sets->begin(); it !=
+                    created_equivalence_sets->end(); it++)
+                if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                  delete it->first;
+              delete created_equivalence_sets;
+              created_equivalence_sets = NULL;
+            }
+            else
+            {
+              std::vector<EquivalenceSet*> to_delete;
+              for (FieldMaskSet<EquivalenceSet>::iterator it =
+                    created_equivalence_sets->begin(); it !=
+                    created_equivalence_sets->end(); it++)
+              {
+                it.filter(invalidated);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (!to_delete.empty())
+              {
+                for (std::vector<EquivalenceSet*>::const_iterator it =
+                      to_delete.begin(); it != to_delete.end(); it++)
+                {
+                  created_equivalence_sets->erase(*it);
+                  if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
+                    delete (*it);
+                }
+              }
+#ifdef DEBUG_LEGION
+              assert(!created_equivalence_sets->empty());
+#endif
+              created_equivalence_sets->tighten_valid_mask();
+            }
+          }
+          pending_invalidations -= invalidated;
+          t_lock.release();
+          // Perform any cancellations now that we've released the lock
+          if (!to_cancel.empty())
+          {
+            std::vector<RtEvent> cancelled_events;
+            cancel_subscriptions(runtime, to_cancel, &cancelled_events);
+            // Make sure all the cancellations are done before we try
+            // again so we don't double count references
+            if (!cancelled_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(cancelled_events);
+              wait_on.wait();
+            }
+          }
+          // Now redo the computation
+          // Note that if there was an initial collective rendezvous to
+          // compute these equivalence sets, we won't try to redo it here
+          // because we can't guarantee convergence between the different
+          // points as to whether they all saw the same invalidations at
+          // the same time and therefore the rendezvous is no longer safe
+          std::vector<EqSetTracker*> targets(1, this);
+          std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
+          const RtEvent ready = context->compute_equivalence_sets(
+              parent_req_index, targets, target_spaces, runtime->address_space,
+              expr, invalidated);
+          if (ready.exists() && !ready.has_triggered())
+          {
+            // Launch task to finalize the sets once they are ready
+            LgFinalizeEqSetsArgs args(this, done_event, opid,
+                context, parent_req_index, expr);
+            runtime->issue_runtime_meta_task(args, 
+                               LG_LATENCY_DEFERRED_PRIORITY, ready);
+            // We did the continuation for this so there's nothing
+            // more to do here
+            return;
+          }
+          t_lock.reacquire();
+          invalidated = finder->second & pending_invalidations;
+        }
+        // If there are any pending equivalence sets, move them into 
+        // the actual equivalence sets
+        if ((pending_equivalence_sets != NULL) &&
+            !(finder->second * pending_equivalence_sets->get_valid_mask()))
+        {
+          if (!(pending_equivalence_sets->get_valid_mask() - finder->second))
+          {
+            // They're all ready so we can move them over
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  pending_equivalence_sets->begin(); it !=
+                  pending_equivalence_sets->end(); it++)
+              if (equivalence_sets.insert(it->first, it->second))
+                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+            delete pending_equivalence_sets;
+            pending_equivalence_sets = NULL;
+          }
+          else
+          {
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  pending_equivalence_sets->begin(); it !=
+                  pending_equivalence_sets->end(); it++)
+            {
+              // Find what fields are overlapping
+              const FieldMask overlap = it->second & finder->second;
+              if (!overlap)
+                continue;
+              if (equivalence_sets.insert(it->first, overlap))
+                it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<EquivalenceSet*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                pending_equivalence_sets->erase(*it);
+            }
+#ifdef DEBUG_LEGION
+            assert(!pending_equivalence_sets->empty());
+#endif
+            pending_equivalence_sets->tighten_valid_mask();
+          }
+        }
+        // If there are any created equivalence sets, move them over too
+        if ((created_equivalence_sets != NULL) &&
+            !(finder->second * created_equivalence_sets->get_valid_mask()))
+        {
+          if (!(created_equivalence_sets->get_valid_mask() - finder->second))
+          {
+            // All fields are ready so we can move them all over
+            // Make sure to remove duplicate references
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  created_equivalence_sets->begin(); it !=
+                  created_equivalence_sets->end(); it++)
+              if (!equivalence_sets.insert(it->first, it->second) &&
+                  it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                assert(false); // should never delete the object
+            delete created_equivalence_sets;
+            created_equivalence_sets = NULL;
+          }
+          else
+          {
+            std::vector<EquivalenceSet*> to_delete;
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  created_equivalence_sets->begin(); it !=
+                  created_equivalence_sets->end(); it++)
+            {
+              // Find what fields are overlapping
+              const FieldMask overlap = it->second & finder->second;
+              if (!overlap)
+                continue;
+              if (overlap == it->second)
+              {
+                // Moving over all of the fields so we can move over
+                // our reference to or deduplicate the reference if
+                // the set already exists in the equivalence_sets
+                if (!equivalence_sets.insert(it->first, it->second) &&
+                    it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
+                  assert(false); // should never delete the object
+                to_delete.push_back(it->first);
+              }
+              else
+              {
+                // Just moving over some of the fields which means
+                // we need to add a reference if this is the first
+                if (equivalence_sets.insert(it->first, overlap))
+                  it->first->add_base_gc_ref(VERSION_MANAGER_REF);
+                it.filter(overlap);
+              }
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<EquivalenceSet*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                created_equivalence_sets->erase(*it);
+            }
+#ifdef DEBUG_LEGION
+            assert(!created_equivalence_sets->empty());
+#endif
+            created_equivalence_sets->tighten_valid_mask();
+          }
+        }
+        if (waiting_infos != NULL)
+        {
+          std::vector<VersionInfo*> to_delete;
+          for (FieldMaskSet<VersionInfo>::iterator wit =
+                waiting_infos->begin(); wit != waiting_infos->end(); wit++)
+          {
+            const FieldMask info_overlap = wit->second & finder->second;
+            if (!info_overlap)
+              continue;
+            record_equivalence_sets(wit->first, info_overlap);
+            wit.filter(info_overlap);
+            if (!wit->second)
+              to_delete.push_back(wit->first);
+          }
+          if (!to_delete.empty())
+          {
+            if (to_delete.size() < waiting_infos->size())
+            {
+              for (std::vector<VersionInfo*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                waiting_infos->erase(*it);
+              waiting_infos->tighten_valid_mask();
+            }
+            else
+            {
+              delete waiting_infos;
+              waiting_infos = NULL;
+            }
+          }
+        }
+        // We can relax the mask for the equivalence sets here so we don't
+        // recompute in the case that we are empty
+        equivalence_sets.relax_valid_mask(finder->second);
+        equivalence_sets_ready->erase(finder);
+        if (equivalence_sets_ready->empty())
+        {
+          delete equivalence_sets_ready;
+          equivalence_sets_ready = NULL;
+        }
+      }
+      // At this point we're done so we can trigger the done event
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::record_equivalence_sets(VersionInfo *version_info,
+                                               const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+      {
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        version_info->record_equivalence_set(it->first, overlap);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EqSetTracker::handle_pending_equivalence_set(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      size_t num_trackers;
+      derez.deserialize(num_trackers);
+      for (unsigned idx = 0; idx < num_trackers; idx++)
+      {
+        EqSetTracker *tracker;
+        derez.deserialize(tracker);
+        FieldMask mask;
+        derez.deserialize(mask);
+        tracker->record_pending_equivalence_set(set, mask);
+      }
+      RtUserEvent recorded_event;
+      derez.deserialize(recorded_event);
+      // Then pending sets can't be processed until the equivalence set is
+      // actually ready so chaing these events here
+      Runtime::trigger_event(recorded_event, ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EqSetTracker::handle_equivalence_set_creation(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      EqSetTracker *owner;
+      derez.deserialize(owner);
+      DistributedID did;
+      derez.deserialize(did);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      std::vector<Domain> rectangles;
+      if (!handle.exists())
+      {
+        size_t num_rectangles;
+        derez.deserialize(num_rectangles);
+        rectangles.resize(num_rectangles);
+        for (unsigned idx = 0; idx < num_rectangles; idx++)
+          derez.deserialize(rectangles[idx]);
+      }
+      RegionTreeID tid;
+      derez.deserialize(tid);
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
+      // Make sure that we'll know when this is triggered
+      ready_event.subscribe();
+      derez.deserialize(num_spaces);
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+      for (unsigned idx1 = 0; idx1 < num_spaces; idx1++)
+      {
+        AddressSpaceID space;
+        derez.deserialize(space);
+        FieldMaskSet<EqKDTree> &trees = to_notify[space];
+        size_t num_trees;
+        derez.deserialize(num_trees);
+        for (unsigned idx2 = 0; idx2 < num_trees; idx2++)
+        {
+          EqKDTree *tree;
+          derez.deserialize(tree);
+          FieldMask mask;
+          derez.deserialize(mask);
+          trees.insert(tree, mask);
+        }
+      }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      const CollectiveMapping target_mapping(derez, num_targets);
+      std::vector<EqSetTracker*> targets(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+        derez.deserialize(targets[idx]);
+      FieldMask recording_mask;
+      derez.deserialize(recording_mask);
+      RtUserEvent notified_event;
+      derez.deserialize(notified_event);
+ 
+      // Send it off to any children nodes
+      std::vector<RtEvent> notified_events;
+      std::vector<AddressSpaceID> children;
+      const AddressSpaceID root = runtime->determine_owner(did);
+      mapping->get_children(root, runtime->address_space, children);
+      if (!children.empty())
+      {
+        // Make this a broadcast tree of ready events so not everyone
+        // is subscribing to the owner node
+        const RtUserEvent local_ready = Runtime::create_rt_user_event();
+        Runtime::trigger_event(local_ready, ready_event);
+        for (std::vector<AddressSpaceID>::const_iterator cit =
+              children.begin(); cit != children.end(); cit++)
+        {
+          const RtUserEvent notified = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(owner);
+            rez.serialize(did);
+            rez.serialize(handle);
+            if (!handle.exists())
+            {
+              rez.serialize<size_t>(rectangles.size());
+              for (unsigned idx = 0; idx < rectangles.size(); idx++)
+                rez.serialize(rectangles[idx]);
+            }
+            rez.serialize(tid);
+            context->pack_inner_context(rez);
+            mapping->pack(rez);
+            rez.serialize(local_ready);
+            rez.serialize<size_t>(to_notify.size());
+            for (LegionMap<AddressSpaceID,
+                           FieldMaskSet<EqKDTree> >::const_iterator nit =
+                  to_notify.begin(); nit != to_notify.end(); nit++)
+            {
+              rez.serialize(nit->first);
+              rez.serialize(nit->second.size());
+              for (FieldMaskSet<EqKDTree>::const_iterator it =
+                    nit->second.begin(); it != nit->second.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+            }
+            target_mapping.pack(rez);
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+              rez.serialize(targets[idx]);
+            rez.serialize(recording_mask);
+            rez.serialize(notified);
+          }
+          runtime->send_equivalence_set_creation(*cit, rez);
+          notified_events.push_back(notified);
+        }
+      }
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator local_finder =
+        to_notify.find(runtime->address_space);
+      EqSetTracker *local_target = NULL;
+      std::set<Domain> rectangles_set;
+      // Check to see if we have a local target to notify here
+      if (target_mapping.contains(runtime->address_space))
+      {
+        unsigned index = target_mapping.find_index(runtime->address_space);
+        local_target = targets[index];
+        if (!handle.exists() && (local_finder == to_notify.end()))
+          rectangles_set.insert(rectangles.begin(), rectangles.end());
+      }
+#ifdef DEBUG_LEGION
+      assert((local_finder != to_notify.end()) || (local_target != NULL));
+#endif
+      // Make the equivalence set
+      IndexSpaceExpression *expr = handle.exists() ? 
+        runtime->forest->get_node(handle) : (local_finder != to_notify.end()) ? 
+        local_finder->second.begin()->first->create_from_rectangles(
+            runtime->forest, rectangles) :
+        local_target->get_tracker_expression()->create_from_rectangles(
+            rectangles_set);
+      void *location = 
+        runtime->find_or_create_pending_collectable_location<EquivalenceSet>(
+          did);
+      EquivalenceSet *set = new(location) EquivalenceSet(runtime, did, root, 
+          expr, tid, context, false/*register now*/, mapping, 
+          (target_mapping.size() > 1));
+      // Once construction is complete then we do the registration
+      set->register_with_runtime();
+      // Register it with any local trees 
+      if (local_finder != to_notify.end())
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              local_finder->second.begin(); it != 
+              local_finder->second.end(); it++)
+          it->first->record_equivalence_set(set, it->second, ready_event,
+                                            target_mapping, targets);
+      }
+      if (local_target != NULL)
+        local_target->record_pending_equivalence_set(set, recording_mask);
+      // Trigger the event that we're done
+      if (!notified_events.empty())
+        Runtime::trigger_event(notified_event,
+            Runtime::merge_events(notified_events));
+      else
+        Runtime::trigger_event(notified_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EqSetTracker::handle_equivalence_set_reuse(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      EqSetTracker *owner;
+      derez.deserialize(owner);
+      AddressSpaceID owner_space;
+      derez.deserialize(owner_space);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping mapping(derez, num_spaces);
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
+      size_t num_notifications;
+      derez.deserialize(num_notifications);
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_notify;
+      for (unsigned idx1 = 0; idx1 < num_notifications; idx1++)
+      {
+        AddressSpaceID space;
+        derez.deserialize(space);
+        FieldMaskSet<EqKDTree> &trees = to_notify[space];
+        size_t num_trees;
+        derez.deserialize(num_trees);
+        for (unsigned idx2 = 0; idx2 < num_trees; idx2++)
+        {
+          EqKDTree *tree;
+          derez.deserialize(tree);
+          FieldMask mask;
+          derez.deserialize(mask);
+          trees.insert(tree, mask);
+        }
+      }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      const CollectiveMapping target_mapping(derez, num_targets);
+      std::vector<EqSetTracker*> targets(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+        derez.deserialize(targets[idx]);
+      FieldMask recording_mask;
+      derez.deserialize(recording_mask);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      std::vector<AddressSpaceID> children;
+      mapping.get_children(owner_space, runtime->address_space, children);
+      std::vector<RtEvent> done_events;
+      for (std::vector<AddressSpaceID>::const_iterator cit =
+            children.begin(); cit != children.end(); cit++)
+      {
+        const RtUserEvent notified = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          // Reference still held by at least one EqKDTree 
+          // for which this is in the previous set
+          rez.serialize(did);
+          rez.serialize(owner);
+          rez.serialize(owner_space);
+          mapping.pack(rez);
+          rez.serialize(ready_event);
+          rez.serialize<size_t>(to_notify.size());
+          for (LegionMap<AddressSpaceID,
+                         FieldMaskSet<EqKDTree> >::const_iterator nit =
+                to_notify.begin(); nit != to_notify.end(); nit++)
+          {
+            rez.serialize(nit->first);
+            rez.serialize(nit->second.size());
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  nit->second.begin(); it != nit->second.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+          }
+          // Also pack the target information
+          target_mapping.pack(rez);
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+            rez.serialize(targets[idx]);
+          rez.serialize(recording_mask);
+          rez.serialize(notified);
+        }
+        runtime->send_equivalence_set_reuse(*cit, rez);
+        done_events.push_back(notified);
+      }
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator local_finder =
+        to_notify.find(runtime->address_space);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      if (local_finder != to_notify.end())
+      {
+        for (FieldMaskSet<EqKDTree>::const_iterator it =
+              local_finder->second.begin(); it !=
+              local_finder->second.end(); it++)
+          it->first->record_equivalence_set(set, it->second,
+              ready_event, target_mapping, targets);
+      }
+      // Check to see if a we have a local target
+      if (target_mapping.contains(runtime->address_space))
+      {
+        unsigned index = target_mapping.find_index(runtime->address_space);
+        targets[index]->record_pending_equivalence_set(set, recording_mask);
+      }
+      if (!done_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned EqSetTracker::invalidate_equivalence_sets(Runtime *runtime,
+                                       const FieldMask &mask,
+                                       EqKDTree *tree, AddressSpaceID source,
+                                       std::vector<RtEvent> &invalidated_events)
+    //--------------------------------------------------------------------------
+    {
+      unsigned source_references_to_remove = 0;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
+      {
+        FieldMask remaining = mask;
+        AutoLock t_lock(tracker_lock);
+        // If we've already recorded a pending invalidation for any of these
+        // fields then there's nothing more we need to do here
+        if (!!pending_invalidations)
+        {
+          remaining -= pending_invalidations;
+          if (!remaining)
+            return source_references_to_remove;
+        }
+        // Invalidations are not precise so we need to handle the case where
+        // we get an invalidation in the middle of computing our equivalence
+        // sets and record that we need to do the invalidation later
+        if (equivalence_sets_ready != NULL)
+        {
+          FieldMask to_filter;
+          for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
+                equivalence_sets_ready->begin(); it !=
+                equivalence_sets_ready->end(); it++)
+          {
+            const FieldMask overlap = remaining & it->second;
+            if (!overlap)
+              continue;
+            to_filter |= overlap;
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
+          if (!!to_filter)
+          {
+#ifdef DEBUG_LEGION
+            // A little sanity check, we should never be receiving racy
+            // invalidations for fields that we are also trying to create
+            // equivalence sets for because mapping dependence analysis 
+            // should guarantee non-overlapping of these index spaces
+            if (creation_rectangles != NULL)
+            {
+              for (LegionMap<Domain,FieldMask>::const_iterator it =
+                    creation_rectangles->begin(); it !=
+                    creation_rectangles->end(); it++)
+                assert(to_filter * it->second);
+            }
+#endif
+            pending_invalidations |= to_filter;
+            if (!remaining)
+              return source_references_to_remove;
+          }
+        }
+        // See if we won the race to invalidating the source
+        LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator finder =
+          current_subscriptions.find(source);
+        if (finder != current_subscriptions.end())
+        {
+          FieldMaskSet<EqKDTree>::iterator source_finder = 
+            finder->second.find(tree);
+          if (source_finder != finder->second.end())
+          {
+            const FieldMask overlap = source_finder->second & remaining;
+            if (!!overlap)
+            {
+              source_references_to_remove += overlap.pop_count();
+              source_finder.filter(overlap);
+              if (!source_finder->second)
+              {
+                finder->second.erase(source_finder);
+                if (finder->second.empty())
+                  current_subscriptions.erase(finder);
+                else
+                  finder->second.tighten_valid_mask();
+              }
+              else
+                finder->second.tighten_valid_mask();
+            }
+          }
+        }
+        // Now go through and invalidate all the other subscriptions to cancel
+        find_cancellations(remaining, to_cancel);
+        if (!(remaining * equivalence_sets.get_valid_mask()))
+        {
+          std::vector<EquivalenceSet*> to_delete;
+          for (FieldMaskSet<EquivalenceSet>::iterator it =
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            it.filter(remaining);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            const ReferenceSource source_kind = get_reference_source_kind();
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              equivalence_sets.erase(*it);
+              if ((*it)->remove_base_gc_ref(source_kind))
+                delete (*it);
+            }
+          }
+          equivalence_sets.tighten_valid_mask();
+        }
+      }
+      if (!to_cancel.empty())
+        cancel_subscriptions(runtime, to_cancel, &invalidated_events);
+      return source_references_to_remove;
+    }
+
+    //--------------------------------------------------------------------------
+    void EqSetTracker::find_cancellations(const FieldMask &mask,
+                   LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel)
+    //--------------------------------------------------------------------------
+    {
+      // Lock held from caller
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator cit =
+            current_subscriptions.begin(); cit != 
+            current_subscriptions.end(); /*nothing*/)
+      {
+        if (cit->second.get_valid_mask() * mask)
+        {
+          cit++;
+          continue;
+        }
+        if (!!(cit->second.get_valid_mask() - mask))
+        {
+          // Selectively filter matches
+          std::vector<EqKDTree*> to_delete;
+          FieldMaskSet<EqKDTree> &invalidations = to_cancel[cit->first];
+          for (FieldMaskSet<EqKDTree>::iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & mask;
+            if (!overlap)
+              continue;
+            invalidations.insert(it->first, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          for (std::vector<EqKDTree*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            cit->second.erase(*it);
+        }
+        else // Filtering all the fields so we can swap it out 
+          to_cancel[cit->first].swap(cit->second);
+        if (cit->second.empty())
+        {
+          LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::iterator
+            delete_it = cit++;
+          current_subscriptions.erase(delete_it);
+        }
+        else
+        {
+          cit->second.tighten_valid_mask();
+          cit++;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EqSetTracker::cancel_subscriptions(Runtime *runtime,
-        const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel)
+        const LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_cancel,
+        std::vector<RtEvent> *cancelled_events)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID local_space = runtime->address_space;
-      for (std::map<AddressSpaceID,std::vector<VersionManager*> >::
-            const_iterator ait = to_cancel.begin(); 
-            ait != to_cancel.end(); ait++)
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> >::const_iterator
+            cit = to_cancel.begin(); cit != to_cancel.end(); cit++)
       {
-        if (ait->first != local_space)
+        if (cit->first != local_space)
         {
           Serializer rez;
           {
             RezCheck z(rez);
+#ifdef DEBUG_LEGION
+            assert(!cit->second.empty());
+#endif
+            rez.serialize<size_t>(cit->second.size());
             rez.serialize(this);
-            rez.serialize<size_t>(ait->second.size());
-            for (std::vector<VersionManager*>::const_iterator it =
-                  ait->second.begin(); it != ait->second.end(); it++)
-              rez.serialize(*it);
+            for (FieldMaskSet<EqKDTree>::const_iterator it =
+                  cit->second.begin(); it != cit->second.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+            if (cancelled_events != NULL)
+            {
+              const RtUserEvent cancelled = Runtime::create_rt_user_event();
+              rez.serialize(cancelled);
+              cancelled_events->push_back(cancelled);
+            }
+            else
+              rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
           }
-          runtime->send_cancel_equivalence_sets_subscription(ait->first, rez);
+          runtime->send_cancel_equivalence_sets_subscription(cit->first, rez);
         }
         else
         {
-          for (std::vector<VersionManager*>::const_iterator it =
-                ait->second.begin(); it != ait->second.end(); it++)
-            if ((*it)->cancel_subscription(this, local_space) &&
-                finish_subscription(*it, local_space))
-              assert(false); // should never need to delete ourselves
+          unsigned references_to_remove = 0;
+          for (FieldMaskSet<EqKDTree>::const_iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            references_to_remove +=
+              it->first->cancel_subscription(this, local_space, it->second);
+            if (it->first->remove_reference(it->second.pop_count()))
+              delete it->first;
+          }
+          if ((references_to_remove > 0) && 
+              remove_subscription_reference(references_to_remove))
+            assert(false); // should never end up deleting ourselves
         }
       }
     }
@@ -19261,101 +23146,107 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      EqSetTracker *subscriber;
-      derez.deserialize(subscriber);
-      size_t num_owners;
-      derez.deserialize(num_owners);
-      std::vector<VersionManager*> to_finish;
-      for (unsigned idx = 0; idx < num_owners; idx++)
+      size_t num_subscribers;
+      derez.deserialize(num_subscribers);
+      if (num_subscribers > 0)
       {
-        VersionManager *owner;
+        EqSetTracker *owner;
         derez.deserialize(owner);
-        if (owner->cancel_subscription(subscriber, source))
-          to_finish.push_back(owner);
-      }
-      if (!to_finish.empty())
-      {
-        Serializer rez;
+        unsigned references_to_remove = 0;
+        for (unsigned idx = 0; idx < num_subscribers; idx++)
         {
-          RezCheck z2(rez);
-          rez.serialize<size_t>(0); // nothing to filter
-          rez.serialize(subscriber);
-          rez.serialize<size_t>(to_finish.size());
-          for (std::vector<VersionManager*>::const_iterator it =
-                to_finish.begin(); it != to_finish.end(); it++)
-            rez.serialize(*it);
+          EqKDTree *tree;
+          derez.deserialize(tree);
+          FieldMask mask;
+          derez.deserialize(mask);
+          references_to_remove += 
+            tree->cancel_subscription(owner, source, mask);
+          if (tree->remove_reference(mask.pop_count()))
+            delete tree;
         }
-        runtime->send_finish_equivalence_sets_subscription(source, rez);
+        if (references_to_remove > 0)
+        {
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize<size_t>(0); // nothing to filter
+            rez.serialize(owner);
+            rez.serialize(references_to_remove);
+          }
+          runtime->send_invalidate_equivalence_sets_subscription(source, rez);
+        }
+        RtUserEvent cancelled;
+        derez.deserialize(cancelled);
+        if (cancelled.exists())
+          Runtime::trigger_event(cancelled);
+      }
+      else
+      {
+        EqKDTree *subscriber;
+        derez.deserialize(subscriber);
+        unsigned references_to_remove;
+        derez.deserialize(references_to_remove);
+        if (subscriber->remove_reference(references_to_remove))
+          delete subscriber;
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EqSetTracker::finish_subscriptions(
-        Runtime *runtime, VersionManager &manager,
-        LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-        std::set<RtEvent> &applied_events)
+    /*static*/ void EqSetTracker::invalidate_subscriptions(
+        Runtime *runtime, EqKDTree *owner,
+        LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &subscribers,
+        std::vector<RtEvent> &invalidated_events)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID local_space = runtime->address_space;
-      for (LegionMap<AddressSpaceID,SubscriberInvalidations>::const_iterator
-            ait = subscribers.begin(); ait != subscribers.end(); ait++)
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::const_iterator
+            sit = subscribers.begin(); sit != subscribers.end(); sit++)
       {
-        if (ait->first != local_space)
+        if (sit->first != local_space)
         {
-          const RtUserEvent applied = Runtime::create_rt_user_event();
+          const RtUserEvent invalidated = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
 #ifdef DEBUG_LEGION
-            assert(!ait->second.subscribers.empty());
+            assert(!sit->second.empty());
 #endif
-            rez.serialize<size_t>(ait->second.subscribers.size());
-            rez.serialize<VersionManager*>(&manager);
-            rez.serialize(applied);
-            if (ait->second.delete_all)
-              rez.serialize<size_t>(ait->second.subscribers.size());
-            else
-              rez.serialize<size_t>(ait->second.finished.size());
+            rez.serialize<size_t>(sit->second.size());
+            rez.serialize(owner);
             for (FieldMaskSet<EqSetTracker>::const_iterator it =
-                  ait->second.subscribers.begin(); it != 
-                  ait->second.subscribers.end(); it++)
+                  sit->second.begin(); it != sit->second.end(); it++)
             {
               rez.serialize(it->first);
               rez.serialize(it->second);
             }
-            if (ait->second.finished.size() < ait->second.subscribers.size())
-            {
-              for (std::vector<EqSetTracker*>::const_iterator it =
-                    ait->second.finished.begin(); it !=
-                    ait->second.finished.end(); it++)
-                rez.serialize(*it);
-            }
+            rez.serialize(invalidated);
           }
-          runtime->send_finish_equivalence_sets_subscription(ait->first, rez);
-          applied_events.insert(applied);
+          runtime->send_invalidate_equivalence_sets_subscription(sit->first,
+                                                                 rez);
+          invalidated_events.push_back(invalidated);
         }
         else
         {
+          unsigned references_to_remove = 0;
           for (FieldMaskSet<EqSetTracker>::const_iterator it = 
-                ait->second.subscribers.begin(); it != 
-                ait->second.subscribers.end(); it++)
+                sit->second.begin(); it != sit->second.end(); it++)
           {
-            it->first->invalidate_equivalence_sets(it->second);
-            if (ait->second.delete_all && 
-                it->first->finish_subscription(&manager, local_space))
+            references_to_remove += it->first->invalidate_equivalence_sets(
+                runtime, it->second, owner, runtime->address_space, 
+                invalidated_events);
+            if (it->first->remove_subscription_reference(
+                                  it->second.pop_count()))
               delete it->first;
           }
-          for (std::vector<EqSetTracker*>::const_iterator it =
-                ait->second.finished.begin(); it != 
-                ait->second.finished.end(); it++)
-            if ((*it)->finish_subscription(&manager, local_space))
-              delete *it;
+          if ((references_to_remove > 0) && 
+              owner->remove_reference(references_to_remove))
+            delete owner;
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EqSetTracker::handle_finish_subscription(
+    /*static*/ void EqSetTracker::handle_invalidate_subscription(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -19364,49 +23255,76 @@ namespace Legion {
       derez.deserialize(num_subscribers);
       if (num_subscribers > 0)
       {
-        VersionManager *owner;
+        EqKDTree *owner;
         derez.deserialize(owner);
-        RtUserEvent done;
-        derez.deserialize(done);
-        size_t num_finished;
-        derez.deserialize(num_finished);
+        unsigned references_to_remove = 0;
+        std::vector<RtEvent> invalidated_events;
         for (unsigned idx = 0; idx < num_subscribers; idx++)
         {
-          EqSetTracker *subscriber;
-          derez.deserialize(subscriber);
+          EqSetTracker *tracker;
+          derez.deserialize(tracker);
           FieldMask mask;
           derez.deserialize(mask);
-          subscriber->invalidate_equivalence_sets(mask);
-          if ((num_finished == num_subscribers) &&
-              subscriber->finish_subscription(owner, source))
-            delete subscriber;
+          references_to_remove += tracker->invalidate_equivalence_sets(
+              runtime, mask, owner, source, invalidated_events);
+          if (tracker->remove_subscription_reference(mask.pop_count()))
+            delete tracker;
         }
-        if (num_finished < num_subscribers)
+        RtUserEvent invalidated;
+        derez.deserialize(invalidated);
+        if (!invalidated_events.empty())
+          Runtime::trigger_event(invalidated, 
+              Runtime::merge_events(invalidated_events));
+        else
+          Runtime::trigger_event(invalidated);
+        if (references_to_remove > 0)
         {
-          for (unsigned idx = 0; idx < num_finished; idx++)
+          Serializer rez;
           {
-            EqSetTracker *to_finish;
-            derez.deserialize(to_finish);
-            if (to_finish->finish_subscription(owner, source))
-              delete to_finish;
+            RezCheck z2(rez);
+            rez.serialize<size_t>(0); // num subscribers
+            rez.serialize(owner);
+            rez.serialize(references_to_remove);
           }
+          runtime->send_cancel_equivalence_sets_subscription(source, rez);
         }
-        Runtime::trigger_event(done);
       }
       else
       {
         EqSetTracker *subscriber;
         derez.deserialize(subscriber);
-        size_t num_owners;
-        derez.deserialize(num_owners);
-        for (unsigned idx = 0; idx < num_owners; idx++)
-        {
-          VersionManager *owner;
-          derez.deserialize(owner);
-          if (subscriber->finish_subscription(owner, source))
-            delete subscriber;
-        }
+        unsigned references_to_remove;
+        derez.deserialize(references_to_remove);
+        if (subscriber->remove_subscription_reference(references_to_remove))
+          delete subscriber;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    EqSetTracker::LgFinalizeEqSetsArgs::LgFinalizeEqSetsArgs(EqSetTracker *t,
+        RtUserEvent c, UniqueID uid, InnerContext *ctx, unsigned index,
+        IndexSpaceExpression *e)
+      : LgTaskArgs<LgFinalizeEqSetsArgs>(uid), tracker(t), compute(c),
+        context(ctx), expr(e), parent_req_index(index)
+    //--------------------------------------------------------------------------
+    {
+      context->add_base_gc_ref(META_TASK_REF);
+      expr->add_base_expression_reference(META_TASK_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EqSetTracker::handle_finalize_eq_sets(const void *args, 
+                                                          Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const LgFinalizeEqSetsArgs *fargs = (const LgFinalizeEqSetsArgs*)args;
+      fargs->tracker->finalize_equivalence_sets(fargs->compute,
+          fargs->context, runtime, fargs->parent_req_index, fargs->expr,
+          fargs->provenance);
+      if (fargs->context->remove_base_gc_ref(META_TASK_REF))
+        delete fargs->context;
+      if (fargs->expr->remove_base_expression_reference(META_TASK_REF))
+        delete fargs->expr;
     }
 
     /////////////////////////////////////////////////////////////
@@ -19415,7 +23333,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *n, ContextID c)
-      : ctx(c), node(n), runtime(n->context->runtime)
+      : EqSetTracker(manager_lock), ctx(c), node(n),runtime(n->context->runtime)
     //--------------------------------------------------------------------------
     {
     }
@@ -19424,29 +23342,52 @@ namespace Legion {
     VersionManager::~VersionManager(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(pending_equivalence_sets.empty());
-      assert(waiting_infos.empty());
-      assert(equivalence_sets.empty());
-      assert(equivalence_sets_ready.empty());
-      assert(!disjoint_complete);
-      assert(disjoint_complete_children.empty());
-      assert(refinement_subscriptions.empty());
-      assert(subscription_owners.empty());
-#endif
     }
 
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
-                   VersionInfo *version_info, RegionNode *region_node,
-                   IndexSpaceExpression *expr, const bool expr_covers,
-                   const FieldMask &version_mask, const UniqueID opid,
-                   const AddressSpaceID source, std::set<RtEvent> &ready_events)
+                 VersionInfo *version_info, RegionNode *region_node,
+                 const FieldMask &version_mask, Operation *op, unsigned index,
+                 unsigned parent_req_index, std::set<RtEvent> &ready_events,
+                 RtEvent *output_region_ready, bool collective_rendezvous)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(node == region_node);
 #endif
+      if (output_region_ready != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!collective_rendezvous);
+#endif
+        // This is a special case for output regions
+        // Make a new equivalence set and record it in the current set
+        // and then we are done, we'll register this equivalence set
+        // with the EqKDTree later once we actually know the bounds
+        // Note that by registering it we're allowing others to find it
+        // here even before they can compute it in the EqKDTree which is
+        // an important optimization for many applications
+        const DistributedID did = runtime->get_available_distributed_id();
+        EquivalenceSet *set = new EquivalenceSet(runtime, did,
+            runtime->address_space/*logical owner*/, region_node->row_source,
+            region_node->handle.get_tree_id(), context, true/*register*/);
+        version_info->record_equivalence_set(set, version_mask);
+        // Launch a meta-task to register this equivalence set with
+        // EqKDTree once the index space domain is ready
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        FinalizeOutputEquivalenceSetArgs args(this, op->get_unique_op_id(),
+            context, parent_req_index, set, done_event);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+            region_node->row_source->get_ready_event());
+        *output_region_ready = done_event;
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(version_mask * equivalence_sets.get_valid_mask());
+#endif
+        if (equivalence_sets.insert(set, version_mask))
+          set->add_base_gc_ref(VERSION_MANAGER_REF);
+        return;
+      }
       // If we don't have equivalence classes for this region yet we 
       // either need to compute them or request them from the owner
       FieldMask remaining_mask(version_mask);
@@ -19456,11 +23397,11 @@ namespace Legion {
         // Check to see if any computations of equivalence sets are in progress
         // If so we'll skip out early and go down the slow path which should
         // be a fairly rare thing to do
-        if (!equivalence_sets_ready.empty())
+        if (equivalence_sets_ready != NULL)
         {
           for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
-                equivalence_sets_ready.begin(); it != 
-                equivalence_sets_ready.end(); it++)
+                equivalence_sets_ready->begin(); it != 
+                equivalence_sets_ready->end(); it++)
           {
             if (remaining_mask * it->second)
               continue;
@@ -19476,24 +23417,24 @@ namespace Legion {
           // Get any fields that are already ready
           if ((version_info != NULL) &&
               !(version_mask * equivalence_sets.get_valid_mask()))
-            record_equivalence_sets(version_info, version_mask,
-                                    expr, expr_covers, ready_events);
+            record_equivalence_sets(version_info, version_mask);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
-          if (!remaining_mask)
+          if (!remaining_mask && !collective_rendezvous)
             return;
         }
       }
       // Retake the lock in exclusive mode and make sure we don't lose the race
       RtUserEvent compute_event;
+      if (!!remaining_mask)
       {
         FieldMask waiting_mask;
         AutoLock m_lock(manager_lock);
-        if (!equivalence_sets_ready.empty())
+        if (equivalence_sets_ready != NULL)
         {
           for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
-                equivalence_sets_ready.begin(); it != 
-                equivalence_sets_ready.end(); it++)
+                equivalence_sets_ready->begin(); it != 
+                equivalence_sets_ready->end(); it++)
           {
             const FieldMask overlap = remaining_mask & it->second;
             if (!overlap)
@@ -19510,12 +23451,11 @@ namespace Legion {
         if (!(remaining_mask * equivalence_sets.get_valid_mask()))
         {
           if (version_info != NULL)
-            record_equivalence_sets(version_info, remaining_mask,
-                                    expr, expr_covers, ready_events);
+            record_equivalence_sets(version_info, remaining_mask);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields here and we're not waiting 
           // on any other computations then we're done
-          if (!remaining_mask && !waiting_mask)
+          if (!remaining_mask && !waiting_mask && !collective_rendezvous)
             return;
         }
         // If we still have remaining fields then we need to
@@ -19523,7 +23463,10 @@ namespace Legion {
         if (!!remaining_mask)
         {
           compute_event = Runtime::create_rt_user_event();
-          equivalence_sets_ready[compute_event] = remaining_mask; 
+          if (equivalence_sets_ready == NULL)
+            equivalence_sets_ready = new LegionMap<RtUserEvent,FieldMask>();
+          equivalence_sets_ready->insert(
+              std::make_pair(compute_event,remaining_mask));
           ready_events.insert(compute_event);
           waiting_mask |= remaining_mask;
         }
@@ -19532,265 +23475,106 @@ namespace Legion {
 #endif
         // Record that our version info is waiting for these fields
         if (version_info != NULL)
-          waiting_infos.push_back(
-             WaitingVersionInfo(version_info, waiting_mask, expr, expr_covers));
+        {
+          if (waiting_infos == NULL)
+            waiting_infos = new FieldMaskSet<VersionInfo>();
+          waiting_infos->insert(version_info, waiting_mask);
+        }
       }
       if (compute_event.exists())
       {
-        // If we're an empty region then we can just get the names of any
-        // empty equivalence sets directly from the region itself.
-        // Otherwise, bounce this computation off the context so that we know
-        // that we are on the right node to perform it
-        const RtEvent ready = context->compute_equivalence_sets(this, 
-            runtime->address_space, region_node, remaining_mask, opid, source);
+        RtEvent ready;
+        if (!collective_rendezvous)
+        {
+          // Bounce this computation off the context so that we know
+          // that we are on the right node to perform it
+          std::vector<EqSetTracker*> targets(1, this);
+          std::vector<AddressSpaceID> target_spaces(1, runtime->address_space);
+          ready = context->compute_equivalence_sets(parent_req_index, targets,
+              target_spaces, runtime->address_space, region_node->row_source,
+              remaining_mask);
+        }
+        else
+          ready = op->perform_collective_versioning_analysis(index, 
+              region_node->handle, this, remaining_mask, parent_req_index);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
-          LgFinalizeEqSetsArgs args(this, compute_event, opid); 
+          LgFinalizeEqSetsArgs args(this, compute_event, 
+              op->get_unique_op_id(), context, parent_req_index,
+              region_node->row_source);
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
         else
-          finalize_equivalence_sets(compute_event);
+          finalize_equivalence_sets(compute_event, context, runtime,
+              parent_req_index, region_node->row_source, 
+              op->get_unique_op_id());
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_equivalence_sets(VersionInfo *version_info,
-                  const FieldMask &mask, IndexSpaceExpression *expr,
-                  const bool expr_covers, std::set<RtEvent> &ready_events) const
-    //--------------------------------------------------------------------------
-    {
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-           equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+      else if (collective_rendezvous)
       {
-        const FieldMask overlap = it->second & mask;
-        if (!overlap)
-          continue;
-        if (!expr_covers)
-        {
-          IndexSpaceExpression *expr_overlap = 
-            runtime->forest->intersect_index_spaces(expr, 
-                                    it->first->set_expr);
-          if (expr_overlap->is_empty())
-            continue;
-        }
-        version_info->record_equivalence_set(it->first, overlap);
-      }
-      // If we have any disjoint complete events we need to record 
-      // precondition events from them as well since they are not ready
-      if (!disjoint_complete_ready.empty())
-      {
-        for (LegionMap<RtEvent,FieldMask>::const_iterator it =
-              disjoint_complete_ready.begin(); it !=
-              disjoint_complete_ready.end(); it++)
-          if (!(mask * it->second))
-            ready_events.insert(it->first);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_subscription(VersionManager *owner,
-                                             AddressSpaceID space)
-    //--------------------------------------------------------------------------
-    {
-      bool add_reference;
-      {
-        const std::pair<VersionManager*,AddressSpaceID> key(owner, space);
-        AutoLock m_lock(manager_lock);
-        add_reference = subscription_owners.empty();
-        std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
-          finder = subscription_owners.find(key);
-        if (finder == subscription_owners.end())
-          subscription_owners[key] = 1;
-        else
-          finder->second++;
-      }
-      if (add_reference)
-        node->add_base_resource_ref(VERSION_MANAGER_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    bool VersionManager::finish_subscription(VersionManager *owner,
-                                             AddressSpaceID space)
-    //--------------------------------------------------------------------------
-    {
-      bool remove_reference;
-      {
-        const std::pair<VersionManager*,AddressSpaceID> key(owner, space);
-        AutoLock m_lock(manager_lock);
-        std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
-          finder = subscription_owners.find(key);
 #ifdef DEBUG_LEGION
-        assert(finder != subscription_owners.end());
-        assert(finder->second > 0);
+        assert(!remaining_mask);
 #endif
-        if (--finder->second == 0)
-          subscription_owners.erase(finder);
-        remove_reference = subscription_owners.empty();
+        // Just need to rendezvous, no need to wait for any computation
+        op->perform_collective_versioning_analysis(index, region_node->handle,
+            this, remaining_mask, parent_req_index);
       }
-      // Do this last to avoid 
-      if (remove_reference &&
-          node->remove_base_resource_ref(VERSION_MANAGER_REF))
+    } 
+
+    //--------------------------------------------------------------------------
+    RtEvent VersionManager::finalize_output_equivalence_set(EquivalenceSet *set,
+                                                      InnerContext *context,
+                                                      unsigned parent_req_index)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask set_mask;
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        FieldMaskSet<EquivalenceSet>::const_iterator finder =
+          equivalence_sets.find(set);
+#ifdef DEBUG_LEGION
+        assert(finder != equivalence_sets.end());
+#endif
+        set_mask = finder->second;
+      }
+      return context->record_output_equivalence_set(this,
+          runtime->address_space, parent_req_index, set, set_mask);
+    } 
+
+    //--------------------------------------------------------------------------
+    RegionTreeID VersionManager::get_region_tree_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return node->get_tree_id();
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* VersionManager::get_tracker_expression(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+#endif
+      return node->as_region_node()->row_source;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::add_subscription_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      // This implicitly keeps us alive
+      node->add_base_resource_ref(VERSION_MANAGER_REF, count);
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::remove_subscription_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(VERSION_MANAGER_REF, count))
         delete node;
-      // Never delete this directly
+      // Never directly delete ourselves
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool VersionManager::cancel_subscription(EqSetTracker *subscriber,
-                                             AddressSpaceID space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::iterator
-        refinement_finder = refinement_subscriptions.find(space);
-      if (refinement_finder == refinement_subscriptions.end())
-        return false;
-      FieldMaskSet<EqSetTracker>::iterator finder =
-        refinement_finder->second.find(subscriber);
-      if (finder == refinement_finder->second.end())
-        return false;
-      refinement_finder->second.erase(finder);
-      if (refinement_finder->second.empty())
-        refinement_subscriptions.erase(refinement_finder);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_equivalence_set(EquivalenceSet *set,
-                                                const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert((node == set->region_node)
-             || !node->as_region_node()->row_source->is_empty());
-#endif
-      AutoLock m_lock(manager_lock);
-      if (equivalence_sets.insert(set, mask))
-        set->add_base_resource_ref(VERSION_MANAGER_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_pending_equivalence_set(EquivalenceSet *set,
-                                                        const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert(mask * disjoint_complete);
-#endif
-      pending_equivalence_sets.insert(set, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::invalidate_equivalence_sets(const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-      // This is very subtle so pay attention!
-      // If you invalidate any of the equivalence sets for a version manager
-      // that is not part of the disjoint complete refinement then you have
-      // to invalidate ALL the equivalence sets with the same fields since 
-      // we use the presence of any equivalence set with a field to indicate
-      // that this VersionManager has an up-to-date copy of the equivalence
-      // sets corresponding to this logical region.
-      if (mask * equivalence_sets.get_valid_mask())
-        return;
-      std::vector<EquivalenceSet*> to_delete;
-      for (FieldMaskSet<EquivalenceSet>::iterator it =
-            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-      {
-        it.filter(mask);
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      for (std::vector<EquivalenceSet*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        equivalence_sets.erase(*it);
-        if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
-          assert(false); // should never end up deleting this here
-      }
-      equivalence_sets.tighten_valid_mask();
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::finalize_equivalence_sets(RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> done_preconditions;
-      {
-        AutoLock m_lock(manager_lock);
-        LegionMap<RtUserEvent,FieldMask>::iterator finder =
-          equivalence_sets_ready.find(done_event);
-#ifdef DEBUG_LEGION
-        assert(finder != equivalence_sets_ready.end());
-#endif
-        // If there are any pending equivalence sets, move them into 
-        // the actual equivalence sets
-        if (!pending_equivalence_sets.empty() && 
-            !(finder->second * pending_equivalence_sets.get_valid_mask()))
-        {
-          std::vector<EquivalenceSet*> to_delete;
-          for (FieldMaskSet<EquivalenceSet>::iterator it = 
-                pending_equivalence_sets.begin(); it !=
-                pending_equivalence_sets.end(); it++)
-          {
-            // Once it's valid for any field then it's valid for all of them
-            if (it->second * finder->second)
-              continue;
-#ifdef DEBUG_LEGION
-            assert((node == it->first->region_node)
-                   || !node->as_region_node()->row_source->is_empty());
-#endif
-            if (equivalence_sets.insert(it->first, it->second))
-              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-            to_delete.push_back(it->first);
-          }
-          if (!to_delete.empty())
-          {
-            if (to_delete.size() < pending_equivalence_sets.size())
-            {
-              for (std::vector<EquivalenceSet*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-                pending_equivalence_sets.erase(*it);
-              pending_equivalence_sets.tighten_valid_mask();
-            }
-            else
-              pending_equivalence_sets.clear();
-          }
-        }
-        if (!waiting_infos.empty())
-        {
-          for (LegionList<WaitingVersionInfo>::iterator wit = 
-                waiting_infos.begin(); wit != waiting_infos.end(); /*nothing*/)
-          {
-            const FieldMask info_overlap = wit->waiting_mask & finder->second;
-            if (!info_overlap)
-            {
-              wit++;
-              continue;
-            }
-            record_equivalence_sets(wit->version_info, info_overlap,
-                    wit->expr, wit->expr_covers, done_preconditions);
-            wit->waiting_mask -= info_overlap;
-            if (!wit->waiting_mask)
-              wit = waiting_infos.erase(wit);
-            else
-              wit++;
-          }
-        }
-        // We can relax the mask for the equivalence sets here so we don't
-        // recompute in the case that we are empty
-        equivalence_sets.relax_valid_mask(finder->second);
-        equivalence_sets_ready.erase(finder);
-      }
-      if (!done_preconditions.empty())
-        Runtime::trigger_event(done_event,
-            Runtime::merge_events(done_preconditions));
-      else
-        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -19799,26 +23583,22 @@ namespace Legion {
     {
       // We need to remove any tracked equivalence sets that we have
       FieldMaskSet<EquivalenceSet> to_remove;
-      std::map<AddressSpaceID,std::vector<VersionManager*> > to_cancel;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
         // All these other resource should already be empty by the time
         // we are being finalized
-        assert(pending_equivalence_sets.empty());
-        assert(waiting_infos.empty());
-        assert(equivalence_sets_ready.empty());
-        assert(!disjoint_complete);
-        assert(disjoint_complete_children.empty());
+        assert(pending_equivalence_sets == NULL);
+        assert(created_equivalence_sets == NULL);
+        assert(waiting_infos == NULL);
+        assert(equivalence_sets_ready == NULL);
 #endif
         if (!equivalence_sets.empty())
           to_remove.swap(equivalence_sets);
-        else if (subscription_owners.empty())
+        else if (current_subscriptions.empty())
           return;
-        for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
-              const_iterator it = subscription_owners.begin();
-              it != subscription_owners.end(); it++)
-          to_cancel[it->first.second].push_back(it->first.first);
+        to_cancel.swap(current_subscriptions);
       }
 #ifdef DEBUG_LEGION
       assert(node->is_region());
@@ -19835,1091 +23615,23 @@ namespace Legion {
         //assert((it->first->region_node != node) ||
         //        it->first->region_node->row_source->is_empty());
 #endif
-        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::add_node_disjoint_complete_ref(void) const
+    /*static*/ void VersionManager::handle_finalize_output_eq_set(
+                                                               const void *args)
     //--------------------------------------------------------------------------
     {
-      node->get_row_source()->add_base_valid_ref(DISJOINT_COMPLETE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::remove_node_disjoint_complete_ref(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool delete_node =
-#endif
-#endif
-      node->get_row_source()->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
-#ifdef DEBUG_LEGION
-      assert(!delete_node); // should never be directly deleting our node
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::initialize_versioning_analysis(EquivalenceSet *set,
-                                                        const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock here since we know this is initialization
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-      assert(node == set->region_node);
-      assert(disjoint_complete * mask);
-#endif
-      if (!disjoint_complete)
-        add_node_disjoint_complete_ref();
-      disjoint_complete |= mask;
-      if (equivalence_sets.insert(set, mask))
-      {
-        set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-        set->add_base_resource_ref(VERSION_MANAGER_REF);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::initialize_nonexclusive_virtual_analysis(
-                                       const FieldMask &mask,
-                                       const FieldMaskSet<EquivalenceSet> &sets)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock here since we know this is initialization
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-      assert(disjoint_complete * sets.get_valid_mask());
-#endif
-      // We'll pretend like we're the root of the equivalence set tree
-      // here even though we don't actually own these sets, we're just
-      // marking it so that any analyses stop here. The logical analysis
-      // will ensure that we are never refined
-      if (!disjoint_complete)
-        add_node_disjoint_complete_ref();
-      disjoint_complete |= mask;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            sets.begin(); it != sets.end(); it++)
-        if (equivalence_sets.insert(it->first, it->second))
-        {
-          it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-        }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::compute_equivalence_sets(const ContextID ctx,
-                                          IndexSpaceExpression *expr,
-                                          EqSetTracker *target,
-                                          const AddressSpaceID target_space,
-                                          FieldMask mask, InnerContext *context,
-                                          const UniqueID opid,
-                                          const AddressSpaceID original_source,
-                                          std::set<RtEvent> &ready_events,
-                                          FieldMaskSet<PartitionNode> &children,
-                                          FieldMask &parent_traversal,
-                                          std::set<RtEvent> &deferral_events,
-                                          const bool downward_only)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node->is_region());
-#endif
-      FieldMask request_mask;
-      RtUserEvent request_ready;
-      RegionNode *region_node = node->as_region_node();
-      if (downward_only)
-      {
-        AutoLock m_lock(manager_lock);
-        // Check to see if we need to ask the context to finalize the
-        // creation of any equivalence sets at this level
-        // Check to see first if there are any pending computations
-        // for disjoint complete equivalence sets
-        if (!disjoint_complete_ready.empty())
-        {
-          std::vector<RtEvent> to_delete;
-          for (LegionMap<RtEvent,FieldMask>::const_iterator it =
-                disjoint_complete_ready.begin(); it != 
-                disjoint_complete_ready.end(); it++)
-          {
-            if (it->first.has_triggered())
-            {
-              to_delete.push_back(it->first);
-              continue;
-            }
-            if (it->second * mask)
-              continue;
-            deferral_events.insert(it->first);
-            mask -= it->second;
-            if (!mask)
-              break;
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<RtEvent>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              disjoint_complete_ready.erase(*it);
-          }
-        }
-        // Now see if there are any fields left for which we still
-        // need to perform any requests to finalize equivalence sets
-        if (!!mask)
-        {
-          request_mask = mask - disjoint_complete;
-          if (!!request_mask)
-          {
-            // We'll defer this computation until it is ready
-            mask -= request_mask;
-            request_ready = Runtime::create_rt_user_event();
-            disjoint_complete_ready[request_ready] = request_mask;
-            deferral_events.insert(request_ready);
-          }
-        }
-      }
-      // Release the lock before doing the call out to the context
-      if (!!request_mask)
-      {
-#ifdef DEBUG_LEGION
-        assert(request_ready.exists());
-        assert(region_node->parent != NULL);
-#endif
-        // Record that this is now a disjoint complete child for invalidation
-        // We propagate once when we make the pending refinement object and
-        // again here because this might be a pending refinement from a remote
-        // shard in a control replication context, so we have to do it again
-        // in order to be sure that the parent knows about it
-        region_node->parent->propagate_refinement(ctx,region_node,request_mask);
-        // Ask the context to fill in the disjoint complete sets here
-        if (context->finalize_disjoint_complete_sets(region_node, this,
-                    request_mask, opid, original_source, request_ready) &&
-            request_ready.has_triggered())
-        {
-          // Special case where the context did this right away
-          // so we can restore the request fields and remove the
-          // deferral event as we know that it no longer matters
-          mask |= request_mask;
-          deferral_events.erase(request_ready);
-        }
-        // If we don't have any local fields remaining then we are done
-        if (!mask)
-          return;
-      }
-      // If we have deferral events then save this traversal for another time
-      if (!deferral_events.empty())
-        return;
-      bool new_subscriber = false;
-      FieldMaskSet<EquivalenceSet> to_record;
-      {
-        // Do the local analysis on our owned equivalence sets
-        AutoLock m_lock(manager_lock);
-        if (!downward_only)
-        {
-          if (!disjoint_complete)
-          {
-            parent_traversal = mask;
-            return;
-          }
-          parent_traversal = mask - disjoint_complete;
-          if (!!parent_traversal)
-          {
-            mask -= parent_traversal;
-            if (!mask)
-              return;
-          }
-        }
-        if (!disjoint_complete_children.empty())
-        {
-          const FieldMask children_overlap = mask & 
-            disjoint_complete_children.get_valid_mask();
-          if (!!children_overlap)
-          {
-            for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-                  disjoint_complete_children.begin(); it !=
-                  disjoint_complete_children.end(); it++)
-            {
-              const FieldMask overlap = mask & it->second;
-              if (!overlap)
-                continue;
-#ifdef DEBUG_LEGION
-              assert(!it->first->is_region());
-#endif
-              children.insert(it->first->as_partition_node(), overlap);
-              mask -= overlap;
-              if (!mask)
-                return;
-            }
-          }
-        }
-        // At this point we're done with the symbolic analysis so we
-        // can actually test the expression for emptiness
-        if ((expr != node->as_region_node()->row_source) && expr->is_empty())
-          return;
-        // If we make it here then we should have equivalence sets for
-        // all these remaining fields
-#ifdef DEBUG_LEGION
-        assert(!equivalence_sets.empty() ||
-                region_node->row_source->is_empty());
-        assert(!(mask - equivalence_sets.get_valid_mask()) ||
-                region_node->row_source->is_empty());
-#endif
-        // If we have any pending disjoint complete ready events then 
-        // we need to record dependences on them as well
-        if (!disjoint_complete_ready.empty())
-        {
-          for (LegionMap<RtEvent,FieldMask>::const_iterator it =
-                disjoint_complete_ready.begin(); it !=
-                disjoint_complete_ready.end(); it++)
-            if (!(mask * it->second))
-              ready_events.insert(it->first); 
-        }
-#ifdef DEBUG_LEGION
-        FieldMask observed_sets;
-#endif
-        if (target_space != runtime->address_space)
-        {
-          FieldMaskSet<EquivalenceSet> to_send;
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-#ifdef DEBUG_LEGION
-            // We should only be sending equivalence sets that we
-            // know we are the owners of
-            // This used to be a valid assertion, but is no longer a valid
-            // assertion if we have virtual-mapped parent region with
-            // read-only privileges because then we have equivalence sets
-            // which only overlap our region here
-            //assert(it->first->region_node == node);
-            observed_sets |= overlap;
-#endif
-            to_send.insert(it->first, overlap);
-          }
-          if (!to_send.empty())
-          {
-            // Record that we have a refinement tracker
-            new_subscriber = refinement_subscriptions[target_space].insert(
-                                          target, to_send.get_valid_mask());
-            const RtUserEvent done = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(target);
-              rez.serialize<bool>(new_subscriber);
-              if (new_subscriber)
-                rez.serialize(this);
-              rez.serialize<size_t>(to_send.size());
-              for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                    to_send.begin(); it != to_send.end(); it++)
-              {
-                rez.serialize(it->first->did);
-                rez.serialize(it->second);
-              }
-              rez.serialize(done);
-            }
-            runtime->send_compute_equivalence_sets_response(target_space, rez);
-            ready_events.insert(done);
-            
-          }
-        }
-        else if (target != this)
-        {
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-#ifdef DEBUG_LEGION
-            // We should only be sending equivalence sets that we
-            // know we are the owners of
-            // This used to be a valid assertion, but is no longer a valid
-            // assertion if we have virtual-mapped parent region with
-            // read-only privileges because then we have equivalence sets
-            // which only overlap our region here
-            //assert(it->first->region_node == node);
-            observed_sets |= overlap;
-#endif
-            to_record.insert(it->first, overlap);
-          }
-          if (!to_record.empty())
-            // Record that we have a refinement tracker
-            new_subscriber = refinement_subscriptions[target_space].insert(
-                                        target, to_record.get_valid_mask());
-        }
-#ifdef DEBUG_LEGION
-        else
-          observed_sets = mask;
-        assert(observed_sets == mask);
-#endif
-      }
-      if (!to_record.empty())
-      {
-        if (new_subscriber)
-          target->record_subscription(this, runtime->address_space);
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              to_record.begin(); it != to_record.end(); it++)
-          target->record_equivalence_set(it->first, it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionManager::handle_compute_equivalence_sets_response(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      EqSetTracker *target;
-      derez.deserialize(target);
-      bool new_subscriber;
-      derez.deserialize<bool>(new_subscriber);
-      if (new_subscriber)
-      {
-        VersionManager *owner;
-        derez.deserialize(owner);
-        target->record_subscription(owner, source);
-      }
-      size_t num_sets;
-      derez.deserialize(num_sets);
-      std::set<RtEvent> ready_events;
-      for (unsigned idx = 0; idx < num_sets; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        FieldMask eq_mask;
-        derez.deserialize(eq_mask);
-        RtEvent ready;
-        EquivalenceSet *set = 
-          runtime->find_or_request_equivalence_set(did, ready);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          target->record_pending_equivalence_set(set, eq_mask);
-          ready_events.insert(ready);
-        }
-        else
-          target->record_equivalence_set(set, eq_mask);
-      }
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      if (!ready_events.empty())
-        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_refinement(EquivalenceSet *set, 
-                                           const FieldMask &mask, 
-                                           FieldMask &parent_mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-      assert(set->region_node == node);
-      // There should not be any other equivalence sets for these fields
-      // This is a valid assertion in general, but not with control replication
-      // where you can get two merge close ops updating subsets
-      //assert(equivalence_sets.get_valid_mask() * mask);
-#ifndef NDEBUG
-      {
-        FieldMaskSet<EquivalenceSet>::const_iterator finder =
-          equivalence_sets.find(set);
-        assert((finder == equivalence_sets.end()) ||
-                (finder->second * mask));
-      }
-#endif
-#endif
-      if (equivalence_sets.insert(set, mask))
-      {
-        set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-        set->add_base_resource_ref(VERSION_MANAGER_REF);
-      }
-      else
-      {
-        // Need to check whether we need to add the first valid reference
-        // See if there were any previous fields that were valid
-        FieldMaskSet<EquivalenceSet>::const_iterator finder =
-          equivalence_sets.find(set);
-#ifdef DEBUG_LEGION
-        assert(finder != equivalence_sets.end());
-#endif
-        const FieldMask previous = finder->second - mask;
-        if (previous * disjoint_complete)
-          set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-      }
-      parent_mask = mask;
-      if (!!disjoint_complete)
-        parent_mask -= disjoint_complete;
-      else
-        add_node_disjoint_complete_ref();
-      disjoint_complete |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_empty_refinement(const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-      assert(node->is_region());
-      assert(node->as_region_node()->row_source->is_empty());
-#endif
-      if (!disjoint_complete)
-        add_node_disjoint_complete_ref();
-      disjoint_complete |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::compute_equivalence_sets(const FieldMask &mask, 
-                                            FieldMask &parent_traversal, 
-                                            FieldMask &children_traversal) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!node->is_region());
-#endif
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-      if (!!disjoint_complete)
-      {
-        children_traversal = disjoint_complete & mask;
-        if (!!children_traversal)
-          parent_traversal = mask - children_traversal;
-        else
-          parent_traversal = mask;
-      }
-      else
-        parent_traversal = mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::propagate_refinement(
-                const std::vector<RegionNode*> &children, const FieldMask &mask,
-                FieldMask &parent_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-      assert(!node->is_region());
-#endif
-      AutoLock m_lock(manager_lock);
-      for (std::vector<RegionNode*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert((disjoint_complete_children.find(*it) ==
-                disjoint_complete_children.end()) ||
-            (disjoint_complete_children[*it] * mask));
-#endif
-        if (disjoint_complete_children.insert(*it, mask))
-          (*it)->add_base_gc_ref(VERSION_MANAGER_REF);
-      }
-      parent_mask = mask;
-      if (!!disjoint_complete)
-        parent_mask -= disjoint_complete;
-      else
-        add_node_disjoint_complete_ref();
-      disjoint_complete |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::propagate_refinement(RegionTreeNode *child,
-                                              const FieldMask &mask, 
-                                              FieldMask &parent_mask) 
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
-      AutoLock m_lock(manager_lock);
-      if (child != NULL)
-      {
-        // We can get duplicate propagations of refinements here because
-        // of control replication. See VersionManager::compute_equivalence_sets 
-        if (disjoint_complete_children.insert(child, mask))
-          child->add_base_gc_ref(VERSION_MANAGER_REF);
-      }
-      parent_mask = mask;
-      if (!!disjoint_complete)
-        parent_mask -= disjoint_complete;
-      else
-        add_node_disjoint_complete_ref();
-      disjoint_complete |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::invalidate_refinement(InnerContext &context,
-                                      const FieldMask &mask, bool self,
-                                      FieldMaskSet<RegionTreeNode> &to_traverse,
-                                      LegionMap<AddressSpaceID,
-                                        SubscriberInvalidations> &subscribers,
-                                      std::vector<EquivalenceSet*> &to_release,
-                                      bool nonexclusive_virtual_mapping_root)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);     
- #ifdef DEBUG_LEGION
-      assert(to_traverse.empty());
-#endif
-      if (self)
-      {
-        if (node->is_region())
-        {
-          // Check to see if we have pending refinements we need
-          // to tell the context that it can invalidate
-          const FieldMask invalidate_mask = mask - disjoint_complete;
-          if (!!invalidate_mask)
-            context.invalidate_disjoint_complete_sets(node->as_region_node(), 
-                                                      invalidate_mask);
-        }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        else
-          assert(!(mask - disjoint_complete));
-#endif
-#endif
-        if (!!disjoint_complete)
-        {
-          disjoint_complete -= mask;
-          if (!disjoint_complete)
-            remove_node_disjoint_complete_ref();
-        }
-      }
-      FieldMask children_overlap;
-      if (!disjoint_complete_children.empty())
-        children_overlap = mask & disjoint_complete_children.get_valid_mask();
-      // Always invalidate any equivalence sets that we might have
-      if (!equivalence_sets.empty() && 
-          !(mask * equivalence_sets.get_valid_mask()))
-      {
-        std::vector<EquivalenceSet*> to_delete;
-#ifdef DEBUG_LEGION
-        assert(node->is_region());
-#endif
-        FieldMask untrack_mask;
-        // Handle the nasty case where there is just one equivalence set
-        // and the index space is empty so the summary valid mask is aliased
-        if ((equivalence_sets.size() == 1) &&
-            node->as_region_node()->row_source->is_empty())
-        {
-          FieldMaskSet<EquivalenceSet>::iterator finder =
-            equivalence_sets.begin();
-          const FieldMask overlap = finder->second & mask;
-          if (!!overlap)
-          {
-            finder.filter(overlap);
-            untrack_mask |= overlap;
-            // Remove this if the only remaining fields are not refinements
-            if (!finder->second || (finder->second * disjoint_complete))
-            {
-              // Remove this entirely from the set
-              // The version manager resource reference flows back
-              to_delete.push_back(finder->first);
-              // Record this to be released once all the effects are applied
-              to_release.push_back(finder->first);
-            }
-          }
-        }
-        else
-        {
-          // This is the common case
-          for (FieldMaskSet<EquivalenceSet>::iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-            // Skip any nodes that are not even part of a refinement 
-            // Unless we are a non-exclusive virtual mapping root in
-            // which case we do still want to invalidate these
-            if ((it->first->region_node != node) && 
-                !nonexclusive_virtual_mapping_root)
-              continue;
-            FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            // If we have disjoint complete children then we do not actually
-            // own these equivalence sets (we're just another observer) so
-            // we can't actually remove them, just ignore them
-            if (!!children_overlap)
-            {
-              overlap -= children_overlap;
-              if (!overlap)
-                continue;
-            }
-            untrack_mask |= overlap; 
-            it.filter(overlap);
-            if (!it->second)
-            {
-              to_delete.push_back(it->first);
-              // Record this to be released once all the effects are applied
-              to_release.push_back(it->first);
-            }
-          }
-        }
-        if (!!untrack_mask && !refinement_subscriptions.empty())
-          filter_refinement_subscriptions(untrack_mask, subscribers);
-        if (!to_delete.empty())
-        {
-          for (std::vector<EquivalenceSet*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            equivalence_sets.erase(*it);
-            // Remove our version manager reference here, this shouldn't
-            // end up deleting the equivalence set though since the 
-            // to_release data structure still holds a disjoin-complete ref
-            if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
-              assert(false);
-          }
-        }
-        equivalence_sets.tighten_valid_mask();
-      }
-      if (!!children_overlap)
-      {
-        std::vector<RegionTreeNode*> to_delete;
-        for (FieldMaskSet<RegionTreeNode>::iterator it = 
-              disjoint_complete_children.begin(); it != 
-              disjoint_complete_children.end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          it.filter(overlap);
-          to_traverse.insert(it->first, overlap);
-          // Add a reference for to_traverse
-          it->first->add_base_gc_ref(VERSION_MANAGER_REF);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<RegionTreeNode*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            disjoint_complete_children.erase(*it);
-            if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
-              delete (*it);
-          }
-        }
-        disjoint_complete_children.tighten_valid_mask();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::filter_refinement_subscriptions(const FieldMask &mask,
-                 LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(subscribers.empty());
-#endif
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::iterator 
-            ait = refinement_subscriptions.begin(); 
-            ait != refinement_subscriptions.end(); /*nothing*/)
-      {
-        const FieldMask space_overlap = ait->second.get_valid_mask() & mask;
-        if (!space_overlap)
-        {
-          ait++;
-          continue;
-        }
-        SubscriberInvalidations &to_untrack = subscribers[ait->first];
-        to_untrack.delete_all = true;
-        if (space_overlap != ait->second.get_valid_mask())
-        {
-          std::vector<EqSetTracker*> to_delete;
-          for (FieldMaskSet<EqSetTracker>::iterator it =
-                ait->second.begin(); it != ait->second.end(); it++)
-          {
-            const FieldMask overlap = it->second & space_overlap;
-            if (!overlap)
-              continue;
-            to_untrack.subscribers.insert(it->first, overlap);
-            it.filter(overlap);
-            if (!it->second)
-            {
-              to_delete.push_back(it->first);
-              if (!to_untrack.delete_all)
-                to_untrack.finished.push_back(it->first);
-            }
-            else if (to_untrack.delete_all)
-            {
-              to_untrack.delete_all = false;
-              if (to_untrack.subscribers.size() > 1)
-              {
-                to_untrack.finished.reserve(to_untrack.subscribers.size() - 1);
-                for (FieldMaskSet<EqSetTracker>::const_iterator sit =
-                      to_untrack.subscribers.begin(); sit !=
-                      to_untrack.subscribers.end(); sit++)
-                {
-                  if (sit->first == it->first)
-                    continue;
-                  to_untrack.finished.push_back(sit->first);
-                }
-              }
-            }
-          }
-          for (std::vector<EqSetTracker*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-            ait->second.erase(*it);
-          if (ait->second.empty())
-          {
-            LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::iterator
-              delete_it = ait++;
-            refinement_subscriptions.erase(delete_it);
-          }
-          else
-          {
-            ait->second.tighten_valid_mask();
-            ait++;
-          }
-        }
-        else
-        {
-          to_untrack.subscribers.swap(ait->second);
-          LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::iterator
-            delete_it = ait++;
-          refinement_subscriptions.erase(delete_it);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::merge(VersionManager &src, 
-                               std::set<RegionTreeNode*> &to_traverse,
-                               LegionMap<AddressSpaceID,
-                                SubscriberInvalidations> &subscribers)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node == src.node);
-      assert(!!src.disjoint_complete);
-#endif
-      if (!src.equivalence_sets.empty())
-      {
-        FieldMask untrack_mask;
-        for (FieldMaskSet<EquivalenceSet>::iterator it = 
-              src.equivalence_sets.begin(); it != 
-              src.equivalence_sets.end(); it++)
-        {
-          if (it->first->region_node != node)
-          {
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-            continue;
-          }
-#ifdef DEBUG_LEGION
-          assert(!(it->second - src.disjoint_complete));
-#endif
-          untrack_mask |= it->second; 
-          // Figure out whether we've already recorded this equivalence set
-          FieldMaskSet<EquivalenceSet>::iterator finder = 
-            equivalence_sets.find(it->first);
-          if (finder != equivalence_sets.end())
-          {
-            // Check to see if we have recorded a valid reference yet
-            // for this equivalence set
-            if (!(finder->second * disjoint_complete))
-            {
-              // Remove the duplicate references
-              if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-                assert(false); // should never end up deleting this
-            }
-            finder.merge(it->second);
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              assert(false); // should never end up deleting this
-          }
-          else
-            // Did not have this before so just insert it
-            // References flow back
-            equivalence_sets.insert(it->first, it->second);
-        }
-        if (!!untrack_mask && !refinement_subscriptions.empty())
-            filter_refinement_subscriptions(untrack_mask, subscribers);
-        src.equivalence_sets.clear();
-      }
-      // The disjoint complete node ref can propagate here but we need
-      // to deduplicate if we already have a reference
-      if (!!disjoint_complete && !!src.disjoint_complete)
-        src.remove_node_disjoint_complete_ref();
-      disjoint_complete |= src.disjoint_complete;
-      src.disjoint_complete.clear();
-      if (!src.disjoint_complete_children.empty())
-      {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              src.disjoint_complete_children.begin(); it !=
-              src.disjoint_complete_children.end(); it++)
-        {
-          to_traverse.insert(it->first);
-          // Remove duplicate references if it is already there
-          // otherwise the references flow to the destination
-          if (!disjoint_complete_children.insert(it->first, it->second))
-            it->first->remove_base_gc_ref(VERSION_MANAGER_REF);
-        }
-        src.disjoint_complete_children.clear();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::swap(VersionManager &src,
-                              std::set<RegionTreeNode*> &to_traverse,
-                              LegionMap<AddressSpaceID,
-                                SubscriberInvalidations> &subscribers)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(src.node == node);
-      assert(!disjoint_complete);
-      assert(!!src.disjoint_complete || (src.node->get_parent() == NULL));
-      assert(equivalence_sets.empty());
-      assert(disjoint_complete_children.empty());
-#endif
-      // The disjoint complete node ref can propagate here but we need
-      // to deduplicate if we already have a reference since it's about
-      // to be overwritten by the reference from the src
-      if (!!disjoint_complete)
-        remove_node_disjoint_complete_ref();
-      disjoint_complete = src.disjoint_complete;
-      src.disjoint_complete.clear();
-      if (!src.equivalence_sets.empty())
-      {
-        FieldMask untrack_mask;
-        for (FieldMaskSet<EquivalenceSet>::iterator it = 
-              src.equivalence_sets.begin(); it != 
-              src.equivalence_sets.end(); it++)
-        {
-          if (it->first->region_node != node)
-          {
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-            continue;
-          }
-#ifdef DEBUG_LEGION
-          assert(!(it->second - disjoint_complete));
-#endif
-          // reference flows back
-          if (!equivalence_sets.insert(it->first, it->second))
-            assert(false); // should never already be there
-          untrack_mask |= it->second;
-        }
-        if (!!untrack_mask && !refinement_subscriptions.empty())
-          filter_refinement_subscriptions(untrack_mask, subscribers);
-        src.equivalence_sets.clear();
-      }
-      disjoint_complete_children.swap(src.disjoint_complete_children);
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            disjoint_complete_children.begin(); it != 
-            disjoint_complete_children.end(); it++)
-        to_traverse.insert(it->first);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::pack_manager(Serializer &rez, const bool invalidate,
-                          std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                          LegionMap<AddressSpaceID,
-                            SubscriberInvalidations> &subscribers)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!!disjoint_complete || 
-          (node->is_region() && (node->as_region_node()->parent == NULL)));
-#endif
-      // No need for the lock here, should not be racing with anyone
-      if (!equivalence_sets.empty())
-      {
-        const FieldMask eq_overlap = 
-          equivalence_sets.get_valid_mask() & disjoint_complete;
-        FieldMask untrack_mask;
-        if (eq_overlap == disjoint_complete)
-        {
-          // We're sending all the equivalence sets
-          rez.serialize<size_t>(equivalence_sets.size());
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-            // Add a remote valid reference on these nodes to keep
-            // them live until we can add on remotely.
-            it->first->pack_global_ref();
-            if (invalidate)
-            {
-              it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
-              untrack_mask |= it->second; 
-              if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-                delete it->first;
-            }
-          }
-        }
-        else if (!!eq_overlap)
-        {
-          // Count how many equivalence sets we need to send back
-          std::vector<EquivalenceSet*> to_send;
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-            if (it->first->region_node != node)
-            {
-              if (invalidate && 
-                  it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-                delete it->first;
-            }
-            else
-            {
-              to_send.push_back(it->first);
-              // Add a remote valid reference on these nodes to keep
-              // them live until we can add on remotely.
-              it->first->pack_global_ref();
-              if (invalidate)
-              {
-                it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
-                untrack_mask |= it->second;
-                if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-                  delete it->first;
-              }
-            }
-          }
-          rez.serialize<size_t>(to_send.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                to_send.begin(); it != to_send.end(); it++)
-          {
-            rez.serialize((*it)->did);
-            rez.serialize(equivalence_sets[*it]);
-          }
-        }
-        else if (invalidate)
-        {
-          // Invalidate all the equivalence sets since none of them are going
-          rez.serialize<size_t>(0);
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-#ifdef DEBUG_LEGION
-            assert(node != it->first->region_node);
-#endif
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-          }
-        }
-        if (!!untrack_mask && !refinement_subscriptions.empty())
-          filter_refinement_subscriptions(untrack_mask, subscribers);
-      }
-      else
-        rez.serialize<size_t>(0);
-      if (!!disjoint_complete)
-        node->get_row_source()->pack_valid_ref();
-      rez.serialize(disjoint_complete);
-      rez.serialize<size_t>(disjoint_complete_children.size());
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            disjoint_complete_children.begin(); it !=
-            disjoint_complete_children.end(); it++)
-      {
-        const LegionColor child_color = it->first->get_color();
-        rez.serialize(child_color);
-        rez.serialize(it->second);
-        to_traverse[child_color] = it->first;
-        // Return reference for to_traverse
-        it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-        if (invalidate && 
-            it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
-          assert(false); // should never get here
-      }
-      if (invalidate)
-      {
-        if (!!disjoint_complete)
-          remove_node_disjoint_complete_ref();
-        disjoint_complete.clear();
-        disjoint_complete_children.clear();
-        equivalence_sets.clear();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::unpack_manager(Deserializer &derez, 
-      AddressSpaceID source, std::map<LegionColor,RegionTreeNode*> &to_traverse)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!disjoint_complete);
-      assert(disjoint_complete_children.empty());
-      assert(equivalence_sets.empty());
-#endif
-      // No need for the lock here, we should not be racing with anyone
-      size_t num_equivalence_sets;
-      derez.deserialize(num_equivalence_sets);
-      std::set<RtEvent> ready_events;
-      for (unsigned idx = 0; idx < num_equivalence_sets; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        FieldMask eq_mask;
-        derez.deserialize(eq_mask);
-        RtEvent ready_event;
-        EquivalenceSet *set = 
-          runtime->find_or_request_equivalence_set(did, ready_event);
-        equivalence_sets.insert(set, eq_mask);
-        if (ready_event.exists())
-          ready_events.insert(ready_event);
-      }
-      derez.deserialize(disjoint_complete);
-      if (!!disjoint_complete)
-      {
-        add_node_disjoint_complete_ref();
-        node->get_row_source()->unpack_valid_ref();
-      }
-      size_t num_children;
-      derez.deserialize(num_children);
-      for (unsigned idx = 0; idx < num_children; idx++)
-      {
-        LegionColor child_color;
-        derez.deserialize(child_color);
-        FieldMask child_mask;
-        derez.deserialize(child_mask);
-        RegionTreeNode *child = node->get_tree_child(child_color);
-        disjoint_complete_children.insert(child, child_mask);
-        child->add_base_gc_ref(VERSION_MANAGER_REF);
-        to_traverse[child_color] = child;
-      }
-      if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
-      // Update the references on all our equivalence sets
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->first->region_node == node);
-#endif
-        it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-        it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-        it->first->unpack_global_ref();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::print_physical_state(RegionTreeNode *node,
-                                              const FieldMask &capture_mask,
-                                              TreeStateLogger *logger)
-    //--------------------------------------------------------------------------
-    {
-      logger->log("Equivalence Sets:");
-      logger->down();
-      // TODO: log equivalence sets
-      assert(false);
-      logger->up();
-    } 
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionManager::handle_finalize_eq_sets(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const LgFinalizeEqSetsArgs *fargs = (const LgFinalizeEqSetsArgs*)args;
-      fargs->manager->finalize_equivalence_sets(fargs->compute);
+      const FinalizeOutputEquivalenceSetArgs *fargs =
+        (const FinalizeOutputEquivalenceSetArgs*)args;
+      RtEvent done = fargs->proxy_this->finalize_output_equivalence_set(
+        fargs->set, fargs->context, fargs->parent_req_index);
+      Runtime::trigger_event(fargs->done_event, done);
+      if (fargs->set->remove_base_gc_ref(META_TASK_REF))
+        delete fargs->set;
     }
 
     /////////////////////////////////////////////////////////////
@@ -20958,23 +23670,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreePath::record_aliased_children(unsigned depth,
-                                                 const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(min_depth <= depth);
-      assert(depth <= max_depth);
-#endif
-      LegionMap<unsigned,FieldMask>::iterator finder = 
-        interfering_children.find(depth);
-      if (finder == interfering_children.end())
-        interfering_children[depth] = mask;
-      else
-        finder->second |= mask;
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreePath::clear(void)
     //--------------------------------------------------------------------------
     {
@@ -21003,19 +23698,6 @@ namespace Legion {
       return path[depth];
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    const FieldMask* RegionTreePath::get_aliased_children(unsigned depth) const
-    //--------------------------------------------------------------------------
-    {
-      if (interfering_children.empty())
-        return NULL;
-      LegionMap<unsigned,FieldMask>::const_iterator finder = 
-        interfering_children.find(depth);
-      if (finder == interfering_children.end())
-        return NULL;
-      return &(finder->second);
-    }
 
     /////////////////////////////////////////////////////////////
     // InstanceRef 

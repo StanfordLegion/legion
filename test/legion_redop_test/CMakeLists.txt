@@ -24,6 +24,7 @@ endif()
 
 add_executable(legion_redop_test legion_redop_test.cc)
 target_link_libraries(legion_redop_test Legion::Legion)
+target_compile_options(legion_redop_test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME legion_redop_test COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:legion_redop_test> ${Legion_TEST_ARGS}) 
+  add_test(NAME legion_redop_test COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:legion_redop_test> ${Legion_TEST_ARGS})
 endif()

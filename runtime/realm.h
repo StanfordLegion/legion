@@ -52,6 +52,7 @@
 #include "realm/indexspace.h"
 #include "realm/codedesc.h"
 #include "realm/subgraph.h"
+#include "realm/module_config.h"
 
 #ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_access.h"

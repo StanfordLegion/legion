@@ -21,8 +21,11 @@
 #include "realm/processor.h"
 #include "realm/redop.h"
 #include "realm/custom_serdez.h"
+#include "realm/module_config.h"
 
 namespace Realm {
+
+    class Module;
 
     class REALM_PUBLIC_API Runtime {
     protected:
@@ -46,6 +49,12 @@ namespace Realm {
       //  *argc and *argv contain the application's real command line
       //  (instead of e.g. mpi spawner information)
       bool network_init(int *argc, char ***argv);
+
+      void parse_command_line(int argc, char **argv);
+      void parse_command_line(std::vector<std::string> &cmdline,
+                              bool remove_realm_args = false);
+      
+      void finish_configure(void);
 
       // configures the runtime from the provided command line - after this 
       //  call it is possible to create user events/reservations/etc, 
@@ -107,8 +116,31 @@ namespace Realm {
 
       // returns the result_code passed to shutdown()
       int wait_for_shutdown(void);
+
+      // called before runtime::init to create module configs for users to configure realm
+      bool create_configs(int argc, char **argv);
+
+      // return the configuration of a specific module
+      ModuleConfig* get_module_config(const std::string name);
+      // modules in Realm may offer extra capabilities specific to certain kinds
+      //  of hardware or software - to get access, you'll want to know the name
+      //  of the module and it's C++ type (both should be found in the module's
+      //  header file - this function will return a null pointer if the module
+      //  isn't present or if the expected and actual types mismatch
+      template <typename T>
+      T *get_module(const char *name)
+      {
+        Module *mod = get_module_untyped(name);
+        if(mod)
+          return dynamic_cast<T *>(mod);
+        else
+          return 0;
+      }
+
+    protected:
+      Module *get_module_untyped(const char *name);
     };
-	
+
 }; // namespace Realm
 
 //include "runtime.inl"

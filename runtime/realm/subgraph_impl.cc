@@ -27,7 +27,7 @@ namespace Realm {
   //
   // class Subgraph
 
-  /*static*/ const Subgraph Subgraph::NO_SUBGRAPH = { 0 };
+  /*static*/ const Subgraph Subgraph::NO_SUBGRAPH = {/* zero-initialization */};
 
   /*static*/ Event Subgraph::create_subgraph(Subgraph& subgraph,
 					     const SubgraphDefinition& defn,

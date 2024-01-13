@@ -174,11 +174,10 @@ public: // handling
                                   const MapperTaskResult&       result);
 #ifndef NO_LEGION_CONTROL_REPLICATION
 public: // Control replication
-  virtual void map_replicate_task(const MapperContext      ctx,
-                                  const Task&              task,
-                                  const MapTaskInput&      input,
-                                  const MapTaskOutput&     default_output,
-                                  MapReplicateTaskOutput&  output);
+  virtual void replicate_task(MapperContext               ctx,
+                              const Task&                 task,
+                              const ReplicateTaskInput&   input,
+                                    ReplicateTaskOutput&  output);
   virtual void select_sharding_functor(
                              const MapperContext                ctx,
                              const Task&                        task,

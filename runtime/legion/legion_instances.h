@@ -361,7 +361,7 @@ namespace Legion {
     public: 
       ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const;
       inline LgEvent get_unique_event(void) const { return unique_event; }
-      PhysicalInstance get_instance(void) const { return instance; }
+      PhysicalInstance get_instance(void) const;
       inline Memory get_memory(void) const { return memory_manager->memory; }
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
@@ -450,9 +450,11 @@ namespace Legion {
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
-                         bool tight_region_bounds = false) const;
+                         bool tight_region_bounds = false,
+                         const Domain *padding_delta = NULL) const;
       bool meets_expression(IndexSpaceExpression *expr, 
-                            bool tight_bounds = false) const;
+                            bool tight_bounds = false,
+                            const Domain *padding_delta = NULL) const;
     public:
       void find_padded_reservations(const FieldMask &mask,
                                     Operation *op, unsigned index);

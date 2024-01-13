@@ -520,51 +520,10 @@ namespace Realm {
 		  // manufacture affinities for remote writes
 		  // acceptable local sources: SYSTEM, Z_COPY, REGDMA (bonus)
 		  // acceptable remote targets: SYSTEM, Z_COPY, GPU_FB, DISK, HDF, FILE, REGDMA (bonus)
-		  int bw = 6;
-		  int latency = 1000;
 		  bool rem_send, rem_recv, rem_reg;
 		  if(!allows_internode_copies(kind,
 					      rem_send, rem_recv, rem_reg))
 		    continue;
-
-		  // iterate over local memories and check their kinds
-		  Node *mynode = &(get_runtime()->nodes[Network::my_node_id]);
-		  for(std::vector<MemoryImpl *>::const_iterator it = mynode->memories.begin();
-		      it != mynode->memories.end();
-		      ++it) {
-		    Machine::MemoryMemoryAffinity mma;
-		    mma.bandwidth = bw + (rem_reg ? 1 : 0);
-		    mma.latency = latency - (rem_reg ? 100 : 0);
-
-		    bool lcl_send, lcl_recv, lcl_reg;
-		    if(!allows_internode_copies((*it)->get_kind(),
-						lcl_send, lcl_recv, lcl_reg))
-		      continue;
-
-		    if(lcl_reg) {
-		      mma.bandwidth += 1;
-		      mma.latency -= 100;
-		    }
-
-		    if(lcl_send && rem_recv) {
-		      mma.m1 = (*it)->me;
-		      mma.m2 = m;
-		      log_annc.debug() << "adding inter-node affinity "
-				       << mma.m1 << " -> " << mma.m2
-				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		      add_mem_mem_affinity(mma, true /*lock held*/);
-		      //mem_mem_affinities.push_back(mma);
-		    }
-		    if(rem_send && lcl_recv) {
-		      mma.m1 = m;
-		      mma.m2 = (*it)->me;
-		      log_annc.debug() << "adding inter-node affinity "
-				       << mma.m1 << " -> " << mma.m2
-				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		      add_mem_mem_affinity(mma, true /*lock held*/);
-		      //mem_mem_affinities.push_back(mma);
-		    }
-		  }
 		}
 #endif
 	      }
@@ -623,24 +582,6 @@ namespace Realm {
 
 	      add_proc_mem_affinity(pma, true /*lock held*/);
 	      //proc_mem_affinities.push_back(pma);
-	    }
-	  }
-	  break;
-
-	case NODE_ANNOUNCE_MMA:
-	  {
-	    Machine::MemoryMemoryAffinity mma;
-	    ok = (ok &&
-		  (fbd >> mma.m1) &&
-		  (fbd >> mma.m2) &&
-		  (fbd >> mma.bandwidth) &&
-		  (fbd >> mma.latency));
-	    if(ok) {
-	      log_annc.debug() << "adding affinity " << mma.m1 << " <-> " << mma.m2
-			       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-
-	      add_mem_mem_affinity(mma, true /*lock held*/);
-	      //mem_mem_affinities.push_back(mma);
 	    }
 	  }
 	  break;
@@ -902,16 +843,22 @@ namespace Realm {
     {
       // TODO: consider using a reader/writer lock here instead
       AutoLock<> al(mutex);
-      for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
-	  it != mem_mem_affinities.end();
-	  it++) {
-	if(it->m1 != m1) continue;
-	if(it->m2 != m2) continue;
-	if(details) {
-	  details->bandwidth = it->bandwidth;
-	  details->latency = it->latency;
-	}
-	return true;
+
+      MachineNodeInfo* nodeInfo = get_nodeinfo(m1);
+      if (nodeInfo == nullptr) {
+        return false;
+      }
+      MachineMemInfo* memInfo = nodeInfo->mems[m1];
+      if (memInfo == nullptr) {
+        return false;
+      }
+      std::map<Memory, Machine::MemoryMemoryAffinity *>::const_iterator it = memInfo->mmas_out.all.find(m2);
+      if (it != memInfo->mmas_out.all.end()) {
+        if (details != nullptr) {
+          details->bandwidth = it->second->bandwidth;
+          details->latency = it->second->latency;
+        }
+        return true;
       }
       return false;
     }
@@ -1008,36 +955,12 @@ namespace Realm {
     {
       // Clear the vector in case it has old data
       result.clear();
-      // Handle the case for same memories
-      if (restrict_mem1.exists() && (restrict_mem1 == restrict_mem2))
-      {
-	Machine::MemoryMemoryAffinity affinity;
-        affinity.m1 = restrict_mem1;
-        affinity.m2 = restrict_mem1;
-        affinity.bandwidth = 100;
-        affinity.latency = 1;
-        result.push_back(affinity);
-        return 1;
-      }
 
       int count = 0;
 
       {
 	// TODO: consider using a reader/writer lock here instead
 	AutoLock<> al(mutex);
-#ifdef USE_OLD_AFFINITIES
-	for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
-	    it != mem_mem_affinities.end();
-	    it++) {
-	  if(restrict_mem1.exists() && 
-	     ((*it).m1 != restrict_mem1)) continue;
-	  if(restrict_mem2.exists() && 
-	     ((*it).m2 != restrict_mem2)) continue;
-	  if(local_only && !is_local_affinity(*it)) continue;
-	  result.push_back(*it);
-	  count++;
-	}
-#else
 	if(restrict_mem1.exists()) {
 	  const MachineNodeInfo *nm1 = get_nodeinfo(restrict_mem1);
 	  if(!nm1) return 0;
@@ -1095,7 +1018,6 @@ namespace Realm {
 	      }
 	  }
 	}
-#endif
       }
 
       return count;
@@ -1128,33 +1050,6 @@ namespace Realm {
     if(!lock_held) mutex.unlock();
   }
 
-  void MachineImpl::add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma,
-					 bool lock_held /*= false*/)
-  {
-    if(!lock_held) mutex.lock();
-
-    mem_mem_affinities.push_back(mma);
-
-    int m1p = ID(mma.m1).memory_owner_node();
-    int m2p = ID(mma.m2).memory_owner_node();
-    {
-      MachineNodeInfo *& ptr = nodeinfos[m1p];
-      if(!ptr) ptr = new MachineNodeInfo(m1p);
-      ptr->add_memory(mma.m1);
-      if(m1p == m2p)
-	ptr->add_memory(mma.m2);
-      ptr->add_mem_mem_affinity(mma);
-    }
-    if(m1p != m2p) {
-      MachineNodeInfo *& ptr = nodeinfos[m2p];
-      if(!ptr) ptr = new MachineNodeInfo(m2p);
-      ptr->add_memory(mma.m2);
-      ptr->add_mem_mem_affinity(mma);
-    }
-    invalidate_query_caches();
-    if(!lock_held) mutex.unlock();
-  }
-
     void MachineImpl::add_subscription(Machine::MachineUpdateSubscriber *subscriber)
     {
       AutoLock<> al(mutex);
@@ -1165,6 +1060,75 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
       subscribers.erase(subscriber);
+    }
+
+    static bool get_memcpy_affinity(Machine::MemoryMemoryAffinity &affinity,
+                                    Realm::Memory src_mem,
+                                    Realm::Memory dst_mem) {
+      bool found_channel = false;
+      affinity.m1 = src_mem;
+      affinity.m2 = dst_mem;
+      affinity.bandwidth = 0;
+      affinity.latency = UINT_MAX;
+      Realm::Node &src_node =
+          get_runtime()->nodes[ID(src_mem).memory_owner_node()];
+      // Find the best channel to satisfy a basic copy and track it's bandwidth
+      // and latency.
+      for (Channel *channel : src_node.dma_channels) {
+        unsigned bandwidth, latency;
+        if (channel->supports_path(ChannelCopyInfo{src_mem, dst_mem}, 0, 0, 0,
+                                   1, nullptr, nullptr, nullptr, &bandwidth,
+                                   &latency) != 0) {
+          affinity.bandwidth = std::max(bandwidth, affinity.bandwidth);
+          affinity.latency = std::min(latency, affinity.latency);
+          found_channel = true;
+        }
+      }
+      return found_channel;
+    }
+
+    void MachineImpl::update_kind_maps(void)
+    {
+      for(std::pair<const int, Realm::MachineNodeInfo *> &node_info : nodeinfos) {
+        node_info.second->update_kind_maps();
+      }
+    }
+
+    void MachineImpl::enumerate_mem_mem_affinities(void) {
+      AutoLock<> al(mutex);
+      // This only enumerates the local-local, local-remote, and remote-local
+      // memory affinities to save on cache space
+      Realm::MachineNodeInfo *src_nodeInfo = nodeinfos[Network::my_node_id];
+      if (src_nodeInfo == nullptr) {
+        src_nodeInfo = new Realm::MachineNodeInfo(Network::my_node_id);
+        nodeinfos[Network::my_node_id] = src_nodeInfo;
+      }
+      for (MemoryImpl *src_mem : get_runtime()->nodes[Network::my_node_id].memories) {
+        src_nodeInfo->add_memory(src_mem->me);
+        Realm::MachineMemInfo *src_memInfo = src_nodeInfo->mems[src_mem->me];
+        for (Realm::NodeID dst_idx = 0; dst_idx <= Network::max_node_id; dst_idx++) {
+          Realm::MachineNodeInfo *dst_nodeInfo = nodeinfos[dst_idx];
+          if (dst_nodeInfo == nullptr) {
+            dst_nodeInfo = new Realm::MachineNodeInfo(dst_idx);
+            nodeinfos[dst_idx] = dst_nodeInfo;
+          }
+          for (MemoryImpl *dst_mem : get_runtime()->nodes[dst_idx].memories) {
+            Machine::MemoryMemoryAffinity affinity;
+            dst_nodeInfo->add_memory(dst_mem->me);
+            Realm::MachineMemInfo* dst_memInfo = dst_nodeInfo->mems[dst_mem->me];
+            // Add the in and out edges for both the source and destination meminfos
+            if (get_memcpy_affinity(affinity, src_mem->me, dst_mem->me)) {
+              src_memInfo->add_mem_mem_affinity(affinity);
+              dst_memInfo->add_mem_mem_affinity(affinity);
+            }
+            if (get_memcpy_affinity(affinity, dst_mem->me, src_mem->me)) {
+              src_memInfo->add_mem_mem_affinity(affinity);
+              dst_memInfo->add_mem_mem_affinity(affinity);
+            }
+          }
+        }
+      }
+      invalidate_query_caches();
     }
 
     void MachineImpl::invalidate_query_caches()
@@ -3096,65 +3060,5 @@ namespace Realm {
 #endif
     return chosen;
   }
-
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class NodeAnnounceMessage
-  //
-
-  static atomic<int> announcements_received(0);
-  static atomic<int> announce_fragments_expected(0);
-
-  /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
-						      const void *data, size_t datalen)
-
-  {
-    log_annc.info() << "received fragment from " << sender
-                    << ": num_fragments=" << args.num_fragments;
-    
-    if(args.num_fragments > 0) {
-      // update the remaining fragment count and then mark that we've got
-      //  this sender's contribution
-      announce_fragments_expected.fetch_add(args.num_fragments);
-      announcements_received.fetch_add_acqrel(1);
-    }
-
-    get_machine()->parse_node_announce_data(sender,
-                                            data, datalen, true);
-
-    // this fragment has been handled
-    announce_fragments_expected.fetch_sub_acqrel(1);
-  }
-
-  /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
-  {
-    // two steps:
-
-    // 1) wait until we've got the fragment-count-bearing message from every
-    //  other node
-    while(announcements_received.load() < Network::max_node_id) {
-      Thread::yield();
-      //do_some_polling();
-    }
-
-    // 2) then wait for the expected fragment count to drop to zero
-    while(announce_fragments_expected.load_acquire() > 0) {
-      Thread::yield();
-    }
-
-    log_annc.info("node %d has received all of its announcements", Network::my_node_id);
-
-    // 3) go ahead and build the by-kind maps in each node info
-    MachineImpl *impl = get_machine();
-    for(std::map<int, MachineNodeInfo *>::iterator it = impl->nodeinfos.begin();
-        it != impl->nodeinfos.end();
-        ++it)
-      it->second->update_kind_maps();
-  }
-  
-
-  ActiveMessageHandlerReg<NodeAnnounceMessage> node_announce_message;
 
 }; // namespace Realm

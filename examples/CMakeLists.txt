@@ -20,10 +20,6 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++${CMAKE_CXX_STANDARD})
-
 add_subdirectory(allreduce)
 add_subdirectory(attach_file)
 add_subdirectory(circuit)
@@ -46,6 +42,7 @@ add_subdirectory(tiling)
 add_subdirectory(padded_instances)
 add_subdirectory(implicit_top_task)
 add_subdirectory(future_map_transforms)
+add_subdirectory(collective_writes)
 add_subdirectory(concurrent_tasks)
 add_subdirectory(tree_collectives)
 

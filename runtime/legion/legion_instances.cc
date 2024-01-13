@@ -1137,6 +1137,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalManager::get_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::compute_copy_offsets(const FieldMask &copy_mask,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
@@ -1166,8 +1175,9 @@ namespace Legion {
         {
           // Handle the case where we already requested this view on this
           // node from an unrelated meta-task execution
-          void *location = runtime->find_or_create_pending_collectable_location(
-              view_did, sizeof(ReductionView));
+          void *location = 
+            runtime->find_or_create_pending_collectable_location<ReductionView>(
+              view_did);
           return new (location) ReductionView(runtime, view_did,
               logical_owner, this, true/*register now*/, mapping);
         }
@@ -1181,8 +1191,8 @@ namespace Legion {
         {
           // Handle the case where we already requested this view on this
           // node from an unrelated meta-task execution
-          void *location = runtime->find_or_create_pending_collectable_location(
-              view_did, sizeof(MaterializedView));
+          void *location = runtime->find_or_create_pending_collectable_location<
+            MaterializedView>(view_did);
           return new (location) MaterializedView(runtime, view_did,
                 logical_owner, this, true/*register now*/, mapping);
         }
@@ -1287,8 +1297,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(key);
-          rez.serialize(own_ctx->did);
+          own_ctx->pack_inner_context(rez);
           rez.serialize(owner_space);
           mapping->pack(rez);
           rez.serialize(&view_did);
@@ -1312,8 +1321,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(key);
-          rez.serialize(own_ctx->did);
+          own_ctx->pack_inner_context(rez);
           rez.serialize(logical_owner);
           rez.serialize<size_t>(0); // no mapping
           rez.serialize(&view_did);
@@ -1523,7 +1531,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::meets_regions(
-      const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
+      const std::vector<LogicalRegion> &regions, bool tight_region_bounds,
+      const Domain *padding_delta) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1542,16 +1551,16 @@ namespace Legion {
       }
       IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
         *(region_exprs.begin()) : context->union_index_spaces(region_exprs);
-      return meets_expression(space_expr, tight_region_bounds);
+      return meets_expression(space_expr, tight_region_bounds, padding_delta);
     }
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::meets_expression(IndexSpaceExpression *space_expr,
-                                           bool tight_bounds) const
+                           bool tight_bounds, const Domain *padding_delta) const
     //--------------------------------------------------------------------------
     {
       return instance_domain->meets_layout_expression(space_expr, tight_bounds,
-                                                  piece_list, piece_list_size);
+                                    piece_list, piece_list_size, padding_delta);
     }
 
     //--------------------------------------------------------------------------
@@ -2216,7 +2225,7 @@ namespace Legion {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(gc_state == PENDING_COLLECTED_GC_STATE);
+      assert(gc_state != COLLECTED_GC_STATE);
 #endif
       sent_valid_references += sent;
       received_valid_references += received;
@@ -2850,22 +2859,7 @@ namespace Legion {
       RtEvent man_ready;
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(did, man_ready);
-      DistributedID repl_id, ctx_did;
-      derez.deserialize(repl_id);
-      derez.deserialize(ctx_did);
-      RtEvent ctx_ready;
-      InnerContext *context = NULL;
-      if (repl_id != ctx_did)
-      {
-        // See if we're on a node where there is a shard manager for
-        // this replicated context
-        ShardManager *shard_manager = 
-          runtime->find_shard_manager(repl_id, true/*can fail*/);
-        if (shard_manager != NULL)
-          context = shard_manager->find_local_context();
-      }
-      if (context == NULL)
-        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      InnerContext *context = InnerContext::unpack_inner_context(derez,runtime);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       CollectiveMapping *mapping = NULL;
@@ -2881,20 +2875,12 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
       // See if we're ready or we need to defer this until later
-      if ((man_ready.exists() && !man_ready.has_triggered()) ||
-          (ctx_ready.exists() && !ctx_ready.has_triggered()))
+      if (man_ready.exists() && !man_ready.has_triggered())
       {
         RemoteCreateViewArgs args(manager, context, logical_owner,
                                   mapping, target, source, done);
-        if (!man_ready.exists())
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
-        else if (!ctx_ready.exists())
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, man_ready);
-        else
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-              Runtime::merge_events(man_ready, ctx_ready));
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, man_ready);
         return;
       }
       process_top_view_request(manager, context, logical_owner, mapping,
@@ -3195,25 +3181,21 @@ namespace Legion {
       MemoryManager *memory = runtime->find_memory_manager(mem);
       const ReductionOp *op = 
         (redop == 0) ? NULL : runtime->get_reduction(redop);
-      void *location;
-      PhysicalManager *man = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        man = new(location) PhysicalManager(runtime->forest, did,
-                                            memory, inst, inst_domain, 
+      void *location = runtime->find_or_create_pending_collectable_location<
+                                                        PhysicalManager>(did);
+      PhysicalManager *man = new(location) PhysicalManager(runtime->forest,
+                                            did, memory, inst, inst_domain, 
                                             piece_list, piece_list_size, 
                                             space_node, tree_id, layout, 
                                             redop, false/*reg now*/, 
                                             inst_footprint, use_event, 
                                             unique_event, kind, op);
-      else
-        man = new PhysicalManager(runtime->forest, did, memory, 
-                              inst, inst_domain, piece_list, piece_list_size,
-                              space_node, tree_id, layout, redop,
-                              false/*reg now*/, inst_footprint, use_event,
-                              unique_event, kind, op);
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime();
+      // Remove the reference we got back on the layout description
+      if (layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------
@@ -3369,8 +3351,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (use_event.exists() && !use_event.has_triggered())
-        use_event.wait();
+      if (use_event.exists() && !use_event.has_triggered_faultignorant())
+        use_event.wait_faultignorant();
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       return uintptr_t(inst_ptr);
     }
@@ -3964,6 +3946,9 @@ namespace Legion {
       }
       // manager takes ownership of the piece list
       piece_list = NULL;
+      // Remove the reference we got back from finding or creating the layout
+      if (layout->remove_reference())
+        delete layout;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -4260,6 +4245,33 @@ namespace Legion {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
                         "Illegal request to create instance of type %d", 
                         constraints.specialized_constraint.get_kind())
+      }
+#ifdef DEBUG_LEGION
+      assert((constraints.padding_constraint.delta.get_dim() == 0) ||
+             (constraints.padding_constraint.delta.get_dim() == (int)num_dims));
+#endif
+      // If we don't have a padding constraint then record that we 
+      // don't have any padding on this instance
+      if (constraints.padding_constraint.delta.get_dim() == 0)
+      {
+        DomainPoint empty;
+        empty.dim = num_dims;
+        for (unsigned dim = 0; dim < num_dims; dim++)
+          empty[dim] = 0; // no padding
+        constraints.padding_constraint.delta = Domain(empty, empty);
+      }
+      else
+      {
+        DomainPoint lo = constraints.padding_constraint.delta.lo();
+        DomainPoint hi = constraints.padding_constraint.delta.hi();
+        for (unsigned dim = 0; dim < num_dims; dim++)
+        {
+          if (lo[dim] < 0)
+            lo[dim] = 0;
+          if (hi[dim] < 0)
+            hi[dim] = 0;
+        }
+        constraints.padding_constraint.delta = Domain(lo, hi);
       }
     }
 

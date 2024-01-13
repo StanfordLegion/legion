@@ -24,6 +24,7 @@ endif()
 
 add_executable(attach_file attach_file.cc)
 target_link_libraries(attach_file Legion::Legion)
+target_compile_options(attach_file PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 target_include_directories(attach_file PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(attach_file ${HDF5_LIBRARIES})
 if(Legion_ENABLE_TESTING)

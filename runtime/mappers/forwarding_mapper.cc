@@ -302,13 +302,12 @@ void ForwardingMapper::handle_task_result(
 
 #ifndef NO_LEGION_CONTROL_REPLICATION
 
-void ForwardingMapper::map_replicate_task(
-    const MapperContext ctx,
+void ForwardingMapper::replicate_task(
+    MapperContext ctx,
     const Task& task,
-    const MapTaskInput& input,
-    const MapTaskOutput& default_output,
-    MapReplicateTaskOutput& output) {
-  mapper->map_replicate_task(ctx, task, input, default_output, output);
+    const ReplicateTaskInput& input,
+          ReplicateTaskOutput& output) {
+  mapper->replicate_task(ctx, task, input, output);
 }
 
 void ForwardingMapper::select_sharding_functor(

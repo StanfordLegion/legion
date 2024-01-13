@@ -50,6 +50,7 @@ namespace Realm {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID my_node_id = 0;
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID max_node_id = 0;
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSet all_peers;
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSet shared_peers;
     NetworkModule *single_network = 0;
 
     bool check_for_quiescence(IncomingMessageManager *message_manager)
@@ -144,6 +145,9 @@ namespace Realm {
     static NetworkModule *create_network_module(RuntimeImpl *runtime,
 						int *argc, const char ***argv);
 
+    // Enumerates all the peers that the current node could potentially share memory with
+    virtual void get_shared_peers(NodeSet &shared_peers);
+
     // actual parsing of the command line should wait until here if at all
     //  possible
     virtual void parse_command_line(RuntimeImpl *runtime,
@@ -165,6 +169,8 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes);
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes);
+    virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                            std::vector<size_t> &lengths);
 
     virtual size_t sample_messages_received_count(void);
     virtual bool check_for_quiescence(size_t sampled_receive_count);
@@ -244,6 +250,8 @@ namespace Realm {
     return new LoopbackNetworkModule;
   }
 
+  void LoopbackNetworkModule::get_shared_peers(NodeSet &shared_peers) {}
+
   // actual parsing of the command line should wait until here if at all
   //  possible
   void LoopbackNetworkModule::parse_command_line(RuntimeImpl *runtime,
@@ -313,6 +321,15 @@ namespace Realm {
 				     size_t bytes)
   {
     memcpy(vals_out, val_in, bytes);
+  }
+
+  void LoopbackNetworkModule::allgatherv(const char *val_in, size_t bytes,
+                                         std::vector<char> &vals_out,
+                                         std::vector<size_t> &lengths)
+  {
+    vals_out.resize(bytes);
+    lengths[0] = bytes;
+    memcpy(vals_out.data(), val_in, bytes);
   }
 
   size_t LoopbackNetworkModule::sample_messages_received_count(void)
@@ -688,7 +705,7 @@ namespace Realm {
         }
 
         int count = load_network_module_list(e, runtime, argc, argv,
-                                             sofile_handles, modules);
+                                             network_sofile_handles, modules);
         if(count > 0)
           need_loopback = false;
 #else

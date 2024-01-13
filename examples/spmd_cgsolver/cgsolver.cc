@@ -449,8 +449,7 @@ void top_level_task(const Task *task,
   // define the main grid index space and its partition into blocks
   IndexSpaceT<3> is_grid = runtime->create_index_space(ctx,
       Rect<3>(Point<3>(0,0,0), grid_dim - Point<3>(1,1,1)));
-  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, 
-                                                        block_dim, 0/*color*/);
+  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, block_dim);
 
   // we also use an index space with an element per block to record things like which shard owns each block
   IndexSpace is_blks = runtime->create_index_space(ctx,
@@ -832,8 +831,7 @@ bool spmd_main_task(const Task *task,
                                                               color_space,
                                                               transform,
                                                               r_subset,
-                                                              COMPUTE_KIND,
-                                                              dir*2+side);
+                                                              COMPUTE_KIND);
 	  IndexSpace is_subset = runtime->get_index_subspace(ctx, ip, 0);
 	  assert(runtime->get_index_space_domain(ctx, is_subset) == r_subset);
 	  g.ispace = is_subset;
@@ -1058,6 +1056,23 @@ bool spmd_main_task(const Task *task,
 					  fid_sol_r, true /*private*/,
 					  p_notdone);
     f_residuals.push(f_resnew);
+
+    if(args.future_lag > 0) {
+      Future f_notdone = FLT_double::compute(runtime, ctx, f_restarget, f_resnew);
+      p_notdone = runtime->predicate_and(ctx, p_notdone,
+					 runtime->create_predicate(ctx, f_notdone));
+    }
+
+    // p = r + (resnew/resold)*p
+    Future f_beta = FDV_double::compute(runtime, ctx, f_resnew, f_resold);
+    double beta = f_beta.get_result<double>();
+    VectorAcc::compute(myblocks, runtime, ctx,
+		       1.0, fid_sol_r, true /*private*/,
+		       beta, fid_sol_p, false /*!private*/,
+		       p_notdone);
+
+    f_resold = f_resnew;
+
     if(f_residuals.size() > (size_t)args.future_lag) {
       Future f = f_residuals.front();
       f_residuals.pop();
@@ -1085,23 +1100,7 @@ bool spmd_main_task(const Task *task,
       if(shard == 0)
 	log_app.info() << "not speculating past " << iter << " iterations";
       break;
-    }
-
-    if(args.future_lag > 0) {
-      Future f_notdone = FLT_double::compute(runtime, ctx, f_restarget, f_resnew);
-      p_notdone = runtime->predicate_and(ctx, p_notdone,
-					 runtime->create_predicate(ctx, f_notdone));
-    }
-
-    // p = r + (resnew/resold)*p
-    Future f_beta = FDV_double::compute(runtime, ctx, f_resnew, f_resold);
-    double beta = f_beta.get_result<double>();
-    VectorAcc::compute(myblocks, runtime, ctx,
-		       1.0, fid_sol_r, true /*private*/,
-		       beta, fid_sol_p, false /*!private*/,
-		       p_notdone);
-
-    f_resold = f_resnew;
+    } 
 
     if(args.use_tracing)
       runtime->end_trace(ctx, TRACE_ID_CG_ITER);

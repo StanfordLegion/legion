@@ -17,6 +17,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import annotations
 
 import inspect
 import re
@@ -29,7 +30,10 @@ from typing import Union, Dict, List, Tuple, Callable, Type, ItemsView, Any, Opt
 
 import legion_spy
 from legion_util import typeassert, typecheck
-from legion_prof import State
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from legion_prof import State
 
 binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
@@ -72,7 +76,7 @@ class LegionDeserializer(ABC):
         @param[state]:     The state object for our callbacks
         @param[callbacks]: A dictionary containing the callbacks we should use
                            after deserializing each item. You must pass a callback
-                           for 
+                           for
         """
         self.state = state
         self.callbacks: Dict[Any, Callable] = callbacks # type: ignore # Any is str or int
@@ -130,6 +134,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+)'),
+        "ZeroTime": re.compile(prefix + r'Zero Time (?P<zero_time>[0-9]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
         "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<bandwidth>[0-9]+) (?P<latency>[0-9]+)'),
@@ -155,18 +160,18 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
         "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
         "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
-        "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+)'),
-        "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<request_type>[0-9]+) (?P<fevent>[a-f0-9]+)'),
+        "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<collective>[0-9]+) (?P<fevent>[a-f0-9]+)'),
         "CopyInstInfo": re.compile(prefix + r'Prof Copy Inst Info (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<src_fid>[a-f0-9]+) (?P<dst_fid>[a-f0-9]+) (?P<src_inst>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+) (?P<num_hops>[0-9]+) (?P<indirect>[0-1])'),
         "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[a-f0-9]+)'),
         "FillInstInfo": re.compile(prefix + r'Prof Fill Inst Info (?P<dst>[a-f0-9]+) (?P<fid>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+)'),
         "InstTimelineInfo": re.compile(prefix + r'Prof Inst Timeline (?P<inst_uid>[a-f0-9]+) (?P<inst_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<size>[0-9]+) (?P<op_id>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<destroy>[0-9]+)'),
         "PartitionInfo": re.compile(prefix + r'Prof Partition Timeline (?P<op_id>[0-9]+) (?P<part_op>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+        "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)')
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
@@ -212,7 +217,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_id": lambda x: int(x, 16),
         "inst_uid": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
-        "indirect": int, 
+        "indirect": int,
         "create": int,
         "destroy": int,
         "start": int,
@@ -230,7 +235,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "dense_size": int,
         "sparse_size": int,
         "name": lambda x: x,
-        "request_type": int,
+        "collective": int,
         "num_hops": int,
         "message" : bool,
         "ordered_vc" : bool,
@@ -238,6 +243,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "provenance": lambda x: x,
         "node_id": int,
         "num_nodes": int,
+        "zero_time": int,
     }
 
     def __init__(self, state: State, callbacks: Dict[str, Callable]) -> None:
@@ -416,13 +422,13 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             _id = int(m.group('id'))
             params = m.group('params')
             param_data = []
-            
+
             for param_m in LegionProfBinaryDeserializer.params_regex.finditer(params):
                 param_name = param_m.group('param_name')
                 param_type = param_m.group('param_type')
                 param_bytes = int(param_m.group('param_bytes'))
 
-                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type) 
+                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type)
 
                 param_data.append((param_name, reader))
 
@@ -432,7 +438,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
         # change the callbacks to be by id
         if not self.callbacks_translated:
-            new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
+            new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback
                                for name, callback in self.callbacks.items()
                                if name in LegionProfBinaryDeserializer.name_to_id}
             self.callbacks = new_callbacks
@@ -480,7 +486,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         try:
             # Try it as a gzip file first
             with getFileObj(filename,compressed=True) as log:
-                return parse_file(log)    
+                return parse_file(log)
         except IOError:
             # If its not a gzip file try a normal file
             with getFileObj(filename,compressed=False) as log:

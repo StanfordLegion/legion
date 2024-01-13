@@ -63,7 +63,7 @@ namespace Legion {
     static const TypeTag TYPE_TAG_##DIM##D = \
       Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>();
     LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
+#undef DIMFUNC 
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -314,7 +314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -387,7 +387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -474,7 +474,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate::Predicate(Predicate &&p)
+    Predicate::Predicate(Predicate &&p) noexcept
     //--------------------------------------------------------------------------
     {
       const_value = p.const_value;
@@ -520,7 +520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate& Predicate::operator=(Predicate &&rhs)
+    Predicate& Predicate::operator=(Predicate &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -2003,6 +2003,8 @@ namespace Legion {
     {
     }
 
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     /////////////////////////////////////////////////////////////
     // AttachLauncher
     /////////////////////////////////////////////////////////////
@@ -2012,10 +2014,17 @@ namespace Legion {
                                    LogicalRegion h, LogicalRegion p,
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
-      : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
+      : resource(r), parent(p), handle(h), external_resource(NULL),
+        restricted(restr), mapped(map),
         collective((r == LEGION_EXTERNAL_INSTANCE) ? true : false),
         deduplicate_across_shards(false), file_name(NULL),
         mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AttachLauncher::~AttachLauncher(void)
     //--------------------------------------------------------------------------
     {
     }
@@ -2033,6 +2042,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLauncher::~IndexAttachLauncher(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // PredicateLauncher
@@ -2333,7 +2350,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Future &&rhs)
+    Future::Future(Future &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2370,7 +2387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future& Future::operator=(Future &&rhs)
+    Future& Future::operator=(Future &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2429,9 +2446,13 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      Processor proc = Internal::implicit_context->get_executing_processor();
-      return impl->get_buffer(proc, memory, extent_in_bytes, check_size,
-                              silence_warnings, warning_string);
+      if (Internal::implicit_context == NULL)
+        return impl->get_buffer(Processor::NO_PROC, memory, extent_in_bytes, 
+                                check_size, silence_warnings, warning_string);
+      else
+        return impl->get_buffer(
+            Internal::implicit_context->get_executing_processor(), memory,
+            extent_in_bytes, check_size, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2487,13 +2508,14 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Creating Legion Future objects from a buffer is only permitted "
             "to be performed inside of Legion tasks.")
-      return Internal::implicit_context->from_value(value, value_size, 
-                                                    owned, NULL/*provenance*/);
+      return Internal::implicit_context->from_value(value, value_size,
+          owned, NULL/*provenance*/, false/*shard local*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Future Future::from_untyped_pointer(
-             const void *value, size_t value_size, bool owned, const char *prov)
+             const void *value, size_t value_size, bool owned, 
+             const char *prov, bool shard_local)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
@@ -2502,14 +2524,14 @@ namespace Legion {
             "to be performed inside of Legion tasks.")
       Internal::AutoProvenance provenance(prov);
       return Internal::implicit_context->from_value(value, value_size,
-                                                    owned, provenance);
+                                        owned, provenance, shard_local);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Future Future::from_value(const void *buffer, size_t size,
         bool owned, const Realm::ExternalInstanceResource &resource,
         void (*freefunc)(const Realm::ExternalInstanceResource&),
-        const char *prov)
+        const char *prov, bool shard_local)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
@@ -2518,7 +2540,7 @@ namespace Legion {
             "to be performed inside of Legion tasks.")
       Internal::AutoProvenance provenance(prov);
       return Internal::implicit_context->from_value(buffer, size, owned,
-                                        resource, freefunc, provenance);
+                            resource, freefunc, provenance, shard_local);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2542,7 +2564,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(FutureMap &&map)
+    FutureMap::FutureMap(FutureMap &&map) noexcept
       : impl(map.impl)
     //--------------------------------------------------------------------------
     {
@@ -2579,7 +2601,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    FutureMap& FutureMap::operator=(FutureMap &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
@@ -2649,7 +2671,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2693,7 +2715,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3189,7 +3211,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources::ExternalResources(ExternalResources &&rhs)
+    ExternalResources::ExternalResources(ExternalResources &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3218,7 +3240,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExternalResources& ExternalResources::operator=(ExternalResources &&rhs)
+    ExternalResources& ExternalResources::operator=(
+                                               ExternalResources &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3284,7 +3307,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator::PieceIterator(PieceIterator &&rhs)
+    PieceIterator::PieceIterator(PieceIterator &&rhs) noexcept
       : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
     //--------------------------------------------------------------------------
     {
@@ -3314,7 +3337,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3335,18 +3358,8 @@ namespace Legion {
       return valid();
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     /////////////////////////////////////////////////////////////
     // Index Iterator  
     /////////////////////////////////////////////////////////////
@@ -3488,15 +3501,8 @@ namespace Legion {
                               "no longer supported");
       assert(false);
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // Field Allocator
@@ -3519,7 +3525,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs) noexcept
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -3560,7 +3566,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && impl->remove_reference())
@@ -3732,16 +3738,10 @@ namespace Legion {
     {
     }
 
-// FIXME: This exists for backwards compatibility but it is tripping
-// over our own deprecation warnings. Turn those off inside this method.
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    // FIXME: This exists for backwards compatibility but it is tripping
+    // over our own deprecation warnings. Turn those off inside this method.
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -3892,21 +3892,16 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
     }
 
@@ -3915,10 +3910,27 @@ namespace Legion {
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                          "INVOCATION OF DEPRECATED PROJECTION "
-                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      // Must be override by derived classes
+      assert(false);
       return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
+                          const DomainPoint &point, const Domain &launch_domain, 
+                          const void *args, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      return project(upper_bound, point, launch_domain);
     }
 
     //--------------------------------------------------------------------------
@@ -4680,13 +4692,14 @@ namespace Legion {
                                        const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,int>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color, provenance);
     }
@@ -4700,13 +4713,14 @@ namespace Legion {
                                     const char *prov)
     //--------------------------------------------------------------------------
     {
-      Internal::AutoProvenance provenance(prov);
-      ArgumentMap argmap;
+      std::map<DomainPoint,UntypedBuffer> data;
       for (std::map<DomainPoint,size_t>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
+        data.emplace(std::make_pair(it->first, 
+              UntypedBuffer(&it->second, sizeof(it->second))));
+      FutureMap future_map = construct_future_map(ctx, color_space, data,
+          false/*collective*/, 0/*sid*/, false/*implicit*/, prov);
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color, provenance);
     }
@@ -5903,13 +5917,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::advise_analysis_subtree(Context ctx, LogicalRegion parent,
-                                        const std::set<LogicalRegion> &regions,
-                                        const std::set<LogicalPartition> &parts,
-                                        const std::set<FieldID> &fields)
+    void Runtime::reset_equivalence_sets(Context ctx, LogicalRegion parent,
+                                         LogicalRegion region,
+                                         const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
-      ctx->advise_analysis_subtree(parent, regions, parts, fields);
+      ctx->reset_equivalence_sets(parent, region, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -6260,14 +6273,8 @@ namespace Legion {
       return runtime->get_parent_logical_partition(handle);
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
     //--------------------------------------------------------------------------
@@ -6278,12 +6285,8 @@ namespace Legion {
                                 "same task that created the index space.");
       return IndexAllocator(is, IndexIterator(this, ctx, is));
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
@@ -6332,12 +6335,13 @@ namespace Legion {
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
                                       ReductionOpID redop, bool deterministic,
                                       MapperID map, MappingTagID tag,
-                                      const char *prov)
+                                      const char *prov,
+                                      Future initial_value)
     //--------------------------------------------------------------------------
     {
       Internal::AutoProvenance provenance(prov);
       return ctx->reduce_future_map(future_map, redop, deterministic,
-                                    map, tag, provenance);
+                                    map, tag, provenance, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -6659,6 +6663,8 @@ namespace Legion {
       ctx->progress_unordered_operations();
     }
 
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
                                                  const char *file_name,
@@ -6699,6 +6705,8 @@ namespace Legion {
         ctx->remap_region(region, NULL/*no provenance because deprecated*/);
       return region;
     }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
@@ -7130,6 +7138,15 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         return NULL;
       return ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::query_available_memory(Context ctx, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        return 0;
+      return ctx->query_available_memory(target);
     }
 
     //--------------------------------------------------------------------------
@@ -7667,17 +7684,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
-                                  bool default_mapper)
+                                  bool default_mapper, bool filter)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background, default_mapper);
+      return Internal::Runtime::start(argc, argv, background, 
+                                      default_mapper, filter);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, 
+                                        bool filter, bool parse)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv, filter);
+      Internal::Runtime::initialize(argc, argv, parse, filter);
     }
 
     //--------------------------------------------------------------------------
@@ -7730,10 +7749,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finish_implicit_task(Context ctx)
+    void Runtime::finish_implicit_task(Context ctx, Realm::Event effects)
     //--------------------------------------------------------------------------
     {
-      runtime->finish_implicit_task(ctx);
+      runtime->finish_implicit_task(ctx, Internal::ApEvent(effects));
     } 
 
     //--------------------------------------------------------------------------
@@ -8050,8 +8069,12 @@ namespace Legion {
 #endif
       ctx = *((const Context*)data);
       task = ctx->get_task();
-
-      reg = &ctx->begin_task(runtime);
+      const Processor exec_proc = Processor::get_executing_processor();
+#ifdef DEBUG_LEGION
+      assert(exec_proc.exists());
+#endif
+      reg = &ctx->begin_task(exec_proc);
+      runtime = Internal::implicit_runtime->external;
     }
 
     //--------------------------------------------------------------------------
@@ -8064,7 +8087,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
-          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize);
+          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8073,7 +8097,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST,
-          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0);
+          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8085,7 +8110,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(ptr, size, owned, Realm::RegionInstance::NO_INST,
-          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize);
+          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize,
+          Internal::ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8190,4 +8216,3 @@ namespace Legion {
 }; // namespace Legion
 
 // EOF
-

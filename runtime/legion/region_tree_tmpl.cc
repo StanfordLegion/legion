@@ -69,12 +69,13 @@ namespace Legion {
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_domain_helper<INST_N2,T2>(Operation *,    \
                                      IndexPartNode *,     \
-                                     FutureMapImpl *,     \
+                                     const std::map<DomainPoint,FutureImpl*>&, \
+                                     const Domain&, \
                                      bool); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_weight_helper<INST_N2,T2>(Operation *,    \
                                      IndexPartNode *,   \
-                                     FutureMapImpl *,   \
+                                     const std::map<DomainPoint,FutureImpl*>&, \
                                      size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_field_helper<INST_N2,T2>(Operation *,	\
@@ -138,7 +139,7 @@ namespace Legion {
   template class Internal::IndexSpaceUnion<INST_N1,T>; \
   template class Internal::IndexSpaceIntersection<INST_N1,T>; \
   template class Internal::IndexSpaceDifference<INST_N1,T>; \
-  template class Internal::InstanceExpression<INST_N1,T>; \
+  template class Internal::InternalExpression<INST_N1,T>; \
   template class Internal::RemoteExpression<INST_N1,T>;
   
 
