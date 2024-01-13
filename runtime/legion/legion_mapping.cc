@@ -497,14 +497,8 @@ namespace Legion {
     {
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     Mapper::PremapTaskInput::PremapTaskInput(void)
     //--------------------------------------------------------------------------
@@ -528,12 +522,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // MapperRuntime
@@ -1661,7 +1651,7 @@ namespace Legion {
       held = true;
       Internal::local_lock_list = this;
       if (paused)
-        ctx->manager->resume_mapper_call(ctx);
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1708,7 +1698,7 @@ namespace Legion {
       Internal::local_lock_list = this;
       held = true;
       if (paused)
-        ctx->manager->resume_mapper_call(ctx);
+        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
   }; // namespace Mapping

@@ -178,31 +178,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_map_replicate_task(TaskOp *task,
-                                     Mapper::MapTaskInput *input,
-                                     Mapper::MapTaskOutput *default_output,
-                                     Mapper::MapReplicateTaskOutput *output,
+    void MapperManager::invoke_replicate_task(TaskOp *task,
+                                     Mapper::ReplicateTaskInput *input,
+                                     Mapper::ReplicateTaskOutput *output,
                                      MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_REPLICATE_TASK_CALL,
+        info = begin_mapper_call(REPLICATE_TASK_CALL,
                                  task, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation4<TaskOp,Mapper::MapTaskInput,
-                              Mapper::MapTaskOutput,
-                              Mapper::MapReplicateTaskOutput,
-                              &MapperManager::invoke_map_replicate_task>
-                                continuation(this, task, input, 
-                                    default_output, output, info);
+          MapperContinuation3<TaskOp,Mapper::ReplicateTaskInput,
+                              Mapper::ReplicateTaskOutput,
+                              &MapperManager::invoke_replicate_task>
+                                continuation(this, task, input, output, info);
           continuation.defer(runtime, continuation_precondition, task);
           return;
         }
       }
-      mapper->map_replicate_task(info, *task, *input, *default_output, *output);
+      mapper->replicate_task(info, *task, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -1442,7 +1439,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       runtime->process_mapper_message(target, mapper_id, processor,
                                       message, message_size, message_kind);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_SEND_MESSAGE_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1453,7 +1450,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
                         message_size, message_kind, radix, 0/*index*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_BROADCAST_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1477,7 +1474,7 @@ namespace Legion {
       instance.impl = runtime->find_or_request_instance_manager(did, ready);
       if (ready.exists())
         ready.wait();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_UNPACK_INSTANCE_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1487,7 +1484,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       MapperEvent result;
       result.impl = Runtime::create_rt_user_event();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_EVENT_CALL);
       return result;
     }
 
@@ -1498,7 +1495,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const bool triggered = event.impl.has_triggered();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_TRIGGERED_CALL);
       return triggered;
     }
     
@@ -1511,7 +1508,7 @@ namespace Legion {
       RtUserEvent to_trigger = event.impl;
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_TRIGGER_EVENT_CALL);
     }
     
     //--------------------------------------------------------------------------
@@ -1523,7 +1520,7 @@ namespace Legion {
       RtEvent wait_on = event.impl;
       if (wait_on.exists())
         wait_on.wait();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_WAIT_EVENT_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1541,7 +1538,7 @@ namespace Legion {
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const ExecutionConstraintSet &result = impl->get_execution_constraints();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_EXECUTION_CONSTRAINTS_CALL);
       return result;
     }
 
@@ -1560,7 +1557,7 @@ namespace Legion {
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const TaskLayoutConstraintSet& result = impl->get_layout_constraints();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_TASK_LAYOUT_CONSTRAINTS_CALL);
       return result;
     }
 
@@ -1579,7 +1576,7 @@ namespace Legion {
                       "that layout constraint ID is invalid.",
                       mapper->get_mapper_name(), layout_id,
                       get_mapper_call_name(ctx->kind))
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_LAYOUT_CONSTRAINTS_CALL);
       return *constraints;
     }
 
@@ -1592,7 +1589,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LayoutConstraints *cons = 
         runtime->register_layout(handle, constraints, false/*internal*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_REGISTER_LAYOUT_CALL);
       return cons->layout_id;
     }
 
@@ -1603,7 +1600,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->release_layout(layout_id);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_LAYOUT_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1626,7 +1623,7 @@ namespace Legion {
                       get_mapper_call_name(ctx->kind))
       const bool result = 
         c1->conflicts(c2, 0/*dont care about dimensions*/, conflict_constraint);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CONSTRAINTS_CONFLICT_CALL);
       return result;
     }
 
@@ -1650,7 +1647,7 @@ namespace Legion {
                       get_mapper_call_name(ctx->kind))
       const bool result = 
         c1->entails(c2, 0/*don't care about dimensions*/, failed_constraint);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CONSTRAINTS_ENTAIL_CALL);
       return result;
     }
 
@@ -1663,7 +1660,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       TaskImpl *task_impl = runtime->find_or_create_task_impl(task_id);
       task_impl->find_valid_variants(valid_variants, kind);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_VALID_VARIANTS_CALL);
     }
     
     //--------------------------------------------------------------------------
@@ -1674,7 +1671,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       const char *name = impl->get_name();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_TASK_VARIANT_NAME_CALL);
       return name;
     }
 
@@ -1686,7 +1683,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_leaf();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_LEAF_VARIANT_CALL);
       return result;
     }
 
@@ -1698,7 +1695,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_inner();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_INNER_VARIANT_CALL);
       return result;
     }
     
@@ -1710,7 +1707,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_idempotent();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_IDEMPOTENT_VARIANT_CALL);
       return result;
     }
 
@@ -1722,7 +1719,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_replicable();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_REPLICABLE_VARIANT_CALL);
       return result;
     }
 
@@ -1737,7 +1734,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantID result = runtime->register_variant(registrar, user_data,
                 user_len, realm_desc, return_type_size, has_return_type);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_REGISTER_TASK_VARIANT_CALL);
       return result;
     }
 
@@ -1811,7 +1808,7 @@ namespace Legion {
         else
           var_it++;
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FILTER_VARIANTS_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1879,7 +1876,7 @@ namespace Legion {
             break;
         }
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FILTER_INSTANCES_CALL);
     }
     
     //--------------------------------------------------------------------------
@@ -1939,7 +1936,7 @@ namespace Legion {
         if (missing_fields.empty())
           break;
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FILTER_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1973,7 +1970,7 @@ namespace Legion {
           0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2010,7 +2007,7 @@ namespace Legion {
                         ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2047,7 +2044,7 @@ namespace Legion {
                  ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2085,7 +2082,7 @@ namespace Legion {
                   ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2114,7 +2111,7 @@ namespace Legion {
                                  regions, result, acquire, tight_region_bounds);
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, false/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2144,7 +2141,7 @@ namespace Legion {
                           regions, result, acquire, tight_region_bounds);
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, false/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2177,7 +2174,7 @@ namespace Legion {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
           record_acquired_instance(ctx, results[idx].impl, false/*created*/);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2210,7 +2207,7 @@ namespace Legion {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
           record_acquired_instance(ctx, results[idx].impl, false/*created*/);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2235,7 +2232,7 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
             "Ignoring request for mapper %s to set garbage collection "
             "priority on an external instance", get_mapper_name())
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_SET_GC_PRIORITY_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2264,12 +2261,12 @@ namespace Legion {
       if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
       {
         record_acquired_instance(ctx, manager, false/*created*/);
-        resume_mapper_call(ctx);
+        resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCE_CALL);
         return true;
       }
       else
       {
-        resume_mapper_call(ctx);
+        resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCE_CALL);
         return false;
       }
     }
@@ -2292,7 +2289,7 @@ namespace Legion {
         return acquire_instance(ctx, instances[0]);
       pause_mapper_call(ctx);
       const bool all_acquired = perform_acquires(ctx, instances);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2340,7 +2337,7 @@ namespace Legion {
           instances.erase(instances.begin()+(*it));
         to_erase.clear();
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2366,7 +2363,7 @@ namespace Legion {
         if (!perform_acquires(ctx, *it))
           all_acquired = false;
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2401,7 +2398,7 @@ namespace Legion {
           to_erase.clear();
         }
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2465,7 +2462,7 @@ namespace Legion {
       }
       pause_mapper_call(ctx);
       release_acquired_instance(ctx, instance.impl); 
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCE_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2484,7 +2481,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       for (unsigned idx = 0; idx < instances.size(); idx++)
         release_acquired_instance(ctx, instances[idx].impl);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2507,7 +2504,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->size(); idx++)
           release_acquired_instance(ctx, (*it)[idx].impl);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2517,8 +2514,7 @@ namespace Legion {
     {
       if ((future.impl == NULL) || !memory.exists())
         return false;
-      if ((ctx->kind != MAP_TASK_CALL) && 
-          (ctx->kind != MAP_REPLICATE_TASK_CALL))
+      if (ctx->kind != MAP_TASK_CALL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
                         "Ignoring acquire future request in unsupported mapper "
@@ -2529,7 +2525,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       const bool result = future.impl->find_or_create_application_instance(
                                 memory, ctx->operation->get_unique_op_id()); 
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_FUTURE_CALL);
       return result;
     }
 
@@ -2624,7 +2620,7 @@ namespace Legion {
       runtime->forest->create_index_space(result, &domain, did, provenance);
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_INDEX_SPACE_CALL);
       return result; 
     }
 
@@ -2657,7 +2653,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_UNION_INDEX_SPACES_CALL);
       return result;
     }
 
@@ -2690,7 +2686,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INTERSECT_INDEX_SPACES_CALL);
       return result;
     }
 
@@ -2715,7 +2711,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_SUBTRACT_INDEX_SPACES_CALL);
       return result;
     }
 
@@ -2729,7 +2725,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       IndexSpaceNode *node = runtime->forest->get_node(handle);
       bool result = node->is_empty();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INDEX_SPACE_EMPTY_CALL);
       return result;
     }
 
@@ -2750,7 +2746,7 @@ namespace Legion {
       IndexSpaceExpression *overlap = 
         runtime->forest->intersect_index_spaces(n1, n2);
       const bool result = !overlap->is_empty();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INDEX_SPACES_OVERLAP_CALL);
       return result;
     }
 
@@ -2773,7 +2769,7 @@ namespace Legion {
       IndexSpaceExpression *difference =
         runtime->forest->subtract_index_spaces(n1, n2);
       const bool result = difference->is_empty();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INDEX_SPACE_DOMINATES_CALL);
       return result;
     }
 
@@ -2784,7 +2780,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->has_index_partition(parent, color);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -2796,7 +2792,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexPartition result = runtime->get_index_partition(parent, color);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -2809,7 +2805,7 @@ namespace Legion {
       Point<1,coord_t> color(c);
       IndexSpace result = runtime->get_index_subspace(p, &color,
                     NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SUBSPACE_CALL);
       return result;
     }
 
@@ -2836,7 +2832,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SUBSPACE_CALL);
       return result;
     }
 
@@ -2872,7 +2868,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_DOMAIN_CALL);
       return result;
     }
 
@@ -2892,7 +2888,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       Domain result = runtime->get_index_partition_color_space(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CS_CALL);
       return result;
     }
 
@@ -2903,7 +2899,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexSpace result = runtime->get_index_partition_color_space_name(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CS_NAME_CALL);
       return result;
     }
 
@@ -2914,7 +2910,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->get_index_space_partition_colors(handle, colors);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_PARTITION_COLORS_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2924,7 +2920,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->is_index_partition_disjoint(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_INDEX_PARTITION_DISJOINT_CALL);
       return result;
     }
 
@@ -2935,7 +2931,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->is_index_partition_complete(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_INDEX_PARTITION_COMPLETE_CALL);
       return result;
     }
 
@@ -2948,7 +2944,7 @@ namespace Legion {
       Point<1,coord_t> point;
       runtime->get_index_space_color_point(handle, &point,
                 NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_COLOR_CALL);
       return point[0];
     }
 
@@ -2959,7 +2955,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       DomainPoint result = runtime->get_index_space_color_point(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_COLOR_POINT_CALL);
       return result;
     }
 
@@ -2970,7 +2966,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       Color result = runtime->get_index_partition_color(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_COLOR_CALL);
       return result;
     }
 
@@ -2981,7 +2977,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexSpace result = runtime->get_parent_index_space(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_INDEX_SPACE_CALL);
       return result;
     }
 
@@ -2992,7 +2988,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->has_parent_index_partition(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_PARENT_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -3003,7 +2999,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexPartition result = runtime->get_parent_index_partition(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -3014,7 +3010,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       unsigned result = runtime->get_index_space_depth(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_DEPTH_CALL);
       return result;
     }
 
@@ -3025,7 +3021,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       unsigned result = runtime->get_index_partition_depth(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_DEPTH_CALL);
       return result;
     }
 
@@ -3036,7 +3032,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       size_t result = runtime->get_field_size(handle, fid);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_FIELD_SIZE_CALL);
       return result;
     }
 
@@ -3047,7 +3043,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->get_field_space_fields(handle, fields);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_FIELD_SPACE_FIELDS_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3058,7 +3054,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalPartition result = runtime->get_logical_partition(parent, handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_CALL);
       return result;
     }
 
@@ -3070,7 +3066,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LogicalPartition result = 
         runtime->get_logical_partition_by_color(par, color);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3085,7 +3081,7 @@ namespace Legion {
 #endif
       LogicalPartition result = 
         runtime->get_logical_partition_by_color(par, color[0]);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3100,7 +3096,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LogicalPartition result = 
         runtime->get_logical_partition_by_tree(part, fspace, tid);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_BY_TREE_CALL);
       return result;
     }
 
@@ -3112,7 +3108,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalRegion result = runtime->get_logical_subregion(parent, handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_CALL);
       return result;
     }
 
@@ -3125,7 +3121,7 @@ namespace Legion {
       Point<1,coord_t> point(color);
       LogicalRegion result = runtime->get_logical_subregion_by_color(par,
                       &point, NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3151,7 +3147,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3164,7 +3160,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LogicalRegion result = 
         runtime->get_logical_subregion_by_tree(handle, fspace, tid);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_BY_TREE_CALL);
       return result;
     }
 
@@ -3177,7 +3173,7 @@ namespace Legion {
       Point<1,coord_t> point;
       runtime->get_logical_region_color(handle, &point, 
             NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_REGION_COLOR_CALL);
       return point[0];
     }
 
@@ -3189,7 +3185,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       DomainPoint result = runtime->get_logical_region_color_point(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_REGION_COLOR_POINT_CALL);
       return result;
     }
 
@@ -3200,7 +3196,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       Color result = runtime->get_logical_partition_color(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_COLOR_CALL);
       return result;
     }
 
@@ -3211,7 +3207,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalRegion result = runtime->get_parent_logical_region(part);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_LOGICAL_REGION_CALL);
       return result;
     }
     
@@ -3222,7 +3218,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->has_parent_logical_partition(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_PARENT_LOGICAL_PARTITION_CALL);
       return result;
     }
 
@@ -3233,7 +3229,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalPartition result = runtime->get_parent_logical_partition(r);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_LOGICAL_PARTITION_CALL);
       return result;
     }
 
@@ -3247,7 +3243,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(task_id, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3261,7 +3257,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3275,7 +3271,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3289,7 +3285,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3303,7 +3299,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, fid,
 					     tag, result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3317,7 +3313,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3331,7 +3327,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3346,7 +3342,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3360,7 +3356,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3374,7 +3370,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3388,7 +3384,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3402,7 +3398,7 @@ namespace Legion {
           LEGION_NAME_SEMANTIC_TAG, name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3416,7 +3412,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3430,7 +3426,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3475,10 +3471,6 @@ namespace Legion {
     void MapperManager::free_call_info(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        runtime->profiler->record_mapper_call(info->kind, 
-            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
-            info->start_time, info->stop_time); 
       delete info;
     }
 
@@ -3761,6 +3753,8 @@ namespace Legion {
     void SerializingManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
+      if (profile_mapper)
+        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
       if (executing_call != info)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
                       "Invalid mapper context passed to mapper_rt "
@@ -3790,9 +3784,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SerializingManager::resume_mapper_call(MappingCallInfo *info)
+    void SerializingManager::resume_mapper_call(MappingCallInfo *info,
+                                                RuntimeCallKind kind)
     //--------------------------------------------------------------------------
     {
+      if (profile_mapper)
+        runtime->profiler->record_runtime_call(kind, info->pause_time,
+            Realm::Clock::current_time_in_nanoseconds());
       // See if we are ready to be woken up
       RtEvent wait_on;
       {
@@ -3831,7 +3829,9 @@ namespace Legion {
 #endif
       // Record our finish time when we're done
       if (profile_mapper)
-        info->stop_time = Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_mapper_call(info->kind, 
+            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
+            info->start_time, Realm::Clock::current_time_in_nanoseconds());
       // Set this flag asynchronously without the lock, there will
       // be a race to see who gets the lock next and therefore can
       // do the rest of the finish mapper call routine, we do this
@@ -4102,14 +4102,18 @@ namespace Legion {
     void ConcurrentManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (profile_mapper)
+        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info)
+    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info,
+                                               RuntimeCallKind kind)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (profile_mapper)
+        runtime->profiler->record_runtime_call(kind, info->pause_time,
+            Realm::Clock::current_time_in_nanoseconds());
     }
 
     //--------------------------------------------------------------------------
@@ -4118,7 +4122,9 @@ namespace Legion {
     {
       // Record our finish time when we are done
       if (profile_mapper)
-        info->stop_time = Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_mapper_call(info->kind, 
+            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
+            info->start_time, Realm::Clock::current_time_in_nanoseconds());
       std::vector<RtUserEvent> to_trigger;
       {
         AutoLock m_lock(mapper_lock);

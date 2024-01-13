@@ -378,61 +378,6 @@ ifeq ($(strip $(USE_PYTHON)),1)
     $(error USE_PYTHON requires USE_LIBDL)
   endif
 
-  # Attempt to auto-detect location of Python shared library based on
-  # the location of Python executable on PATH. We do this because the
-  # shared library may not be on LD_LIBRARY_PATH even when the
-  # executable is on PATH.
-
-  # Note: Set PYTHON_ROOT to an empty string to skip this logic and
-  # defer to the normal search of LD_LIBRARY_PATH instead. Or set
-  # PYTHON_LIB to specify the path to the shared library directly.
-  ifndef PYTHON_LIB
-    ifndef PYTHON_ROOT
-      PYTHON_EXE := $(shell which python3 python | head -1)
-      ifeq ($(PYTHON_EXE),)
-        $(error cannot find python - set PYTHON_ROOT if not in PATH)
-      endif
-      PYTHON_VERSION_MAJOR := $(shell $(PYTHON_EXE) -c 'import sys; print(sys.version_info.major)')
-      PYTHON_VERSION_MINOR := $(shell $(PYTHON_EXE) -c 'import sys; print(sys.version_info.minor)')
-      PYTHON_ROOT := $(dir $(PYTHON_EXE))
-    endif
-
-    # Try searching for common locations of the Python shared library.
-    ifneq ($(strip $(PYTHON_ROOT)),)
-      ifeq ($(strip $(DARWIN)),1)
-        PYTHON_EXT := dylib
-      else
-	PYTHON_EXT := so
-      endif
-      PYTHON_LIB := $(wildcard $(PYTHON_ROOT)/libpython$(PYTHON_VERSION_MAJOR).$(PYTHON_VERSION_MINOR)*.$(PYTHON_EXT))
-      ifeq ($(strip $(PYTHON_LIB)),)
-        PYTHON_LIB := $(wildcard $(abspath $(PYTHON_ROOT)/../lib/libpython$(PYTHON_VERSION_MAJOR).$(PYTHON_VERSION_MINOR)*.$(PYTHON_EXT)))
-        ifeq ($(strip $(PYTHON_LIB)),)
-          $(warning cannot find libpython$(PYTHON_VERSION_MAJOR).$(PYTHON_VERSION_MINOR)*.$(PYTHON_EXT) - falling back to using LD_LIBRARY_PATH)
-          PYTHON_LIB :=
-        endif
-      endif
-    endif
-  endif
-
-  ifneq ($(strip $(PYTHON_LIB)),)
-    ifndef FORCE_PYTHON
-      ifeq ($(wildcard $(PYTHON_LIB)),)
-        $(error cannot find libpython$(PYTHON_VERSION_MAJOR).$(PYTHON_VERSION_MINOR).$(PYTHON_EXT) - PYTHON_LIB set but file does not exist)
-      else
-        REALM_CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
-      endif
-    else
-      REALM_CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
-    endif
-  endif
-
-  ifndef PYTHON_VERSION_MAJOR
-    $(error cannot auto-detect Python version - please set PYTHON_VERSION_MAJOR)
-  else
-    REALM_CC_FLAGS += -DREALM_PYTHON_VERSION_MAJOR=$(PYTHON_VERSION_MAJOR)
-  endif
-
   REALM_CC_FLAGS += -DREALM_USE_PYTHON
 endif
 
@@ -986,6 +931,7 @@ MAPPER_SRC	?=
 # Set the source files
 REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
     $(LG_RT_DIR)/realm/bgwork.cc \
+    $(LG_RT_DIR)/realm/transfer/address_list.cc \
     $(LG_RT_DIR)/realm/transfer/transfer.cc \
     $(LG_RT_DIR)/realm/transfer/channel.cc \
     $(LG_RT_DIR)/realm/transfer/channel_disk.cc \

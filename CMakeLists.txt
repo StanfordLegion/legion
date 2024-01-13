@@ -284,17 +284,18 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_Python "Use Python" OFF)
 if(Legion_USE_Python)
-  set(Legion_Python_Version "" CACHE STRING "Minimum Python version")
+  find_package(Python3 REQUIRED)
 
-  # Note: Legion now supports several versions, so no need to be so forceful
-  # set(Python_ADDITIONAL_VERSIONS 2.7)
-  find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+  # Unset empty Python3_ variables
+  get_cmake_property(_variableNames VARIABLES)
+  foreach (_variableName ${_variableNames})
+      if ((_variableName MATCHES "Python3_") AND (${_variableName} STREQUAL ""))
+          unset(${_variableName})
+      endif()
+  endforeach()
 
   # define variables for realm_defines.h
   set(REALM_USE_PYTHON ON)
-  # Set REALM_PYTHON_LIB to Python library's filename without the path
-  get_filename_component(REALM_PYTHON_LIB "${Python3_LIBRARIES}" NAME)
-  set(REALM_PYTHON_VERSION_MAJOR ${Python3_VERSION_MAJOR})
 endif()
 
 set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
@@ -921,6 +922,13 @@ elseif(Legion_BUILD_REALM_TESTS)
   # temporary hackery to just enable the realm tests
   add_library(Legion::Realm ALIAS Realm)
   add_subdirectory(test/realm)
+elseif(Legion_BUILD_REALM_UNIT_TESTS)
+  if (BUILD_SHARED_LIBS)
+    add_library(Legion::RealmTests ALIAS RealmStatic)
+  else()
+    add_library(Legion::RealmTests ALIAS Realm)
+  endif()
+  add_subdirectory(test/realm/unit_tests)
 endif()
 
 #------------------------------------------------------------------------------#

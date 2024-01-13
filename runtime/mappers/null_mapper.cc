@@ -119,11 +119,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::map_replicate_task(const MapperContext      ctx,
-                                        const Task&              task,
-                                        const MapTaskInput&      input,
-                                        const MapTaskOutput&     default_output,
-                                        MapReplicateTaskOutput&  output)
+    void NullMapper::replicate_task(MapperContext               ctx,
+                                    const Task&                 task,
+                                    const ReplicateTaskInput&   input,
+                                          ReplicateTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);

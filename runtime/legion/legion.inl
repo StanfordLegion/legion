@@ -18814,18 +18814,7 @@ namespace Legion {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __PGIC__
-#pragma warning (push)
-#pragma diag_suppress 1445
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     inline void AttachLauncher::initialize_constraints(bool column_major, 
@@ -19184,15 +19173,7 @@ namespace Legion {
       pointers.emplace_back(PointerConstraint(mem, uintptr_t(base)));
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef __PGIC__
-#pragma warning (pop)
-#endif
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     inline void PredicateLauncher::add_predicate(const Predicate &pred)
@@ -19984,14 +19965,8 @@ namespace Legion {
       return result;
     }
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
@@ -20056,12 +20031,8 @@ namespace Legion {
         return result;
       }
     }
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -21868,24 +21839,12 @@ namespace LegionRuntime {
     typedef Legion::CopyLauncher CopyLauncher;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::PhysicalRegion PhysicalRegion;
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
+    LEGION_DISABLE_DEPRECATED_WARNINGS
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexIterator IndexIterator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexAllocator IndexAllocator;
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+    LEGION_REENABLE_DEPRECATED_WARNINGS
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::AcquireLauncher AcquireLauncher;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

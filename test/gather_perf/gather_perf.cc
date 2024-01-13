@@ -1146,9 +1146,8 @@ public:
     // top level task should be replicated, if requested
     if(replicate && (task.task_id == TOP_LEVEL_TASK_ID))
       output.replicate = true;
-
-    // we're going to do all mapping from node 0
-    output.map_locally = true;
+    else // we're going to do all mapping from node 0
+      output.map_locally = true;
   }
 
   void select_tasks_to_map(const Mapping::MapperContext ctx,
@@ -1179,7 +1178,13 @@ public:
     switch(task.task_id) {
     case TOP_LEVEL_TASK_ID:
       {
-	p = procs[0];
+        if (input.shard_processor.exists())
+        {
+          output.target_procs.resize(1, input.shard_processor);
+          output.chosen_variant = input.shard_variant;
+          return;
+        }
+        p = procs[0];
 	break;
       }
 
@@ -1224,26 +1229,19 @@ public:
     output.chosen_variant = valid_variants[0];
   }
 
-  void map_replicate_task(const Mapping::MapperContext ctx,
-			  const Task& task, const MapTaskInput& input,
-			  const MapTaskOutput& default_output,
-			  MapReplicateTaskOutput& output)
+  void replicate_task(const Mapping::MapperContext ctx,
+		      const Task& task,
+                      const ReplicateTaskInput& input,
+                            ReplicateTaskOutput& output)
   {
     // only the top-level task should end up here
     assert(task.task_id == TOP_LEVEL_TASK_ID);
 
-    // TODO: maybe need to keep a separate 'control_procs' list?
-    output.task_mappings.resize(procs.size(), default_output);
-    output.control_replication_map = procs;
-
     std::vector<VariantID> valid_variants;
     runtime->find_valid_variants(ctx, task.task_id, valid_variants, procs[0].kind());
     assert(!valid_variants.empty());
-
-    for(size_t i = 0; i < procs.size(); i++) {
-      output.task_mappings[i].target_procs.push_back(procs[i]);
-      output.task_mappings[i].chosen_variant = valid_variants[0];
-    }
+    output.chosen_variant = valid_variants[0];
+    output.target_processors = procs;
   }
 
   void configure_context(const Mapping::MapperContext ctx,

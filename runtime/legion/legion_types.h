@@ -34,6 +34,8 @@
 #include <vector>
 #include <typeinfo>
 #include <type_traits>
+#include <unordered_set>
+#include <unordered_map>
 
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h"
@@ -50,6 +52,37 @@
 #else
 #define LEGION_DEPRECATED(x)
 #endif
+#endif
+
+// Macros for disabling and re-enabling deprecated warnings
+#if defined(__GNUC__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("GCC diagnostic push") \
+  _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("GCC diagnostic pop")
+#elif defined(__clang__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("clang diagnostic push") \
+  _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("clang diagnostic pop")
+#elif defined(__PGIC__)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (push)") \
+  _Pragma("diag_suppress 1445")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning (pop)")
+#elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+#define LEGION_DISABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning push") \
+  _Pragma("warning disable 1478")
+#define LEGION_REENABLE_DEPRECATED_WARNINGS \
+  _Pragma("warning pop")
+#else
+#warning "Don't know how to suppress deprecated warnings for this compiler"
+#define LEGION_DISABLE_DEPRECATED_WARNINGS
+#define LEGION_REENABLE_DEPRECATED_WARNINGS
 #endif
 
 // If we're doing full LEGION_SPY then turn off event pruning
@@ -282,10 +315,6 @@ namespace Legion {
       OPEN_READ_WRITE         = 2, // unknown dirty information below
       OPEN_SINGLE_REDUCE      = 3, // only one open child with reductions below
       OPEN_MULTI_REDUCE       = 4, // multiple open children with same reduction
-      // Only projection states below here
-      OPEN_READ_ONLY_PROJ     = 5, // read-only projection
-      OPEN_READ_WRITE_PROJ    = 6, // read-write projection
-      OPEN_REDUCE_PROJ        = 7, // reduction-only projection
     }; 
 
     // Internal reduction operators
@@ -380,7 +409,6 @@ namespace Legion {
       LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       LG_DEFER_FIELD_INFOS_TASK_ID,
-      LG_DEFER_COMPUTE_EQ_SETS_TASK_ID,
       LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
@@ -391,17 +419,15 @@ namespace Legion {
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
+      LG_FINALIZE_OUTPUT_TREE_TASK_ID,
       LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISPREDICATION_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
-      LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_DEFER_COMPOSITE_COPY_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
-      LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
-      LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_TASK_ID,
       LG_TRANSITIVE_REDUCTION_TASK_ID,
       LG_DELETE_TEMPLATE_TASK_ID,
@@ -410,6 +436,7 @@ namespace Legion {
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
+      LG_FINALIZE_OUTPUT_EQ_SET_TASK_ID,
       LG_DEFERRED_COPY_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OP_DELETION_TASK_ID,
       LG_DEFER_REMOTE_INSTANCE_TASK_ID,
@@ -431,15 +458,12 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
-      LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID,
-      LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_PRECONDITION_TASK_ID,
       LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
-      LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
@@ -500,7 +524,6 @@ namespace Legion {
         "Field Space Semantic Request",                           \
         "Field Semantic Request",                                 \
         "Defer Field Infos Request",                              \
-        "Defer Compute Equivalence Sets",                         \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
@@ -511,17 +534,15 @@ namespace Legion {
         "Remote View Creation",                                   \
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
+        "Finalize Output Regions Eq KD Tree",                     \
         "Deferred Task Launch",                                   \
         "Handle Mapping Mispredication",                          \
         "Defer Trigger Task Complete",                            \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
         "Defer Phi View Registration",                            \
-        "Control Replication Launch",                             \
         "Defer Composite Copy",                                   \
         "Tighten Index Space",                                    \
-        "Remote Physical Context Request",                        \
-        "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Template Transitive Reduction",                          \
         "Delete Physical Template",                               \
@@ -530,6 +551,7 @@ namespace Legion {
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
+        "Finalize Output Equivalence Set",                        \
         "Deferred Copy Across",                                   \
         "Defer Remote Op Deletion",                               \
         "Defer Remote Instance Request",                          \
@@ -551,15 +573,12 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
-        "Defer Disjoint Complete Response",                       \
         "Defer Collective Instance Message",                      \
-        "Defer Finalize Pending Equivalence Set",                 \
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Trace Precondition Test",                          \
         "Defer Trace Postcondition Test",                         \
-        "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Defer Delete Future Instance",                           \
@@ -583,7 +602,7 @@ namespace Legion {
       PREMAP_TASK_CALL,
       SLICE_TASK_CALL,
       MAP_TASK_CALL,
-      MAP_REPLICATE_TASK_CALL,
+      REPLICATE_TASK_CALL,
       SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
       TASK_SELECT_SOURCES_CALL,
@@ -640,7 +659,7 @@ namespace Legion {
       "premap_task",                                \
       "slice_task",                                 \
       "map_task",                                   \
-      "map_replicate_task",                         \
+      "replicate_task",                             \
       "select_task_variant",                        \
       "postmap_task",                               \
       "select_task_sources",                        \
@@ -747,7 +766,8 @@ namespace Legion {
       EXPRESSION_VIRTUAL_CHANNEL = 11,
       MIGRATION_VIRTUAL_CHANNEL = 12,
       TRACING_VIRTUAL_CHANNEL = 13,
-      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
+      RENDEZVOUS_VIRTUAL_CHANNEL = 14,
+      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
     };
 
     enum MessageKind {
@@ -810,6 +830,7 @@ namespace Legion {
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_FUTURE_SIZE,
+      INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -819,6 +840,9 @@ namespace Legion {
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
+      SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS,
+      SLICE_REMOTE_OUTPUT_EXTENTS,
+      SLICE_REMOTE_OUTPUT_REGISTRATION,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_DOWNGRADE_REQUEST,
       DISTRIBUTED_DOWNGRADE_RESPONSE,
@@ -890,17 +914,19 @@ namespace Legion {
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
-      SEND_REPL_DISJOINT_COMPLETE_REQUEST,
-      SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
+      SEND_REPL_COMPUTE_EQUIVALENCE_SETS,
+      SEND_REPL_OUTPUT_EQUIVALENCE_SET,
+      SEND_REPL_REFINE_EQUIVALENCE_SETS,
+      SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
       SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_BROADCAST_UPDATE,
+      SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
       SEND_REPL_TRACE_FRONTIER_REQUEST,
       SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
-      SEND_REPL_IMPLICIT_REQUEST,
-      SEND_REPL_IMPLICIT_RESPONSE,
+      SEND_REPL_IMPLICIT_RENDEZVOUS,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
@@ -926,16 +952,19 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
+      SEND_COMPUTE_EQUIVALENCE_SETS_PENDING,
+      SEND_OUTPUT_EQUIVALENCE_SET_REQUEST,
+      SEND_OUTPUT_EQUIVALENCE_SET_RESPONSE,
       SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
-      SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION,
+      SEND_INVALIDATE_EQUIVALENCE_SETS_SUBSCRIPTION,
+      SEND_EQUIVALENCE_SET_CREATION,
+      SEND_EQUIVALENCE_SET_REUSE,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
       SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
       SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
-      SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
-      SEND_EQUIVALENCE_SET_MAKE_OWNER,
       SEND_EQUIVALENCE_SET_CLONE_REQUEST,
       SEND_EQUIVALENCE_SET_CLONE_RESPONSE,
       SEND_EQUIVALENCE_SET_CAPTURE_REQUEST,
@@ -975,11 +1004,15 @@ namespace Legion {
       SEND_CONSTRAINT_RELEASE,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
-      SEND_REPLICATE_LAUNCH,
+      SEND_REPLICATE_DISTRIBUTION,
+      SEND_REPLICATE_COLLECTIVE_VERSIONING,
+      SEND_REPLICATE_COLLECTIVE_MAPPING,
+      SEND_REPLICATE_VIRTUAL_RENDEZVOUS,
       SEND_REPLICATE_POST_MAPPED,
       SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
+      SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE,
       SEND_LIBRARY_MAPPER_REQUEST,
       SEND_LIBRARY_MAPPER_RESPONSE,
       SEND_LIBRARY_TRACE_REQUEST,
@@ -1042,9 +1075,12 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_SHARD_PARTICIPANTS_EXCHANGE,
       SEND_CONTROL_REPLICATION_IMPLICIT_SHARDING_FUNCTOR,
       SEND_CONTROL_REPLICATION_CREATE_FILL_VIEW,
+      SEND_CONTROL_REPLICATION_VERSIONING_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_VIEW_RENDEZVOUS,
       SEND_CONTROL_REPLICATION_CONCURRENT_EXECUTION_VALIDATION,
-      SEND_CONTROL_REPLICATION_ELIDE_CLOSE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_PROJECTION_TREE_EXCHANGE,
+      SEND_CONTROL_REPLICATION_TIMEOUT_MATCH_EXCHANGE,
+      SEND_CONTROL_REPLICATION_MASK_EXCHANGE,
       SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
@@ -1114,6 +1150,7 @@ namespace Legion {
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Individual Remote Future Size",                              \
+        "Individual Remote Output Region Registration",               \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \
@@ -1123,6 +1160,9 @@ namespace Legion {
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
+        "Slice Remote Collective Versioning Rendezvous",              \
+        "Slice Remote Output Region Extents",                         \
+        "Slice Remote Output Region Registration",                    \
         "Distributed Remote Registration",                            \
         "Distributed Downgrade Request",                              \
         "Distributed Downgrade Response",                             \
@@ -1194,17 +1234,19 @@ namespace Legion {
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
-        "Send Replicate Disjoint Complete Request",                   \
-        "Send Replicate Disjoint Complete Response",                  \
+        "Send Replicate Compute Equivalence Sets",                    \
+        "Send Replicate Register Output Equivalence Set",             \
+        "Send Replicate Refine Equivalence Sets",                     \
+        "Send Replicate Equivalence Set Notification",                \
         "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Broadcast Update",                            \
+        "Send Replicate Created Regions Return",                      \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
         "Send Replicate Trace Frontier Request",                      \
         "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
-        "Send Replicate Implicit Request",                            \
-        "Send Replicate Implicit Response",                           \
+        "Send Replicate Implicit Rendezvous",                         \
         "Send Replicate Find or Create Collective View",              \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
@@ -1230,16 +1272,19 @@ namespace Legion {
         "Send Remote Context Find Collective View Response",          \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
+        "Send Compute Equivalence Sets Pending",                      \
+        "Send Register Output Equivalence Set Request",               \
+        "Send Register Output Equivalence Set Response",              \
         "Send Cancel Equivalence Sets Subscription",                  \
-        "Send Finish Equivalence Sets Subscription",                  \
+        "Send Invalidate Equivalence Sets Subscription",              \
+        "Send Equivalence Set Creation",                              \
+        "Send Equivalence Set Reuse",                                 \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
         "Send Equivalence Set Replication Request",                   \
         "Send Equivalence Set Replication Response",                  \
-        "Send Equivalence Set Replication Invalidation",              \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
-        "Send Equivalence Set Make Owner",                            \
         "Send Equivalence Set Clone Request",                         \
         "Send Equivalence Set Clone Response",                        \
         "Send Equivalence Set Tracing Capture Request",               \
@@ -1279,11 +1324,15 @@ namespace Legion {
         "Send Constraint Release",                                    \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
-        "Send Replication Launch",                                    \
+        "Send Replication Distribution",                              \
+        "Send Replication Collective Versioning",                     \
+        "Send Replication Collective Mapping",                        \
+        "Send Replication Virtual Mapping Rendezvous",                \
         "Send Replication Post Mapped",                               \
         "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
+        "Send Control Replication Rendezvous Message",                \
         "Send Library Mapper Request",                                \
         "Send Library Mapper Response",                               \
         "Send Library Trace Request",                                 \
@@ -1346,9 +1395,12 @@ namespace Legion {
         "Control Replication Collective Shard Participants Exchange", \
         "Control Replication Collective Implicit Sharding Functor",   \
         "Control Replication Collective Create Fill View",            \
+        "Control Replication Collective Versioning Rendezvous",       \
         "Control Replication Collective View Rendezvous",             \
         "Control Replication Collective Concurrent Execution Validation",\
-        "Control Replication Collective Elide Close Exchange",        \
+        "Control Replication Collective Projection Tree Exchange",    \
+        "Control Replication Collective Timeout Match Exchange",      \
+        "Control Replication Collective Mask Exchange",               \
         "Control Replication Collective Predicate Exchange",          \
         "Control Replication Collective Cross Product Exchange",      \
         "Control Replication Collective Slow Barrier",                \
@@ -1375,6 +1427,83 @@ namespace Legion {
     };
 
     enum RuntimeCallKind {
+      // Mapper runtime call kinds
+      MAPPER_SEND_MESSAGE_CALL,
+      MAPPER_BROADCAST_CALL,
+      MAPPER_UNPACK_INSTANCE_CALL,
+      MAPPER_CREATE_EVENT_CALL,
+      MAPPER_HAS_TRIGGERED_CALL,
+      MAPPER_TRIGGER_EVENT_CALL,
+      MAPPER_WAIT_EVENT_CALL,
+      MAPPER_FIND_EXECUTION_CONSTRAINTS_CALL,
+      MAPPER_FIND_TASK_LAYOUT_CONSTRAINTS_CALL,
+      MAPPER_FIND_LAYOUT_CONSTRAINTS_CALL,
+      MAPPER_REGISTER_LAYOUT_CALL,
+      MAPPER_RELEASE_LAYOUT_CALL,
+      MAPPER_CONSTRAINTS_CONFLICT_CALL,
+      MAPPER_CONSTRAINTS_ENTAIL_CALL,
+      MAPPER_FIND_VALID_VARIANTS_CALL,
+      MAPPER_FIND_TASK_VARIANT_NAME_CALL,
+      MAPPER_IS_LEAF_VARIANT_CALL,
+      MAPPER_IS_INNER_VARIANT_CALL,
+      MAPPER_IS_IDEMPOTENT_VARIANT_CALL,
+      MAPPER_IS_REPLICABLE_VARIANT_CALL,
+      MAPPER_REGISTER_TASK_VARIANT_CALL,
+      MAPPER_FILTER_VARIANTS_CALL,
+      MAPPER_FILTER_INSTANCES_CALL,
+      MAPPER_CREATE_PHYSICAL_INSTANCE_CALL,
+      MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL,
+      MAPPER_FIND_PHYSICAL_INSTANCE_CALL,
+      MAPPER_FIND_PHYSICAL_INSTANCES_CALL,
+      MAPPER_SET_GC_PRIORITY_CALL,
+      MAPPER_ACQUIRE_INSTANCE_CALL,
+      MAPPER_ACQUIRE_INSTANCES_CALL,
+      MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL,
+      MAPPER_RELEASE_INSTANCE_CALL,
+      MAPPER_RELEASE_INSTANCES_CALL,
+      MAPPER_ACQUIRE_FUTURE_CALL,
+      MAPPER_CREATE_INDEX_SPACE_CALL,
+      MAPPER_UNION_INDEX_SPACES_CALL,
+      MAPPER_INTERSECT_INDEX_SPACES_CALL,
+      MAPPER_SUBTRACT_INDEX_SPACES_CALL,
+      MAPPER_INDEX_SPACE_EMPTY_CALL,
+      MAPPER_INDEX_SPACES_OVERLAP_CALL,
+      MAPPER_INDEX_SPACE_DOMINATES_CALL,
+      MAPPER_HAS_INDEX_PARTITION_CALL,
+      MAPPER_GET_INDEX_PARTITION_CALL,
+      MAPPER_GET_INDEX_SUBSPACE_CALL,
+      MAPPER_GET_INDEX_SPACE_DOMAIN_CALL,
+      MAPPER_GET_INDEX_PARTITION_CS_CALL,
+      MAPPER_GET_INDEX_PARTITION_CS_NAME_CALL,
+      MAPPER_GET_INDEX_SPACE_PARTITION_COLORS_CALL,
+      MAPPER_IS_INDEX_PARTITION_DISJOINT_CALL,
+      MAPPER_IS_INDEX_PARTITION_COMPLETE_CALL,
+      MAPPER_GET_INDEX_SPACE_COLOR_CALL,
+      MAPPER_GET_INDEX_SPACE_COLOR_POINT_CALL,
+      MAPPER_GET_INDEX_PARTITION_COLOR_CALL,
+      MAPPER_GET_PARENT_INDEX_SPACE_CALL,
+      MAPPER_HAS_PARENT_INDEX_PARTITION_CALL,
+      MAPPER_GET_PARENT_INDEX_PARTITION_CALL,
+      MAPPER_GET_INDEX_SPACE_DEPTH_CALL,
+      MAPPER_GET_INDEX_PARTITION_DEPTH_CALL,
+      MAPPER_GET_FIELD_SIZE_CALL,
+      MAPPER_GET_FIELD_SPACE_FIELDS_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_BY_COLOR_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_BY_TREE_CALL,
+      MAPPER_GET_LOGICAL_SUBREGION_CALL,
+      MAPPER_GET_LOGICAL_SUBREGION_BY_COLOR_CALL,
+      MAPPER_GET_LOGICAL_SUBREGION_BY_TREE_CALL,
+      MAPPER_GET_LOGICAL_REGION_COLOR_CALL,
+      MAPPER_GET_LOGICAL_REGION_COLOR_POINT_CALL,
+      MAPPER_GET_LOGICAL_PARTITION_COLOR_CALL,
+      MAPPER_GET_PARENT_LOGICAL_REGION_CALL,
+      MAPPER_HAS_PARENT_LOGICAL_PARTITION_CALL,
+      MAPPER_GET_PARENT_LOGICAL_PARTITION_CALL,
+      MAPPER_RETRIEVE_SEMANTIC_INFO_CALL,
+      MAPPER_RETRIEVE_NAME_CALL,
+      MAPPER_AUTO_LOCK_CALL,
+      // Old runtime call kinds
       PACK_BASE_TASK_CALL, 
       UNPACK_BASE_TASK_CALL,
       TASK_PRIVILEGE_CHECK_CALL,
@@ -1523,6 +1652,81 @@ namespace Legion {
 
 #define RUNTIME_CALL_DESCRIPTIONS(name)                               \
     const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+      "MapperRuntime::send_message",                                  \
+      "MapperRuntime::broadcast",                                     \
+      "MapperRuntime::unpack_physical_instance",                      \
+      "MapperRuntime::create_mapper_event",                           \
+      "MapperRuntime::has_mapper_event_triggered",                    \
+      "MapperRuntime::trigger_mapper_event",                          \
+      "MapperRuntime::wait_on_mapper_event",                          \
+      "MapperRuntime::find_execution_constraints",                    \
+      "MapperRuntime::find_task_layout_constraints",                  \
+      "MapperRuntime::find_layout_constraints",                       \
+      "MapperRuntime::register_layout",                               \
+      "MapperRuntime::release_layout",                                \
+      "MapperRuntime::do_constraints_conflict",                       \
+      "MapperRuntime::do_constraints_entail",                         \
+      "MapperRuntime::find_valid_variants",                           \
+      "MapperRuntime::find_task_variant_name",                        \
+      "MapperRuntime::is_leaf_variant",                               \
+      "MapperRuntime::is_inner_variant",                              \
+      "MapperRuntime::is_idempotent_variant",                         \
+      "MapperRuntime::is_replicable_variant",                         \
+      "MapperRuntime::register_task_variant",                         \
+      "MapperRuntime::filter_variants",                               \
+      "MapperRuntime::filter_instances",                              \
+      "MapperRuntime::create_physical_instance",                      \
+      "MapperRuntime::find_or_create_physical_instance",              \
+      "MapperRuntime::find_physical_instance",                        \
+      "MapperRuntime::find_physical_instances",                       \
+      "MapperRuntime::set_garbage_collection_priority",               \
+      "MapperRuntime::acquire_instance",                              \
+      "MapperRuntime::acquire_instances",                             \
+      "MapperRuntime::acquire_and_filter_instances",                  \
+      "MapperRuntime::release_instance",                              \
+      "MapperRuntime::release_instances",                             \
+      "MapperRuntime::acquire_future",                                \
+      "MapperRuntime::create_index_space",                            \
+      "MapperRuntime::union_index_spaces",                            \
+      "MapperRuntime::intersect_index_spaces",                        \
+      "MapperRuntime::subtract_index_spaces",                         \
+      "MapperRuntime::is_index_space_empty",                          \
+      "MapperRuntime::index_spaces_overlap",                          \
+      "MapperRuntime::index_space_dominates",                         \
+      "MapperRuntime::has_index_partition",                           \
+      "MapperRuntime::get_index_partition",                           \
+      "MapperRuntime::get_index_subspace",                            \
+      "MapperRuntime::get_index_space_domain",                        \
+      "MapperRuntime::get_index_partition_color_space",               \
+      "MapperRuntime::get_index_partition_color_space_name",          \
+      "MapperRuntime::get_index_space_parition_colors",               \
+      "MapperRuntime::is_index_partition_disjoint",                   \
+      "MapperRuntime::is_index_partition_complete",                   \
+      "MapperRuntime::get_index_space_color",                         \
+      "MapperRuntime::get_index_space_color_point",                   \
+      "MapperRuntime::get_index_partition_color",                     \
+      "MapperRuntime::get_parent_index_space",                        \
+      "MapperRuntime::has_parent_index_partition",                    \
+      "MapperRuntime::get_parent_index_partition",                    \
+      "MapperRuntime::get_index_space_depth",                         \
+      "MapperRuntime::get_index_partition_depth",                     \
+      "MapperRuntime::get_field_size",                                \
+      "MapperRuntime::get_field_space_fields",                        \
+      "MapperRuntime::get_logical_partition",                         \
+      "MapperRuntime::get_logical_partition_by_color",                \
+      "MapperRuntime::get_logical_partition_by_tree",                 \
+      "MapperRuntime::get_logical_subregion",                         \
+      "MapperRuntime::get_logical_subregion_by_color",                \
+      "MapperRuntime::get_logical_subregion_by_tree",                 \
+      "MapperRuntime::get_logical_region_color",                      \
+      "MapperRuntime::get_logical_region_color_point",                \
+      "MapperRuntime::get_logical_partition_color",                   \
+      "MapperRuntime::get_parent_logical_region",                     \
+      "MapperRuntime::has_parent_logical_partition",                  \
+      "MapperRuntime::get_parent_logical_partition",                  \
+      "MapperRuntime::retrieve_semantic_information",                 \
+      "MapperRuntime::retrieve_name",                                 \
+      "MapperRuntime::AutoLock",                                      \
       "Pack Base Task",                                               \
       "Unpack Base Task",                                             \
       "Task Privilege Check",                                         \
@@ -1762,7 +1966,7 @@ namespace Legion {
       //COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
-      //COLLECTIVE_LOC_79 = 79,
+      COLLECTIVE_LOC_79 = 79,
       COLLECTIVE_LOC_80 = 80,
       COLLECTIVE_LOC_81 = 81,
       COLLECTIVE_LOC_82 = 82,
@@ -1788,6 +1992,7 @@ namespace Legion {
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
       COLLECTIVE_LOC_104 = 104,
+      COLLECTIVE_LOC_105 = 105,
     };
 
     // legion_types.h
@@ -1870,7 +2075,7 @@ namespace Legion {
     class PostCloseOp;
     class VirtualCloseOp;
     class RefinementOp;
-    class AdvisementOp;
+    class ResetOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -1934,9 +2139,7 @@ namespace Legion {
     class LeafContext;
 
     // legion_trace.h
-    class LegionTrace;
-    class StaticTrace;
-    class DynamicTrace;
+    class LogicalTrace;
     class TraceCaptureOp;
     class TraceCompleteOp;
     class TraceReplayOp;
@@ -1990,21 +2193,26 @@ namespace Legion {
     class ColorSpaceIterator;
     template<int DIM, typename T> class ColorSpaceLinearizationT;
     template<int DIM, typename T, typename RT = void> class KDNode;
+    class EqKDTree;
+    template<int DIM, typename T> class EqKDTreeT;
 
-    class RegionTreeContext;
     class RegionTreePath;
     class PathTraverser;
     class NodeTraverser;
 
-    class ProjectionEpoch;
     class LogicalState;
+    class LogicalAnalysis;
     class PhysicalAnalysis;
     class EquivalenceSet;
-    class PendingEquivalenceSet;
     class EqSetTracker;
     class VersionManager;
     class VersionInfo;
-    class RayTracer;
+    class ProjectionNode;
+    class ProjectionRegion;
+    class ProjectionPartition;
+    class RefinementTracker;
+    class RegionRefinementTracker;
+    class PartitionRefinementTracker;
 
     class Collectable;
     class Notifiable;
@@ -2037,17 +2245,18 @@ namespace Legion {
     class RegionAnalyzer;
     class RegionMapper;
 
-    struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
     struct LogicalTraceInfo;
     struct PhysicalTraceInfo;
-    class LogicalCloser;
     class TreeCloseImpl;
     class TreeClose;
     struct CloseInfo; 
     struct FieldDataDescriptor;
     struct PendingRemoteExpression;
+    class ProjectionSummary;
+    class ProjectionInfo;
+
 
     // legion_spy.h
     class TreeStateLogger;
@@ -2071,6 +2280,7 @@ namespace Legion {
     class ReplMergeCloseOp;
     class ReplVirtualCloseOp;
     class ReplRefinementOp;
+    class ReplResetOp;
     class ReplFillOp;
     class ReplIndexFillOp;
     class ReplDiscardOp;
@@ -2118,6 +2328,9 @@ namespace Legion {
     class MustEpochMappingExchange;
     class PredicateCollective;
     class UnorderedExchange;
+    class ShardRendezvous;
+    class ProjectionTreeExchange;
+    class TimeoutMatchExchange;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
@@ -2203,7 +2416,7 @@ namespace Legion {
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::RefinementOp;                    \
-    friend class Internal::AdvisementOp;                    \
+    friend class Internal::ResetOp;                         \
     friend class Internal::AcquireOp;                       \
     friend class Internal::ReleaseOp;                       \
     friend class Internal::PredicateImpl;                   \

@@ -32,9 +32,7 @@ namespace Realm {
   struct PyObject;
   struct PyInterpreterState;
   struct PyThreadState {
-#if REALM_PYTHON_VERSION_MAJOR >= 3
     struct PyThreadState *prev;
-#endif
     struct PyThreadState *next;
     struct PyInterpreterState *interp;
     // lots more stuff here

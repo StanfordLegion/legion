@@ -367,19 +367,6 @@
 #define LEGION_DEFAULT_MAX_MESSAGE_SIZE        (DEFAULT_MAX_MESSAGE_SIZE)
 #endif
 #endif
-// Timeout before checking for whether a logical user
-// should be pruned from the logical region tree data strucutre
-// Making the value less than or equal to zero will
-// result in checks always being performed
-#ifndef DEFAULT_LOGICAL_USER_TIMEOUT // For backwards compatibility
-#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    32
-#endif
-#else
-#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    (DEFAULT_LOGICAL_USER_TIMEOUT)
-#endif
-#endif
 // Number of events to place in each GC epoch
 // Large counts improve efficiency but add latency to
 // garbage collection.  Smaller count reduce efficiency
@@ -469,23 +456,6 @@
 // Controls how many IDs are available for dynamic use
 #ifndef LEGION_INITIAL_LIBRARY_ID_OFFSET
 #define LEGION_INITIAL_LIBRARY_ID_OFFSET (1 << 30)
-#endif
-
-// Default number of consecutive accesses to the
-// same disjoint+complete partition before Legion
-// will switch physical analysis to using it
-// Pick prime numbers to avoid aliasing during sampling
-#ifndef LEGION_REFINEMENT_SAME_CHILD
-#define LEGION_REFINEMENT_SAME_CHILD      7
-#endif
-
-// Default number of consecutive accesses to any
-// disjoint+complete partition other than the current
-// one being used for analysis before Legion will
-// switch physical analysis to using a new partition
-// Pick prime numbers to avoid aliasing during sampling
-#ifndef LEGION_REFINEMENT_DIFF_CHILD
-#define LEGION_REFINEMENT_DIFF_CHILD      31
 #endif
 
 // Default percentage of the number of children in a
@@ -1411,13 +1381,14 @@ typedef enum legion_error_t {
   LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION = 1107,
   LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES = 1108,
   LEGION_WARNING_INLINING_NOT_SUPPORTED = 1109,
-  LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE = 1110,
+  LEGION_WARNING_IGNORING_EQUIVALENCE_SETS_RESET = 1110,
   LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS = 1111,
   LEGION_WARNING_PARTITION_VERIFICATION = 1112,
   LEGION_WARNING_IMPRECISE_ATTACH_MEMORY = 1113,
   LEGION_WARNING_KDTREE_REFINEMENT_FAILED = 1114,
   LEGION_WARNING_COLLECTIVE_HAMMER_REDUCTION = 1115,
   LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE = 1116,
+  LEGION_WARNING_UNSUPPORTED_REPLICATION = 1117,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
