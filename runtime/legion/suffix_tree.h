@@ -346,12 +346,6 @@ namespace Legion {
           return result;
         }
       }
-
-      bool compare(const NonOverlappingRepeatsResult& left, const NonOverlappingRepeatsResult& right) {
-        // Note: using > instead of < to sort in descending order.
-        return std::make_pair((left.end - left.start) * left.repeats, left.repeats) >
-               std::make_pair((right.end - right.start) * right.repeats, right.repeats);
-      }
     }
 
     // The input string must also be formatted correctly for the suffix tree (unique last character).
@@ -360,7 +354,11 @@ namespace Legion {
       SuffixTree<T> tree(str);
       std::vector<NonOverlappingRepeatsResult> result;
       walk(tree.get_root(), result, min_length);
-      std::sort(result.begin(), result.end(), compare);
+      std::sort(result.begin(), result.end(), [](const NonOverlappingRepeatsResult& left, const NonOverlappingRepeatsResult& right) {
+        // Note: using > instead of < to sort in descending order.
+        return std::make_pair((left.end - left.start) * left.repeats, left.repeats) >
+               std::make_pair((right.end - right.start) * right.repeats, right.repeats);
+      });
       return result;
     }
   };
