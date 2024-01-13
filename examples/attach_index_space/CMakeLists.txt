@@ -24,6 +24,7 @@ endif()
 
 add_executable(index_space_attach index_space_attach.cc)
 target_link_libraries(index_space_attach Legion::Legion)
+target_compile_options(index_space_attach PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME index_space_attach COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:index_space_attach> ${Legion_TEST_ARGS}) 
+  add_test(NAME index_space_attach COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:index_space_attach> ${Legion_TEST_ARGS})
 endif()

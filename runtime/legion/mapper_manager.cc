@@ -32,13 +32,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MappingCallInfo::MappingCallInfo(MapperManager *man, MappingCallKind k,
-                                     Operation *op)
+                                     Operation *op, bool prioritize)
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), 
         start_time(0), reentrant_disabled(false)
     //--------------------------------------------------------------------------
     {
+      manager->begin_mapper_call(this, prioritize);
+    }
+
+    //--------------------------------------------------------------------------
+    MappingCallInfo::~MappingCallInfo(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->finish_mapper_call(this);
     }
 
     /////////////////////////////////////////////////////////////
@@ -76,1334 +84,521 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_options(TaskOp *task, 
-          Mapper::TaskOptions *options, bool *prioritize, MappingCallInfo *info)
+                                  Mapper::TaskOptions &options, bool prioritize)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SELECT_TASK_OPTIONS_CALL,
-                                 NULL, continuation_precondition, *prioritize);
-        // If we need to build a continuation do that now
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::TaskOptions, bool,
-                              &MapperManager::invoke_select_task_options>
-                                continuation(this,task,options,prioritize,info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
+      MappingCallInfo ctx(this, SELECT_TASK_OPTIONS_CALL, task, prioritize);
       // If we have an info, we know we are good to go
-      mapper->select_task_options(info, *task, *options);
-      finish_mapper_call(info);
+      mapper->select_task_options(&ctx, *task, options);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_premap_task(TaskOp *task, 
-                                           Mapper::PremapTaskInput *input,
-                                           Mapper::PremapTaskOutput *output, 
-                                           MappingCallInfo *info)
+                                           Mapper::PremapTaskInput &input,
+                                           Mapper::PremapTaskOutput &output) 
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PREMAP_TASK_CALL,
-                                 task, continuation_precondition);
-        // Build a continuation if necessary
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::PremapTaskInput, 
-            Mapper::PremapTaskOutput, &MapperManager::invoke_premap_task>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->premap_task(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, PREMAP_TASK_CALL, task);
+      mapper->premap_task(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_slice_task(TaskOp *task, 
-                                          Mapper::SliceTaskInput *input,
-                                          Mapper::SliceTaskOutput *output, 
-                                          MappingCallInfo *info)
+                                          Mapper::SliceTaskInput &input,
+                                          Mapper::SliceTaskOutput &output) 
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SLICE_TASK_CALL,
-                                 NULL, continuation_precondition);
-        // Build a continuation if necessary
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::SliceTaskInput,
-            Mapper::SliceTaskOutput, &MapperManager::invoke_slice_task>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->slice_task(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, SLICE_TASK_CALL, task);
+      mapper->slice_task(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_task(TaskOp *task, 
-                                        Mapper::MapTaskInput *input,
-                                        Mapper::MapTaskOutput *output, 
-                                        MappingCallInfo *info)
+                                        Mapper::MapTaskInput &input,
+                                        Mapper::MapTaskOutput &output) 
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_TASK_CALL, task, continuation_precondition,
-                                 false/*prioritize*/);
-        // Build a continuation if necessary
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp,Mapper::MapTaskInput,Mapper::MapTaskOutput,
-                              &MapperManager::invoke_map_task>
-                                continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->map_task(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_TASK_CALL, task);
+      mapper->map_task(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_map_replicate_task(TaskOp *task,
-                                     Mapper::MapTaskInput *input,
-                                     Mapper::MapTaskOutput *default_output,
-                                     Mapper::MapReplicateTaskOutput *output,
-                                     MappingCallInfo *info)
+    void MapperManager::invoke_replicate_task(TaskOp *task,
+                                     Mapper::ReplicateTaskInput &input,
+                                     Mapper::ReplicateTaskOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_REPLICATE_TASK_CALL,
-                                 task, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation4<TaskOp,Mapper::MapTaskInput,
-                              Mapper::MapTaskOutput,
-                              Mapper::MapReplicateTaskOutput,
-                              &MapperManager::invoke_map_replicate_task>
-                                continuation(this, task, input, 
-                                    default_output, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->map_replicate_task(info, *task, *input, *default_output, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, REPLICATE_TASK_CALL, task);
+      mapper->replicate_task(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_variant(TaskOp *task,
-                                            Mapper::SelectVariantInput *input,
-                                            Mapper::SelectVariantOutput *output,
-                                            MappingCallInfo *info)
+                                            Mapper::SelectVariantInput &input,
+                                            Mapper::SelectVariantOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SELECT_VARIANT_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::SelectVariantInput, 
-            Mapper::SelectVariantOutput, 
-            &MapperManager::invoke_select_task_variant>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->select_task_variant(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, SELECT_VARIANT_CALL, task);
+      mapper->select_task_variant(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_post_map_task(TaskOp *task, 
-                                             Mapper::PostMapInput *input,
-                                             Mapper::PostMapOutput *output,
-                                             MappingCallInfo *info)
+                                             Mapper::PostMapInput &input,
+                                             Mapper::PostMapOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(POSTMAP_TASK_CALL, task,
-                                 continuation_precondition,false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp,Mapper::PostMapInput,Mapper::PostMapOutput,
-                              &MapperManager::invoke_post_map_task>
-                                continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->postmap_task(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, POSTMAP_TASK_CALL, task);
+      mapper->postmap_task(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_sources(TaskOp *task, 
-                                    Mapper::SelectTaskSrcInput *input,
-                                    Mapper::SelectTaskSrcOutput *output,
-                                    MappingCallInfo *info)
+                                    Mapper::SelectTaskSrcInput &input,
+                                    Mapper::SelectTaskSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
-                                 task, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::SelectTaskSrcInput,
-            Mapper::SelectTaskSrcOutput, 
-            &MapperManager::invoke_select_task_sources>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->select_task_sources(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, TASK_SELECT_SOURCES_CALL, task);
+      mapper->select_task_sources(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_sources(RemoteTaskOp *task, 
-                                    Mapper::SelectTaskSrcInput *input,
-                                    Mapper::SelectTaskSrcOutput *output,
-                                    MappingCallInfo *info)
+                                    Mapper::SelectTaskSrcInput &input,
+                                    Mapper::SelectTaskSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
-                                 task, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<RemoteTaskOp, Mapper::SelectTaskSrcInput,
-            Mapper::SelectTaskSrcOutput, 
-            &MapperManager::invoke_select_task_sources>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->select_task_sources(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, TASK_SELECT_SOURCES_CALL, task);
+      mapper->select_task_sources(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_report_profiling(TaskOp *task, 
-                                              Mapper::TaskProfilingInfo *input,
-                                              MappingCallInfo *info)
+                                               Mapper::TaskProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_REPORT_PROFILING_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<TaskOp, Mapper::TaskProfilingInfo,
-                              &MapperManager::invoke_task_report_profiling>
-                                continuation(this, task, input, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->report_profiling(info, *task, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, TASK_REPORT_PROFILING_CALL, task);
+      mapper->report_profiling(&ctx, *task, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_select_sharding_functor(TaskOp *task,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_SELECT_SHARDING_FUNCTOR_CALL, task,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_task_select_sharding_functor>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, TASK_SELECT_SHARDING_FUNCTOR_CALL, task);
+      mapper->select_sharding_functor(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_inline(MapOp *op, 
-                                          Mapper::MapInlineInput *input,
-                                          Mapper::MapInlineOutput *output, 
-                                          MappingCallInfo *info)
+                                          Mapper::MapInlineInput &input,
+                                          Mapper::MapInlineOutput &output) 
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_INLINE_CALL, op, continuation_precondition,
-                                 false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<MapOp, 
-                  Mapper::MapInlineInput,Mapper::MapInlineOutput,
-                              &MapperManager::invoke_map_inline>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_inline(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_INLINE_CALL, op);
+      mapper->map_inline(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_inline_sources(MapOp *op, 
-                                      Mapper::SelectInlineSrcInput *input,
-                                      Mapper::SelectInlineSrcOutput *output,
-                                      MappingCallInfo *info)
+                                      Mapper::SelectInlineSrcInput &input,
+                                      Mapper::SelectInlineSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(INLINE_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<MapOp, Mapper::SelectInlineSrcInput,
-                              Mapper::SelectInlineSrcOutput, 
-                              &MapperManager::invoke_select_inline_sources>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_inline_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, INLINE_SELECT_SOURCES_CALL, op);
+      mapper->select_inline_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_inline_sources(RemoteMapOp *op, 
-                                      Mapper::SelectInlineSrcInput *input,
-                                      Mapper::SelectInlineSrcOutput *output,
-                                      MappingCallInfo *info)
+                                      Mapper::SelectInlineSrcInput &input,
+                                      Mapper::SelectInlineSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(INLINE_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<RemoteMapOp, Mapper::SelectInlineSrcInput,
-                              Mapper::SelectInlineSrcOutput, 
-                              &MapperManager::invoke_select_inline_sources>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_inline_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, INLINE_SELECT_SOURCES_CALL, op);
+      mapper->select_inline_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_report_profiling(MapOp *op, 
-                                     Mapper::InlineProfilingInfo *input,
-                                     MappingCallInfo *info)
+                                     Mapper::InlineProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(INLINE_REPORT_PROFILING_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<MapOp, Mapper::InlineProfilingInfo,
-                              &MapperManager::invoke_inline_report_profiling>
-                                continuation(this, op, input, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->report_profiling(info, *op, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, INLINE_REPORT_PROFILING_CALL, op);
+      mapper->report_profiling(&ctx, *op, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_copy(CopyOp *op,
-                                        Mapper::MapCopyInput *input,
-                                        Mapper::MapCopyOutput *output,
-                                        MappingCallInfo *info)
+                                        Mapper::MapCopyInput &input,
+                                        Mapper::MapCopyOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_COPY_CALL, op, continuation_precondition,
-                                 false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CopyOp,Mapper::MapCopyInput,Mapper::MapCopyOutput,
-                              &MapperManager::invoke_map_copy>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_copy(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_COPY_CALL, op);
+      mapper->map_copy(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_copy_sources(CopyOp *op,
-                                    Mapper::SelectCopySrcInput *input,
-                                    Mapper::SelectCopySrcOutput *output,
-                                    MappingCallInfo *info)
+                                    Mapper::SelectCopySrcInput &input,
+                                    Mapper::SelectCopySrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CopyOp, Mapper::SelectCopySrcInput,
-            Mapper::SelectCopySrcOutput, 
-            &MapperManager::invoke_select_copy_sources>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_copy_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, COPY_SELECT_SOURCES_CALL, op);
+      mapper->select_copy_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_copy_sources(RemoteCopyOp *op,
-                                    Mapper::SelectCopySrcInput *input,
-                                    Mapper::SelectCopySrcOutput *output,
-                                    MappingCallInfo *info)
+                                    Mapper::SelectCopySrcInput &input,
+                                    Mapper::SelectCopySrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<RemoteCopyOp, Mapper::SelectCopySrcInput,
-            Mapper::SelectCopySrcOutput, 
-            &MapperManager::invoke_select_copy_sources>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_copy_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, COPY_SELECT_SOURCES_CALL, op);
+      mapper->select_copy_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_report_profiling(CopyOp *op,
-                                             Mapper::CopyProfilingInfo *input,
-                                             MappingCallInfo *info)
+                                             Mapper::CopyProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_REPORT_PROFILING_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<CopyOp, Mapper::CopyProfilingInfo,
-                              &MapperManager::invoke_copy_report_profiling>
-                                continuation(this, op, input, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->report_profiling(info, *op, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, COPY_REPORT_PROFILING_CALL, op);
+      mapper->report_profiling(&ctx, *op, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_select_sharding_functor(CopyOp *op,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_SELECT_SHARDING_FUNCTOR_CALL, op,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CopyOp, Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_copy_select_sharding_functor>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, COPY_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_close_sources(CloseOp *op,
-                                         Mapper::SelectCloseSrcInput *input,
-                                         Mapper::SelectCloseSrcOutput *output,
-                                         MappingCallInfo *info)
+                                         Mapper::SelectCloseSrcInput &input,
+                                         Mapper::SelectCloseSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CloseOp, Mapper::SelectCloseSrcInput,
-            Mapper::SelectCloseSrcOutput, 
-            &MapperManager::invoke_select_close_sources>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_close_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, CLOSE_SELECT_SOURCES_CALL, op);
+      mapper->select_close_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_close_sources(RemoteCloseOp *op,
-                                         Mapper::SelectCloseSrcInput *input,
-                                         Mapper::SelectCloseSrcOutput *output,
-                                         MappingCallInfo *info)
+                                         Mapper::SelectCloseSrcInput &input,
+                                         Mapper::SelectCloseSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<RemoteCloseOp, Mapper::SelectCloseSrcInput,
-            Mapper::SelectCloseSrcOutput, 
-            &MapperManager::invoke_select_close_sources>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_close_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, CLOSE_SELECT_SOURCES_CALL, op);
+      mapper->select_close_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_close_report_profiling(CloseOp *op,
-                                          Mapper::CloseProfilingInfo *input,
-                                          MappingCallInfo *info)
+                                          Mapper::CloseProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_REPORT_PROFILING_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<CloseOp, Mapper::CloseProfilingInfo,
-                              &MapperManager::invoke_close_report_profiling>
-                                continuation(this, op, input, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->report_profiling(info, *op, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, CLOSE_REPORT_PROFILING_CALL, op);
+      mapper->report_profiling(&ctx, *op, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_close_select_sharding_functor(CloseOp *op,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_SELECT_SHARDING_FUNCTOR_CALL, op,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CloseOp, Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_close_select_sharding_functor>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, CLOSE_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_acquire(AcquireOp *op,
-                                           Mapper::MapAcquireInput *input,
-                                           Mapper::MapAcquireOutput *output,
-                                           MappingCallInfo *info)
+                                           Mapper::MapAcquireInput &input,
+                                           Mapper::MapAcquireOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_ACQUIRE_CALL, op,
-                                 continuation_precondition,false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<AcquireOp, Mapper::MapAcquireInput,
-            Mapper::MapAcquireOutput, &MapperManager::invoke_map_acquire>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_acquire(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_ACQUIRE_CALL, op);
+      mapper->map_acquire(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_acquire_report_profiling(AcquireOp *op,
-                                         Mapper::AcquireProfilingInfo *input,
-                                         MappingCallInfo *info)
+                                         Mapper::AcquireProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(ACQUIRE_REPORT_PROFILING_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<AcquireOp, Mapper::AcquireProfilingInfo,
-                              &MapperManager::invoke_acquire_report_profiling>
-                                continuation(this, op, input, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->report_profiling(info, *op, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, ACQUIRE_REPORT_PROFILING_CALL, op);
+      mapper->report_profiling(&ctx, *op, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_acquire_select_sharding_functor(AcquireOp *op,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL, op,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<AcquireOp, Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_acquire_select_sharding_functor>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_release(ReleaseOp *op,
-                                           Mapper::MapReleaseInput *input,
-                                           Mapper::MapReleaseOutput *output,
-                                           MappingCallInfo *info)
+                                           Mapper::MapReleaseInput &input,
+                                           Mapper::MapReleaseOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_RELEASE_CALL, op,
-                                 continuation_precondition,false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<ReleaseOp, Mapper::MapReleaseInput,
-            Mapper::MapReleaseOutput, &MapperManager::invoke_map_release>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_release(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_RELEASE_CALL, op);
+      mapper->map_release(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_release_sources(ReleaseOp *op,
-                                       Mapper::SelectReleaseSrcInput *input,
-                                       Mapper::SelectReleaseSrcOutput *output,
-                                       MappingCallInfo *info)
+                                       Mapper::SelectReleaseSrcInput &input,
+                                       Mapper::SelectReleaseSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<ReleaseOp, Mapper::SelectReleaseSrcInput,
-                              Mapper::SelectReleaseSrcOutput, 
-                              &MapperManager::invoke_select_release_sources>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_release_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, RELEASE_SELECT_SOURCES_CALL, op);
+      mapper->select_release_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_release_sources(RemoteReleaseOp *op,
-                                       Mapper::SelectReleaseSrcInput *input,
-                                       Mapper::SelectReleaseSrcOutput *output,
-                                       MappingCallInfo *info)
+                                       Mapper::SelectReleaseSrcInput &input,
+                                       Mapper::SelectReleaseSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<RemoteReleaseOp, Mapper::SelectReleaseSrcInput,
-                              Mapper::SelectReleaseSrcOutput, 
-                              &MapperManager::invoke_select_release_sources>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_release_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, RELEASE_SELECT_SOURCES_CALL, op);
+      mapper->select_release_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_report_profiling(ReleaseOp *op,
-                                         Mapper::ReleaseProfilingInfo *input,
-                                         MappingCallInfo *info)
+                                         Mapper::ReleaseProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_REPORT_PROFILING_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<ReleaseOp, Mapper::ReleaseProfilingInfo,
-                              &MapperManager::invoke_release_report_profiling>
-                                continuation(this, op, input, info);
-          continuation.defer(runtime, continuation_precondition, op);  
-          return;
-        }
-      }
-      mapper->report_profiling(info, *op, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, RELEASE_REPORT_PROFILING_CALL, op);
+      mapper->report_profiling(&ctx, *op, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_select_sharding_functor(ReleaseOp *op,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_SELECT_SHARDING_FUNCTOR_CALL, op,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<ReleaseOp, Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_release_select_sharding_functor>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, RELEASE_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_partition_projection(
                           DependentPartitionOp *op,
-                          Mapper::SelectPartitionProjectionInput *input,
-                          Mapper::SelectPartitionProjectionOutput *output,
-                          MappingCallInfo *info)
+                          Mapper::SelectPartitionProjectionInput &input,
+                          Mapper::SelectPartitionProjectionOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SELECT_PARTITION_PROJECTION_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<DependentPartitionOp, 
-                            Mapper::SelectPartitionProjectionInput,
-                            Mapper::SelectPartitionProjectionOutput, 
-                            &MapperManager::invoke_select_partition_projection>
-                              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_partition_projection(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, SELECT_PARTITION_PROJECTION_CALL, op);
+      mapper->select_partition_projection(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_partition(DependentPartitionOp *op,
-                                  Mapper::MapPartitionInput *input,
-                                  Mapper::MapPartitionOutput *output,
-                                  MappingCallInfo *info)
+                                  Mapper::MapPartitionInput &input,
+                                  Mapper::MapPartitionOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_PARTITION_CALL, op,
-                                 continuation_precondition,false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<DependentPartitionOp, 
-                            Mapper::MapPartitionInput,
-                            Mapper::MapPartitionOutput, 
-                            &MapperManager::invoke_map_partition>
-                              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_partition(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_PARTITION_CALL, op);
+      mapper->map_partition(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_partition_sources(
                                   DependentPartitionOp *op,
-                                  Mapper::SelectPartitionSrcInput *input,
-                                  Mapper::SelectPartitionSrcOutput *output,
-                                  MappingCallInfo *info)
+                                  Mapper::SelectPartitionSrcInput &input,
+                                  Mapper::SelectPartitionSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<DependentPartitionOp, 
-                            Mapper::SelectPartitionSrcInput,
-                            Mapper::SelectPartitionSrcOutput, 
-                            &MapperManager::invoke_select_partition_sources>
-                              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_partition_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, PARTITION_SELECT_SOURCES_CALL, op);
+      mapper->select_partition_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_partition_sources(RemotePartitionOp *op,
-                                  Mapper::SelectPartitionSrcInput *input,
-                                  Mapper::SelectPartitionSrcOutput *output,
-                                  MappingCallInfo *info)
+                                  Mapper::SelectPartitionSrcInput &input,
+                                  Mapper::SelectPartitionSrcOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_SELECT_SOURCES_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<RemotePartitionOp, 
-                            Mapper::SelectPartitionSrcInput,
-                            Mapper::SelectPartitionSrcOutput, 
-                            &MapperManager::invoke_select_partition_sources>
-                              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_partition_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, PARTITION_SELECT_SOURCES_CALL, op);
+      mapper->select_partition_sources(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_partition_report_profiling(
                                          DependentPartitionOp *op,
-                                         Mapper::PartitionProfilingInfo *input,
-                                         MappingCallInfo *info)
+                                         Mapper::PartitionProfilingInfo &input)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_REPORT_PROFILING_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<DependentPartitionOp, 
-                              Mapper::PartitionProfilingInfo,
-                              &MapperManager::invoke_partition_report_profiling>
-                                continuation(this, op, input, info);
-          continuation.defer(runtime, continuation_precondition, op);  
-          return;
-        }
-      }
-      mapper->report_profiling(info, *op, *input);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, PARTITION_REPORT_PROFILING_CALL, op);
+      mapper->report_profiling(&ctx, *op, input);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_partition_select_sharding_functor(
                               DependentPartitionOp *op,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_SELECT_SHARDING_FUNCTOR_CALL, op,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<DependentPartitionOp, 
-            Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_partition_select_sharding_functor>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, PARTITION_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_fill_select_sharding_functor(FillOp *op,
-                              Mapper::SelectShardingFunctorInput *input,
-                              Mapper::SelectShardingFunctorOutput *output,
-                              MappingCallInfo *info)
+                              Mapper::SelectShardingFunctorInput &input,
+                              Mapper::SelectShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(FILL_SELECT_SHARDING_FUNCTOR_CALL, op, 
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<FillOp, 
-            Mapper::SelectShardingFunctorInput,
-            Mapper::SelectShardingFunctorOutput,
-            &MapperManager::invoke_fill_select_sharding_functor>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, FILL_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_future_map_reduction(AllReduceOp *op,
-                                       Mapper::FutureMapReductionInput *input,
-                                       Mapper::FutureMapReductionOutput *output,
-                                       MappingCallInfo *info)
+                                       Mapper::FutureMapReductionInput &input,
+                                       Mapper::FutureMapReductionOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_FUTURE_MAP_REDUCTION_CALL, op, 
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<AllReduceOp, 
-            Mapper::FutureMapReductionInput,
-            Mapper::FutureMapReductionOutput,
-            &MapperManager::invoke_map_future_map_reduction>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_future_map_reduction(info, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_FUTURE_MAP_REDUCTION_CALL, op);
+      mapper->map_future_map_reduction(&ctx, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
-                                         Mapper::ContextConfigOutput *output,
-                                         MappingCallInfo *info)
+                                         Mapper::ContextConfigOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(CONFIGURE_CONTEXT_CALL,
-                                 task, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<TaskOp, Mapper::ContextConfigOutput,
-                              &MapperManager::invoke_configure_context>
-                                continuation(this, task, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->configure_context(info, *task, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, CONFIGURE_CONTEXT_CALL, task);
+      mapper->configure_context(&ctx, *task, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_tunable_value(TaskOp *task,
-                                     Mapper::SelectTunableInput *input,
-                                     Mapper::SelectTunableOutput *output,
-                                     MappingCallInfo *info)
+                                     Mapper::SelectTunableInput &input,
+                                     Mapper::SelectTunableOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SELECT_TUNABLE_VALUE_CALL,
-                                 task, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::SelectTunableInput,
-                              Mapper::SelectTunableOutput, 
-                              &MapperManager::invoke_select_tunable_value>
-                                continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->select_tunable_value(info, *task, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, SELECT_TUNABLE_VALUE_CALL, task);
+      mapper->select_tunable_value(&ctx, *task, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_must_epoch_select_sharding_functor(
                                 MustEpochOp *op,
-                                Mapper::SelectShardingFunctorInput *input,
-                                Mapper::MustEpochShardingFunctorOutput *output,
-                                MappingCallInfo *info)
+                                Mapper::SelectShardingFunctorInput &input,
+                                Mapper::MustEpochShardingFunctorOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL, op,
-                                 continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<MustEpochOp,
-                      Mapper::SelectShardingFunctorInput, 
-                      Mapper::MustEpochShardingFunctorOutput,
-                      &MapperManager::invoke_must_epoch_select_sharding_functor>
-                            continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->select_sharding_functor(info, *op, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL, op);
+      mapper->select_sharding_functor(&ctx, *op, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_must_epoch(MustEpochOp *op,
-                                            Mapper::MapMustEpochInput *input,
-                                            Mapper::MapMustEpochOutput *output,
-                                            MappingCallInfo *info)
+                                            Mapper::MapMustEpochInput &input,
+                                            Mapper::MapMustEpochOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_MUST_EPOCH_CALL, op,
-                                 continuation_precondition,false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<MustEpochOp, Mapper::MapMustEpochInput, 
-                              Mapper::MapMustEpochOutput,
-                              &MapperManager::invoke_map_must_epoch>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_must_epoch(info, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_MUST_EPOCH_CALL, op);
+      mapper->map_must_epoch(&ctx, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_dataflow_graph(
-                                   Mapper::MapDataflowGraphInput *input,
-                                   Mapper::MapDataflowGraphOutput *output,
-                                   MappingCallInfo *info)
+                                   Mapper::MapDataflowGraphInput &input,
+                                   Mapper::MapDataflowGraphOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL, NULL,
-                                 continuation_precondition,false/*prioritize*/);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<Mapper::MapDataflowGraphInput, 
-                              Mapper::MapDataflowGraphOutput,
-                              &MapperManager::invoke_map_dataflow_graph>
-                                continuation(this, input, output, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
-      }
-      mapper->map_dataflow_graph(info, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MAP_DATAFLOW_GRAPH_CALL, NULL);
+      mapper->map_dataflow_graph(&ctx, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_memoize_operation(Mappable *mappable,
-                                                 Mapper::MemoizeInput *input,
-                                                 Mapper::MemoizeOutput *output,
-                                                 MappingCallInfo *info)
+                                                 Mapper::MemoizeInput &input,
+                                                 Mapper::MemoizeOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MEMOIZE_OPERATION_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<Mappable,
-                              Mapper::MemoizeInput,
-                              Mapper::MemoizeOutput,
-                              &MapperManager::invoke_memoize_operation>
-                            continuation(this, mappable, input, output, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
-      }
-      mapper->memoize_operation(info, *mappable, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, MEMOIZE_OPERATION_CALL, NULL);
+      mapper->memoize_operation(&ctx, *mappable, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_tasks_to_map(
-                                    Mapper::SelectMappingInput *input,
-                                    Mapper::SelectMappingOutput *output,
-                                    MappingCallInfo *info)
+                                    Mapper::SelectMappingInput &input,
+                                    Mapper::SelectMappingOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SELECT_TASKS_TO_MAP_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<Mapper::SelectMappingInput,
-                              Mapper::SelectMappingOutput,
-                              &MapperManager::invoke_select_tasks_to_map>
-                                continuation(this, input, output, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
-      }
-      mapper->select_tasks_to_map(info, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, SELECT_TASKS_TO_MAP_CALL, NULL);
+      mapper->select_tasks_to_map(&ctx, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_steal_targets(
-                                     Mapper::SelectStealingInput *input,
-                                     Mapper::SelectStealingOutput *output,
-                                     MappingCallInfo *info)
+                                     Mapper::SelectStealingInput &input,
+                                     Mapper::SelectStealingOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(SELECT_STEAL_TARGETS_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<Mapper::SelectStealingInput,
-                              Mapper::SelectStealingOutput,
-                              &MapperManager::invoke_select_steal_targets>
-                                continuation(this, input, output, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
-      }
-      mapper->select_steal_targets(info, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, SELECT_STEAL_TARGETS_CALL, NULL);
+      mapper->select_steal_targets(&ctx, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_permit_steal_request(
-                                     Mapper::StealRequestInput *input,
-                                     Mapper::StealRequestOutput *output,
-                                     MappingCallInfo *info)
+                                     Mapper::StealRequestInput &input,
+                                     Mapper::StealRequestOutput &output)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PERMIT_STEAL_REQUEST_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<Mapper::StealRequestInput,
-                              Mapper::StealRequestOutput,
-                              &MapperManager::invoke_permit_steal_request>
-                                continuation(this, input, output, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
-      }
-      mapper->permit_steal_request(info, *input, *output);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, PERMIT_STEAL_REQUEST_CALL, NULL);
+      mapper->permit_steal_request(&ctx, input, output);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_handle_message(Mapper::MapperMessage *message,
-                                       void *check_defer, MappingCallInfo *info)
+                                              bool check_defer)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
+      // Special case for handle message, always defer it if we are also
+      // the sender in order to avoid deadlocks, same thing for any
+      // local processor for non-reentrant mappers, have to use a test
+      // for NULL pointer here since mapper continuation want
+      // pointer arguments
+      if (check_defer && 
+          ((message->sender == processor) ||
+           ((mapper->get_mapper_sync_model() == 
+             Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL) && 
+            runtime->is_local(message->sender))))
       {
-        // Special case for handle message, always defer it if we are also
-        // the sender in order to avoid deadlocks, same thing for any
-        // local processor for non-reentrant mappers, have to use a test
-        // for NULL pointer here since mapper continuation want
-        // pointer arguments
-        if ((check_defer == NULL) && 
-            ((message->sender == processor) ||
-             ((mapper->get_mapper_sync_model() == 
-               Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL) && 
-              runtime->is_local(message->sender))))
-        {
-          defer_message(message);
-          return;
-        }
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(HANDLE_MESSAGE_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<Mapper::MapperMessage, void,
-                              &MapperManager::invoke_handle_message>
-                                continuation(this, message, info, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
+        defer_message(message);
+        return;
       }
-      mapper->handle_message(info, *message);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, HANDLE_MESSAGE_CALL, NULL);
+      mapper->handle_message(&ctx, *message);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_handle_task_result(
-                                   Mapper::MapperTaskResult *result,
-                                   MappingCallInfo *info)
+                                   Mapper::MapperTaskResult &result)
     //--------------------------------------------------------------------------
     {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(HANDLE_TASK_RESULT_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation1<Mapper::MapperTaskResult,
-                              &MapperManager::invoke_handle_task_result>
-                                continuation(this, result, info);
-          continuation.defer(runtime, continuation_precondition);
-          return;
-        }
-      }
-      mapper->handle_task_result(info, *result);
-      finish_mapper_call(info);
+      MappingCallInfo ctx(this, HANDLE_TASK_RESULT_CALL, NULL);
+      mapper->handle_task_result(&ctx, result);
     }
 
     //--------------------------------------------------------------------------
@@ -1442,7 +637,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       runtime->process_mapper_message(target, mapper_id, processor,
                                       message, message_size, message_kind);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_SEND_MESSAGE_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1453,7 +648,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
                         message_size, message_kind, radix, 0/*index*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_BROADCAST_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1477,7 +672,7 @@ namespace Legion {
       instance.impl = runtime->find_or_request_instance_manager(did, ready);
       if (ready.exists())
         ready.wait();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_UNPACK_INSTANCE_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1487,7 +682,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       MapperEvent result;
       result.impl = Runtime::create_rt_user_event();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_EVENT_CALL);
       return result;
     }
 
@@ -1498,7 +693,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const bool triggered = event.impl.has_triggered();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_TRIGGERED_CALL);
       return triggered;
     }
     
@@ -1511,7 +706,7 @@ namespace Legion {
       RtUserEvent to_trigger = event.impl;
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_TRIGGER_EVENT_CALL);
     }
     
     //--------------------------------------------------------------------------
@@ -1523,7 +718,7 @@ namespace Legion {
       RtEvent wait_on = event.impl;
       if (wait_on.exists())
         wait_on.wait();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_WAIT_EVENT_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1541,7 +736,7 @@ namespace Legion {
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const ExecutionConstraintSet &result = impl->get_execution_constraints();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_EXECUTION_CONSTRAINTS_CALL);
       return result;
     }
 
@@ -1560,7 +755,7 @@ namespace Legion {
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const TaskLayoutConstraintSet& result = impl->get_layout_constraints();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_TASK_LAYOUT_CONSTRAINTS_CALL);
       return result;
     }
 
@@ -1579,7 +774,7 @@ namespace Legion {
                       "that layout constraint ID is invalid.",
                       mapper->get_mapper_name(), layout_id,
                       get_mapper_call_name(ctx->kind))
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_LAYOUT_CONSTRAINTS_CALL);
       return *constraints;
     }
 
@@ -1592,7 +787,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LayoutConstraints *cons = 
         runtime->register_layout(handle, constraints, false/*internal*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_REGISTER_LAYOUT_CALL);
       return cons->layout_id;
     }
 
@@ -1603,7 +798,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->release_layout(layout_id);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_LAYOUT_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1626,7 +821,7 @@ namespace Legion {
                       get_mapper_call_name(ctx->kind))
       const bool result = 
         c1->conflicts(c2, 0/*dont care about dimensions*/, conflict_constraint);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CONSTRAINTS_CONFLICT_CALL);
       return result;
     }
 
@@ -1650,7 +845,7 @@ namespace Legion {
                       get_mapper_call_name(ctx->kind))
       const bool result = 
         c1->entails(c2, 0/*don't care about dimensions*/, failed_constraint);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CONSTRAINTS_ENTAIL_CALL);
       return result;
     }
 
@@ -1663,7 +858,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       TaskImpl *task_impl = runtime->find_or_create_task_impl(task_id);
       task_impl->find_valid_variants(valid_variants, kind);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_VALID_VARIANTS_CALL);
     }
     
     //--------------------------------------------------------------------------
@@ -1674,7 +869,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       const char *name = impl->get_name();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_TASK_VARIANT_NAME_CALL);
       return name;
     }
 
@@ -1686,7 +881,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_leaf();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_LEAF_VARIANT_CALL);
       return result;
     }
 
@@ -1698,7 +893,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_inner();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_INNER_VARIANT_CALL);
       return result;
     }
     
@@ -1710,7 +905,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_idempotent();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_IDEMPOTENT_VARIANT_CALL);
       return result;
     }
 
@@ -1722,7 +917,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       bool result = impl->is_replicable();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_REPLICABLE_VARIANT_CALL);
       return result;
     }
 
@@ -1737,7 +932,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       VariantID result = runtime->register_variant(registrar, user_data,
                 user_len, realm_desc, return_type_size, has_return_type);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_REGISTER_TASK_VARIANT_CALL);
       return result;
     }
 
@@ -1794,7 +989,9 @@ namespace Legion {
               std::vector<LogicalRegion> regions_to_check(1,
                         task.regions[lay_it->first].region);
               PhysicalManager *phy = manager->as_physical_manager();
-              if (!phy->meets_regions(regions_to_check, true/*exact*/))
+              if (!phy->meets_regions(regions_to_check,
+                    constraints->specialized_constraint.is_exact(),
+                    &constraints->padding_constraint.delta))
               {
                 conflicts = true;
                 break;
@@ -1809,7 +1006,7 @@ namespace Legion {
         else
           var_it++;
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FILTER_VARIANTS_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1852,7 +1049,9 @@ namespace Legion {
               std::vector<LogicalRegion> regions_to_check(1,
                         task.regions[lay_it->first].region);
               PhysicalManager *phy = manager->as_physical_manager();
-              if (!phy->meets_regions(regions_to_check, true/*tight*/))
+              if (!phy->meets_regions(regions_to_check,
+                    constraints->specialized_constraint.is_exact(),
+                    &constraints->padding_constraint.delta))
                 it = instances.erase(it);
               else
                 it++;
@@ -1875,7 +1074,7 @@ namespace Legion {
             break;
         }
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FILTER_INSTANCES_CALL);
     }
     
     //--------------------------------------------------------------------------
@@ -1912,7 +1111,9 @@ namespace Legion {
             std::vector<LogicalRegion> regions_to_check(1,
                       task.regions[lay_it->first].region);
             PhysicalManager *phy = manager->as_physical_manager();
-            if (!phy->meets_regions(regions_to_check, true/*tight*/))
+            if (!phy->meets_regions(regions_to_check,
+                  constraints->specialized_constraint.is_exact(),
+                  &constraints->padding_constraint.delta))
               it = instances.erase(it);
             else
               it++;
@@ -1933,7 +1134,7 @@ namespace Legion {
         if (missing_fields.empty())
           break;
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FILTER_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -1967,7 +1168,7 @@ namespace Legion {
           0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2004,7 +1205,7 @@ namespace Legion {
                         ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2041,7 +1242,7 @@ namespace Legion {
                  ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2079,7 +1280,7 @@ namespace Legion {
                   ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2108,7 +1309,7 @@ namespace Legion {
                                  regions, result, acquire, tight_region_bounds);
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, false/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2138,7 +1339,7 @@ namespace Legion {
                           regions, result, acquire, tight_region_bounds);
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, false/*created*/);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCE_CALL);
       return success;
     }
 
@@ -2171,7 +1372,7 @@ namespace Legion {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
           record_acquired_instance(ctx, results[idx].impl, false/*created*/);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2204,7 +1405,7 @@ namespace Legion {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
           record_acquired_instance(ctx, results[idx].impl, false/*created*/);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_FIND_PHYSICAL_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2229,7 +1430,7 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
             "Ignoring request for mapper %s to set garbage collection "
             "priority on an external instance", get_mapper_name())
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_SET_GC_PRIORITY_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2258,12 +1459,12 @@ namespace Legion {
       if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
       {
         record_acquired_instance(ctx, manager, false/*created*/);
-        resume_mapper_call(ctx);
+        resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCE_CALL);
         return true;
       }
       else
       {
-        resume_mapper_call(ctx);
+        resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCE_CALL);
         return false;
       }
     }
@@ -2286,7 +1487,7 @@ namespace Legion {
         return acquire_instance(ctx, instances[0]);
       pause_mapper_call(ctx);
       const bool all_acquired = perform_acquires(ctx, instances);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2334,7 +1535,7 @@ namespace Legion {
           instances.erase(instances.begin()+(*it));
         to_erase.clear();
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2360,7 +1561,7 @@ namespace Legion {
         if (!perform_acquires(ctx, *it))
           all_acquired = false;
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2395,7 +1596,7 @@ namespace Legion {
           to_erase.clear();
         }
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_AND_FILTER_INSTANCES_CALL);
       return all_acquired;
     }
 
@@ -2459,7 +1660,7 @@ namespace Legion {
       }
       pause_mapper_call(ctx);
       release_acquired_instance(ctx, instance.impl); 
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCE_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2478,7 +1679,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       for (unsigned idx = 0; idx < instances.size(); idx++)
         release_acquired_instance(ctx, instances[idx].impl);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2501,7 +1702,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->size(); idx++)
           release_acquired_instance(ctx, (*it)[idx].impl);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RELEASE_INSTANCES_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2511,8 +1712,7 @@ namespace Legion {
     {
       if ((future.impl == NULL) || !memory.exists())
         return false;
-      if ((ctx->kind != MAP_TASK_CALL) && 
-          (ctx->kind != MAP_REPLICATE_TASK_CALL))
+      if (ctx->kind != MAP_TASK_CALL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
                         "Ignoring acquire future request in unsupported mapper "
@@ -2523,7 +1723,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       const bool result = future.impl->find_or_create_application_instance(
                                 memory, ctx->operation->get_unique_op_id()); 
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_ACQUIRE_FUTURE_CALL);
       return result;
     }
 
@@ -2618,7 +1818,7 @@ namespace Legion {
       runtime->forest->create_index_space(result, &domain, did, provenance);
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_CREATE_INDEX_SPACE_CALL);
       return result; 
     }
 
@@ -2651,7 +1851,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_UNION_INDEX_SPACES_CALL);
       return result;
     }
 
@@ -2684,7 +1884,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INTERSECT_INDEX_SPACES_CALL);
       return result;
     }
 
@@ -2709,7 +1909,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(result.get_id(),
                     runtime->address_space, provenance);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_SUBTRACT_INDEX_SPACES_CALL);
       return result;
     }
 
@@ -2723,7 +1923,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       IndexSpaceNode *node = runtime->forest->get_node(handle);
       bool result = node->is_empty();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INDEX_SPACE_EMPTY_CALL);
       return result;
     }
 
@@ -2744,7 +1944,7 @@ namespace Legion {
       IndexSpaceExpression *overlap = 
         runtime->forest->intersect_index_spaces(n1, n2);
       const bool result = !overlap->is_empty();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INDEX_SPACES_OVERLAP_CALL);
       return result;
     }
 
@@ -2767,7 +1967,7 @@ namespace Legion {
       IndexSpaceExpression *difference =
         runtime->forest->subtract_index_spaces(n1, n2);
       const bool result = difference->is_empty();
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_INDEX_SPACE_DOMINATES_CALL);
       return result;
     }
 
@@ -2778,7 +1978,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->has_index_partition(parent, color);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -2790,7 +1990,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexPartition result = runtime->get_index_partition(parent, color);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -2803,7 +2003,7 @@ namespace Legion {
       Point<1,coord_t> color(c);
       IndexSpace result = runtime->get_index_subspace(p, &color,
                     NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SUBSPACE_CALL);
       return result;
     }
 
@@ -2830,7 +2030,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SUBSPACE_CALL);
       return result;
     }
 
@@ -2866,7 +2066,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_DOMAIN_CALL);
       return result;
     }
 
@@ -2886,7 +2086,18 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       Domain result = runtime->get_index_partition_color_space(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CS_CALL);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::get_index_partition_color_space_name(
+                                         MappingCallInfo *ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = runtime->get_index_partition_color_space_name(p);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_CS_NAME_CALL);
       return result;
     }
 
@@ -2897,7 +2108,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->get_index_space_partition_colors(handle, colors);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_PARTITION_COLORS_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2907,7 +2118,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->is_index_partition_disjoint(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_INDEX_PARTITION_DISJOINT_CALL);
       return result;
     }
 
@@ -2918,7 +2129,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->is_index_partition_complete(p);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_IS_INDEX_PARTITION_COMPLETE_CALL);
       return result;
     }
 
@@ -2931,7 +2142,7 @@ namespace Legion {
       Point<1,coord_t> point;
       runtime->get_index_space_color_point(handle, &point,
                 NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_COLOR_CALL);
       return point[0];
     }
 
@@ -2942,7 +2153,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       DomainPoint result = runtime->get_index_space_color_point(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_COLOR_POINT_CALL);
       return result;
     }
 
@@ -2953,7 +2164,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       Color result = runtime->get_index_partition_color(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_COLOR_CALL);
       return result;
     }
 
@@ -2964,7 +2175,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexSpace result = runtime->get_parent_index_space(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_INDEX_SPACE_CALL);
       return result;
     }
 
@@ -2975,7 +2186,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->has_parent_index_partition(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_PARENT_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -2986,7 +2197,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexPartition result = runtime->get_parent_index_partition(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_INDEX_PARTITION_CALL);
       return result;
     }
 
@@ -2997,7 +2208,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       unsigned result = runtime->get_index_space_depth(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_SPACE_DEPTH_CALL);
       return result;
     }
 
@@ -3008,7 +2219,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       unsigned result = runtime->get_index_partition_depth(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_INDEX_PARTITION_DEPTH_CALL);
       return result;
     }
 
@@ -3019,7 +2230,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       size_t result = runtime->get_field_size(handle, fid);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_FIELD_SIZE_CALL);
       return result;
     }
 
@@ -3030,7 +2241,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->get_field_space_fields(handle, fields);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_FIELD_SPACE_FIELDS_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3041,7 +2252,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalPartition result = runtime->get_logical_partition(parent, handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_CALL);
       return result;
     }
 
@@ -3053,7 +2264,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LogicalPartition result = 
         runtime->get_logical_partition_by_color(par, color);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3068,7 +2279,7 @@ namespace Legion {
 #endif
       LogicalPartition result = 
         runtime->get_logical_partition_by_color(par, color[0]);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3083,7 +2294,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LogicalPartition result = 
         runtime->get_logical_partition_by_tree(part, fspace, tid);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_BY_TREE_CALL);
       return result;
     }
 
@@ -3095,7 +2306,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalRegion result = runtime->get_logical_subregion(parent, handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_CALL);
       return result;
     }
 
@@ -3108,7 +2319,7 @@ namespace Legion {
       Point<1,coord_t> point(color);
       LogicalRegion result = runtime->get_logical_subregion_by_color(par,
                       &point, NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3134,7 +2345,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_BY_COLOR_CALL);
       return result;
     }
 
@@ -3147,7 +2358,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       LogicalRegion result = 
         runtime->get_logical_subregion_by_tree(handle, fspace, tid);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_SUBREGION_BY_TREE_CALL);
       return result;
     }
 
@@ -3160,7 +2371,7 @@ namespace Legion {
       Point<1,coord_t> point;
       runtime->get_logical_region_color(handle, &point, 
             NT_TemplateHelper::encode_tag<1,coord_t>());
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_REGION_COLOR_CALL);
       return point[0];
     }
 
@@ -3172,7 +2383,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       DomainPoint result = runtime->get_logical_region_color_point(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_REGION_COLOR_POINT_CALL);
       return result;
     }
 
@@ -3183,7 +2394,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       Color result = runtime->get_logical_partition_color(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_LOGICAL_PARTITION_COLOR_CALL);
       return result;
     }
 
@@ -3194,7 +2405,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalRegion result = runtime->get_parent_logical_region(part);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_LOGICAL_REGION_CALL);
       return result;
     }
     
@@ -3205,7 +2416,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       bool result = runtime->has_parent_logical_partition(handle);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_HAS_PARENT_LOGICAL_PARTITION_CALL);
       return result;
     }
 
@@ -3216,7 +2427,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       LogicalPartition result = runtime->get_parent_logical_partition(r);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_GET_PARENT_LOGICAL_PARTITION_CALL);
       return result;
     }
 
@@ -3230,7 +2441,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(task_id, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3244,7 +2455,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3258,7 +2469,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3272,7 +2483,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3286,7 +2497,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, fid,
 					     tag, result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3300,7 +2511,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3314,7 +2525,7 @@ namespace Legion {
       bool ok = runtime->retrieve_semantic_information(handle, tag,
 					     result, size,
                                              can_fail, wait_until_ready);
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_SEMANTIC_INFO_CALL);
       return ok;
     }
 
@@ -3329,7 +2540,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3343,7 +2554,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3357,7 +2568,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3371,7 +2582,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3385,7 +2596,7 @@ namespace Legion {
           LEGION_NAME_SEMANTIC_TAG, name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3399,7 +2610,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3413,7 +2624,7 @@ namespace Legion {
                                              name, dummy_size, false, false);
       static_assert(sizeof(result) == sizeof(name), "Fuck c++");
       memcpy(&result, &name, sizeof(result));
-      resume_mapper_call(ctx);
+      resume_mapper_call(ctx, MAPPER_RETRIEVE_NAME_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -3444,25 +2655,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->find_local_MPI_rank();
-    }
-
-    //--------------------------------------------------------------------------
-    MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
-                                                       Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      return new MappingCallInfo(this, kind, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperManager::free_call_info(MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (profile_mapper)
-        runtime->profiler->record_mapper_call(info->kind, 
-            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
-            info->start_time, info->stop_time); 
-      delete info;
     }
 
     //--------------------------------------------------------------------------
@@ -3500,7 +2692,7 @@ namespace Legion {
       message.message = margs->message;
       message.size = margs->size;
       message.broadcast = margs->broadcast;
-      margs->manager->invoke_handle_message(&message, &message/*non-NULL*/);
+      margs->manager->invoke_handle_message(&message, false/*no check*/);
       // Then free up the allocated memory
       free(margs->message);
     }
@@ -3528,7 +2720,7 @@ namespace Legion {
         AutoLock m_lock(mapper_lock, 1, false/*exclusive*/);
         steal_input.blacklist = steal_blacklist; 
       }
-      invoke_select_steal_targets(&steal_input, &steal_output);
+      invoke_select_steal_targets(steal_input, steal_output);
       if (steal_output.targets.empty())
         return;
       // Retake the lock and process the results
@@ -3696,12 +2888,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MappingCallInfo* SerializingManager::begin_mapper_call(MappingCallKind kind,
-                          Operation *op, RtEvent &precondition, bool prioritize)
+    void SerializingManager::begin_mapper_call(MappingCallInfo *info,
+                                               bool prioritize)
     //--------------------------------------------------------------------------
     {
+      RtEvent precondition;
       RtUserEvent to_trigger;
-      MappingCallInfo *result = allocate_call_info(kind, op);
       {
         AutoLock m_lock(mapper_lock);
         // See if there is a pending call for us to handle
@@ -3714,15 +2906,15 @@ namespace Legion {
               ((paused_calls > 0) || !ready_calls.empty())))
         {
           // Put this on the list of pending calls
-          result->resume = Runtime::create_rt_user_event();
-          precondition = result->resume;
+          info->resume = Runtime::create_rt_user_event();
+          precondition = info->resume;
           if (prioritize)
-            pending_calls.push_front(result);
+            pending_calls.push_front(info);
           else
-            pending_calls.push_back(result);
+            pending_calls.push_back(info);
         }
         else
-          executing_call = result;
+          executing_call = info;
       }
       // Wake up a pending mapper call to run if necessary
       if (to_trigger.exists())
@@ -3730,20 +2922,23 @@ namespace Legion {
       if (profile_mapper)
       {
         if (is_default_mapper)
-          runtime->profiler->issue_default_mapper_warning(op,
-                                  get_mapper_call_name(kind));
-        // Record our start time in this case since there is no continuation
-        if (!precondition.exists())
-          result->start_time = Realm::Clock::current_time_in_nanoseconds();
+          runtime->profiler->issue_default_mapper_warning(info->operation,
+                                      get_mapper_call_name(info->kind));
+        info->start_time = Realm::Clock::current_time_in_nanoseconds();
       }
-      // else the continuation will initialize the start time
-      return result;
+      if (precondition.exists() && !precondition.has_triggered())
+        precondition.wait();
+#ifdef DEBUG_LEGION
+      assert(executing_call == info);
+#endif
     }
 
     //--------------------------------------------------------------------------
     void SerializingManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
+      if (profile_mapper)
+        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
       if (executing_call != info)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
                       "Invalid mapper context passed to mapper_rt "
@@ -3773,9 +2968,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SerializingManager::resume_mapper_call(MappingCallInfo *info)
+    void SerializingManager::resume_mapper_call(MappingCallInfo *info,
+                                                RuntimeCallKind kind)
     //--------------------------------------------------------------------------
     {
+      if (profile_mapper)
+        runtime->profiler->record_runtime_call(kind, info->pause_time,
+            Realm::Clock::current_time_in_nanoseconds());
       // See if we are ready to be woken up
       RtEvent wait_on;
       {
@@ -3814,7 +3013,9 @@ namespace Legion {
 #endif
       // Record our finish time when we're done
       if (profile_mapper)
-        info->stop_time = Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_mapper_call(info->kind, 
+            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
+            info->start_time, Realm::Clock::current_time_in_nanoseconds());
       // Set this flag asynchronously without the lock, there will
       // be a race to see who gets the lock next and therefore can
       // do the rest of the finish mapper call routine, we do this
@@ -3834,7 +3035,6 @@ namespace Legion {
       // Wake up the next task if necessary
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
-      free_call_info(info);
     }
 
     //--------------------------------------------------------------------------
@@ -4065,34 +3265,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MappingCallInfo* ConcurrentManager::begin_mapper_call(MappingCallKind kind,
-                          Operation *op, RtEvent &precondition, bool prioritize)
+    void ConcurrentManager::begin_mapper_call(MappingCallInfo *info,
+                                              bool prioritize)
     //--------------------------------------------------------------------------
     {
-      MappingCallInfo *result = allocate_call_info(kind, op);
       // Record our mapper start time when we're ready to run
       if (profile_mapper)
       {
         if (is_default_mapper)
-          runtime->profiler->issue_default_mapper_warning(op,
-                                  get_mapper_call_name(kind));
-        result->start_time = Realm::Clock::current_time_in_nanoseconds();
+          runtime->profiler->issue_default_mapper_warning(info->operation,
+                                        get_mapper_call_name(info->kind));
+        info->start_time = Realm::Clock::current_time_in_nanoseconds();
       }
-      return result;
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (profile_mapper)
+        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info)
+    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info,
+                                               RuntimeCallKind kind)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (profile_mapper)
+        runtime->profiler->record_runtime_call(kind, info->pause_time,
+            Realm::Clock::current_time_in_nanoseconds());
     }
 
     //--------------------------------------------------------------------------
@@ -4101,7 +3303,9 @@ namespace Legion {
     {
       // Record our finish time when we are done
       if (profile_mapper)
-        info->stop_time = Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_mapper_call(info->kind, 
+            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
+            info->start_time, Realm::Clock::current_time_in_nanoseconds());
       std::vector<RtUserEvent> to_trigger;
       {
         AutoLock m_lock(mapper_lock);
@@ -4120,7 +3324,6 @@ namespace Legion {
               to_trigger.begin(); it != to_trigger.end(); it++)
           Runtime::trigger_event(*it);
       }
-      free_call_info(info);
     }
 
     //--------------------------------------------------------------------------
@@ -4159,44 +3362,6 @@ namespace Legion {
         default:
           assert(false);
       }
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Mapper Continuation 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    MapperContinuation::MapperContinuation(MapperManager *man,
-                                           MappingCallInfo *i)
-      : manager(man), info(i)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperContinuation::defer(Runtime *runtime, RtEvent precondition, 
-                                   Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      ContinuationArgs args((op == NULL) ? implicit_provenance :
-                              op->get_unique_op_id(), this);
-      // Give this resource priority in case we are holding the mapper lock
-      RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                           LG_RESOURCE_PRIORITY, precondition);
-      wait_on.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MapperContinuation::handle_continuation(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const ContinuationArgs *conargs = (const ContinuationArgs*)args;
-      // Update the timing if necessary since we did a continuation
-      if (conargs->continuation->manager->profile_mapper &&
-          (conargs->continuation->info != NULL))
-        conargs->continuation->info->start_time =
-          Realm::Clock::current_time_in_nanoseconds();
-      conargs->continuation->execute();
     }
 
   };

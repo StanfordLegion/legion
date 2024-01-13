@@ -323,7 +323,6 @@ namespace LegionRuntime {
 
       struct Generic {
 	struct Untyped {
-          CUDAPREFIX
 	  Untyped() 
 	    : inst(Realm::RegionInstance::NO_INST)
 	    , field_id(0)
@@ -332,7 +331,6 @@ namespace LegionRuntime {
 #endif
 	  {}
 
-          CUDAPREFIX
 	  Untyped(Realm::RegionInstance _inst, Realm::FieldID _field_id = 0)
 	    : inst(_inst)
 	    , field_id(_field_id)
@@ -1042,9 +1040,7 @@ namespace LegionRuntime {
 
 	template <typename T, typename PT>
 	struct Typed : public Untyped, public StructSpecific<T, PT, TemplateFu::IsAStruct<T>::value> {
-          CUDAPREFIX
 	  Typed() : Untyped() {}
-          CUDAPREFIX
 	  Typed(Realm::RegionInstance _inst, Realm::FieldID _field_id = 0)
 	    : Untyped(_inst, _field_id)
 	  {}
@@ -1348,9 +1344,7 @@ namespace LegionRuntime {
       template <size_t STRIDE> 
       struct AOS {
 	struct Untyped : public Stride<STRIDE> {
-          CUDAPREFIX
 	  Untyped() : Stride<STRIDE>(), base(0) {}
-          CUDAPREFIX
 	  Untyped(void *_base, size_t _stride) : Stride<STRIDE>(_stride), base((char *)_base) {}
 	  
           CUDAPREFIX
@@ -1381,9 +1375,7 @@ namespace LegionRuntime {
 
 	template <typename T, typename PT>
 	struct Typed : protected Untyped {
-          CUDAPREFIX
 	  Typed() : Untyped() {}
-          CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 
 #if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
@@ -1461,9 +1453,7 @@ namespace LegionRuntime {
       template <size_t STRIDE> 
       struct SOA {
 	struct Untyped : public Stride<STRIDE> {
-          CUDAPREFIX
 	  Untyped() : Stride<STRIDE>(STRIDE), base(0) {}
-          CUDAPREFIX
 	  Untyped(void *_base, size_t _stride) : Stride<STRIDE>(_stride), base((char *)_base) {}
 	  
           CUDAPREFIX
@@ -1490,11 +1480,8 @@ namespace LegionRuntime {
 
 	template <typename T, typename PT>
 	struct Typed : protected Untyped {
-          CUDAPREFIX
 	  Typed() : Untyped() {}
-          CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
-	  CUDAPREFIX
 	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {
 #if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
             this->set_region(other.region);
@@ -1580,9 +1567,7 @@ namespace LegionRuntime {
       template <size_t STRIDE, size_t BLOCK_SIZE, size_t BLOCK_STRIDE> 
       struct HybridSOA {
 	struct Untyped : public Stride<STRIDE>, public BlockSize<BLOCK_SIZE>, public BlockStride<BLOCK_STRIDE> {
-          CUDAPREFIX
 	  Untyped() : Stride<STRIDE>(0), BlockSize<BLOCK_SIZE>(0), BlockStride<BLOCK_STRIDE>(0), base(0) {}
-          CUDAPREFIX
           Untyped(void *_base, size_t _stride, size_t _block_size, size_t _block_stride) 
 	  : Stride<STRIDE>(_stride), BlockSize<BLOCK_SIZE>(_block_size),
 	    BlockStride<BLOCK_STRIDE>(_block_stride), base((char *)_base) {}
@@ -1614,9 +1599,7 @@ namespace LegionRuntime {
 
 	template <typename T, typename PT>
 	struct Typed : protected Untyped {
-          CUDAPREFIX
 	  Typed() : Untyped() {}
-          CUDAPREFIX
 	  Typed(void *_base, size_t _stride, size_t _block_size, size_t _block_stride)
 	    : Untyped(_base, _stride, _block_size, _block_stride) {}
 
@@ -1691,7 +1674,6 @@ namespace LegionRuntime {
       template <unsigned DIM>
       struct Affine {
 	struct Untyped {
-          CUDAPREFIX
 	  Untyped(void) : base(0) {}
 
           CUDAPREFIX
@@ -1747,9 +1729,7 @@ namespace LegionRuntime {
       template <typename REDOP>
       struct ReductionFold {
 	struct Untyped {
-          CUDAPREFIX
 	  Untyped() : base(0) {}
-          CUDAPREFIX
 	  Untyped(void *_base) : base((char *)_base) {}
 	  
           CUDAPREFIX
@@ -1782,9 +1762,7 @@ namespace LegionRuntime {
 
 	template <typename T, typename PT>
 	struct Typed : protected Untyped {
-          CUDAPREFIX
 	  Typed(void) : Untyped() {}
-          CUDAPREFIX
 	  Typed(void *_base) : Untyped(_base) {}
 
 #if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
@@ -1899,17 +1877,14 @@ namespace LegionRuntime {
 
     template <typename AT, typename ET, typename PT> 
     struct RegionAccessor : public AT::template Typed<ET, PT> {
-      CUDAPREFIX
       RegionAccessor()
 	: AT::template Typed<ET, PT>() {}
-      CUDAPREFIX
       RegionAccessor(const typename AT::template Typed<ET, PT>& to_copy) 
 	: AT::template Typed<ET, PT>(to_copy) {}
 
       template <typename FT>
       struct FieldAccessor : 
         public AT::template Typed<ET, PT>::template Field<FT> {
-        CUDAPREFIX
 	FieldAccessor(void) {}
 
 	//FieldAccessor(const typename AT::template Inner<ET, PT>::template Field<FT>& to_copy) {}

@@ -163,23 +163,18 @@ void LoggingWrapper::select_sharding_functor_impl(
   }
 }
 
-void LoggingWrapper::map_replicate_task(const MapperContext ctx,
-                                        const Task& task,
-                                        const MapTaskInput& input,
-                                        const MapTaskOutput& default_output,
-                                        MapReplicateTaskOutput& output) {
-  mapper->map_replicate_task(ctx, task, input, default_output, output);
+void LoggingWrapper::replicate_task(MapperContext ctx,
+                                    const Task& task,
+                                    const ReplicateTaskInput& input,
+                                          ReplicateTaskOutput& output) {
+  mapper->replicate_task(ctx, task, input, output);
   if (!logger->want_info()) return;
   MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "MAP_REPLICATE_TASK for "
              << to_string(runtime, ctx, task, false /*include_index_point*/);
-  for (unsigned i = 0; i < output.task_mappings.size(); ++i) {
+  for (unsigned i = 0; i < output.target_processors.size(); ++i) {
     std::stringstream& ss = buf.line();
-    ss << "  REPLICANT " << i;
-    if (!output.control_replication_map.empty()) {
-      ss << " -> " << output.control_replication_map[i];
-    }
-    buf.report(task, output.task_mappings[i]);
+    ss << "  REPLICANT " << i << " -> " << output.target_processors[i];
   }
 }
 

@@ -219,7 +219,7 @@ namespace Legion {
                                      size_t granularity);
       ApEvent create_partition_by_weights(Operation *op,
                                           IndexPartition pid,
-                                          const FutureMap &map,
+              const std::map<DomainPoint,FutureImpl*> &futures,
                                           size_t granularity);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
@@ -241,7 +241,8 @@ namespace Legion {
                                               const void *transform,
                                               const void *extent);
       ApEvent create_partition_by_domain(Operation *op, IndexPartition pid,
-                                         const FutureMap &future_map,
+                          const std::map<DomainPoint,FutureImpl*> &futures,
+                                         const Domain &future_map_domain,
                                          bool perform_intersections);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
@@ -293,9 +294,6 @@ namespace Legion {
       ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexSpace initial,
                                     const std::vector<IndexSpace> &handles);
-    public:
-      void set_pending_space_domain(IndexSpace target,
-                                    Domain domain);
     public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,
@@ -425,7 +423,7 @@ namespace Legion {
       size_t get_domain_volume(LogicalRegion handle);
     public:
       // Index space operation methods
-      void find_launch_space_domain(IndexSpace handle, Domain &launch_domain);
+      void find_domain(IndexSpace handle, Domain &launch_domain);
       void validate_slicing(IndexSpace input_space,
                             const std::vector<IndexSpace> &slice_spaces,
                             MultiTask *task, MapperManager *mapper);
@@ -435,7 +433,6 @@ namespace Legion {
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
-                                       const RegionTreePath &path,
                                        LogicalAnalysis &logical_analysis);
       bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
@@ -449,9 +446,11 @@ namespace Legion {
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events);
-      void invalidate_current_context(RegionTreeContext ctx, bool users_only,
-                                      RegionNode *top_node);
+                                       std::set<RtEvent> &ready_events,
+                                       RtEvent *output_region_ready = NULL,
+                                       bool collective_rendezvous = false);
+      void invalidate_current_context(ContextID ctx,
+          const RegionRequirement &req, bool filter_specific_fields);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
                                  const InstanceSet &inst1,
@@ -687,7 +686,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
     public:
       // Debugging method for checking context state
-      void check_context_state(RegionTreeContext ctx);
+      void check_context_state(ContextID ctx);
 #endif
     public:
       // We know the domain of the index space
@@ -705,6 +704,7 @@ namespace Legion {
                                   IndexPartNode &par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   Provenance *provenance,
+                                  IndexSpaceExprID expr_id = 0,
                                   CollectiveMapping *mapping = NULL,
                                   unsigned depth = UINT_MAX);
       // We know the disjointness of the index partition
@@ -797,16 +797,9 @@ namespace Legion {
                               std::vector<LegionColor> &path);
       bool compute_partition_path(IndexSpace parent, IndexPartition child,
                                   std::vector<LegionColor> &path); 
-    public:
-      void initialize_path(IndexSpace child, IndexSpace parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexPartition child, IndexSpace parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexSpace child, IndexPartition parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexPartition child, IndexPartition parent,
-                           RegionTreePath &path);
-      void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
+   private:
+      void initialize_path(IndexTreeNode *child,
+                           IndexTreeNode *parent,
                            RegionTreePath &path);
 #ifdef DEBUG_LEGION
     public:
@@ -817,7 +810,6 @@ namespace Legion {
       // These are debugging methods and are never called from
       // actual code, therefore they never take locks
       void dump_logical_state(LogicalRegion region, ContextID ctx);
-      void dump_physical_state(LogicalRegion region, ContextID ctx);
 #endif
     public:
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
@@ -902,8 +894,12 @@ namespace Legion {
     public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs,
                   IndexSpaceExpression *rhs, OperationCreator *creator = NULL);
-    public:
+    protected:
+      // You don't call this method directly, call 
+      // IndexSpaceExpression::get_canonical_expression instead
+      friend class IndexSpaceExpression;
       IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
+    public:
       void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
     private:
       static inline bool compare_expressions(IndexSpaceExpression *one,
@@ -976,7 +972,7 @@ namespace Legion {
       // we don't have multiple symbols for congruent expressions. This data
       // structure is used to find congruent expressions where they exist
       std::map<std::pair<size_t,TypeTag>,
-               std::set<IndexSpaceExpression*> > canonical_expressions;
+               std::vector<IndexSpaceExpression*> > canonical_expressions;
     public:
       static const unsigned MAX_EXPRESSION_FANOUT = 32;
     };
@@ -1260,6 +1256,15 @@ namespace Legion {
     public:
       template<int DIM, typename T>
       inline KDNode<DIM,T>* as_kdnode(void);
+      // This method tries to compute a splitting plane either by evenly
+      // dividing the rectangles or by evenly dividing the points in the
+      // sets of rectangles depending on the BY_RECTS parameter
+      template<int DIM, typename T, bool BY_RECTS = true>
+      static inline bool compute_best_splitting_plane(
+          const Rect<DIM,T> &bounds, const std::vector<Rect<DIM,T> > &rects,
+          Rect<DIM,T> &best_left_bounds, Rect<DIM,T> &best_right_bounds,
+          std::vector<Rect<DIM,T> > &best_left_set,
+          std::vector<Rect<DIM,T> > &best_right_set);
     };
 
     /**
@@ -1297,8 +1302,13 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0; 
+      virtual bool is_sparse() = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual bool is_set(void) const { return true; }
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -1330,6 +1340,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
       virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const
@@ -1375,11 +1387,37 @@ namespace Legion {
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size) = 0;
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
-         bool tight_bounds, const void *piece_list, size_t piece_list_size) = 0;
+         bool tight_bounds, const void *piece_list, size_t piece_list_size,
+         const Domain *padding_delta) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::set<IndexSpaceExpression*> &expressions) = 0;
+                  std::vector<IndexSpaceExpression*> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
+    public:
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        ShardID local_shard,
+                                        bool current) = 0;
+      virtual void compute_equivalence_sets(
+          EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
+      virtual unsigned record_output_equivalence_set(EqKDTree *tree,
+          LocalLock *tree_lock, EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1451,11 +1489,15 @@ namespace Legion {
       template<int DIM, typename T>
       inline bool meets_layout_expression_internal(
                          IndexSpaceExpression *space_expr, bool tight_bounds,
-                         const Rect<DIM,T> *piece_list, size_t piece_list_size);
+                         const Rect<DIM,T> *piece_list, size_t piece_list_size,
+                         const Domain *padding_delta);
+      template<int DIM, typename T>
+      inline IndexSpaceExpression* create_from_rectangles_internal(
+                       RegionTreeForest *forest, const std::set<Domain> &rects);
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
-                        std::set<IndexSpaceExpression*> &expressions);
+                        std::vector<IndexSpaceExpression*> &expressions);
       template<int DIM, typename T>
       inline KDTree* get_sparsity_map_kd_tree_internal(void);
     public:
@@ -1558,7 +1600,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1612,7 +1657,11 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      virtual bool is_sparse();
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
@@ -1624,6 +1673,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0);
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
@@ -1666,11 +1717,37 @@ namespace Legion {
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
-         bool tight_bounds, const void *piece_list, size_t piece_list_size);
+         bool tight_bounds, const void *piece_list, size_t piece_list_size,
+         const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::set<IndexSpaceExpression*> &expressions);
+                  std::vector<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
+    public:
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        ShardID local_shard,
+                                        bool current);
+      virtual void compute_equivalence_sets(
+          EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual unsigned record_output_equivalence_set(EqKDTree *tree,
+          LocalLock *tree_lock, EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -1804,26 +1881,57 @@ namespace Legion {
     };
 
     /**
-     * \class InstanceExpression 
-     * This class stores an expression corresponding to the
-     * rectangles that represent a physical instance
+     * \class InternalExpression 
+     * This class stores an internal expression corresponding to a
+     * group of rectangles that the runtime had to compute and not
+     * derived from any other expressions. This can occur when creating
+     * a custom sparse physical instance, but can also come from a
+     * computing equivalence sets.
      */
     template<int DIM, typename T>
-    class InstanceExpression : public IndexSpaceOperationT<DIM,T>,
-        public LegionHeapify<InstanceExpression<DIM,T> > {
+    class InternalExpression : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<InternalExpression<DIM,T> > {
     public:
       static const AllocationType alloc_type = INSTANCE_EXPR_ALLOC;
     public:
-      InstanceExpression(const Rect<DIM,T> *rects, size_t num_rects,
+      InternalExpression(const Rect<DIM,T> *rects, size_t num_rects,
                          RegionTreeForest *context);
-      InstanceExpression(const InstanceExpression<DIM,T> &rhs);
-      virtual ~InstanceExpression(void);
+      InternalExpression(const InternalExpression<DIM,T> &rhs);
+      virtual ~InternalExpression(void);
     public:
-      InstanceExpression& operator=(const InstanceExpression &rhs);
+      InternalExpression& operator=(const InternalExpression &rhs);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
+    };
+
+    class InternalExpressionCreator
+    {
+    public:
+      InternalExpressionCreator(TypeTag t, const Domain &d, RegionTreeForest *f)
+        : type_tag(t), dom(d), forest(f) { }
+
+      virtual void create_operation()
+      {
+        NT_TemplateHelper::demux<InternalExpressionCreator>(type_tag, this);
+      }
+
+      template<typename N, typename T>
+      static inline void demux(InternalExpressionCreator *creator)
+      {
+        Rect<N::N, T> rect = creator->dom;
+        creator->result = new InternalExpression<N::N, T>(&rect, 1,
+                                                  creator->forest);
+      }
+
+      static IndexSpaceOperation *create_with_domain(TypeTag tag,
+                                                     const Domain &dom);
+    public:
+      const TypeTag type_tag;
+      const Domain dom;
+      RegionTreeForest *const forest;
+      IndexSpaceOperation *result;
     };
 
     /**
@@ -2022,11 +2130,10 @@ namespace Legion {
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs) = delete;
     public:
-      inline bool is_set(void) const { return index_space_set.load(); }
-    public:
       virtual void notify_invalid(void);
       virtual void notify_local(void);
     public:
+      virtual bool is_set(void) const { return index_space_set.load(); }
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
       virtual IndexSpaceNode* as_index_space_node(void);
@@ -2052,6 +2159,8 @@ namespace Legion {
       bool has_color(const LegionColor color);
       LegionColor generate_color(LegionColor suggestion = INVALID_COLOR);
       void release_color(LegionColor color);
+      // If you pass can_fail=true here then the node comes back with 
+      // a resource REGION_TREE_REF to keep it alive
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
       void add_child(IndexPartNode *child);
@@ -2095,7 +2204,10 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
       
       virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
       virtual bool set_bounds(const void *bounds, bool is_domain, 
@@ -2131,6 +2243,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized,Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
       virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const;
@@ -2197,11 +2311,12 @@ namespace Legion {
                                             int partition_dim) = 0;
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
-                                       FutureMapImpl *future_map,
+                 const std::map<DomainPoint,FutureImpl*> &futures,
+                                       const Domain &future_map_domain,
                                        bool perform_intersections) = 0;
       virtual ApEvent create_by_weights(Operation *op,
                                         IndexPartNode *partition,
-                                        FutureMapImpl *future_map,
+                const std::map<DomainPoint,FutureImpl*> &weights,
                                         size_t granularity) = 0;
       virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
@@ -2238,21 +2353,12 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual size_t get_coordinate_size(bool range) const = 0;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-				   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode,
-                                   ApEvent &ready_event) = 0;
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event) = 0;
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                 const std::vector<FieldID> &field_ids,
+                                 const std::vector<size_t> &field_sizes,
+                                 const std::vector<std::string> &field_files,
+                                 const OrderingConstraint &dimension_order) = 0;
     public:
-      virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper) = 0;
       virtual void log_launch_space(UniqueID op_id) = 0;
@@ -2267,6 +2373,20 @@ namespace Legion {
                               const std::vector<DomainPoint> &shard_points,
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards) = 0;
+    public:
+      virtual EqKDTree* create_equivalence_set_kd_tree(
+                                        size_t total_shards = 1) = 0;
+      virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
+                                        bool move_to_previous) = 0;
+      virtual void invalidate_shard_equivalence_set_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+                                        ShardID local_shard) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2319,7 +2439,11 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      virtual bool is_sparse();
+      // If you ask for a tight index space you don't need to pay 
+      // attention to the event returned as a precondition as it 
+      // is guaranteed to be a no-event
+      virtual ApEvent get_domain(Domain &domain, bool need_tight);
       virtual bool set_domain(const Domain &domain, bool broadcast = false);
       virtual bool set_bounds(const void *bounds, bool is_domain, 
                               bool inititializing, ApEvent is_ready);
@@ -2330,6 +2454,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized,Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0);
+      virtual IndexSpaceExpression* create_from_rectangles(
+                                const std::set<Domain> &rectangles);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
@@ -2400,21 +2526,23 @@ namespace Legion {
                                    const Realm::Rect<N,T> &extent);
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
-                                       FutureMapImpl *future_map,
+               const std::map<DomainPoint,FutureImpl*> &futures,
+                                       const Domain &future_map_domain,
                                        bool perform_intersections);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_domain_helper(Operation *op,
                                       IndexPartNode *partition,
-                                      FutureMapImpl *future_map,
+                const std::map<DomainPoint,FutureImpl*> &futures,
+                                      const Domain &future_map_domain,
                                       bool perform_intersections);
       virtual ApEvent create_by_weights(Operation *op,
                                         IndexPartNode *partition,
-                                        FutureMapImpl *future_map,
+                const std::map<DomainPoint,FutureImpl*> &weights,
                                         size_t granularity);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_weight_helper(Operation *op,
                                       IndexPartNode *partition,
-                                      FutureMapImpl *future_map,
+              const std::map<DomainPoint,FutureImpl*> &weights,
                                       size_t granularity);
       virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
@@ -2490,19 +2618,11 @@ namespace Legion {
                                       ApEvent instances_ready);
       virtual size_t get_coordinate_size(bool range) const;
     public:
-      virtual PhysicalInstance create_file_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
+      virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
+                                   const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_file_mode_t file_mode, 
-                                   ApEvent &ready_event);
-      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
-                                   const Realm::ProfilingRequestSet &requests,
-                                   const std::vector<Realm::FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<const char*> &field_files,
-                                   const OrderingConstraint &dimension_order,
-                                   bool read_only, ApEvent &ready_event);
+                                   const std::vector<std::string> &field_files,
+                                   const OrderingConstraint &dimension_order);
     public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -2543,13 +2663,13 @@ namespace Legion {
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
-         bool tight_bounds, const void *piece_list, size_t piece_list_size);
+         bool tight_bounds, const void *piece_list, size_t piece_list_size,
+         const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::set<IndexSpaceExpression*> &expressions);
+                  std::vector<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
-      virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
                                     MultiTask *task, MapperManager *mapper);
       virtual void log_launch_space(UniqueID op_id);
@@ -2565,6 +2685,43 @@ namespace Legion {
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards);
     public:
+      virtual EqKDTree* create_equivalence_set_kd_tree(size_t total_shards = 1);
+      virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
+                                        EquivalenceSet *set,
+                                        const FieldMask &mask,
+                                        ShardID local_shard,
+                                        bool current);
+      virtual void compute_equivalence_sets(
+          EqKDTree *tree, LocalLock *tree_lock, const FieldMask &mask, 
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual unsigned record_output_equivalence_set(EqKDTree *tree,
+          LocalLock *tree_lock, EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual void invalidate_equivalence_set_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
+                                        bool move_to_previous);
+      virtual void invalidate_shard_equivalence_set_kd_tree(EqKDTree *tree,
+                                        LocalLock *tree_lock,
+                                        const FieldMask &mask,
+                                        std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+                                        ShardID local_shard);
+    public:
       bool contains_point(const Point<DIM,T> &point);
     protected:
       ColorSpaceLinearizationT<DIM,T>* compute_linearization_metadata(void);
@@ -2577,21 +2734,25 @@ namespace Legion {
       public:
         CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
                              IndexPartNode *p, Operation *o,
-                             FutureMapImpl *fm, bool inter)
-          : node(n), partition(p), op(o), future_map(fm), intersect(inter) { }
+                             const std::map<DomainPoint,FutureImpl*> &fts,
+                             const Domain &domain, bool inter)
+          : node(n), partition(p), op(o), futures(fts), 
+            future_map_domain(domain), intersect(inter) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByDomainHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_domain_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->intersect);
+                creator->partition, creator->futures, 
+                creator->future_map_domain, creator->intersect);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
         IndexPartNode *const partition;
         Operation *const op;
-        FutureMapImpl *const future_map;
+        const std::map<DomainPoint,FutureImpl*> &futures;
+        const Domain &future_map_domain;
         const bool intersect;
         ApEvent result;
       };
@@ -2599,21 +2760,22 @@ namespace Legion {
       public:
         CreateByWeightHelper(IndexSpaceNodeT<DIM,T> *n,
                              IndexPartNode *p, Operation *o,
-                             FutureMapImpl *fm, size_t g)
-          : node(n), partition(p), op(o), future_map(fm), granularity(g) { }
+                             const std::map<DomainPoint,FutureImpl*> &wts,
+                             size_t g)
+          : node(n), partition(p), op(o), weights(wts), granularity(g) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByWeightHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_weight_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->granularity);
+                creator->partition, creator->weights, creator->granularity);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
         IndexPartNode *const partition;
         Operation *const op;
-        FutureMapImpl *const future_map;
+        const std::map<DomainPoint,FutureImpl*> &weights;
         const size_t granularity;
         ApEvent result;
       };
@@ -2886,7 +3048,7 @@ namespace Legion {
       ColorSpaceIterator& operator++(int/*postfix*/);
       void step(void);
       static LegionColor compute_chunk(LegionColor max_color, 
-                                       size_t total_shards);
+                                       size_t total_spaces);
     private:
       IndexSpaceNode *color_space;
       LegionColor current, end;
@@ -2928,6 +3090,437 @@ namespace Legion {
       CollectiveMapping *const mapping;
       const bool tree_valid;
       IndexSpaceNode *result;
+    };
+
+    /**
+     * \class EqKDTree
+     * This class defines the interface for looking up equivalence
+     * sets for any given parent logical region
+     */
+    class EqKDTree : public Collectable {
+    public:
+      virtual ~EqKDTree(void) { }
+    public:
+      virtual void compute_shard_equivalence_sets(
+          const Domain &rect, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          ShardID local_shard) = 0;
+      virtual unsigned record_shard_output_equivalence_set(
+          EquivalenceSet *set, const Domain &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &new_subscriptions, ShardID local_shard) = 0;
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators) = 0;
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const = 0;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const = 0;
+      virtual void invalidate_shard_tree(const Domain &domain,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated) = 0;
+      // Return true if we should remove the reference on the origin tracker
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
+                               AddressSpaceID space, const FieldMask &mask) = 0;
+      // Just use this method of indirecting into template land
+      virtual IndexSpaceExpression* create_from_rectangles(
+                          RegionTreeForest *forest, 
+                          const std::vector<Domain> &rectangles) const = 0;
+    public:
+      template<int DIM, typename T>
+      inline EqKDTreeT<DIM,T>* as_eq_kd_tree(void);
+    };
+
+    /**
+     * \class EqKDTreeT
+     */
+    template<int DIM, typename T>
+    class EqKDTreeT : public EqKDTree {
+    public:
+      EqKDTreeT(const Rect<DIM,T> &rect);
+      virtual ~EqKDTreeT(void) { }
+    public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  ShardID local_shard,
+                                  bool current) = 0;
+      virtual void compute_shard_equivalence_sets(
+          const Domain &rect, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          ShardID local_shard);
+      virtual void compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
+      virtual unsigned record_shard_output_equivalence_set(
+          EquivalenceSet *set, const Domain &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &new_subscriptions, ShardID local_shard);
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators) = 0;
+      virtual unsigned record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const = 0;
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask, Runtime *runtime,
+                                   std::vector<RtEvent> &invalidated_events,
+                                   bool move_to_previous,
+                                   FieldMask *parent_all_previous = NULL) = 0;
+      virtual void invalidate_shard_tree(const Domain &domain,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated);
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
+                           AddressSpaceID space, const FieldMask &mask) = 0;
+      // Just use this method of indirecting into template land
+      virtual IndexSpaceExpression* create_from_rectangles(
+                          RegionTreeForest *forest,
+                          const std::vector<Domain> &rectangles) const;
+    public:
+      const Rect<DIM,T> bounds;
+    };
+
+    /**
+     * This class provides support for efficient spatial lookup of
+     * equivalence sets for a given parent region in a context. 
+     */
+    template<int DIM, typename T>
+    class EqKDNode : public EqKDTreeT<DIM,T>,
+      public LegionHeapify<EqKDNode<DIM,T> > {
+    public:
+      EqKDNode(const Rect<DIM,T> &bounds);
+      EqKDNode(const EqKDNode &rhs) = delete;
+      virtual ~EqKDNode(void);
+    public:
+      EqKDNode& operator=(const EqKDNode &rhs) = delete;
+    public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  ShardID local_shard,
+                                  bool current);
+      virtual void compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0); 
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators);
+      virtual unsigned record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask, Runtime *runtime,
+                                   std::vector<RtEvent> &invalidated_events,
+                                   bool move_to_previous,
+                                   FieldMask *parent_all_previous = NULL);
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
+                                 AddressSpaceID space, const FieldMask &mask);
+    public:
+      void find_all_previous_sets(FieldMask mask,
+         std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs);
+      void invalidate_all_previous_sets(const FieldMask &mask);
+      void find_shard_equivalence_sets(const Rect<DIM,T> &rect,
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
+      void find_rect_equivalence_sets(const Rect<DIM,T> &rect,
+          FieldMaskSet<EquivalenceSet> &eq_sets) const;
+    protected:
+      void refine_node(const Rect<DIM,T> &rect, const FieldMask &mask,
+                       bool refine_current = false);
+      unsigned record_subscription(EqSetTracker *tracker, 
+          AddressSpaceID tracker_space, const FieldMask &mask);
+      void clone_sets(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
+          FieldMask clone, FieldMaskSet<EquivalenceSet> *&sets, bool current);
+      void record_set(EquivalenceSet *set, const FieldMask &mask, bool current);
+      void find_to_get_previous(FieldMask &all_prev_below,
+          FieldMaskSet<EqKDNode<DIM,T> > &to_get_previous) const;
+      void invalidate_previous_sets(const FieldMask &mask,
+              FieldMaskSet<EqKDNode<DIM,T> > &to_invalidate_previous);
+      void record_child_all_previous(EqKDNode<DIM,T> *child, 
+                                     FieldMask &mask);
+    protected:
+      mutable LocalLock node_lock;
+      // Left and right sub-trees for different fields
+      FieldMaskSet<EqKDNode<DIM,T> > *lefts, *rights;
+      // Current equivalence sets are the ones that have current data
+      // Previous equivalence sets are ones that have been invalidated but
+      // we still need to update whatever the new equivalence sets are
+      FieldMaskSet<EquivalenceSet> *current_sets, *previous_sets;
+      // Events for indicating when the current sets are ready because they
+      // might still be in the process of being initialized
+      LegionMap<RtEvent,FieldMask> *current_set_preconditions;
+      // Equvialence sets that are being made at this level but are not ready
+      LegionMap<RtUserEvent,FieldMask> *pending_set_creations;
+      // Postconditions for the creation of each of the pending sets
+      std::map<RtUserEvent,std::vector<RtEvent> > *pending_postconditions;
+      // Trackers on different nodes that are currently tracking the state
+      // of this node for different fields
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > *subscriptions;
+      // If we know that only one of the children (either right or left)
+      // is all previous below we record that here in case we ultimately
+      // end up seeing the other child become all-previous below at which
+      // point we can set the all_previous_below mask appropriately
+      FieldMaskSet<EqKDNode<DIM,T> > *child_previous_below;
+      // Record fields for which all the sub-nodes (in both left and right)
+      // only have previous sets and no current sets because we invalidated
+      // everything at this node and below
+      FieldMask all_previous_below;
+    };
+
+    /**
+     * \class EqKDSparse
+     * In the case of index spaces with sparsity maps, this class helps
+     * deal with the tracking of splitting planes for the rectangles until
+     * we get down to a single rectangle and can move to EqKDNodes
+     */
+    template<int DIM, typename T>
+    class EqKDSparse : public EqKDTreeT<DIM,T> {
+    public:
+      EqKDSparse(const Rect<DIM,T> &bound,
+                 const std::vector<Rect<DIM,T> > &rects);
+      EqKDSparse(const EqKDSparse &rhs) = delete;
+      virtual ~EqKDSparse(void);
+    public:
+      EqKDSparse& operator=(const EqKDSparse &rhs) = delete;
+    public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  ShardID local_shard,
+                                  bool current);
+      virtual void compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0); 
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators);
+      virtual unsigned record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask, Runtime *runtime,
+                                   std::vector<RtEvent> &invalidated_events,
+                                   bool move_to_previous,
+                                   FieldMask *parent_all_previous = NULL);
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
+                               AddressSpaceID space, const FieldMask &mask);
+    protected:
+      std::vector<EqKDTreeT<DIM,T>*> children;
+    };
+
+    /**
+     * \class EqKDSharded
+     * For control replicated contexts, this class provides a way of sharding
+     * a dense rectangle down into subspaces handled by different shards.
+     * We split shards by high order bits first down to low order bits in order
+     * to maintain spatial locality between shards
+     */
+    template<int DIM, typename T>
+    class EqKDSharded : public EqKDTreeT<DIM,T> {
+    public:
+      EqKDSharded(const Rect<DIM,T> &bound, ShardID lower, ShardID upper);
+      EqKDSharded(const EqKDSharded &rhs) = delete;
+      virtual ~EqKDSharded(void);
+    public:
+      EqKDSharded& operator=(const EqKDSharded &rhs) = delete;
+    public:
+      virtual void initialize_set(EquivalenceSet *set,
+                                  const Rect<DIM,T> &rect,
+                                  const FieldMask &mask,
+                                  ShardID local_shard,
+                                  bool current);
+      virtual void compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          const std::vector<EqSetTracker*> &trackers,
+          const std::vector<AddressSpaceID> &tracker_spaces,
+          std::vector<unsigned> &new_tracker_references,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<EquivalenceSet*,LegionMap<Domain,FieldMask> > &creation_srcs,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0); 
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask, RtEvent ready,
+          const CollectiveMapping &creator_spaces,
+          const std::vector<EqSetTracker*> &creators);
+      virtual unsigned record_output_equivalence_set(
+          EquivalenceSet *set, const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EqKDTree> &subscriptions,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual void find_local_equivalence_sets(
+          FieldMaskSet<EquivalenceSet> &eq_sets, ShardID local_shard) const;
+      virtual void find_shard_equivalence_sets(
+          std::map<ShardID,LegionMap<RegionNode*,
+                   FieldMaskSet<EquivalenceSet> > > &eq_sets,
+          ShardID source_shard, ShardID dst_lower_shard,
+          ShardID dst_upper_shard, RegionNode *region) const;
+      virtual void invalidate_tree(const Rect<DIM,T> &rect,
+                                   const FieldMask &mask, Runtime *runtime,
+                                   std::vector<RtEvent> &invalidated_events,
+                                   bool move_to_previous,
+                                   FieldMask *parent_all_previous = NULL);
+      virtual void invalidate_shard_tree_remote(const Rect<DIM,T> &rect,
+                                         const FieldMask &mask,
+                                         Runtime *runtime,
+                                         std::vector<RtEvent> &invalidated,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
+      virtual unsigned cancel_subscription(EqSetTracker *tracker,
+                               AddressSpaceID space, const FieldMask &mask);
+    protected:
+      // Make these methods virtual so they can be overloaded by the sparse
+      // version of this class that inherits from this class as well
+      virtual size_t get_total_volume(void) const;
+      virtual void refine_node(void);
+      virtual EqKDTreeT<DIM,T>* refine_local(void); 
+    public:
+      // Lower bound shard (inclusive)
+      const ShardID lower;
+      // Upper bound shard (inclusive)
+      const ShardID upper;
+      // To avoid over-decomposing we specify a minimum split size, as soon
+      // as the total number of points represented by this  node are less 
+      // than this value then we stop splitting and use the smallest shard
+      // in the set of shards to handle the results
+      static constexpr size_t MIN_SPLIT_SIZE = 4096;
+    protected:
+      // These are atomic since they are lazily instantiated but once
+      // they are instantiated then they don't change so we don't need
+      // to have a lock in this node of the tree
+      std::atomic<EqKDTreeT<DIM,T>*> left, right;
+    };
+
+    /**
+     * \class EqKDSparseSharded
+     * This class handles the case of splitting sparse index spaces down
+     * to subsets of rectangles that can be handled by individual shards.
+     */
+    template<int DIM, typename T>
+    class EqKDSparseSharded : public EqKDSharded<DIM,T> {
+    public:
+      EqKDSparseSharded(const Rect<DIM,T> &bound, ShardID lower, ShardID upper,
+                        std::vector<Rect<DIM,T> > &rects);
+      EqKDSparseSharded(const EqKDSparseSharded &rhs) = delete;
+      virtual ~EqKDSparseSharded(void);
+    public:
+      EqKDSparseSharded& operator=(const EqKDSparseSharded &rhs) = delete;
+    protected:
+      virtual size_t get_total_volume(void) const;
+      virtual void refine_node(void);
+      virtual EqKDTreeT<DIM,T>* refine_local(void);
+      static inline bool sort_by_volume(const Rect<DIM,T> &r1, 
+                                        const Rect<DIM,T> &r2);
+    protected:
+      std::vector<Rect<DIM,T> > rectangles;
+      size_t total_volume;
     };
 
     /**
@@ -3107,8 +3700,8 @@ namespace Legion {
       bool handle_disjointness_update(Deserializer &derez);
     public:
       ApEvent create_equal_children(Operation *op, size_t granularity);
-      ApEvent create_by_weights(Operation *op, const FutureMap &weights,
-                                size_t granularity);
+      ApEvent create_by_weights(Operation *op, 
+          const std::map<DomainPoint,FutureImpl*> &weights, size_t granularity);
       ApEvent create_by_union(Operation *Op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
@@ -3118,7 +3711,8 @@ namespace Legion {
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_restriction(const void *transform, const void *extent);
-      ApEvent create_by_domain(FutureMapImpl *future_map);
+      ApEvent create_by_domain(const std::map<DomainPoint,FutureImpl*> &futures,
+                               const Domain &future_map_domain);
     public:
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true); 
@@ -3574,7 +4168,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceRef create_external_instance(
+      InstanceRef create_external_instance(const std::set<FieldID> &priv_fields,
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
       PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 
@@ -3750,6 +4344,10 @@ namespace Legion {
       {
         return current_versions.lookup_entry(ctx, this, ctx);
       }
+      // For OrderedFieldMaskChildren
+      inline bool deterministic_pointer_less(const RegionTreeNode *rhs) const
+        { return (get_color() < rhs->get_color()); }
+      typedef FieldState::OrderedFieldMaskChildren OrderedFieldMaskChildren;
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
             const void *buffer, size_t size, bool is_mutable, bool local_only);
@@ -3761,122 +4359,74 @@ namespace Legion {
        const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
       // Logical traversal operations
-      void register_logical_user(ContextID ctx,
-                                 const LogicalUser &user,
+      void register_logical_user(LogicalRegion privilege_root,
+                                 LogicalUser &user,
                                  const RegionTreePath &path,
                                  const LogicalTraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
+                                 const FieldMask &user_mask,
                                  FieldMask &unopened_field_mask,
-                                 FieldMask &already_closed_mask,
-                                 FieldMask &disjoint_complete_below,
-                                 FieldMask &first_touch_refinement,
-                                 FieldMaskSet<RefinementOp> &refinements,
+                                 FieldMask &refinement_mask,
                                  LogicalAnalysis &logical_analysis,
-                                 const bool track_disjoint_complete_below,
-                                 const bool check_unversioned);
+                                 FieldMaskSet<RefinementOp> &refinements,
+                                 const bool root_node);
       void register_local_user(LogicalState &state,
-                               const LogicalUser &user,
-                               const LogicalTraceInfo &trace_info);
-      void add_open_field_state(LogicalState &state, bool arrived,
-                                const ProjectionInfo &projection_info,
+                               LogicalUser &user,
+                               const FieldMask &user_mask);
+      void add_open_field_state(LogicalState &state,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 RegionTreeNode *next_child);
-      void close_logical_node(LogicalCloser &closer,
+      void siphon_interfering_children(LogicalState &state,
+                                       LogicalAnalysis &analysis,
+                                       const FieldMask &closing_mask,
+                                       const LogicalUser &user,
+                                       LogicalRegion privilege_root,
+                                       RegionTreeNode *next_child,
+                                       FieldMask &open_below);
+      void perform_close_operations(const LogicalUser &user,
+                                    const FieldMask &close_mask,
+                                    OrderedFieldMaskChildren &children,
+                                    LogicalRegion privilege_root,
+                                    RegionTreeNode *path_node,
+                                    RegionTreeNode *next_child,
+                                    FieldMask &open_below,
+                                    LogicalAnalysis &analysis,
+                                    const bool filter_next);
+      void close_logical_node(const LogicalUser &user,
                               const FieldMask &closing_mask,
-                              const bool read_only_close);
-      void siphon_logical_children(LogicalCloser &closer,
-                                   LogicalState &state,
-                                   const FieldMask &closing_mask,
-                                   const FieldMask *aliased_children,
-                                   bool record_close_operations,
-                                   RegionTreeNode *next_child,
-                                   FieldMask &open_below);
-      void siphon_logical_projection(LogicalCloser &closer,
-                                     LogicalState &state,
-                                     const FieldMask &closing_mask,
-                                     const ProjectionInfo &proj_info,
-                                     bool record_close_operations,
-                                     FieldMask &open_below);
-      void flush_logical_reductions(LogicalCloser &closer,
-                                    LogicalState &state,
-                                    FieldMask &reduction_flush_fields,
-                                    bool record_close_operations,
-                                    RegionTreeNode *next_child,
-                                    LegionDeque<FieldState> &states);
-      // Note that 'allow_next_child' and 
-      // 'record_closed_fields' are mutually exclusive
-      void perform_close_operations(LogicalCloser &closer,
-                                    const FieldMask &closing_mask,
-                                    FieldState &closing_state,
-                                    RegionTreeNode *next_child,
-                                    bool allow_next_child,
-                                    const FieldMask *aliased_children,
-                                    bool upgrade_next_child, 
-                                    bool read_only_close,
-                                    bool overwriting_close,
-                                    bool record_close_operations,
-                                    bool record_closed_fields,
-                                    FieldMask &output_mask); 
+                              LogicalRegion privilege_root,
+                              RegionTreeNode *path_node,
+                              LogicalAnalysis &analysis,
+                              FieldMask &still_open);
+      ProjectionSummary* compute_projection_summary(Operation *op, 
+                                                 unsigned index,
+                                                 const RegionRequirement &req,
+                                                 LogicalAnalysis &analysis,
+                                                 const ProjectionInfo &info); 
+      void record_refinement_dependences(ContextID ctx,
+                                         const LogicalUser &refinement_user,
+                                         const FieldMask &refinement_mask,
+                                         const ProjectionInfo &proj_info,
+                                         RegionTreeNode *previous_child,
+                                         LogicalRegion privilege_root,
+                                         LogicalAnalysis &logical_analysis);
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
                                   LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask,
-                                   const bool tracing);
-      void filter_disjoint_complete_accesses(LogicalState &state,
-                                             const FieldMask &mask);
+      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
-      void record_logical_reduction(LogicalState &state, ReductionOpID redop,
-                                    const FieldMask &user_mask);
-      void clear_logical_reduction_fields(LogicalState &state,
-                                          const FieldMask &cleared_mask);
-      void sanity_check_logical_state(LogicalState &state);
-      void perform_tree_dominance_analysis(ContextID ctx,
-                                           const LogicalUser &user,
-                                           const FieldMask &field_mask,
-                                           Operation *skip_op = NULL,
-                                           GenerationID skip_gen = 0);
-      void invalidate_disjoint_complete_tree(ContextID ctx, 
-                                        const FieldMask &invalidate_mask,
-                                        const bool invalidate_self);
-      void register_logical_deletion(ContextID ctx,
-                                     const LogicalUser &user,
-                                     const FieldMask &check_mask,
-                                     const RegionTreePath &path,
-                                     const LogicalTraceInfo &trace_info,
-                                     FieldMask &already_closed_mask,
-                                     bool invalidate_tree); 
-      void siphon_logical_deletion(LogicalCloser &closer,
-                                   LogicalState &state,
-                                   const FieldMask &current_mask,
-                                   RegionTreeNode *next_child,
-                                   FieldMask &open_below,
-                                   bool force_close_next);
-      void record_close_no_dependences(ContextID ctx,
-                                       const LogicalUser &user);
-    public:
-      void migrate_logical_state(ContextID src, ContextID dst, bool merge);
-      void migrate_version_state(ContextID src, ContextID dst, 
-                                 std::set<RtEvent> &applied, bool merge);
-      void pack_logical_state(ContextID ctx, Serializer &rez, 
-                              const bool invalidate); 
-      void unpack_logical_state(ContextID ctx, Deserializer &derez,
-                                AddressSpaceID source);
-      void pack_version_state(ContextID ctx, Serializer &rez, 
-                              const bool invalidate,
-                              std::set<RtEvent> &applied_events); 
-      void unpack_version_state(ContextID ctx, Deserializer &derez, 
-                                AddressSpaceID source);
+      void invalidate_logical_refinement(ContextID ctx, 
+                              const FieldMask &invalidate_mask);
     public:
       void initialize_current_state(ContextID ctx);
-      void invalidate_current_state(ContextID ctx, bool users_only);
+      void invalidate_current_state(ContextID ctx);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
-      void invalidate_logical_states(void);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
@@ -3892,11 +4442,10 @@ namespace Legion {
       inline RegionNode* as_region_node(void) const;
       inline PartitionNode* as_partition_node(void) const;
 #endif
+      virtual RefinementTracker* create_refinement_tracker(void) = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
-      virtual void pack_global_reference(bool need_root) = 0;
-      virtual void unpack_global_reference(bool need_root) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -3910,10 +4459,6 @@ namespace Legion {
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
-      virtual void print_physical_context(ContextID ctx, 
-                                          TreeStateLogger *logger,
-                                          const FieldMask &mask,
-                                  std::deque<RegionTreeNode*> &to_traverse) = 0;
       virtual void print_context_header(TreeStateLogger *logger) = 0;
 #ifdef DEBUG_LEGION
     public:
@@ -3921,25 +4466,21 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask) = 0;
-      virtual void dump_physical_context(ContextID ctx, 
-                                         TreeStateLogger *logger,
-                                         const FieldMask &mask) = 0;
 #endif
     public:
       // Logical helper operations
-      template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
-      static FieldMask perform_dependence_checks(const LogicalUser &user, 
-          LegionList<LogicalUser, ALLOC> &users, 
+      typedef FieldMaskSet<LogicalUser,UNTRACKED_ALLOC,true/*deterministic*/>
+        OrderedFieldMaskUsers;
+      template<bool TRACK_DOM>
+      FieldMask perform_dependence_checks(LogicalRegion privilege_root,
+          const LogicalUser &user, OrderedFieldMaskUsers &users,
           const FieldMask &check_mask, const FieldMask &open_below,
-          bool validates_regions, Operation *to_skip = NULL, 
-          GenerationID skip_gen = 0);
-      template<AllocationType ALLOC>
-      static void perform_closing_checks(LogicalCloser &closer,
-          LegionList<LogicalUser, ALLOC> &users, 
-          const FieldMask &check_mask);
-      template<AllocationType ALLOC>
-      static void perform_nodep_checks(const LogicalUser &user,
-          const LegionList<LogicalUser, ALLOC> &users);
+          const bool arrived, const ProjectionInfo &proj_info,
+          LogicalState &state, LogicalAnalysis &logical_analysis);
+      static void perform_closing_checks(LogicalAnalysis &analysis,
+          OrderedFieldMaskUsers &users, const LogicalUser &user,
+          const FieldMask &check_mask, LogicalRegion root_privilege,
+          RegionTreeNode *path_node, FieldMask &still_open);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
         { return column_source; }
@@ -3979,28 +4520,6 @@ namespace Legion {
         const SemanticTag tag;
         const AddressSpaceID source;
       };
-      struct DeferComputeEquivalenceSetArgs : 
-        public LgTaskArgs<DeferComputeEquivalenceSetArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COMPUTE_EQ_SETS_TASK_ID;
-      public:
-        DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
-            InnerContext *c, EqSetTracker *t, const AddressSpaceID ts,
-            IndexSpaceExpression *e, const FieldMask &m, 
-            const UniqueID id, const AddressSpaceID s, const bool covers);
-      public:
-        RegionNode *const proxy_this;
-        const ContextID ctx;
-        InnerContext *const context;
-        EqSetTracker *const target;
-        const AddressSpaceID target_space;
-        IndexSpaceExpression *const expr;
-        FieldMask *const mask;
-        const UniqueID opid;
-        const AddressSpaceID source;
-        const RtUserEvent ready;
-        const bool expr_covers;
-      };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
@@ -4020,14 +4539,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
-      void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
-      void refine_disjoint_complete_tree(ContextID ctx, PartitionNode *child,
-                                         RefinementOp *refinement, 
-                                         const FieldMask &refinement_mask,
-                                         std::set<RtEvent> &applied_events);
-      bool filter_unversioned_fields(ContextID ctx, TaskContext *context,
-                                     const FieldMask &filter_mask,
-                                     RegionRequirement &req);
+      void initialize_refined_fields(ContextID ctx, const FieldMask &m);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -4035,6 +4547,8 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
+      virtual RefinementTracker* create_refinement_tracker(void)
+        { return new RegionRefinementTracker(this); }
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -4048,8 +4562,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual void pack_global_reference(bool need_root);
-      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual size_t get_num_children(void) const;
@@ -4077,10 +4589,6 @@ namespace Legion {
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
-      virtual void print_physical_context(ContextID ctx, 
-                                          TreeStateLogger *logger,
-                                          const FieldMask &mask,
-                                      std::deque<RegionTreeNode*> &to_traverse);
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
@@ -4092,49 +4600,18 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask);
-      virtual void dump_physical_context(ContextID ctx, 
-                                         TreeStateLogger *logger,
-                                         const FieldMask &mask);
 #endif
     public:
       // Support for refinements and versioning
-      void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
-                                         const FieldMask &refinement_mask,
-                                         FieldMask &refined_partition,
-                                         std::set<RtEvent> &applied_events);
-      void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
-                                          const FieldMask &mask);
-      void initialize_nonexclusive_virtual_analysis(ContextID ctx,
-                                  const FieldMask &mask,
-                                  const FieldMaskSet<EquivalenceSet> &eq_sets);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
-                                       const UniqueID opid, 
-                                       const AddressSpaceID original_source,
-                                       std::set<RtEvent> &ready_events);
-      void compute_equivalence_sets(ContextID ctx,
-                                    InnerContext *parent_ctx,
-                                    EqSetTracker *target,
-                                    const AddressSpaceID target_space,
-                                    IndexSpaceExpression *expr,
-                                    const FieldMask &mask,
-                                    const UniqueID opid,
-                                    const AddressSpaceID original_source,
-                                    std::set<RtEvent> &ready_events,
-                                    const bool downward_only,
-                                    const bool expr_covers);
-      static void handle_deferred_compute_equivalence_sets(const void *args);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-                                 bool self, InnerContext &source_context,
-                                 std::set<RtEvent> &applied_events, 
-                                 std::vector<EquivalenceSet*> &to_release,
-                                 bool nonexclusive_virtual_root = false);
-      void record_refinement(ContextID ctx, EquivalenceSet *set, 
-                             const FieldMask &mask);
-      void propagate_refinement(ContextID ctx, PartitionNode *child,
-                                const FieldMask &mask);
+                                       Operation *op, unsigned index,
+                                       unsigned parent_req_index,
+                                       std::set<RtEvent> &ready_events,
+                                       RtEvent *output_region_ready = NULL,
+                                       bool collective_rendezvous = false);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -4191,6 +4668,8 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
+      virtual RefinementTracker* create_refinement_tracker(void)
+        { return new PartitionRefinementTracker(this); }
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -4205,8 +4684,6 @@ namespace Legion {
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual void pack_global_reference(bool need_root);
-      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual size_t get_num_children(void) const;
@@ -4223,38 +4700,10 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
-      void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
-                                         const FieldMask &refinement_mask,
-                                         std::set<RtEvent> &applied_events);
-      void compute_equivalence_sets(ContextID ctx,
-                                    InnerContext *context,
-                                    EqSetTracker *target,
-                                    const AddressSpaceID target_space,
-                                    IndexSpaceExpression *expr,
-                                    const FieldMask &mask,
-                                    const UniqueID opid,
-                                    const AddressSpaceID source,
-                                    std::set<RtEvent> &ready_events,
-                                    const bool downward_only,
-                                    const bool expr_covers);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-                                 std::set<RtEvent> &applied_events,
-                                 std::vector<EquivalenceSet*> &to_release,
-                                 InnerContext &source_context);
-      void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask);
-      void propagate_refinement(ContextID ctx, 
-                                const std::vector<RegionNode*> &children,
-                                const FieldMask &mask);
-    public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
-      virtual void print_physical_context(ContextID ctx, 
-                                          TreeStateLogger *logger,
-                                          const FieldMask &mask,
-                                      std::deque<RegionTreeNode*> &to_traverse);
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
@@ -4266,9 +4715,6 @@ namespace Legion {
       virtual void dump_logical_context(ContextID ctx, 
                                         TreeStateLogger *logger,
                                         const FieldMask &mask);
-      virtual void dump_physical_context(ContextID ctx, 
-                                         TreeStateLogger *logger,
-                                         const FieldMask &mask);
 #endif
     public:
       const LogicalPartition handle;

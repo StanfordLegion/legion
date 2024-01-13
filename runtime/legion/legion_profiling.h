@@ -127,6 +127,11 @@ namespace Legion {
         unsigned node_id;
 	unsigned num_nodes;
       };
+      struct ZeroTime {
+      public:
+        long long zero_time;
+      };
+
     };
 
     class LegionProfInstance {
@@ -173,8 +178,9 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
 #ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance, finish_event;
+        LgEvent provenance;
 #endif
+        LgEvent finish_event;
       };
       struct GPUTaskInfo {
       public:
@@ -186,8 +192,9 @@ namespace Legion {
         timestamp_t gpu_start, gpu_stop;
         std::deque<WaitInfo> wait_intervals;
 #ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance, finish_event;
+        LgEvent provenance;
 #endif
+        LgEvent finish_event;
       };
       struct IndexSpacePointDesc {
       public:
@@ -290,8 +297,9 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
 #ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance, finish_event;
+        LgEvent provenance;
 #endif
+        LgEvent finish_event;
       };
       struct CopyInstInfo {
       public:
@@ -306,7 +314,6 @@ namespace Legion {
         UniqueID op_id;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
-        unsigned request_type;
         LgEvent fevent;
         CollectiveKind collective;
 #ifdef LEGION_PROF_PROVENANCE
@@ -356,12 +363,14 @@ namespace Legion {
         UniqueID op_id;
         timestamp_t start, stop;
         ProcID proc_id;
+        LgEvent finish_event;
       };
       struct RuntimeCallInfo {
       public:
         RuntimeCallKind kind;
         timestamp_t start, stop;
         ProcID proc_id;
+        LgEvent finish_event;
       };
       struct ProcDesc {
       public:
@@ -387,6 +396,7 @@ namespace Legion {
         ProcID proc_id;
         UniqueID op_id;
         timestamp_t start, stop;
+        LgEvent finish_event;
       };
 #endif
       struct ProfilingInfo : public ProfilingResponseBase {
@@ -483,21 +493,25 @@ namespace Legion {
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
+      void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
+          long long start, long long stop, 
+          const std::vector<std::pair<long long,long long> > &waits,
+          LgEvent finish_event);
       void process_mem_desc(const Memory &m);
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
-
     public:
       void record_mapper_call(Processor proc, MappingCallKind kind, 
                               UniqueID uid, timestamp_t start,
-                              timestamp_t stop);
+                              timestamp_t stop, LgEvent finish_event);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
-                               timestamp_t start, timestamp_t stop);
+                               timestamp_t start, timestamp_t stop,
+                               LgEvent finish_event);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
-                           timestamp_t stop);
+                           timestamp_t stop, LgEvent finish_event);
 #endif
     public:
       void dump_state(LegionProfSerializer *serializer);
@@ -580,11 +594,12 @@ namespace Legion {
                      const size_t total_runtime_instances,
                      const size_t footprint_threshold,
                      const size_t target_latency,
+                     const size_t minimum_call_threshold,
                      const bool slow_config_ok);
-      LegionProfiler(const LegionProfiler &rhs);
+      LegionProfiler(const LegionProfiler &rhs) = delete;
       virtual ~LegionProfiler(void);
     public:
-      LegionProfiler& operator=(const LegionProfiler &rhs);
+      LegionProfiler& operator=(const LegionProfiler &rhs) = delete;
     public:
       // Dynamically created things must be registered at runtime
       // Tasks
@@ -683,6 +698,11 @@ namespace Legion {
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
     public:
+      void record_implicit(UniqueID op_id, TaskID tid, Processor proc,
+                           long long start, long long stop,
+           const std::vector<std::pair<long long,long long> > &waits,
+                           LgEvent finish_event);
+    public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
                                                 unsigned cnt = 1);
@@ -702,6 +722,8 @@ namespace Legion {
       Runtime *const runtime;
       // Event to trigger once the profiling is actually done
       const RtUserEvent done_event;
+      // Minimum duration of mapper and runtime calls for logging in ns
+      const size_t minimum_call_threshold;
       // Size in bytes of the footprint before we start dumping
       const size_t output_footprint_threshold;
       // The goal size in microseconds of the output tasks

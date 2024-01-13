@@ -20,7 +20,6 @@
 //  a bunch of C++11 baggage
 
 #include "realm/module.h"
-#include "realm/threads.h"
 
 #include <string>
 
@@ -37,7 +36,9 @@ namespace Realm {
     public:
       virtual ~LLVMJitModule(void);
 
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete

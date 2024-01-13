@@ -17,13 +17,24 @@
 #define REALM_HDF5_MODULE_H
 
 #include "realm/module.h"
-#include "realm/mem_impl.h"
 
 namespace Realm {
 
   namespace HDF5 {
 
     class HDF5Memory;
+
+    class HDF5ModuleConfig : public ModuleConfig {
+      friend class HDF5Module;
+    protected:
+      HDF5ModuleConfig(void);
+
+    public:
+      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+
+    protected:
+      bool cfg_showerrors = true;
+    };
 
     // our interface to the rest of the runtime
     class HDF5Module : public Module {
@@ -32,8 +43,10 @@ namespace Realm {
       
     public:
       virtual ~HDF5Module(void);
-
-      static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
+      
+      static ModuleConfig *create_module_config(RuntimeImpl *runtime);
+      
+      static Module *create_module(RuntimeImpl *runtime);
 
       // do any general initialization - this is called after all configuration is
       //  complete
@@ -59,7 +72,7 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
-      bool cfg_showerrors;
+      HDF5ModuleConfig *config;
 
       unsigned version_major, version_minor, version_rel;
       bool threadsafe;

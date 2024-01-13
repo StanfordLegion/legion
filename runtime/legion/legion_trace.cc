@@ -62,15 +62,18 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // LegionTrace 
+    // LogicalTrace 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(InnerContext *c, TraceID t, 
-                             bool logical_only, Provenance *p)
-      : ctx(c), tid(t), begin_provenance(p), end_provenance(NULL),
-        blocking_call_observed(false), 
-        has_intermediate_ops(false), fixed(false)
+    LogicalTrace::LogicalTrace(InnerContext *c, TraceID t, bool logical_only,
+                               bool static_trace, Provenance *p,
+                               const std::set<RegionTreeID> *trees)
+      : context(c), tid(t), begin_provenance(p), end_provenance(NULL),
+        blocking_call_observed(false),
+        has_intermediate_ops(false), fixed(false),
+        recording(true), trace_fence(NULL),
+        static_translator(static_trace ? new StaticTranslator(trees) : NULL)
     //--------------------------------------------------------------------------
     {
       state.store(LOGICAL_ONLY);
@@ -81,7 +84,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionTrace::~LegionTrace(void)
+    LogicalTrace::~LogicalTrace(void)
     //--------------------------------------------------------------------------
     {
       if (physical_trace != NULL)
@@ -93,7 +96,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::fix_trace(Provenance *provenance)
+    void LogicalTrace::fix_trace(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -107,66 +110,511 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::replay_aliased_children(
-                             std::vector<RegionTreePath> &privilege_paths) const
+    bool LogicalTrace::initialize_op_tracing(Operation *op,
+                               const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
-      unsigned index = operations.size() - 1;
-      std::map<unsigned,LegionVector<AliasChildren> >::const_iterator
-        finder = aliased_children.find(index);
-      if (finder == aliased_children.end())
-        return;
-      for (LegionVector<AliasChildren>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
+      if (op->is_internal_op())
+      {
+        if (!recording)
+          return false;
+      }
+      else
+      {
+        if (fixed)
+          return false;
+      }
+      if (static_translator != NULL)
+        static_translator->push_dependences(dependences);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalTrace::skip_analysis(RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      if (!recording)
+        return true;
+      if (static_translator == NULL)
+        return false;
+      return static_translator->skip_analysis(tid);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t LogicalTrace::register_operation(Operation *op, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      const std::pair<Operation*,GenerationID> key(op,gen);
+#ifdef LEGION_SPY
+      current_uids[key] = op->get_unique_op_id();
+      num_regions[key] = op->get_region_count();
+#endif
+      if (recording)
+      {
+        // Recording
+        if (op->is_internal_op())
+          // We don't need to register internal operations
+          return SIZE_MAX;
+        const size_t index = replay_info.size();
+        if (has_physical_trace() && op->get_memoizable() == NULL)
+          REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+              "Invalid memoization request. Operation of type %s (UID %lld) "
+              "at index %zd in trace %d requested memoization, but physical "
+              "tracing does not support this operation type yet.",
+              Operation::get_string_rep(op->get_operation_kind()),
+              op->get_unique_op_id(), index, tid);
+        const size_t op_index = operations.size();
+        op_map[key] = op_index;
+        operations.push_back(key);
+        replay_info.push_back(OperationInfo(op));
+        if (static_translator != NULL)
+        {
+          // Add a mapping reference since we might need to refer to it later
+          op->add_mapping_reference(gen);
+          // Recording a static trace so see if we have 
+          // dependences to translate
+          std::vector<StaticDependence> to_translate;
+          static_translator->pop_dependences(to_translate);
+          translate_dependence_records(op, op_index, to_translate);
+        }
+        return index;
+      }
+      else
       {
 #ifdef DEBUG_LEGION
-        assert(it->req_index < privilege_paths.size());
+        assert(!op->is_internal_op());
 #endif
-        privilege_paths[it->req_index].record_aliased_children(it->depth,
-                                                               it->mask);
+        // Replaying
+        const size_t index = replay_index++;
+        if (index >= replay_info.size())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
+                        "Trace violation! Recorded %zd operations in trace "
+                        "%d in task %s (UID %lld) but %zd operations have "
+                        "now been issued!", replay_info.size(), tid,
+                        context->get_task_name(), 
+                        context->get_unique_id(), index+1)
+        // Check to see if the meta-data alignes
+        const OperationInfo &info = replay_info[index];
+        // Check that they are the same kind of operation
+        if (info.kind != op->get_operation_kind())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                        "Trace violation! Operation at index %zd of trace %d "
+                        "in task %s (UID %lld) was recorded as having type "
+                        "%s but instead has type %s in replay.",
+                        index, tid, context->get_task_name(),
+                        context->get_unique_id(),
+                        Operation::get_string_rep(info.kind),
+                        Operation::get_string_rep(op->get_operation_kind()))
+        // Check that they have the same number of region requirements
+        if (info.region_count != op->get_region_count())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                        "Trace violation! Operation at index %zd of trace %d "
+                        "in task %s (UID %lld) was recorded as having %d "
+                        "regions, but instead has %zd regions in replay.",
+                        index, tid, context->get_task_name(),
+                        context->get_unique_id(), info.region_count,
+                        op->get_region_count())
+        // Add a mapping reference since ops will be registering dependences
+        op->add_mapping_reference(gen);
+        operations.push_back(key);
+        frontiers.insert(key);
+        // First make any close operations needed for this operation and
+        // register their dependences
+        for (LegionVector<CloseInfo>::const_iterator cit = 
+              info.closes.begin(); cit != info.closes.end(); cit++)
+        {
+#ifdef DEBUG_LEGION_COLLECTIVES
+          MergeCloseOp *close_op = context->get_merge_close_op(op, cit->node);
+#else
+          MergeCloseOp *close_op = context->get_merge_close_op();
+#endif
+          close_op->initialize(context, cit->requirement, cit->creator_idx, op);
+          close_op->update_close_mask(cit->close_mask);
+          const GenerationID close_gen = close_op->get_generation();
+          const std::pair<Operation*,GenerationID> close_key(close_op, 
+                                                             close_gen);
+          close_op->add_mapping_reference(close_gen);
+          operations.push_back(close_key);
+#ifdef LEGION_SPY
+          current_uids[close_key] = close_op->get_unique_op_id();
+          num_regions[close_key] = close_op->get_region_count();
+#endif
+          close_op->begin_dependence_analysis();
+          close_op->trigger_dependence_analysis();
+          replay_operation_dependences(close_op, cit->dependences);
+          close_op->end_dependence_analysis();
+        }
+        // Then register the dependences for this operation
+        if (!info.dependences.empty())
+          replay_operation_dependences(op, info.dependences);
+        else // need to at least record a dependence on the fence event
+          op->register_dependence(trace_fence, trace_fence_gen);
+        return index;
       }
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::end_trace_execution(FenceOp *op)
+    void LogicalTrace::register_internal(InternalOp *op)
     //--------------------------------------------------------------------------
     {
-      if (is_replaying())
-      {
-        // Remove mapping fences on the frontiers which haven't been removed yet
-        for (std::set<std::pair<Operation*,GenerationID> >::const_iterator it =
-              frontiers.begin(); it != frontiers.end(); it++)
-          it->first->remove_mapping_reference(it->second);
-        frontiers.clear();
-#ifdef LEGION_SPY
-        current_uids.clear();
-#endif
-        operations.clear();
-        if (physical_trace != NULL)
-          physical_trace->reset_last_memoized();
-        return;
-      }
-
-      // Register for this fence on every one of the operations in
-      // the trace and then clear out the operations data structure
-      for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
-            frontiers.begin(); it != frontiers.end(); ++it)
-      {
-        const std::pair<Operation*,GenerationID> &target = *it;
 #ifdef DEBUG_LEGION
-        assert(!target.first->is_internal_op());
+      assert(recording);
 #endif
-        op->register_dependence(target.first, target.second);
-#ifdef LEGION_SPY
-        for (unsigned req_idx = 0; req_idx < num_regions[target]; req_idx++)
+      const std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      const std::pair<Operation*,GenerationID> creator_key(
+          op->get_creator_op(), op->get_creator_gen());
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        finder = op_map.find(creator_key);
+#ifdef DEBUG_LEGION
+      assert(finder != op_map.end());
+#endif
+      // Record that they have the same entry so that we can detect that
+      // they are the same when recording dependences. We do this for all
+      // internal operations which won't be replayed and for which we will
+      // need to collapse their dependences back onto their creator
+      op_map[key] = finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::register_close(MergeCloseOp *op, unsigned creator_idx,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                                      RegionTreeNode *node,
+#endif
+                                      const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+      assert(!replay_info.empty());
+#endif
+      std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      const size_t index = operations.size();
+      operations.push_back(key);
+      op_map[key] = index;
+      OperationInfo &info = replay_info.back();
+      info.closes.emplace_back(CloseInfo(op, creator_idx,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                                         node,
+#endif
+                                         req));
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::replay_operation_dependences(Operation *op,
+                              const LegionVector<DependenceRecord> &dependences)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionVector<DependenceRecord>::const_iterator it =
+            dependences.begin(); it != dependences.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->operation_idx >= 0);
+        assert(((size_t)it->operation_idx) < operations.size());
+        assert(it->dtype != LEGION_NO_DEPENDENCE);
+#endif
+        const std::pair<Operation*,GenerationID> &target = 
+                                              operations[it->operation_idx];
+        std::set<std::pair<Operation*,GenerationID> >::iterator finder =
+          frontiers.find(target);
+        if (finder != frontiers.end())
         {
-          LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(), current_uids[target], req_idx,
-              op->get_unique_op_id(), 0, LEGION_TRUE_DEPENDENCE);
+          finder->first->remove_mapping_reference(finder->second);
+          frontiers.erase(finder);
         }
+        if ((it->prev_idx == -1) || (it->next_idx == -1))
+        {
+          op->register_dependence(target.first, target.second); 
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+           op->get_context()->get_unique_id(),
+           get_current_uid_by_index(it->operation_idx),
+           (it->prev_idx == -1) ? 0 : it->prev_idx,
+           op->get_unique_op_id(), 
+           (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
 #endif
-        // Remove any mapping references that we hold
-        target.first->remove_mapping_reference(target.second);
+        }
+        else
+        {
+          op->register_region_dependence(it->next_idx, target.first,
+                                         target.second, it->prev_idx,
+                                         it->dtype, it->validates,
+                                         it->dependent_mask);
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+              op->get_context()->get_unique_id(),
+              get_current_uid_by_index(it->operation_idx), it->prev_idx,
+              op->get_unique_op_id(), it->next_idx, it->dtype);
+#endif
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalTrace::record_dependence(Operation *target,
+            GenerationID target_gen, Operation *source, GenerationID source_gen)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      const std::pair<Operation*,GenerationID> target_key(target, target_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        target_finder = op_map.find(target_key);
+      // The target is not part of the trace so there's no need to record it
+      if (target_finder == op_map.end())
+        return false;
+      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        source_finder = op_map.find(source_key);
+#ifdef DEBUG_LEGION
+      assert(!replay_info.empty());
+      assert(source_finder != op_map.end());
+#endif
+      // In the case of operations recording dependences on internal operations
+      // such as refinement operations then we don't need to record those as
+      // the refinement operations won't be in the replay
+      if (source_finder->second == target_finder->second)
+      {
+#ifdef DEBUG_LEGION
+        assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+        return true;
+      }
+      OperationInfo &info = replay_info.back();
+      DependenceRecord record(target_finder->second);
+      if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+        assert(!info.closes.empty());
+#endif
+        // Find the right close info and record the dependence 
+        for (unsigned idx = 0; idx < info.closes.size(); idx++)
+        {
+          CloseInfo &close = info.closes[idx];
+          if (close.close_op != source)
+            continue;
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          for (LegionVector<DependenceRecord>::iterator it =
+                close.dependences.begin(); it != close.dependences.end(); it++)
+            if (it->merge(record))
+              return true;
+          close.dependences.emplace_back(std::move(record));
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      else
+      {
+        // Note that if the source is a non-close internal operation then
+        // we also come through this pathway so that we record dependences
+        // on anything that the operation records any transitive dependences
+        // on things that its internal operations dependended on
+        for (LegionVector<DependenceRecord>::iterator it =
+              info.dependences.begin(); it != info.dependences.end(); it++)
+          if (it->merge(record))
+            return true;
+        info.dependences.emplace_back(std::move(record));
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalTrace::record_region_dependence(Operation *target, 
+                                                GenerationID target_gen,
+                                                Operation *source, 
+                                                GenerationID source_gen,
+                                                unsigned target_idx, 
+                                                unsigned source_idx,
+                                                DependenceType dtype,
+                                                bool validates,
+                                                const FieldMask &dep_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      const std::pair<Operation*,GenerationID> target_key(target, target_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        target_finder = op_map.find(target_key);
+      // The target is not part of the trace so there's no need to record it
+      if (target_finder == op_map.end())
+      {
+        // If this is a close operation then we still need to update the mask
+        if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
+        {
+#ifdef DEBUG_LEGION
+          assert(!replay_info.empty());
+          assert(op_map.find(std::make_pair(source, source_gen)) != 
+              op_map.end());
+#endif
+          OperationInfo &info = replay_info.back();
+#ifdef DEBUG_LEGION
+          bool found = false;
+          assert(!info.closes.empty());
+#endif
+          // Find the right close info and record the dependence 
+          for (unsigned idx = 0; idx < info.closes.size(); idx++)
+          {
+            CloseInfo &close = info.closes[idx];
+            if (close.close_op != source)
+              continue;
+#ifdef DEBUG_LEGION
+            found = true;
+#endif
+            close.close_mask |= dep_mask;
+            break;
+          }
+#ifdef DEBUG_LEGION
+          assert(found);
+#endif
+        }
+        return false;
+      }
+      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        source_finder = op_map.find(source_key);
+#ifdef DEBUG_LEGION
+      assert(!replay_info.empty());
+      assert(source_finder != op_map.end());
+#endif
+      // In the case of operations recording dependences on internal operations
+      // such as refinement operations then we don't need to record those as
+      // the refinement operations won't be in the replay
+      if (source_finder->second == target_finder->second)
+      {
+#ifdef DEBUG_LEGION
+        assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
+#endif
+        return true;
+      }
+      OperationInfo &info = replay_info.back();
+      DependenceRecord record(target_finder->second, target_idx, source_idx,
+                              validates, dtype, dep_mask);
+      if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+        assert(!info.closes.empty());
+#endif
+        // Find the right close info and record the dependence 
+        for (unsigned idx = 0; idx < info.closes.size(); idx++)
+        {
+          CloseInfo &close = info.closes[idx];
+          if (close.close_op != source)
+            continue;
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          close.close_mask |= dep_mask;
+          for (LegionVector<DependenceRecord>::iterator it =
+                close.dependences.begin(); it != close.dependences.end(); it++)
+            if (it->merge(record))
+              return true;
+          close.dependences.emplace_back(std::move(record));
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      else
+      {
+        // Note that if the source is a non-close internal operation then
+        // we also come through this pathway so that we record dependences
+        // on anything that the operation records any transitive dependences
+        // on things that its internal operations dependended on
+        for (LegionVector<DependenceRecord>::iterator it =
+              info.dependences.begin(); it != info.dependences.end(); it++)
+          if (it->merge(record))
+            return true;
+        info.dependences.emplace_back(std::move(record));
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::begin_trace_execution(FenceOp *fence_op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace_fence == NULL);
+#endif
+      if (!recording)
+      {
+        trace_fence = fence_op;
+        trace_fence_gen = fence_op->get_generation();
+        fence_op->add_mapping_reference(trace_fence_gen);
+        replay_index = 0;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::end_trace_execution(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      if (!recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_fence != NULL);
+#endif
+        if (replay_index != replay_info.size())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
+                        "Trace violation! Recorded %zd operations in trace "
+                        "%d in task %s (UID %lld) but only %zd operations "
+                        "have been issued at the end of the trace!", 
+                        replay_info.size(), tid,
+                        context->get_task_name(), 
+                        context->get_unique_id(), replay_index)
+        op->register_dependence(trace_fence, trace_fence_gen);
+        trace_fence->remove_mapping_reference(trace_fence_gen);
+        trace_fence = NULL;
+        // Register for this fence on every one of the operations in
+        // the trace and then clear out the operations data structure
+        for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
+              frontiers.begin(); it != frontiers.end(); ++it)
+        {
+          const std::pair<Operation*,GenerationID> &target = *it;
+#ifdef DEBUG_LEGION
+          assert(!target.first->is_internal_op());
+#endif
+          op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+          for (unsigned req_idx = 0; req_idx < num_regions[target]; req_idx++)
+          {
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(), current_uids[target],
+                req_idx, op->get_unique_op_id(), 0, LEGION_TRUE_DEPENDENCE);
+          }
+#endif
+          // Remove any mapping references that we hold
+          target.first->remove_mapping_reference(target.second);
+        }
+      }
+      else // Finished the recording so we are done
+      {
+        recording = false;
+        op_map.clear();
+        if (static_translator != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(static_translator->dependences.empty());
+#endif
+          delete static_translator;
+          static_translator = NULL;
+          // Also remove the mapping references from all the operations
+          for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+                it = operations.begin(); it != operations.end(); it++)
+            it->first->remove_mapping_reference(it->second);
+          // Remove mapping fences on the frontiers which haven't been removed 
+          for (std::set<std::pair<Operation*,GenerationID> >::const_iterator 
+                it = frontiers.begin(); it != frontiers.end(); it++)
+            it->first->remove_mapping_reference(it->second);
+        }
       }
       operations.clear();
       if (physical_trace != NULL)
@@ -180,7 +628,7 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    UniqueID LegionTrace::get_current_uid_by_index(unsigned op_idx) const
+    UniqueID LogicalTrace::get_current_uid_by_index(unsigned op_idx) const
     //--------------------------------------------------------------------------
     {
       assert(op_idx < operations.size());
@@ -193,7 +641,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void LegionTrace::invalidate_trace_cache(Operation *invalidator)
+    void LogicalTrace::invalidate_trace_cache(Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       if (physical_trace == NULL)
@@ -223,7 +671,7 @@ namespace Legion {
         else
         {
           physical_trace->clear_cached_template();
-          current_template->issue_summary_operations(ctx, invalidator, 
+          current_template->issue_summary_operations(context, invalidator, 
                                                      end_provenance);
           has_intermediate_ops = false;
         }
@@ -232,860 +680,69 @@ namespace Legion {
         has_intermediate_ops = true;
     }
 
-    /////////////////////////////////////////////////////////////
-    // StaticTrace
-    /////////////////////////////////////////////////////////////
-
     //--------------------------------------------------------------------------
-    StaticTrace::StaticTrace(TraceID t, InnerContext *c, bool logical_only,
-                             Provenance *p, const std::set<RegionTreeID> *trees)
-      : LegionTrace(c, t, logical_only, p)
+    void LogicalTrace::translate_dependence_records(Operation *op,
+         const unsigned index, const std::vector<StaticDependence> &dependences)
     //--------------------------------------------------------------------------
     {
-      if (trees != NULL)
-        application_trees.insert(trees->begin(), trees->end());
-    }
-    
-    //--------------------------------------------------------------------------
-    StaticTrace::StaticTrace(const StaticTrace &rhs)
-      : LegionTrace(NULL, 0, true, NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    StaticTrace::~StaticTrace(void)
-    //--------------------------------------------------------------------------
-    {
-      // Remove our mapping references and then clear the operations
-      for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
-            operations.begin(); it != operations.end(); it++)
-        it->first->remove_mapping_reference(it->second);
-      operations.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    StaticTrace& StaticTrace::operator=(const StaticTrace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool StaticTrace::handles_region_tree(RegionTreeID tid) const
-    //--------------------------------------------------------------------------
-    {
-      if (application_trees.empty())
-        return true;
-      return (application_trees.find(tid) != application_trees.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool StaticTrace::initialize_op_tracing(Operation *op,
-                               const std::vector<StaticDependence> *dependences,
-                               const LogicalTraceInfo *trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already recorded all these, there's no need to do it again
-      if (fixed)
-        return false;
-      // Internal operations get to skip this
-      if (op->is_internal_op())
-        return false;
-      // All other operations have to add something to the list
-      if (dependences == NULL)
-        static_dependences.resize(static_dependences.size() + 1);
-      else // Add it to the list of static dependences
-        static_dependences.push_back(*dependences);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t StaticTrace::register_operation(Operation *op, GenerationID gen)
-    //--------------------------------------------------------------------------
-    {
-      std::pair<Operation*,GenerationID> key(op,gen);
-      const size_t index = operations.size();
-      if (!op->is_internal_op())
+      RegionTreeForest *forest = context->runtime->forest;
+      const bool is_replicated = (context->get_replication_id() > 0);
+      for (std::vector<StaticDependence>::const_iterator it =
+            dependences.begin(); it != dependences.end(); it++)
       {
-        frontiers.insert(key);
-        const LegionVector<DependenceRecord> &deps = 
-          translate_dependence_records(op, index); 
-        operations.push_back(key);
-#ifdef LEGION_SPY
-        current_uids[key] = op->get_unique_op_id();
-        num_regions[key] = op->get_region_count();
-#endif
-        // Add a mapping reference since people will be 
-        // registering dependences
-        op->add_mapping_reference(gen);  
-        // Then compute all the dependences on this operation from
-        // our previous recording of the trace
-        for (LegionVector<DependenceRecord>::const_iterator it = 
-              deps.begin(); it != deps.end(); it++)
-        {
+        if (it->dependence_type == LEGION_NO_DEPENDENCE)
+          continue;
 #ifdef DEBUG_LEGION
-          assert((it->operation_idx >= 0) &&
-                 ((size_t)it->operation_idx < operations.size()));
+        assert(it->previous_offset <= index);
 #endif
-          const std::pair<Operation*,GenerationID> &target = 
-                                                operations[it->operation_idx];
-          std::set<std::pair<Operation*,GenerationID> >::iterator finder =
-            frontiers.find(target);
-          if (finder != frontiers.end())
-          {
-            finder->first->remove_mapping_reference(finder->second);
-            frontiers.erase(finder);
-          }
-
-          if ((it->prev_idx == -1) || (it->next_idx == -1))
-          {
-            op->register_dependence(target.first, target.second);
-#ifdef LEGION_SPY
-            LegionSpy::log_mapping_dependence(
-               op->get_context()->get_unique_id(),
-               get_current_uid_by_index(it->operation_idx),
-               (it->prev_idx == -1) ? 0 : it->prev_idx,
-               op->get_unique_op_id(), 
-               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
-#endif
-          }
-          else
-          {
-            op->register_region_dependence(it->next_idx, target.first,
-                                           target.second, it->prev_idx,
-                                           it->dtype, it->validates,
-                                           it->dependent_mask);
-#ifdef LEGION_SPY
-            LegionSpy::log_mapping_dependence(
-                op->get_context()->get_unique_id(),
-                get_current_uid_by_index(it->operation_idx), it->prev_idx,
-                op->get_unique_op_id(), it->next_idx, it->dtype);
-#endif
-          }
-        }
-      }
-      else
-      {
-        // We already added our creator to the list of operations
-        // so the set of dependences is index-1
-#ifdef DEBUG_LEGION
-        assert(index > 0);
-#endif
-        const LegionVector<DependenceRecord> &deps = 
-          translate_dependence_records(operations[index-1].first, index-1);
-        // Special case for internal operations
-        // Internal operations need to register transitive dependences
-        // on all the other operations with which it interferes.
-        // We can get this from the set of operations on which the
-        // operation we are currently performing dependence analysis
-        // has dependences.
-        InternalOp *internal_op = static_cast<InternalOp*>(op);
-#ifdef DEBUG_LEGION
-        assert(internal_op == dynamic_cast<InternalOp*>(op));
-#endif
-        int internal_index = internal_op->get_internal_index();
-        for (LegionVector<DependenceRecord>::const_iterator it = 
-              deps.begin(); it != deps.end(); it++)
+        const std::pair<Operation*,GenerationID> &prev =
+            operations[index - it->previous_offset];
+        unsigned parent_index = op->find_parent_index(it->current_req_index);
+        LogicalRegion root_region = context->find_logical_region(parent_index);
+        FieldSpaceNode *fs = forest->get_node(root_region.get_field_space());
+        const FieldMask mask = fs->get_field_mask(it->dependent_fields);
+        if (is_replicated && !it->shard_only)
         {
-          // We only record dependences for this internal operation on
-          // the indexes for which this internal operation is being done
-          if (internal_index != it->next_idx)
-            continue;
-#ifdef DEBUG_LEGION
-          assert((it->operation_idx >= 0) &&
-                 ((size_t)it->operation_idx < operations.size()));
+          // Need a merge close op to mediate the dependence
+          RegionRequirement req(root_region, 
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, root_region);
+          req.privilege_fields = it->dependent_fields;
+#ifdef DEBUG_LEGION_COLLECTIVES
+          MergeCloseOp *close_op = context->get_merge_close_op(op,
+                                    forest->get_node(root_region));
+#else
+          MergeCloseOp *close_op = context->get_merge_close_op();
 #endif
-          const std::pair<Operation*,GenerationID> &target = 
-                                                operations[it->operation_idx];
-          // If this is the case we can do the normal registration
-          if ((it->prev_idx == -1) || (it->next_idx == -1))
-          {
-            internal_op->register_dependence(target.first, target.second); 
-#ifdef LEGION_SPY
-            LegionSpy::log_mapping_dependence(
-               op->get_context()->get_unique_id(),
-               get_current_uid_by_index(it->operation_idx),
-               (it->prev_idx == -1) ? 0 : it->prev_idx,
-               op->get_unique_op_id(), 
-               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
+          close_op->initialize(context, req, it->current_req_index, op);
+          close_op->update_close_mask(mask);
+          register_close(close_op, it->current_req_index,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                         forest->get_node(root_region),
 #endif
-          }
-          else
-          {
-            internal_op->record_trace_dependence(target.first, target.second,
-                                               it->prev_idx, it->next_idx,
-                                               it->dtype, it->dependent_mask);
-#ifdef LEGION_SPY
-            LegionSpy::log_mapping_dependence(
-                internal_op->get_context()->get_unique_id(),
-                get_current_uid_by_index(it->operation_idx), it->prev_idx,
-                internal_op->get_unique_op_id(), 0, it->dtype);
-#endif
-          }
-        }
-      }
-      return index;
-    }
-
-    //--------------------------------------------------------------------------
-    void StaticTrace::record_dependence(
-                                     Operation *target, GenerationID target_gen,
-                                     Operation *source, GenerationID source_gen)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-    
-    //--------------------------------------------------------------------------
-    void StaticTrace::record_region_dependence(
-                                    Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void StaticTrace::record_no_dependence(
-                                    Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void StaticTrace::record_aliased_children(unsigned req_index,unsigned depth,
-                                              const FieldMask &aliase_mask)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void StaticTrace::end_trace_capture(void)
-    //--------------------------------------------------------------------------
-    {
-      // Remove mapping fences on the frontiers which haven't been removed yet
-      for (std::set<std::pair<Operation*,GenerationID> >::const_iterator it =
-            frontiers.begin(); it != frontiers.end(); it++)
-        it->first->remove_mapping_reference(it->second);
-      operations.clear();
-      frontiers.clear();
-      if (physical_trace != NULL)
-        physical_trace->reset_last_memoized();
-#ifdef LEGION_SPY
-      current_uids.clear();
-      num_regions.clear();
-#endif
-    }
-
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    void StaticTrace::perform_logging(
-                               UniqueID prev_fence_uid, UniqueID curr_fence_uid)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: Implement this if someone wants to memoize static traces
-      assert(false);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    const LegionVector<LegionTrace::DependenceRecord>& 
-        StaticTrace::translate_dependence_records(Operation *op, unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      // If we already translated it then we are done
-      if (index < translated_deps.size())
-        return translated_deps[index];
-      const unsigned start_idx = translated_deps.size();
-      translated_deps.resize(index+1);
-      RegionTreeForest *forest = ctx->runtime->forest;
-      for (unsigned op_idx = start_idx; op_idx <= index; op_idx++)
-      {
-        const std::vector<StaticDependence> &static_deps = 
-          static_dependences[op_idx];
-        LegionVector<DependenceRecord> &translation = 
-          translated_deps[op_idx];
-        for (std::vector<StaticDependence>::const_iterator it = 
-              static_deps.begin(); it != static_deps.end(); it++)
-        {
-          // Convert the previous offset into an absoluate offset    
-          // If the previous offset is larger than the index then 
-          // this dependence doesn't matter
-          if (it->previous_offset > index)
-            continue;
-          // Compute the field mask by getting the parent region requirement
-          unsigned parent_index = op->find_parent_index(it->current_req_index);
-          FieldSpace field_space =  
-            ctx->find_logical_region(parent_index).get_field_space();
-          const FieldMask dependence_mask = 
-            forest->get_node(field_space)->get_field_mask(it->dependent_fields);
-          translation.push_back(DependenceRecord(index - it->previous_offset, 
-                it->previous_req_index, it->current_req_index, it->validates, 
-                it->dependence_type, dependence_mask));
-        }
-      }
-      return translated_deps[index];
-    }
-
-    /////////////////////////////////////////////////////////////
-    // DynamicTrace 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(TraceID t, InnerContext *c, bool logical_only,
-                               Provenance *p)
-      : LegionTrace(c, t, logical_only, p), tracing(true)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(const DynamicTrace &rhs)
-      : LegionTrace(NULL, 0, true, NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicTrace::~DynamicTrace(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicTrace& DynamicTrace::operator=(const DynamicTrace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    } 
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::end_trace_capture(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tracing);
-#endif
-      // We don't record mapping dependences when tracing so we don't need
-      // to remove them when we are here
-      operations.clear();
-      if (physical_trace != NULL)
-        physical_trace->reset_last_memoized();
-      op_map.clear();
-      internal_dependences.clear();
-      tracing = false;
-#ifdef LEGION_SPY
-      current_uids.clear();
-      num_regions.clear();
-#endif
-    } 
-
-    //--------------------------------------------------------------------------
-    bool DynamicTrace::handles_region_tree(RegionTreeID tid) const
-    //--------------------------------------------------------------------------
-    {
-      // Always handles all of them
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DynamicTrace::initialize_op_tracing(Operation *op,
-                               const std::vector<StaticDependence> *dependences,
-                               const LogicalTraceInfo *trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if (trace_info != NULL) // happens for internal operations
-        return !trace_info->already_traced;
-      else
-        return !is_fixed();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t DynamicTrace::register_operation(Operation *op, GenerationID gen)
-    //--------------------------------------------------------------------------
-    {
-      std::pair<Operation*,GenerationID> key(op,gen);
-      const size_t index = operations.size();
-      if (has_physical_trace() &&
-          !op->is_internal_op() && op->get_memoizable() == NULL)
-        REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
-            "Invalid memoization request. Operation of type %s (UID %lld) "
-            "at index %zd in trace %d requested memoization, but physical "
-            "tracing does not support this operation type yet.",
-            Operation::get_string_rep(op->get_operation_kind()),
-            op->get_unique_op_id(), index, tid);
-
-      // Only need to save this in the map if we are not done tracing
-      if (tracing)
-      {
-        // This is the normal case
-        if (!op->is_internal_op())
-        {
-          operations.push_back(key);
-          op_map[key] = index;
-          // Add a new vector for storing dependences onto the back
-          dependences.push_back(LegionVector<DependenceRecord>());
-          // Record meta-data about the trace for verifying that
-          // it is being replayed correctly
-          op_info.push_back(OperationInfo(op));
-        }
-        else // Otherwise, track internal operations separately
-        {
-          std::pair<InternalOp*,GenerationID> 
-            local_key(static_cast<InternalOp*>(op),gen);
-          internal_dependences[local_key] = LegionVector<DependenceRecord>();
-        }
-      }
-      else
-      {
-        if (!op->is_internal_op())
-        {
-          frontiers.insert(key);
-          // Check for exceeding the trace size
-          if (index >= dependences.size())
-            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
-                          "Trace violation! Recorded %zd operations in trace "
-                          "%d in task %s (UID %lld) but %zd operations have "
-                          "now been issued!", dependences.size(), tid,
-                          ctx->get_task_name(), ctx->get_unique_id(), index+1)
-          // Check to see if the meta-data alignes
-          const OperationInfo &info = op_info[index];
-          // Check that they are the same kind of operation
-          if (info.kind != op->get_operation_kind())
-            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                          "Trace violation! Operation at index %zd of trace %d "
-                          "in task %s (UID %lld) was recorded as having type "
-                          "%s but instead has type %s in replay.",
-                          index, tid, ctx->get_task_name(),ctx->get_unique_id(),
-                          Operation::get_string_rep(info.kind),
-                          Operation::get_string_rep(op->get_operation_kind()))
-          // Check that they have the same number of region requirements
-          if (info.count != op->get_region_count())
-            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                          "Trace violation! Operation at index %zd of trace %d "
-                          "in task %s (UID %lld) was recorded as having %d "
-                          "regions, but instead has %zd regions in replay.",
-                          index, tid, ctx->get_task_name(),
-                          ctx->get_unique_id(), info.count,
-                          op->get_region_count())
-          // If we make it here, everything is good
-          const LegionVector<DependenceRecord> &deps = dependences[index];
-          operations.push_back(key);
-#ifdef LEGION_SPY
-          current_uids[key] = op->get_unique_op_id();
-          num_regions[key] = op->get_region_count();
-#endif
-          // Add a mapping reference since people will be 
-          // registering dependences
-          op->add_mapping_reference(gen);  
-          // Then compute all the dependences on this operation from
-          // our previous recording of the trace
-          for (LegionVector<DependenceRecord>::const_iterator it = 
-                deps.begin(); it != deps.end(); it++)
-          {
-            // Skip any no-dependences since they are still no-deps here
-            if (it->dtype == LEGION_NO_DEPENDENCE)
-              continue;
-#ifdef DEBUG_LEGION
-            assert((it->operation_idx >= 0) &&
-                   ((size_t)it->operation_idx < operations.size()));
-#endif
-            const std::pair<Operation*,GenerationID> &target = 
-                                                  operations[it->operation_idx];
-            std::set<std::pair<Operation*,GenerationID> >::iterator finder =
-              frontiers.find(target);
-            if (finder != frontiers.end())
-            {
-              finder->first->remove_mapping_reference(finder->second);
-              frontiers.erase(finder);
-            }
-
-            if ((it->prev_idx == -1) || (it->next_idx == -1))
-            {
-              op->register_dependence(target.first, target.second); 
-#ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-               op->get_context()->get_unique_id(),
-               get_current_uid_by_index(it->operation_idx),
-               (it->prev_idx == -1) ? 0 : it->prev_idx,
-               op->get_unique_op_id(), 
-               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
-#endif
-            }
-            else
-            {
-              op->register_region_dependence(it->next_idx, target.first,
-                                             target.second, it->prev_idx,
-                                             it->dtype, it->validates,
-                                             it->dependent_mask);
-#ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-                  op->get_context()->get_unique_id(),
-                  get_current_uid_by_index(it->operation_idx), it->prev_idx,
-                  op->get_unique_op_id(), it->next_idx, it->dtype);
-#endif
-            }
-          }
+                         req);
+          // Mark that we are starting our dependence analysis
+          close_op->begin_dependence_analysis();
+          // Do any other work for the dependence analysis
+          close_op->trigger_dependence_analysis();
+          // Record the dependence of the close on the previous op
+          close_op->register_region_dependence(0/*close index*/,
+              prev.first, prev.second, it->previous_req_index,
+              LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+          // Then record our dependence on the close operation
+          op->register_region_dependence(it->current_req_index,
+              close_op, close_op->get_generation(), 0/*close index*/,
+              LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+          // Dispatch this close op
+          close_op->end_dependence_analysis();
         }
         else
         {
-          // We already added our creator to the list of operations
-          // so the set of dependences is index-1
-#ifdef DEBUG_LEGION
-          assert(index > 0);
-#endif
-          const LegionVector<DependenceRecord> &deps = dependences[index-1];
-          // Special case for internal operations
-          // Internal operations need to register transitive dependences
-          // on all the other operations with which it interferes.
-          // We can get this from the set of operations on which the
-          // operation we are currently performing dependence analysis
-          // has dependences.
-          InternalOp *internal_op = static_cast<InternalOp*>(op);
-#ifdef DEBUG_LEGION
-          assert(internal_op == dynamic_cast<InternalOp*>(op));
-#endif
-          int internal_index = internal_op->get_internal_index();
-          for (LegionVector<DependenceRecord>::const_iterator it = 
-                deps.begin(); it != deps.end(); it++)
-          {
-            // We only record dependences for this internal operation on
-            // the indexes for which this internal operation is being done
-            if (internal_index != it->next_idx)
-              continue;
-#ifdef DEBUG_LEGION
-            assert((it->operation_idx >= 0) &&
-                   ((size_t)it->operation_idx < operations.size()));
-#endif
-            const std::pair<Operation*,GenerationID> &target = 
-                                                  operations[it->operation_idx];
-
-            // If this is the case we can do the normal registration
-            if ((it->prev_idx == -1) || (it->next_idx == -1))
-            {
-              internal_op->register_dependence(target.first, target.second); 
-#ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-               op->get_context()->get_unique_id(),
-               get_current_uid_by_index(it->operation_idx),
-               (it->prev_idx == -1) ? 0 : it->prev_idx,
-               op->get_unique_op_id(), 
-               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
-#endif
-            }
-            else
-            {
-              // Promote no-dependence cases to full dependences here
-              internal_op->record_trace_dependence(target.first, target.second,
-                                                   it->prev_idx, it->next_idx,
-                                                   LEGION_TRUE_DEPENDENCE, 
-                                                   it->dependent_mask);
-#ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-                  internal_op->get_context()->get_unique_id(),
-                  get_current_uid_by_index(it->operation_idx), it->prev_idx,
-                  internal_op->get_unique_op_id(), 0, it->dtype);
-#endif
-            }
-          }
+          // Can just record a normal dependence
+          op->register_region_dependence(it->current_req_index,
+              prev.first, prev.second, it->previous_req_index,
+              it->dependence_type, it->validates, mask);
         }
       }
-      return index;
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::record_dependence(Operation *target,GenerationID tar_gen,
-                                         Operation *source,GenerationID src_gen)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tracing);
-      if (!source->is_internal_op())
-      {
-        assert(operations.back().first == source);
-        assert(operations.back().second == src_gen);
-      }
-#endif
-      std::pair<Operation*,GenerationID> target_key(target, tar_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
-        finder = op_map.find(target_key);
-      // We only need to record it if it falls within our trace
-      if (finder != op_map.end())
-      {
-        // Two cases here
-        if (!source->is_internal_op())
-        {
-          // Normal case
-          insert_dependence(DependenceRecord(finder->second));
-        }
-        else
-        {
-          // Otherwise this is an internal op so record it special
-          // Don't record dependences on our creator
-          if (target_key != operations.back())
-          {
-            std::pair<InternalOp*,GenerationID> 
-              src_key(static_cast<InternalOp*>(source), src_gen);
-#ifdef DEBUG_LEGION
-            assert(internal_dependences.find(src_key) != 
-                   internal_dependences.end());
-#endif
-            insert_dependence(src_key, DependenceRecord(finder->second));
-          }
-        }
-      }
-      else if (target->is_internal_op())
-      {
-        // They shouldn't both be internal operations, if they are, then
-        // they should be going through the other path that tracks
-        // dependences based on specific region requirements
-#ifdef DEBUG_LEGION
-        assert(!source->is_internal_op());
-#endif
-        // First check to see if the internal op is one of ours
-        std::pair<InternalOp*,GenerationID> 
-          local_key(static_cast<InternalOp*>(target),tar_gen);
-        std::map<std::pair<InternalOp*,GenerationID>,
-                LegionVector<DependenceRecord>>::const_iterator
-          internal_finder = internal_dependences.find(local_key);
-        if (internal_finder != internal_dependences.end())
-        {
-          const LegionVector<DependenceRecord> &internal_deps = 
-                                                        internal_finder->second;
-          for (LegionVector<DependenceRecord>::const_iterator it = 
-                internal_deps.begin(); it != internal_deps.end(); it++)
-            insert_dependence(DependenceRecord(it->operation_idx)); 
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::record_region_dependence(Operation *target, 
-                                                GenerationID tar_gen,
-                                                Operation *source, 
-                                                GenerationID src_gen,
-                                                unsigned target_idx, 
-                                                unsigned source_idx,
-                                                DependenceType dtype,
-                                                bool validates,
-                                                const FieldMask &dep_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tracing);
-      if (!source->is_internal_op())
-      {
-        assert(operations.back().first == source);
-        assert(operations.back().second == src_gen);
-      }
-#endif
-      std::pair<Operation*,GenerationID> target_key(target, tar_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
-        finder = op_map.find(target_key);
-      // We only need to record it if it falls within our trace
-      if (finder != op_map.end())
-      {
-        // Two cases here, 
-        if (!source->is_internal_op())
-        {
-          // Normal case
-          insert_dependence(
-              DependenceRecord(finder->second, target_idx, source_idx,
-                   validates, dtype, dep_mask));
-        }
-        else
-        {
-          // Otherwise this is a internal op so record it special
-          // Don't record dependences on our creator
-          if (target_key != operations.back())
-          { 
-            std::pair<InternalOp*,GenerationID> 
-              src_key(static_cast<InternalOp*>(source), src_gen);
-#ifdef DEBUG_LEGION
-            assert(internal_dependences.find(src_key) != 
-                   internal_dependences.end());
-#endif
-            insert_dependence(src_key, 
-                DependenceRecord(finder->second, target_idx, source_idx,
-                     validates, dtype, dep_mask));
-          }
-        }
-      }
-      else if (target->is_internal_op())
-      {
-        // First check to see if the internal op is one of ours
-        std::pair<InternalOp*,GenerationID> 
-          local_key(static_cast<InternalOp*>(target), tar_gen);
-        std::map<std::pair<InternalOp*,GenerationID>,
-                 LegionVector<DependenceRecord>>::const_iterator
-          internal_finder = internal_dependences.find(local_key);
-        if (internal_finder != internal_dependences.end())
-        {
-          // It is one of ours, so two cases
-          if (!source->is_internal_op())
-          {
-            // Iterate over the internal operation dependences and 
-            // translate them to our dependences
-            for (LegionVector<DependenceRecord>::const_iterator
-                  it = internal_finder->second.begin(); 
-                  it != internal_finder->second.end(); it++)
-            {
-              FieldMask overlap = it->dependent_mask & dep_mask;
-              if (!overlap)
-                continue;
-              insert_dependence(
-                  DependenceRecord(it->operation_idx, it->prev_idx,
-                     source_idx, it->validates, it->dtype, overlap));
-            }
-          }
-          else
-          {
-            // Iterate over the internal operation dependences
-            // and translate them to our dependences
-            std::pair<InternalOp*,GenerationID> 
-              src_key(static_cast<InternalOp*>(source), src_gen);
-#ifdef DEBUG_LEGION
-            assert(internal_dependences.find(src_key) != 
-                   internal_dependences.end());
-#endif
-            for (LegionVector<DependenceRecord>::const_iterator
-                  it = internal_finder->second.begin(); 
-                  it != internal_finder->second.end(); it++)
-            {
-              FieldMask overlap = it->dependent_mask & dep_mask;
-              if (!overlap)
-                continue;
-              insert_dependence(src_key, 
-                  DependenceRecord(it->operation_idx, it->prev_idx,
-                    source_idx, it->validates, it->dtype, overlap));
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::record_no_dependence(Operation *target, 
-                                            GenerationID tar_gen,
-                                            Operation *source, 
-                                            GenerationID src_gen,
-                                            unsigned target_idx, 
-                                            unsigned source_idx,
-                                            const FieldMask &dep_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tracing);
-      assert(!target->is_internal_op());
-      assert(!source->is_internal_op());
-#endif
-      std::pair<Operation*,GenerationID> target_key(target, tar_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
-        finder = op_map.find(target_key);
-      // We only need to record it if it falls within our trace
-      if (finder != op_map.end())
-      {
-        insert_dependence(DependenceRecord(finder->second, target_idx, 
-                  source_idx, false, LEGION_NO_DEPENDENCE, dep_mask));
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::record_aliased_children(unsigned req_index,
-                                          unsigned depth, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      unsigned index = operations.size() - 1;
-      aliased_children[index].push_back(AliasChildren(req_index, depth, mask));
-    } 
-
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    void DynamicTrace::perform_logging(
-                               UniqueID prev_fence_uid, UniqueID curr_fence_uid)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID context_uid = ctx->get_unique_id();
-      for (unsigned idx = 0; idx < operations.size(); ++idx)
-      {
-        const UniqueID uid = get_current_uid_by_index(idx);
-        const LegionVector<DependenceRecord> &deps = dependences[idx];
-        for (LegionVector<DependenceRecord>::const_iterator it =
-             deps.begin(); it != deps.end(); it++)
-        {
-          if ((it->prev_idx == -1) || (it->next_idx == -1))
-          {
-            LegionSpy::log_mapping_dependence(
-               context_uid, get_current_uid_by_index(it->operation_idx),
-               (it->prev_idx == -1) ? 0 : it->prev_idx,
-               uid,
-               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
-          }
-          else
-          {
-            LegionSpy::log_mapping_dependence(
-                context_uid, get_current_uid_by_index(it->operation_idx),
-                it->prev_idx, uid, it->next_idx, it->dtype);
-          }
-        }
-        LegionSpy::log_mapping_dependence(
-            context_uid, prev_fence_uid, 0, uid, 0, LEGION_TRUE_DEPENDENCE);
-        LegionSpy::log_mapping_dependence(
-            context_uid, uid, 0, curr_fence_uid, 0, LEGION_TRUE_DEPENDENCE);
-      }
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::insert_dependence(const DependenceRecord &record)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!dependences.empty());
-#endif
-      LegionVector<DependenceRecord> &deps = dependences.back();
-      // Try to merge it with an existing dependence
-      for (unsigned idx = 0; idx < deps.size(); idx++)
-        if (deps[idx].merge(record))
-          return;
-      // If we make it here, we couldn't merge it so just add it
-      deps.push_back(record);
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::insert_dependence(
-                                 const std::pair<InternalOp*,GenerationID> &key,
-                                 const DependenceRecord &record)
-    //--------------------------------------------------------------------------
-    {
-      LegionVector<DependenceRecord> &deps = internal_dependences[key];
-      // Try to merge it with an existing dependence
-      for (unsigned idx = 0; idx < deps.size(); idx++)
-        if (deps[idx].merge(record))
-          return;
-      // If we make it here, we couldn't merge it so just add it
-      deps.push_back(record);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1209,7 +866,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Indicate that we are done capturing this trace
-      trace->end_trace_capture();
+      trace->end_trace_execution(this);
       // Register this fence with all previous users in the parent's context
       FenceOp::trigger_dependence_analysis();
       parent_ctx->record_previous_trace(trace);
@@ -1241,7 +898,7 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
+        current_template->finalize(parent_ctx, this, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -1352,17 +1009,6 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      if (trace->is_replaying())
-      {
-        PhysicalTrace *physical_trace = trace->get_physical_trace();
-#ifdef DEBUG_LEGION
-        assert(physical_trace != NULL);
-#endif
-        trace->perform_logging(
-         physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
-      }
-#endif
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 
@@ -1441,7 +1087,7 @@ namespace Legion {
         assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
+        current_template->finalize(parent_ctx, this, has_blocking_call);
         PhysicalTrace *physical_trace = trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -1513,8 +1159,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *tr,
-                                          Provenance *provenance)
+    void TraceReplayOp::initialize_replay(InnerContext *ctx, 
+                                       LogicalTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
@@ -1675,7 +1321,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *tr,
+    void TraceBeginOp::initialize_begin(InnerContext *ctx, LogicalTrace *tr,
                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -1712,6 +1358,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TRACE_BEGIN_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      trace->begin_trace_execution(this);
+      TraceOp::trigger_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1838,10 +1492,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
+    PhysicalTrace::PhysicalTrace(Runtime *rt, LogicalTrace *lt)
       : runtime(rt), logical_trace(lt), perform_fence_elision(
           !(runtime->no_trace_optimization || runtime->no_fence_elision)),
-        repl_ctx(dynamic_cast<ReplicateContext*>(lt->ctx)),
+        repl_ctx(dynamic_cast<ReplicateContext*>(lt->context)),
         previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
         new_template_count(0), last_memoized(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
@@ -1866,10 +1520,18 @@ namespace Legion {
     PhysicalTrace::~PhysicalTrace()
     //--------------------------------------------------------------------------
     {
+      std::set<RtEvent> deleted_events;
+      ApEvent pending_deletion = ApEvent::NO_AP_EVENT;
       for (std::vector<PhysicalTemplate*>::iterator it =
            templates.begin(); it != templates.end(); ++it)
-        delete (*it);
+        if (!(*it)->defer_template_deletion(pending_deletion, deleted_events))
+          delete (*it);
       templates.clear();
+      if (!deleted_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(deleted_events);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1879,7 +1541,7 @@ namespace Legion {
     {
       ApEvent pending_deletion;
       // See if we're going to exceed the maximum number of templates
-      if (templates.size() == logical_trace->ctx->get_max_trace_templates())
+      if (templates.size() == logical_trace->context->get_max_trace_templates())
       {
 #ifdef DEBUG_LEGION
         assert(!templates.empty());
@@ -1897,7 +1559,7 @@ namespace Legion {
       templates.push_back(tpl);
       if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
       {
-        InnerContext *ctx = logical_trace->ctx;
+        InnerContext *ctx = logical_trace->context;
         REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
             "WARNING: The runtime has created %d new replayable templates "
             "for trace %u in task %s (UID %lld) without replaying any "
@@ -1926,7 +1588,7 @@ namespace Legion {
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
-        InnerContext *ctx = logical_trace->ctx;
+        InnerContext *ctx = logical_trace->context;
         REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
             "WARNING: The runtime has failed to memoize the trace more than "
             "%u times, due to the absence of a replayable template. It is "
@@ -2168,12 +1830,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceViewSet::TraceViewSet(InnerContext *ctx, DistributedID own_did, 
-                               RegionNode *r)
-      : context(ctx), region(r), owner_did(
+                               IndexSpaceExpression *expr, RegionTreeID tid)
+      : context(ctx), expression(expr), tree_id(tid), owner_did(
           (own_did > 0) ? own_did : ctx->did), has_collective_views(false)
     //--------------------------------------------------------------------------
     {
-      region->add_nested_resource_ref(owner_did);
+      expression->add_nested_expression_reference(owner_did);
       if (owner_did == ctx->did)
         context->add_base_resource_ref(TRACE_REF);
       else
@@ -2204,8 +1866,8 @@ namespace Legion {
         if (context->remove_nested_resource_ref(owner_did))
           delete context;
       }
-      if (region->remove_nested_resource_ref(owner_did))
-        delete region;
+      if (expression->remove_nested_expression_reference(owner_did))
+        delete expression;
       conditions.clear();
     }
 
@@ -2215,7 +1877,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
-      IndexSpaceExpression *const total_expr = region->row_source; 
+      IndexSpaceExpression *const total_expr = expression; 
       const size_t expr_volume = expr->get_volume();
       if (expr != total_expr)
       {
@@ -2356,7 +2018,7 @@ namespace Legion {
         return;
       }
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = region->row_source; 
+      IndexSpaceExpression *const total_expr = expression; 
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -2569,7 +2231,7 @@ namespace Legion {
       if (expr->is_empty())
         return true;
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = region->row_source;
+      IndexSpaceExpression *const total_expr = expression;
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -2707,7 +2369,7 @@ namespace Legion {
         return;
       }
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = region->row_source;
+      IndexSpaceExpression *const total_expr = expression;
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -3384,8 +3046,8 @@ namespace Legion {
     void TraceViewSet::dump(void) const
     //--------------------------------------------------------------------------
     {
-      const LogicalRegion lr = region->handle;
       RegionTreeForest *forest = context->runtime->forest;
+      RegionNode *region = forest->get_tree(tree_id);
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
       {
@@ -3395,8 +3057,6 @@ namespace Legion {
         {
           char *mask = region->column_source->to_string(it->second, context);
           const void *name = NULL; size_t name_size = 0;
-          forest->runtime->retrieve_semantic_information(lr, 
-              LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
           if (view->is_fill_view())
           {
             log_tracing.info() << "  "
@@ -3486,8 +3146,7 @@ namespace Legion {
         if (dids.size() > 1)
         {
           InnerContext::CollectiveResult *result =
-            context->find_or_create_collective_view(
-                region->handle.get_tree_id(), dids, ready);
+            context->find_or_create_collective_view(tree_id, dids, ready);
           results[it->first] = result;
         }
         else
@@ -3767,8 +3426,7 @@ namespace Legion {
       {
         RtEvent ready;
         InnerContext::CollectiveResult *result =
-          context->find_or_create_collective_view(
-              region->handle.get_tree_id(), dids, ready);
+          context->find_or_create_collective_view(tree_id, dids, ready);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
         // Then wait for the collective view to be registered
@@ -3803,15 +3461,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
-                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask)
-      : context(trace->logical_trace->ctx), forest(f),
-        region(node), condition_expr(region->row_source), condition_mask(mask),
-        invalid_mask(mask), precondition_views(NULL), anticondition_views(NULL),
-        postcondition_views(NULL)
+                   RegionTreeForest *f, unsigned parent_req_idx, 
+                   IndexSpaceExpression *expr,
+                   const FieldMask &mask, RegionTreeID tid)
+      : EqSetTracker(set_lock), context(trace->logical_trace->context),
+        forest(f), condition_expr(expr), condition_mask(mask), tree_id(tid),
+        parent_req_index(parent_req_idx), precondition_views(NULL),
+        anticondition_views(NULL), postcondition_views(NULL)
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
-      region->add_base_gc_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3819,7 +3478,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(current_sets.empty());
+      assert(equivalence_sets.empty());
 #endif
       for (LegionMap<IndexSpaceExpression*,
                      FieldMaskSet<LogicalView> >::const_iterator eit =
@@ -3859,8 +3518,6 @@ namespace Legion {
             unique_view_expressions.end(); it++) 
         if ((*it)->remove_base_expression_reference(TRACE_REF))
           delete (*it);
-      if (region->remove_base_gc_ref(TRACE_REF))
-        delete region;
       if (condition_expr->remove_base_expression_reference(TRACE_REF))
         delete condition_expr;
       if (precondition_views != NULL)
@@ -3872,114 +3529,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::record_subscription(VersionManager *owner,
-                                                AddressSpaceID space)
-    //--------------------------------------------------------------------------
-    {
-      const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
-      AutoLock s_lock(set_lock);
-      if (subscription_owners.empty())
-        add_reference();
-      std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
-        finder = subscription_owners.find(key);
-      if (finder == subscription_owners.end())
-        subscription_owners[key] = 1;
-      else
-        finder->second++;
-    }
-
-    //--------------------------------------------------------------------------
-    bool TraceConditionSet::finish_subscription(VersionManager *owner,
-                                                AddressSpaceID space)
-    //--------------------------------------------------------------------------
-    {
-      const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
-      AutoLock s_lock(set_lock);
-      std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
-        finder = subscription_owners.find(key);
-#ifdef DEBUG_LEGION
-      assert(finder != subscription_owners.end());
-      assert(finder->second > 0);
-#endif
-      if (--finder->second == 0)
-        subscription_owners.erase(finder);
-      if (!subscription_owners.empty())
-        return false;
-      return remove_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceConditionSet::record_equivalence_set(EquivalenceSet *set,
-                                                   const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(set_lock);
-      if (current_sets.insert(set, mask))
-        set->add_base_resource_ref(TRACE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceConditionSet::record_pending_equivalence_set(EquivalenceSet *set,
-                                                          const FieldMask &mask) 
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(set_lock);
-      pending_sets.insert(set, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceConditionSet::invalidate_equivalence_sets(const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(set_lock);
-      if (!(mask - invalid_mask))
-        return;
-      invalid_mask |= mask;
-      std::vector<EquivalenceSet*> to_delete;
-      for (FieldMaskSet<EquivalenceSet>::iterator it =
-            current_sets.begin(); it != current_sets.end(); it++)
-      {
-        it.filter(mask);
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      for (std::vector<EquivalenceSet*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        current_sets.erase(*it);
-        if ((*it)->remove_base_resource_ref(TRACE_REF))
-          assert(false); // should never end up deleting this here
-      }
-      current_sets.tighten_valid_mask();
-    }
-
-    //--------------------------------------------------------------------------
     void TraceConditionSet::invalidate_equivalence_sets(void)
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EquivalenceSet> to_remove;
-      std::map<AddressSpaceID,std::vector<VersionManager*> > to_cancel;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > to_cancel;
       {
         AutoLock s_lock(set_lock);
-        if (subscription_owners.empty())
+        if (current_subscriptions.empty())
         {
 #ifdef DEBUG_LEGION
-          assert(current_sets.empty());
+          assert(equivalence_sets.empty());
 #endif
           return;
         }
         // Copy and not remove since we need to see the acknowledgement
         // before we know when it is safe to remove our references
-        for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
-              const_iterator it = subscription_owners.begin(); 
-              it != subscription_owners.end(); it++)
-          to_cancel[it->first.second].push_back(it->first.first);
-        to_remove.swap(current_sets);
+        to_remove.swap(equivalence_sets);
+        to_cancel.swap(current_subscriptions);
       }
       cancel_subscriptions(context->runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             to_remove.begin(); it != to_remove.end(); it++)
-        if (it->first->remove_base_resource_ref(TRACE_REF))
+        if (it->first->remove_base_gc_ref(TRACE_REF))
           delete it->first;
     }
 
@@ -4118,7 +3690,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceViewSet dump_view_set(context, 0/*owner did*/,
-          forest->get_tree(region->handle.get_tree_id()));
+                                 condition_expr, tree_id);
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -4132,7 +3704,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceViewSet dump_view_set(context, 0/*owner did*/,
-          forest->get_tree(region->handle.get_tree_id()));
+                                 condition_expr, tree_id);
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -4146,7 +3718,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceViewSet dump_view_set(context, 0/*owner did*/,
-          forest->get_tree(region->handle.get_tree_id()));
+                                 condition_expr, tree_id);
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -4164,10 +3736,12 @@ namespace Legion {
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
       // First check to see if we need to recompute our equivalence sets
+      const FieldMask invalid_mask = 
+        condition_mask - equivalence_sets.get_valid_mask();
       if (!!invalid_mask)
       {
         const UniqueID opid = op->get_unique_op_id();
-        const RtEvent ready = recompute_equivalence_sets(opid);
+        const RtEvent ready = recompute_equivalence_sets(opid, invalid_mask);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent tested = Runtime::create_rt_user_event();
@@ -4194,7 +3768,7 @@ namespace Legion {
         precondition_analyses.push_back(analysis);
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              current_sets.begin(); it != current_sets.end(); it++)
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
@@ -4221,7 +3795,7 @@ namespace Legion {
         anticondition_analyses.push_back(analysis);
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              current_sets.begin(); it != current_sets.end(); it++)
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
@@ -4298,10 +3872,12 @@ namespace Legion {
       // blocking all other operations from running and changing the 
       // equivalence sets while we are here
       // First check to see if we need to recompute our equivalence sets
+      const FieldMask invalid_mask = 
+        condition_mask - equivalence_sets.get_valid_mask();
       if (!!invalid_mask)
       {
         const UniqueID opid = op->get_unique_op_id();
-        const RtEvent ready = recompute_equivalence_sets(opid);
+        const RtEvent ready = recompute_equivalence_sets(opid, invalid_mask);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent applied= Runtime::create_rt_user_event();
@@ -4325,7 +3901,7 @@ namespace Legion {
         analysis->add_reference();
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              current_sets.begin(); it != current_sets.end(); it++)
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
@@ -4358,56 +3934,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TraceConditionSet::handle_finalize_sets(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferTraceFinalizeSetsArgs *dargs =
-        (const DeferTraceFinalizeSetsArgs*)args;
-      dargs->set->finalize_computed_sets(); 
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid)
+    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid,
+                                                  const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!invalid_mask);
 #endif
-      std::set<RtEvent> ready_events;
-      ContextID ctxid = context->get_context().get_id();
       AddressSpaceID space = forest->runtime->address_space;
-      region->compute_equivalence_sets(ctxid, context, this, space, 
-          condition_expr, invalid_mask, opid, space, ready_events,
-          false/*downward only*/, false/*covers*/);
-      invalid_mask.clear();
-      if (!ready_events.empty())
+      // Create a user event and store it in the equivalence set ready structure
+      const RtUserEvent compute_event = Runtime::create_rt_user_event();
       {
-        const RtEvent ready = Runtime::merge_events(ready_events);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          // Launch a meta-task to finalize this trace condition set
-          DeferTraceFinalizeSetsArgs args(this, opid);
-          return forest->runtime->issue_runtime_meta_task(args, 
-                          LG_LATENCY_DEFERRED_PRIORITY, ready);
-        }
+        AutoLock s_lock(set_lock);
+#ifdef DEBUG_LEGION
+        assert(equivalence_sets_ready == NULL);
+#endif
+        equivalence_sets_ready = new LegionMap<RtUserEvent,FieldMask>();
+        equivalence_sets_ready->insert(
+            std::make_pair(compute_event, invalid_mask));
       }
-      finalize_computed_sets();
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceConditionSet::finalize_computed_sets(void)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need the lock here, there's only one thing looking at these
-      // data structures at this point
-      if (pending_sets.empty())
-        return;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            pending_sets.begin(); it != pending_sets.end(); it++)
-        if (current_sets.insert(it->first, it->second))
-          it->first->add_base_resource_ref(TRACE_REF);
-      pending_sets.clear();
+      std::vector<EqSetTracker*> targets(1, this);
+      std::vector<AddressSpaceID> target_spaces(1, space);
+      RtEvent ready = context->compute_equivalence_sets(parent_req_index,
+          targets, target_spaces, space, condition_expr, invalid_mask);
+      if (ready.exists() && !ready.has_triggered())
+      {
+        // Launch a meta-task to finalize this trace condition set
+        LgFinalizeEqSetsArgs args(this, compute_event, opid,
+            context, parent_req_index, condition_expr);
+        return forest->runtime->issue_runtime_meta_task(args, 
+                        LG_LATENCY_DEFERRED_PRIORITY, ready);
+      }
+      else
+        finalize_equivalence_sets(compute_event, context, forest->runtime,
+            parent_req_index, condition_expr, opid);
+      return compute_event;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4426,8 +3987,7 @@ namespace Legion {
       recording.store(true);
       events.push_back(fence_event);
       event_map[fence_event] = fence_completion_id;
-      pending_inv_topo_order.store(NULL);
-      pending_transitive_reduction.store(NULL);
+      finished_transitive_reduction.store(NULL);
       instructions.push_back(
          new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
     }
@@ -4467,13 +4027,9 @@ namespace Legion {
         }
         cached_mappings.clear();
       }
-      std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
-      if (inv_topo_order != NULL)
-        delete inv_topo_order;
-      std::vector<std::vector<unsigned> > *transitive_reduction =
-        pending_transitive_reduction.load();
-      if (transitive_reduction != NULL)
-        delete transitive_reduction;
+      TransitiveReductionState *state = finished_transitive_reduction.load();
+      if (state != NULL)
+        delete state;
     }
 
     //--------------------------------------------------------------------------
@@ -4582,8 +4138,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
-                                         ReplTraceOp *op, InnerContext *context,
-                                         UniqueID opid, bool has_blocking_call) 
+                   Operation *op, InnerContext *context, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
@@ -4601,34 +4156,53 @@ namespace Legion {
       // inside the trace condition sets but that is a small price to pay to
       // minimize the number of conditions that we need to do the capture
       // Next we need to compute the equivalence sets for all these regions
-      unsigned index = 0;
-      std::set<RtEvent> eq_events;
-      const ContextID ctx = context->get_context().get_id();
-      LegionVector<VersionInfo> version_infos(trace_regions.size());
-      for (FieldMaskSet<RegionNode>::const_iterator it =
-            trace_regions.begin(); it != trace_regions.end(); it++, index++)
-      {
-        it->first->perform_versioning_analysis(ctx, context, 
-            &version_infos[index], it->second, opid, 
-            trace->runtime->address_space, eq_events);
-        if (it->first->remove_base_resource_ref(TRACE_REF))
-          delete it->first;
-      }
-      trace_regions.clear();
-      if (!eq_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(eq_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
       FieldMaskSet<EquivalenceSet> current_sets;
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      std::map<EquivalenceSet*,unsigned> parent_req_indexes;
       {
-        const FieldMaskSet<EquivalenceSet> &region_sets = 
-            version_infos[idx].get_equivalence_sets();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              region_sets.begin(); it != region_sets.end(); it++)
-          current_sets.insert(it->first, it->second);
+        unsigned index = 0;
+        std::set<RtEvent> eq_events;
+        const ContextID ctx = context->get_physical_tree_context();
+        LegionVector<VersionInfo> version_infos(trace_regions.size());
+        std::map<RegionNode*,unsigned>::const_iterator req_it =
+          trace_region_parent_req_indexes.begin();
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              trace_regions.begin(); it != trace_regions.end(); 
+              it++, req_it++, index++)
+        {
+#ifdef DEBUG_LEGION
+          // Make sure the parent_req_indexes zip with the trace_regions
+          assert(req_it->first == it->first);
+#endif
+          it->first->perform_versioning_analysis(ctx, context, 
+            &version_infos[index], it->second, op, 0/*index*/,
+            req_it->second, eq_events);
+        }
+#ifdef DEBUG_LEGION
+        assert(req_it == trace_region_parent_req_indexes.end());
+#endif
+        // Reset in debug mode since we traversed to check
+        req_it = trace_region_parent_req_indexes.begin();
+        trace_regions.clear();
+        if (!eq_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(eq_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        for (unsigned idx = 0; idx < version_infos.size(); idx++, req_it++)
+        {
+          const FieldMaskSet<EquivalenceSet> &region_sets = 
+              version_infos[idx].get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                region_sets.begin(); it != region_sets.end(); it++)
+          {
+            current_sets.insert(it->first, it->second);
+            parent_req_indexes[it->first] = req_it->second;
+          }
+          if (req_it->first->remove_base_resource_ref(TRACE_REF))
+            delete req_it->first;
+        }
+        trace_region_parent_req_indexes.clear();
       }
       // Make a trace condition set for each one of them
       // Note for control replication, we're just letting multiple shards 
@@ -4637,19 +4211,24 @@ namespace Legion {
       std::vector<RtEvent> ready_events;
       conditions.reserve(current_sets.size()); 
       RegionTreeForest *forest = trace->runtime->forest;
+      std::map<EquivalenceSet*,unsigned>::const_iterator req_it =
+        parent_req_indexes.begin();
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            current_sets.begin(); it != current_sets.end(); it++)
+            current_sets.begin(); it != current_sets.end(); it++, req_it++)
       {
-        TraceConditionSet *condition =
-          new TraceConditionSet(trace, forest, 
-              it->first->region_node, it->second);
+#ifdef DEBUG_LEGION
+        assert(req_it->first == it->first);
+#endif
+        TraceConditionSet *condition = new TraceConditionSet(trace, forest,
+           req_it->second, it->first->set_expr, it->second, it->first->tree_id);
         condition->add_reference();
         // This looks redundant because it is a bit since we're just going
         // to compute the single equivalence set we already have here but
         // really what we're doing here is registering the condition with 
         // the VersionManager that owns this equivalence set which is a
         // necessary thing for us to do
-        const RtEvent ready = condition->recompute_equivalence_sets(opid);
+        const RtEvent ready = condition->recompute_equivalence_sets(
+            op->get_unique_op_id(), it->second);
         if (ready.exists())
           ready_events.push_back(ready);
         condition->capture(it->first, it->second, ready_events);
@@ -4685,11 +4264,11 @@ namespace Legion {
             if (not_subsumed)
               return Replayable(
                   false, "precondition not subsumed: " +
-                    condition.to_string(trace->logical_trace->ctx));
+                    condition.to_string(trace->logical_trace->context));
             else
               return Replayable(
                false, "postcondition anti dependent: " +
-                 condition.to_string(trace->logical_trace->ctx));
+                 condition.to_string(trace->logical_trace->context));
           }
           else
           {
@@ -4755,18 +4334,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(InnerContext *context, UniqueID opid,
-                                    bool has_blocking_call, ReplTraceOp *op)
+    void PhysicalTemplate::finalize(InnerContext *context, Operation *op,
+                                    bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       recording = false;
-      replayable = check_replayable(op, context, opid, has_blocking_call);
+      replayable = check_replayable(op, context, has_blocking_call);
 
       if (!replayable)
       {
         if (trace->runtime->dump_physical_traces)
         {
-          optimize(op, true/*do transitive reduction inline*/);
+          optimize(op, !trace->runtime->no_transitive_reduction);
           dump_template();
         }
         return;
@@ -4775,12 +4354,18 @@ namespace Legion {
       std::fill(events.begin(), events.end(), ApEvent::NO_AP_EVENT);
       event_map.clear();
       // Defer performing the transitive reduction because it might
-      // be expensive (see comment above)
-      if (!trace->runtime->no_trace_optimization)
+      // be expensive (see comment above). Note you can only kick off
+      // the transitive reduction in the background once all the other
+      // optimizations are done so that they don't race on mutating
+      // the instruction and event data structures
+      if (!trace->runtime->no_trace_optimization &&
+          !trace->runtime->no_transitive_reduction)
       {
-        TransitiveReductionArgs args(this);
-        transitive_reduction_done = trace->runtime->issue_runtime_meta_task(
-                                          args, LG_THROUGHPUT_WORK_PRIORITY);
+        TransitiveReductionState *state = 
+          new TransitiveReductionState(Runtime::create_rt_user_event());
+        transitive_reduction_done = state->done;
+        TransitiveReductionArgs args(this, state);
+        trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
       }
       // Can dump now if we're not deferring the transitive reduction
       else if (trace->runtime->dump_physical_traces)
@@ -4788,8 +4373,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::optimize(ReplTraceOp *op,
-                                    bool do_transitive_reduction)
+    void PhysicalTemplate::optimize(Operation *op, bool do_transitive_reduction)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4836,7 +4420,10 @@ namespace Legion {
       {
         propagate_merges(gen);
         if (do_transitive_reduction)
-          transitive_reduction(false/*deferred*/);
+        {
+          TransitiveReductionState state(RtUserEvent::NO_RT_USER_EVENT);
+          transitive_reduction(&state, false/*deferred*/);
+        }
         propagate_copies(&gen);
         eliminate_dead_code(gen);
       }
@@ -5371,12 +4958,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::sync_compute_frontiers(ReplTraceOp *op,
+    void PhysicalTemplate::sync_compute_frontiers(Operation *op,
                                     const std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(op == NULL);
       assert(frontier_events.empty());
 #endif
     }
@@ -5708,302 +5294,424 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::transitive_reduction(bool deferred)
+    void PhysicalTemplate::transitive_reduction(
+                                 TransitiveReductionState *state, bool deferred)
     //--------------------------------------------------------------------------
     {
       // Transitive reduction inspired by Klaus Simon,
       // "An improved algorithm for transitive closure on acyclic digraphs"
 
-      // First, build a DAG and find nodes with no incoming edges
-      std::vector<unsigned> topo_order;
-      topo_order.reserve(instructions.size());
-      std::vector<unsigned> inv_topo_order(events.size(), -1U);
-      std::vector<std::vector<unsigned> > incoming(events.size());
-      std::vector<std::vector<unsigned> > outgoing(events.size());
-
-      initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
-
-      std::map<TraceLocalID, GetTermEvent*> term_insts;
-      std::map<TraceLocalID, ReplayMapping*> replay_insts;
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      // The transitive reduction can be a really long computation and we
+      // don't want it monopolizing an entire processor while it's running
+      // so we time-slice as background tasks until it is done. We pick the
+      // somewhat arbitrary timeslice of 2ms since that's around the right
+      // order of magnitude for other meta-tasks on most machines while still
+      // being large enough to warm-up caches and make forward progress
+      constexpr long long TIMEOUT = 2000; // in microseconds
+      unsigned long long running_time = 0;
+      unsigned long long previous_time = 
+        Realm::Clock::current_time_in_microseconds();
+      std::vector<unsigned> &topo_order = state->topo_order;
+      std::vector<unsigned> &inv_topo_order = state->inv_topo_order;
+      std::vector<std::vector<unsigned> > &incoming = state->incoming;
+      std::vector<std::vector<unsigned> > &outgoing = state->outgoing;
+      if (state->stage == 0)
       {
-        Instruction *inst = instructions[idx];
-        switch (inst->get_kind())
-        {
-          // Pass these instructions as their events will be added later
-          case GET_TERM_EVENT :
-            {
-              GetTermEvent *term = inst->as_get_term_event();
-              term_insts[term->owner] = term; 
-              break;
-            }
-          case REPLAY_MAPPING:
-            {
-              ReplayMapping *replay = inst->as_replay_mapping();
-              replay_insts[inst->owner] = replay;
-              break;
-            }
-          case CREATE_AP_USER_EVENT :
-            {
-              break;
-            }
-          case TRIGGER_EVENT :
-            {
-              TriggerEvent *trigger = inst->as_trigger_event();
-              incoming[trigger->lhs].push_back(trigger->rhs);
-              outgoing[trigger->rhs].push_back(trigger->lhs);
-              break;
-            }
-          case BARRIER_ARRIVAL:
-            {
-              BarrierArrival *arrival = inst->as_barrier_arrival();
-              incoming[arrival->lhs].push_back(arrival->rhs);
-              outgoing[arrival->rhs].push_back(arrival->lhs);
-              break;
-            }
-          case MERGE_EVENT :
-            {
-              MergeEvent *merge = inst->as_merge_event();
-              for (std::set<unsigned>::iterator it = merge->rhs.begin();
-                   it != merge->rhs.end(); ++it)
-              {
-                incoming[merge->lhs].push_back(*it);
-                outgoing[*it].push_back(merge->lhs);
-              }
-              break;
-            }
-          case ISSUE_COPY :
-            {
-              IssueCopy *copy = inst->as_issue_copy();
-              incoming[copy->lhs].push_back(copy->precondition_idx);
-              outgoing[copy->precondition_idx].push_back(copy->lhs);
-              break;
-            }
-          case ISSUE_FILL :
-            {
-              IssueFill *fill = inst->as_issue_fill();
-              incoming[fill->lhs].push_back(fill->precondition_idx);
-              outgoing[fill->precondition_idx].push_back(fill->lhs);
-              break;
-            }
-          case ISSUE_ACROSS:
-            {
-              IssueAcross *across = inst->as_issue_across();
-              incoming[across->lhs].push_back(across->copy_precondition);
-              outgoing[across->copy_precondition].push_back(across->lhs);
-              if (across->collective_precondition != 0)
-              {
-                incoming[across->lhs].push_back(
-                    across->collective_precondition);
-                outgoing[across->collective_precondition].push_back(
-                    across->lhs);
-              }
-              if (across->src_indirect_precondition != 0)
-              {
-                incoming[across->lhs].push_back(
-                    across->src_indirect_precondition);
-                outgoing[across->src_indirect_precondition].push_back(
-                    across->lhs);
-              }
-              if (across->dst_indirect_precondition != 0)
-              {
-                incoming[across->lhs].push_back(
-                    across->dst_indirect_precondition);
-                outgoing[across->dst_indirect_precondition].push_back(
-                    across->lhs);
-              }
-              break;
-            }
-          case SET_OP_SYNC_EVENT :
-            {
-              SetOpSyncEvent *sync = inst->as_set_op_sync_event();
-              inv_topo_order[sync->lhs] = topo_order.size();
-              topo_order.push_back(sync->lhs);
-              break;
-            }
-          case BARRIER_ADVANCE:
-            {
-              BarrierAdvance *advance = inst->as_barrier_advance();
-              inv_topo_order[advance->lhs] = topo_order.size();
-              topo_order.push_back(advance->lhs);
-              break;
-            }
-          case ASSIGN_FENCE_COMPLETION :
-            {
-              inv_topo_order[fence_completion_id] = topo_order.size();
-              topo_order.push_back(fence_completion_id);
-              break;
-            }
-          case COMPLETE_REPLAY :
-            {
-              CompleteReplay *replay = inst->as_complete_replay();
-              // Check to see if we can find a replay instruction to match 
-              std::map<TraceLocalID,ReplayMapping*>::iterator replay_finder =
-                replay_insts.find(replay->owner);
-              if (replay_finder != replay_insts.end())
-              {
-                incoming[replay_finder->second->lhs].push_back(replay->pre);
-                outgoing[replay->pre].push_back(replay_finder->second->lhs);
-                replay_insts.erase(replay_finder);
-              }
-              // Lastly check to see if we can find a term inst to match
-              std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
-                term_insts.find(replay->owner);
-              if (term_finder != term_insts.end())
-              {
-                if (replay->post != 0)
-                {
-                  incoming[term_finder->second->lhs].push_back(replay->post);
-                  outgoing[replay->post].push_back(term_finder->second->lhs);
-                  term_insts.erase(term_finder);
-                }
-                else if (replay->pre != 0)
-                {
-                  incoming[term_finder->second->lhs].push_back(replay->pre);
-                  outgoing[replay->pre].push_back(term_finder->second->lhs);
-                  term_insts.erase(term_finder);
-                }
-              }
-              break;
-            }
-          default:
-            {
-              assert(false);
-              break;
-            }
-        }
+        topo_order.reserve(instructions.size());
+        inv_topo_order.resize(events.size(), -1U);
+        incoming.resize(events.size());
+        outgoing.resize(events.size());
+
+        initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
+        state->stage++;
       }
-#ifdef DEBUG_LEGION
-      // should have seen a complete replay instruction for every replay mapping
-      assert(replay_insts.empty());
-#endif
-      if (!term_insts.empty())
-      {
-        // Any term instructions that don't match with a complete replay
-        // need to be recorded as sources for the BFS
-        for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
-              term_insts.begin(); it != term_insts.end(); it++)
+
+      // First, build a DAG and find nodes with no incoming edges
+      if (state->stage == 1)
+      {  
+        std::map<TraceLocalID, GetTermEvent*> &term_insts = state->term_insts;
+        std::map<TraceLocalID, ReplayMapping*> &replay_insts = 
+          state->replay_insts;
+        for (unsigned idx = state->iteration; idx < instructions.size(); ++idx)
         {
-          inv_topo_order[it->second->lhs] = topo_order.size();
-          topo_order.push_back(it->second->lhs);
+          // Check for timeout
+          if (deferred)
+          {
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
+            {
+              // Hit the timeout so launch a continuation
+              state->iteration = idx;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+              return;
+            }
+            else
+              previous_time = current_time;
+          }
+          Instruction *inst = instructions[idx];
+          switch (inst->get_kind())
+          {
+            // Pass these instructions as their events will be added later
+            case GET_TERM_EVENT :
+              {
+                GetTermEvent *term = inst->as_get_term_event();
+                term_insts[term->owner] = term; 
+                break;
+              }
+            case REPLAY_MAPPING:
+              {
+                ReplayMapping *replay = inst->as_replay_mapping();
+                replay_insts[inst->owner] = replay;
+                break;
+              }
+            case CREATE_AP_USER_EVENT :
+              {
+                break;
+              }
+            case TRIGGER_EVENT :
+              {
+                TriggerEvent *trigger = inst->as_trigger_event();
+                incoming[trigger->lhs].push_back(trigger->rhs);
+                outgoing[trigger->rhs].push_back(trigger->lhs);
+                break;
+              }
+            case BARRIER_ARRIVAL:
+              {
+                BarrierArrival *arrival = inst->as_barrier_arrival();
+                incoming[arrival->lhs].push_back(arrival->rhs);
+                outgoing[arrival->rhs].push_back(arrival->lhs);
+                break;
+              }
+            case MERGE_EVENT :
+              {
+                MergeEvent *merge = inst->as_merge_event();
+                for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                     it != merge->rhs.end(); ++it)
+                {
+                  incoming[merge->lhs].push_back(*it);
+                  outgoing[*it].push_back(merge->lhs);
+                }
+                break;
+              }
+            case ISSUE_COPY :
+              {
+                IssueCopy *copy = inst->as_issue_copy();
+                incoming[copy->lhs].push_back(copy->precondition_idx);
+                outgoing[copy->precondition_idx].push_back(copy->lhs);
+                break;
+              }
+            case ISSUE_FILL :
+              {
+                IssueFill *fill = inst->as_issue_fill();
+                incoming[fill->lhs].push_back(fill->precondition_idx);
+                outgoing[fill->precondition_idx].push_back(fill->lhs);
+                break;
+              }
+            case ISSUE_ACROSS:
+              {
+                IssueAcross *across = inst->as_issue_across();
+                incoming[across->lhs].push_back(across->copy_precondition);
+                outgoing[across->copy_precondition].push_back(across->lhs);
+                if (across->collective_precondition != 0)
+                {
+                  incoming[across->lhs].push_back(
+                      across->collective_precondition);
+                  outgoing[across->collective_precondition].push_back(
+                      across->lhs);
+                }
+                if (across->src_indirect_precondition != 0)
+                {
+                  incoming[across->lhs].push_back(
+                      across->src_indirect_precondition);
+                  outgoing[across->src_indirect_precondition].push_back(
+                      across->lhs);
+                }
+                if (across->dst_indirect_precondition != 0)
+                {
+                  incoming[across->lhs].push_back(
+                      across->dst_indirect_precondition);
+                  outgoing[across->dst_indirect_precondition].push_back(
+                      across->lhs);
+                }
+                break;
+              }
+            case SET_OP_SYNC_EVENT :
+              {
+                SetOpSyncEvent *sync = inst->as_set_op_sync_event();
+                inv_topo_order[sync->lhs] = topo_order.size();
+                topo_order.push_back(sync->lhs);
+                break;
+              }
+            case BARRIER_ADVANCE:
+              {
+                BarrierAdvance *advance = inst->as_barrier_advance();
+                inv_topo_order[advance->lhs] = topo_order.size();
+                topo_order.push_back(advance->lhs);
+                break;
+              }
+            case ASSIGN_FENCE_COMPLETION :
+              {
+                inv_topo_order[fence_completion_id] = topo_order.size();
+                topo_order.push_back(fence_completion_id);
+                break;
+              }
+            case COMPLETE_REPLAY :
+              {
+                CompleteReplay *replay = inst->as_complete_replay();
+                // Check to see if we can find a replay instruction to match 
+                std::map<TraceLocalID,ReplayMapping*>::iterator replay_finder =
+                  replay_insts.find(replay->owner);
+                if (replay_finder != replay_insts.end())
+                {
+                  incoming[replay_finder->second->lhs].push_back(replay->pre);
+                  outgoing[replay->pre].push_back(replay_finder->second->lhs);
+                  replay_insts.erase(replay_finder);
+                }
+                // Lastly check to see if we can find a term inst to match
+                std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
+                  term_insts.find(replay->owner);
+                if (term_finder != term_insts.end())
+                {
+                  if (replay->post != 0)
+                  {
+                    incoming[term_finder->second->lhs].push_back(replay->post);
+                    outgoing[replay->post].push_back(term_finder->second->lhs);
+                    term_insts.erase(term_finder);
+                  }
+                  else if (replay->pre != 0)
+                  {
+                    incoming[term_finder->second->lhs].push_back(replay->pre);
+                    outgoing[replay->pre].push_back(term_finder->second->lhs);
+                    term_insts.erase(term_finder);
+                  }
+                }
+                break;
+              }
+            default:
+              {
+                assert(false);
+                break;
+              }
+          }
         }
+#ifdef DEBUG_LEGION
+        // should have seen a complete replay instruction for every replay mapping
+        assert(replay_insts.empty());
+#endif
+        if (!term_insts.empty())
+        {
+          // Any term instructions that don't match with a complete replay
+          // need to be recorded as sources for the BFS
+          for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
+                term_insts.begin(); it != term_insts.end(); it++)
+          {
+            inv_topo_order[it->second->lhs] = topo_order.size();
+            topo_order.push_back(it->second->lhs);
+          }
+        }
+        state->stage++;
+        state->iteration = 0;
+        term_insts.clear();
+        replay_insts.clear();
       }
 
       // Second, do a toposort on nodes via BFS
-      std::vector<unsigned> remaining_edges(incoming.size());
-      for (unsigned idx = 0; idx < incoming.size(); ++idx)
-        remaining_edges[idx] = incoming[idx].size();
-
-      unsigned idx = 0;
-      while (idx < topo_order.size())
+      if (state->stage == 2)
       {
-        unsigned node = topo_order[idx];
-#ifdef DEBUG_LEGION
-        assert(remaining_edges[node] == 0);
-#endif
-        const std::vector<unsigned> &out = outgoing[node];
-        for (unsigned oidx = 0; oidx < out.size(); ++oidx)
+        std::vector<unsigned> &remaining_edges = state->remaining_edges;
+        if (remaining_edges.empty())
         {
-          unsigned next = out[oidx];
-          if (--remaining_edges[next] == 0)
-          {
-            inv_topo_order[next] = topo_order.size();
-            topo_order.push_back(next);
-          }
+          remaining_edges.resize(incoming.size());
+          for (unsigned idx = 0; idx < incoming.size(); ++idx)
+            remaining_edges[idx] = incoming[idx].size();
         }
-        ++idx;
-      }
-#ifdef DEBUG_LEGION
-      for (unsigned idx = 0; idx < incoming.size(); idx++)
-        assert(remaining_edges[idx] == 0);
-#endif
 
-      // Third, construct a chain decomposition
-      unsigned num_chains = 0;
-      std::vector<unsigned> chain_indices(topo_order.size(), -1U);
-
-      int pos = chain_indices.size() - 1;
-      while (true)
-      {
-        while (pos >= 0 && chain_indices[pos] != -1U)
-          --pos;
-        if (pos < 0) break;
-        unsigned curr = topo_order[pos];
-        while (incoming[curr].size() > 0)
+        unsigned idx = state->iteration;
+        while (idx < topo_order.size())
         {
-          chain_indices[inv_topo_order[curr]] = num_chains;
-          const std::vector<unsigned> &in = incoming[curr];
-          bool found = false;
-          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          // Check for timeout
+          if (deferred)
           {
-            unsigned next = in[iidx];
-            if (chain_indices[inv_topo_order[next]] == -1U)
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
             {
-              found = true;
-              curr = next;
-              chain_indices[inv_topo_order[curr]] = num_chains;
-              break;
+              // Hit the timeout so launch a continuation
+              state->iteration = idx;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
+              return;
+            }
+            else
+              previous_time = current_time;
+          }
+          unsigned node = topo_order[idx];
+#ifdef DEBUG_LEGION
+          assert(remaining_edges[node] == 0);
+#endif
+          const std::vector<unsigned> &out = outgoing[node];
+          for (unsigned oidx = 0; oidx < out.size(); ++oidx)
+          {
+            unsigned next = out[oidx];
+            if (--remaining_edges[next] == 0)
+            {
+              inv_topo_order[next] = topo_order.size();
+              topo_order.push_back(next);
             }
           }
-          if (!found) break;
+          ++idx;
         }
-        chain_indices[inv_topo_order[curr]] = num_chains;
-        ++num_chains;
+#ifdef DEBUG_LEGION
+        for (unsigned idx = 0; idx < incoming.size(); idx++)
+          assert(remaining_edges[idx] == 0);
+#endif
+        state->stage++;
+        state->iteration = 0;
+        remaining_edges.clear();
+      }
+
+      // Third, construct a chain decomposition
+      if (state->stage == 3)
+      {
+        std::vector<unsigned> &chain_indices = state->chain_indices;
+        if (chain_indices.empty())
+        {
+          chain_indices.resize(topo_order.size(), -1U);
+          state->pos = chain_indices.size() - 1;
+        }
+
+        int pos = state->pos;
+        unsigned num_chains = state->num_chains;
+        while (true)
+        {
+          // Check for timeout
+          if (deferred)
+          {
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
+            {
+              // Hit the timeout so launch a continuation
+              state->pos = pos;
+              state->num_chains = num_chains;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
+              return;
+            }
+            else
+              previous_time = current_time;
+          }
+          while (pos >= 0 && chain_indices[pos] != -1U)
+            --pos;
+          if (pos < 0) break;
+          unsigned curr = topo_order[pos];
+          while (incoming[curr].size() > 0)
+          {
+            chain_indices[inv_topo_order[curr]] = num_chains;
+            const std::vector<unsigned> &in = incoming[curr];
+            bool found = false;
+            for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+            {
+              unsigned next = in[iidx];
+              if (chain_indices[inv_topo_order[next]] == -1U)
+              {
+                found = true;
+                curr = next;
+                chain_indices[inv_topo_order[curr]] = num_chains;
+                break;
+              }
+            }
+            if (!found) break;
+          }
+          chain_indices[inv_topo_order[curr]] = num_chains;
+          ++num_chains;
+        }
+        state->stage++;
+        state->num_chains = num_chains;
       }
 
       // Fourth, find the frontiers of chains that are connected to each node
-      std::vector<std::vector<int> > all_chain_frontiers(topo_order.size());
-      std::vector<std::vector<unsigned> > incoming_reduced(topo_order.size());
-      for (unsigned idx = 0; idx < topo_order.size(); ++idx)
+      if (state->stage == 4)
       {
-        std::vector<int> chain_frontiers(num_chains, -1);
-        const std::vector<unsigned> &in = incoming[topo_order[idx]];
-        std::vector<unsigned> &in_reduced = incoming_reduced[idx];
-        for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+        const unsigned num_chains = state->num_chains;
+        const std::vector<unsigned> &chain_indices = state->chain_indices;
+        std::vector<std::vector<int> > &all_chain_frontiers = 
+          state->all_chain_frontiers;
+        if (all_chain_frontiers.empty())
+          all_chain_frontiers.resize(topo_order.size());
+        std::vector<std::vector<unsigned> > &incoming_reduced = 
+          state->incoming_reduced;
+        if (incoming_reduced.empty())
+          incoming_reduced.resize(topo_order.size());
+        for (unsigned idx = state->iteration; idx < topo_order.size(); idx++)
         {
-          int rank = inv_topo_order[in[iidx]];
-#ifdef DEBUG_LEGION
-          assert((unsigned)rank < idx);
-#endif
-          const std::vector<int> &pred_chain_frontiers =
-            all_chain_frontiers[rank];
-          for (unsigned k = 0; k < num_chains; ++k)
-            chain_frontiers[k] =
-              std::max(chain_frontiers[k], pred_chain_frontiers[k]);
-        }
-        for (unsigned iidx = 0; iidx < in.size(); ++iidx)
-        {
-          int rank = inv_topo_order[in[iidx]];
-          unsigned chain_idx = chain_indices[rank];
-          if (chain_frontiers[chain_idx] < rank)
+          // Check for timeout
+          if (deferred)
           {
-            in_reduced.push_back(in[iidx]);
-            chain_frontiers[chain_idx] = rank;
+            unsigned long long current_time = 
+              Realm::Clock::current_time_in_microseconds();
+            running_time += (current_time - previous_time);
+            if (TIMEOUT <= running_time)
+            {
+              // Hit the timeout so launch a continuation
+              state->iteration = idx;
+              TransitiveReductionArgs args(this, state); 
+              trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
+              return;
+            }
+            else
+              previous_time = current_time;
           }
-        }
+          std::vector<int> chain_frontiers(num_chains, -1);
+          const std::vector<unsigned> &in = incoming[topo_order[idx]];
+          std::vector<unsigned> &in_reduced = incoming_reduced[idx];
+          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          {
+            int rank = inv_topo_order[in[iidx]];
 #ifdef DEBUG_LEGION
-        assert(in.size() == 0 || in_reduced.size() > 0);
+            assert((unsigned)rank < idx);
 #endif
-        all_chain_frontiers[idx].swap(chain_frontiers);
+            const std::vector<int> &pred_chain_frontiers =
+              all_chain_frontiers[rank];
+            for (unsigned k = 0; k < num_chains; ++k)
+              chain_frontiers[k] =
+                std::max(chain_frontiers[k], pred_chain_frontiers[k]);
+          }
+          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          {
+            int rank = inv_topo_order[in[iidx]];
+            unsigned chain_idx = chain_indices[rank];
+            if (chain_frontiers[chain_idx] < rank)
+            {
+              in_reduced.push_back(in[iidx]);
+              chain_frontiers[chain_idx] = rank;
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(in.size() == 0 || in_reduced.size() > 0);
+#endif
+          all_chain_frontiers[idx].swap(chain_frontiers);
+        }
+        state->stage++;
+        state->iteration = 0;
+        all_chain_frontiers.clear();
       }
 
       // Lastly, suppress transitive dependences using chains
       if (deferred)
       {
-        // Save the data structures for finalizing the transitive
-        // reduction for later, the next replay will incorporate them
-        std::vector<unsigned> *inv_topo_order_copy = 
-          new std::vector<unsigned>();
-        inv_topo_order_copy->swap(inv_topo_order);
-        std::vector<std::vector<unsigned> > *in_reduced_copy = 
-          new std::vector<std::vector<unsigned> >();
-        in_reduced_copy->swap(incoming_reduced);
-        // Write them to the members (in this order)
-        pending_inv_topo_order.store(inv_topo_order_copy);
-        pending_transitive_reduction.store(in_reduced_copy);
+        const RtUserEvent to_trigger = state->done;
+        finished_transitive_reduction.store(state);
+        Runtime::trigger_event(to_trigger);
       }
       else
-        finalize_transitive_reduction(inv_topo_order, incoming_reduced);
+        finalize_transitive_reduction(state->inv_topo_order, 
+                                      state->incoming_reduced);
     }
 
     //--------------------------------------------------------------------------
@@ -6550,7 +6258,7 @@ namespace Legion {
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
-      InnerContext *ctx = trace->logical_trace->ctx;
+      InnerContext *ctx = trace->logical_trace->context;
       log_tracing.info() << "#### " << replayable << " " << this << " Trace "
         << trace->logical_trace->tid << " for " << ctx->get_task_name()
         << " (UID " << ctx->get_unique_id() << ") ####";
@@ -6777,7 +6485,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!term_event.exists() || term_event.has_triggered());
+      assert(!term_event.exists() || term_event.has_triggered_faultignorant());
 #endif
       term_event = Runtime::create_ap_user_event(NULL);
     }
@@ -7136,7 +6844,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_op_inst(const TraceLocalID &tlid,
-                                          unsigned idx,
+                                          unsigned parent_req_index,
                                           const UniqueInst &inst,
                                           RegionNode *node,
                                           const RegionUsage &usage,
@@ -7147,7 +6855,10 @@ namespace Legion {
     {
       AutoLock tpl_lock(template_lock);
       if (trace_regions.insert(node, user_mask))
+      {
+        trace_region_parent_req_indexes[node] = parent_req_index;
         node->add_base_resource_ref(TRACE_REF);
+      }
       if (update_validity)
         record_instance_user(op_insts[tlid], inst, usage, 
                              node->row_source, user_mask, applied);
@@ -7457,24 +7168,17 @@ namespace Legion {
         recurrent = pending_replays.front().second;
         pending_replays.pop_front();
       }
-      // Check to see if we have a pending transitive reduction result
-      std::vector<std::vector<unsigned> > *transitive_reduction = 
-        pending_transitive_reduction.load();
-      if (transitive_reduction != NULL)
+      // Check to see if we have a finished transitive reduction result
+      TransitiveReductionState *state = finished_transitive_reduction.load();
+      if (state != NULL)
       {
-        std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
-#ifdef DEBUG_LEGION
-        assert(inv_topo_order != NULL);
-#endif
-        finalize_transitive_reduction(*inv_topo_order, *transitive_reduction);
-        delete inv_topo_order;
-        pending_inv_topo_order.store(NULL);
-        delete transitive_reduction;
-        pending_transitive_reduction.store(NULL);
+        finished_transitive_reduction.store(NULL);
+        finalize_transitive_reduction(state->inv_topo_order, 
+                                      state->incoming_reduced);
+        delete state;
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);
-        // If it was requested that we dump the traces do that now
         if (runtime->dump_physical_traces)
           dump_template();
       }
@@ -7578,7 +7282,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pending_deletion = get_completion_for_deletion();
-      if (!pending_deletion.exists())
+      if (!pending_deletion.exists() && 
+          transitive_reduction_done.has_triggered())
         return false;
       RtEvent precondition = Runtime::protect_event(pending_deletion);
       if (transitive_reduction_done.exists() && 
@@ -7616,7 +7321,7 @@ namespace Legion {
     {
       const TransitiveReductionArgs *targs =
         (const TransitiveReductionArgs*)args;
-      targs->tpl->transitive_reduction(true/*deferred*/); 
+      targs->tpl->transitive_reduction(targs->state, true/*deferred*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -8762,23 +8467,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
-                                         ReplTraceOp *op, InnerContext *context,
-                                         UniqueID opid, bool has_blocking_call)
+                   Operation *op, InnerContext *context, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
+      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
+      assert(repl_op != NULL);
+#else
+      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
 #endif
       // We need everyone else to be done capturing their traces
       // before we can do our own replayable check
-      op->sync_for_replayable_check();
+      repl_op->sync_for_replayable_check();
       // Do the base call first to determine if our local shard is replayable
       const Replayable result = 
-       PhysicalTemplate::check_replayable(op, context, opid, has_blocking_call);
+       PhysicalTemplate::check_replayable(op, context, has_blocking_call);
       if (result)
       {
         // Now we can do the exchange
-        if (op->exchange_replayable(repl_ctx, true/*replayable*/))
+        if (repl_op->exchange_replayable(repl_ctx, true/*replayable*/))
           return result;
         else
           return Replayable(false, "Remote shard not replyable");
@@ -8786,7 +8494,7 @@ namespace Legion {
       else
       {
         // Still need to do the exchange
-        op->exchange_replayable(repl_ctx, false/*replayable*/);
+        repl_op->exchange_replayable(repl_ctx, false/*replayable*/);
         return result;
       }
     }
@@ -9427,17 +9135,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::sync_compute_frontiers(ReplTraceOp *op,
+    void ShardedPhysicalTemplate::sync_compute_frontiers(Operation *op,
                                     const std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
+      ReplTraceOp *repl_op = dynamic_cast<ReplTraceOp*>(op);
+#else
+      ReplTraceOp *repl_op = static_cast<ReplTraceOp*>(op);
 #endif
       if (!frontier_events.empty())
-        op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
+        repl_op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
       else
-        op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
+        repl_op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
       // Check for any empty remote frontiers which were not actually
       // contained in the trace and therefore need to be pruned out of
       // any event mergers

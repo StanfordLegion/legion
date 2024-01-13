@@ -25,14 +25,17 @@ static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/in
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/js/timeline.js");
 static UTIL_JS_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/js/util.js");
 
-impl Serialize for Timestamp {
+#[derive(Debug, Copy, Clone)]
+struct TimestampFormat(Timestamp);
+
+impl Serialize for TimestampFormat {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let mut buf = [0u8; 64];
         let mut cursor = Cursor::new(&mut buf[..]);
-        write!(cursor, "{}", self).unwrap();
+        write!(cursor, "{}", self.0).unwrap();
         let len = cursor.position() as usize;
         serializer.serialize_bytes(&buf[..len])
     }
@@ -67,9 +70,9 @@ struct CriticalPathRecord {
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
-    ready: Option<Timestamp>,
-    start: Timestamp,
-    end: Timestamp,
+    ready: Option<TimestampFormat>,
+    start: TimestampFormat,
+    end: TimestampFormat,
     color: &'a str,
     opacity: f64,
     title: &'a str,
@@ -96,7 +99,7 @@ struct OpRecord<'a> {
 
 #[derive(Serialize, Copy, Clone)]
 struct UtilizationRecord {
-    time: Timestamp,
+    time: TimestampFormat,
     count: Count,
 }
 
@@ -238,8 +241,8 @@ impl Proc {
             level,
             level_ready,
             ready: None,
-            start: Timestamp(0),
-            end: Timestamp(0),
+            start: TimestampFormat(Timestamp(0)),
+            end: TimestampFormat(Timestamp(0)),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -257,9 +260,9 @@ impl Proc {
         if !waiters.wait_intervals.is_empty() {
             for wait in &waiters.wait_intervals {
                 f.serialize(DataRecord {
-                    ready: Some(start),
-                    start,
-                    end: wait.start,
+                    ready: Some(TimestampFormat(start)),
+                    start: TimestampFormat(start),
+                    end: TimestampFormat(wait.start),
                     opacity: 1.0,
                     title: &name,
                     // Somehow, these are coming through backwards...
@@ -276,17 +279,17 @@ impl Proc {
                 children = String::new();
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
-                    ready: Some(wait.start),
-                    start: wait.start,
-                    end: wait.ready,
+                    ready: Some(TimestampFormat(wait.start)),
+                    start: TimestampFormat(wait.start),
+                    end: TimestampFormat(wait.ready),
                     opacity: 0.15,
                     ..default
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (ready)", &name),
-                    ready: Some(wait.ready),
-                    start: wait.ready,
-                    end: wait.end,
+                    ready: Some(TimestampFormat(wait.ready)),
+                    start: TimestampFormat(wait.ready),
+                    end: TimestampFormat(wait.end),
                     opacity: 0.45,
                     ..default
                 })?;
@@ -294,9 +297,9 @@ impl Proc {
             }
             if start < time_range.stop.unwrap() {
                 f.serialize(DataRecord {
-                    ready: Some(start),
-                    start,
-                    end: time_range.stop.unwrap(),
+                    ready: Some(TimestampFormat(start)),
+                    start: TimestampFormat(start),
+                    end: TimestampFormat(time_range.stop.unwrap()),
                     opacity: 1.0,
                     title: &name,
                     ..default
@@ -304,9 +307,9 @@ impl Proc {
             }
         } else {
             f.serialize(DataRecord {
-                ready: Some(time_range.ready.unwrap_or(start)),
-                start,
-                end: time_range.stop.unwrap(),
+                ready: Some(TimestampFormat(time_range.ready.unwrap_or(start))),
+                start: TimestampFormat(start),
+                end: TimestampFormat(time_range.stop.unwrap()),
                 // Somehow, these are coming through backwards...
                 in_: &out, //&in_,
                 out: &in_, //&out,
@@ -333,9 +336,8 @@ impl Proc {
             .from_path(path.as_ref().join(&filename))?;
 
         for point in &self.time_points {
-            if point.first {
-                self.emit_tsv_point(&mut f, point, state, spy_state)?;
-            }
+            assert!(point.first);
+            self.emit_tsv_point(&mut f, point, state, spy_state)?;
         }
 
         let level = max(self.max_levels, 1);
@@ -466,9 +468,9 @@ impl Chan {
         f.serialize(DataRecord {
             level,
             level_ready: None,
-            ready: ready_timestamp,
-            start: time_range.start.unwrap(),
-            end: time_range.stop.unwrap(),
+            ready: ready_timestamp.map(TimestampFormat),
+            start: TimestampFormat(time_range.start.unwrap()),
+            end: TimestampFormat(time_range.stop.unwrap()),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -596,9 +598,8 @@ impl Chan {
             .from_path(path.as_ref().join(&filename))?;
 
         for point in &self.time_points {
-            if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
-            }
+            assert!(point.first);
+            self.emit_tsv_point(&mut f, point, state)?;
         }
 
         let level = max(self.max_levels + 1, 4) - 1;
@@ -633,8 +634,8 @@ impl Mem {
             level,
             level_ready: None,
             ready: None,
-            start: time_range.create.unwrap(),
-            end: time_range.ready.unwrap(),
+            start: TimestampFormat(time_range.create.unwrap()),
+            end: TimestampFormat(time_range.ready.unwrap()),
             color: &color,
             opacity: 0.45,
             title: &format!("{} (deferred)", &name),
@@ -652,8 +653,8 @@ impl Mem {
             level,
             level_ready: None,
             ready: None,
-            start: time_range.start.unwrap(),
-            end: time_range.stop.unwrap(),
+            start: TimestampFormat(time_range.start.unwrap()),
+            end: TimestampFormat(time_range.stop.unwrap()),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -694,9 +695,8 @@ impl Mem {
             .from_path(path.as_ref().join(&filename))?;
 
         for point in &self.time_points {
-            if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
-            }
+            assert!(point.first);
+            self.emit_tsv_point(&mut f, point, state)?;
         }
 
         let level = max(self.max_live_insts + 1, 4) - 1;
@@ -752,12 +752,12 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: Timestamp(0),
+            time: TimestampFormat(Timestamp(0)),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time,
+                time: TimestampFormat(time),
                 count: Count(count),
             })?;
         }
@@ -803,12 +803,12 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: Timestamp(0),
+            time: TimestampFormat(Timestamp(0)),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time,
+                time: TimestampFormat(time),
                 count: Count(count),
             })?;
         }
@@ -855,12 +855,12 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: Timestamp(0),
+            time: TimestampFormat(Timestamp(0)),
             count: Count(0.0),
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time,
+                time: TimestampFormat(time),
                 count: Count(count),
             })?;
         }

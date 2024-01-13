@@ -710,9 +710,12 @@ namespace Realm {
 
     void detach();
 
+    void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
     void broadcast(gex_Rank_t root, const void *val_in, void *val_out, size_t bytes);
     void gather(gex_Rank_t root, const void *val_in, void *vals_out, size_t bytes);
+    void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
+                    std::vector<size_t> &lengths);
 
     size_t sample_messages_received_count();
     bool check_for_quiescence(size_t sampled_receive_count);

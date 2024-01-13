@@ -24,6 +24,7 @@ endif()
 
 add_executable(logical_regions logical_regions.cc)
 target_link_libraries(logical_regions Legion::Legion)
+target_compile_options(logical_regions PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME logical_regions COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:logical_regions> ${Legion_TEST_ARGS})
 endif()

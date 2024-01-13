@@ -39,7 +39,8 @@ extern void dsyrk_(char *uplo, char* trans, int* n, int* k,
 
 ]]
 
-if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+local ffi = require("ffi")
+if ffi.os == "OSX" then
   regentlib.linklibrary("libblas.dylib")
   regentlib.linklibrary("liblapack.dylib")
 else

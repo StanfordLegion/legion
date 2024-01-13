@@ -17,12 +17,10 @@
 #ifndef REALM_HIP_INTERNAL_H
 #define REALM_HIP_INTERNAL_H
 
-#include <hip/hip_runtime.h>
-#ifdef __HIP_PLATFORM_NVCC__
-#define hipDeviceScheduleBlockingSync CU_CTX_SCHED_BLOCKING_SYNC 
-#endif
+#include "realm/hip/hip_module.h"
 
-#include "realm/realm_config.h"
+#include <hip/hip_runtime.h>
+
 #include "realm/operation.h"
 #include "realm/threads.h"
 #include "realm/circ_queue.h"
@@ -664,8 +662,17 @@ namespace Realm {
       virtual ~GPUProcessor(void);
 
     public:
+      virtual bool register_task(Processor::TaskFuncID func_id,
+				                         CodeDescriptor& codedesc,
+				                         const ByteArrayRef& user_data);
+
       virtual void shutdown(void);
 
+    protected:
+      virtual void execute_task(Processor::TaskFuncID func_id,
+				                        const ByteArrayRef& task_args);
+
+    public:
       static GPUProcessor *get_current_gpu_proc(void);
 
 #ifdef REALM_USE_HIP_HIJACK
@@ -735,6 +742,16 @@ namespace Realm {
       ContextSynchronizer ctxsync;
     protected:
       Realm::CoreReservation *core_rsrv;
+
+      struct GPUTaskTableEntry {
+	      Processor::TaskFuncPtr fnptr;
+	      Hip::StreamAwareTaskFuncPtr stream_aware_fnptr;
+	      ByteArray user_data;
+      };
+
+      // we're not using the parent's task table, but we can use the mutex
+      //RWLock task_table_mutex;
+      std::map<Processor::TaskFuncID, GPUTaskTableEntry> gpu_task_table;
     };
 
     // this can be attached to any MemoryImpl if the underlying memory is
@@ -1030,7 +1047,7 @@ namespace Realm {
 
       // override this because we have to be picky about which reduction ops
       //  we support
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1085,7 +1102,7 @@ namespace Realm {
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,

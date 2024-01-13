@@ -39,6 +39,7 @@
 #include "realm/inst_impl.h"
 #include "realm/bgwork.h"
 #include "realm/utils.h"
+#include "realm/transfer/address_list.h"
 
 namespace Realm {
 
@@ -189,54 +190,6 @@ namespace Realm {
       XferDesRedopInfo(ReductionOpID _id, bool _is_fold, bool _in_place, bool _is_exclusive)
       : id(_id), is_fold(_is_fold), in_place(_in_place), is_exclusive(_is_exclusive) {}
     };
-
-    class AddressList {
-    public:
-      AddressList();
-
-      size_t *begin_nd_entry(int max_dim);
-      void commit_nd_entry(int act_dim, size_t bytes);
-
-      size_t bytes_pending() const;
-      
-    protected:
-      friend class AddressListCursor;
-
-      const size_t *read_entry();
-
-      size_t total_bytes;
-      unsigned write_pointer;
-      unsigned read_pointer;
-      static const size_t MAX_ENTRIES = 1000;
-      size_t data[MAX_ENTRIES];
-    };
-
-    class AddressListCursor {
-    public:
-      AddressListCursor();
-
-      void set_addrlist(AddressList *_addrlist);
-
-      int get_dim() const;
-      uintptr_t get_offset() const;
-      uintptr_t get_stride(int dim) const;
-      size_t remaining(int dim) const;
-      void advance(int dim, size_t amount);
-
-      void skip_bytes(size_t bytes);
-      
-    protected:
-      AddressList *addrlist;
-      bool partial;
-      // we need to be one larger than any index space realm supports, since
-      //  we use the contiguous bytes within a field as a "dimension" in some
-      //  cases
-      static const int MAX_DIM = REALM_MAX_DIM + 1;
-      int partial_dim;
-      size_t pos[MAX_DIM];
-    };
-
-    std::ostream& operator<<(std::ostream& os, const AddressListCursor& alc);
 
     // a control port is used to steer inputs/outputs of transfer descriptors -
     //   the information is encoded into 32b packets which may be read/written
@@ -736,6 +689,16 @@ namespace Realm {
     class RemoteChannelInfo;
     class RemoteChannel;
 
+    struct ChannelCopyInfo {
+      Memory src_mem;
+      Memory dst_mem;
+      // TODO(apryrkahin@): Uncomment when used in gather/scatter path.
+      // Memory ind_mem = Memory::NO_MEMORY;
+      // bool is_scatter = false;
+      // bool is_ranges = false;
+      // size_t addr_size = 0;
+    };
+
     class Channel {
     public:
       Channel(XferDesKind _kind)
@@ -830,7 +793,7 @@ namespace Realm {
       // returns 0 if the path is not supported, or a strictly-positive
       //  estimate of the time required (in nanoseconds) to transfer data
       //  along a supported path
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -972,7 +935,7 @@ namespace Realm {
        */
       virtual long available();
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1043,7 +1006,7 @@ namespace Realm {
       //  on the cpu in the current process
       static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
 
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,
@@ -1101,7 +1064,7 @@ namespace Realm {
       static const bool is_ordered = false;
 
       // override because we don't want to claim non-reduction copies
-      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
                                      CustomSerdezID dst_serdez_id,
                                      ReductionOpID redop_id,

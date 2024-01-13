@@ -17,8 +17,8 @@
 // UCP network module internals
 
 #include "realm/logging.h"
-#include "bootstrap_internal.h"
-#include "bootstrap_loader.h"
+#include "realm/ucx/bootstrap/bootstrap_internal.h"
+#include "realm/ucx/bootstrap/bootstrap_loader.h"
 
 namespace Realm {
 

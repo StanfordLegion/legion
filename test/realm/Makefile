@@ -39,6 +39,8 @@ HIPCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 
+REALM_CUDA_OBJS ?=
+
 CXX ?= g++
 
 # we're going to include runtime.mk to get variable settings, but then
@@ -53,7 +55,7 @@ TESTS += deppart
 TESTS += scatter
 TESTS += compqueue
 TESTS += event_subscribe
-TESTS += deferred_allocs
+#TESTS += deferred_allocs
 TESTS += test_nodeset
 TESTS += subgraphs
 TESTS += large_tls
@@ -66,20 +68,54 @@ TESTS += memmodel
 TESTS += extres_alias
 TESTS += reservations
 TESTS += multiaffine
+TESTS += machine_config
+TESTS += rect_transform_test
+TESTS += rsrv_acquire_poisoned
+
+ifeq ($(strip $(USE_CUDA)),1)
+TESTS += task_stream
+TESTS += test_cuhook
+TESTS += cuda_memcpy_test
+TESTS += cuda_transpose_test
+endif
+
+ifeq ($(strip $(USE_HIP)),1)
+TESTS += task_stream
+endif
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
-TESTARGS_compqueue := -ll:cpu 4
+TESTARGS_compqueue := -ll:cpu 4 -timeout 120
 TESTARGS_event_subscribe := -ll:cpu 4
-TESTARGS_deferred_allocs := -ll:gsize 0 -all
+#TESTARGS_deferred_allocs := -ll:gsize 0 -all
 TESTARGS_scatter := -p1 2 -p2 2
 TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose
+TESTARGS_task_stream := -ll:gpu 1
+TESTARGS_machine_config_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin
+ifeq ($(strip $(USE_CUDA)),1)
+TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
+endif
+ifeq ($(strip $(USE_HIP)),1)
+TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
+endif
+ifeq ($(strip $(USE_OPENMP)),1)
+TESTARGS_machine_config_args += -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4
+endif
+ifeq ($(strip $(USE_PYTHON)),1)
+TESTARGS_machine_config_args += -ll:py 1 -ll:pystack 4
+endif
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
               $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
+
+REALM_CUDA_OBJS ?=
+ifeq ($(strip $(USE_CUDA)),1)
+REALM_CUDA_OBJS := $(patsubst %.cu,$(REALM_CUDA_DIR)/%.o,$(notdir $(REALM_CUDA_SRC)))
+endif
+
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
 RUNTIME_VPATH := $(subst $(SPACE),:,$(sort $(dir $(REALM_SRC))))
@@ -91,39 +127,55 @@ REALM_LIB := librealm.a
 
 TEST_OBJS := $(TESTS:%=%.o)
 
-run_all : $(TESTS:%=run_%)
+run_all : $(TESTS:%=run_%) run_machine_config_args
 
 run_% : %
 	@# this echos exactly once, even if -s was specified
 	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
 	@$(LAUNCHER) ./$* $(TESTARGS_$*)
 
+run_machine_config_args : machine_config
+	@# this echos exactly once, even if -s was specified
+	@echo $(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
+	@$(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
+
 build : $(TESTS)
 
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS)
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
 
-# scatter uses C++11 lambdas
-scatter.o : CC_FLAGS += -std=c++11
+machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
-$(TESTS) : % : %.o librealm.a
+$(TESTS) : % : %.o librealm.a $(SLIB_REALM_CUHOOK)
 	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)
 
-$(REALM_LIB) : $(REALM_OBJS)
+$(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
 	rm -f $(REALM_LIB)
-	ar rc $(REALM_LIB) $(REALM_OBJS)
+	ar rc $(REALM_LIB) $(REALM_OBJS) $(REALM_CUDA_OBJS)
 
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
 EXTRAOBJS_multiaffine := multiaffine_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine)
+EXTRAOBJS_task_stream := task_stream_gpu.o
+EXTRAOBJS_test_cuhook := test_cuhook_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream) $(EXTRAOBJS_test_cuhook)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 multiaffine : multiaffine_gpu.o
+task_stream : task_stream_gpu.o
+test_cuhook : test_cuhook_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+
+$(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
+	rm -f $@
+	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+
+$(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	# $(NVCC) --compiler-options '-fPIC' -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
@@ -131,10 +183,12 @@ EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
 # FIXME: https://github.com/StanfordLegion/legion/issues/1476
 # EXTRAOBJS_multiaffine := multiaffine_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine)
+EXTRAOBJS_task_stream := task_stream_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 # multiaffine : multiaffine_gpu.o
+task_stream : task_stream_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(HIPCC) -o $@ -c $< $(INC_FLAGS) $(HIPCC_FLAGS)

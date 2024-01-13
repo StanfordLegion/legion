@@ -35,6 +35,7 @@ if(Legion_USE_HIP)
 endif()
 
 target_link_libraries(event_latency Legion::Realm)
+target_compile_options(event_latency PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME event_latency COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:event_latency> ${Legion_TEST_ARGS})
 endif()

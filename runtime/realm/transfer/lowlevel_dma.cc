@@ -21,6 +21,7 @@
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/ib_memory.h"
+#include "realm/utils.h"
 
 #include <errno.h>
 // included for file memory data transfer
@@ -202,19 +203,63 @@ namespace Realm {
     void PosixAIOWrite::launch(void)
     {
       log_aio.debug("write issued: op=%p cb=%p", this, &cb);
-#ifndef NDEBUG
-      int ret =
+#ifdef REALM_ON_MACOS
+      constexpr unsigned MAX_ATTEMPTS = 8;
+#else
+      constexpr unsigned MAX_ATTEMPTS = 1;
 #endif
-	aio_write(&cb);
-      assert(ret == 0);
+      for (unsigned idx = 0; idx < MAX_ATTEMPTS; idx++)
+      {
+        int ret = aio_write(&cb);
+        if (ret == 0)
+          return;
+        switch (errno)
+        {
+          case EAGAIN:
+            continue;
+          default:
+            {
+              const char *message = realm_strerror(errno);
+              log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+              abort();
+            }
+        }
+      }
+      log_aio.warning("exceeeded max aio write attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
+      const uint8_t *buffer = (const uint8_t*)cb.aio_buf;
+      while (cb.aio_nbytes) {
+        ssize_t ret = pwrite(cb.aio_fildes, (const void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        if (ret < 0) {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed synchronous IO write [%d]: %s", errno, message);
+          abort();
+        } else if (ret) {
+          assert(((size_t)ret) <= cb.aio_nbytes);
+          buffer += ret;
+          cb.aio_offset += ret;
+          cb.aio_nbytes -= ret;
+        } else {
+          log_aio.fatal("Synchronous IO write failed to make forward progress");
+          abort();
+        } 
+      }
+      completed = true;
     }
 
     bool PosixAIOWrite::check_completion(void)
     {
-      int ret = aio_error(&cb);
-      if(ret == EINPROGRESS) return false;
-      log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
-      assert(ret == 0);
+      if (!completed)
+      {
+        int ret = aio_error(&cb);
+        if(ret == EINPROGRESS) return false;
+        log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
+        if (ret != 0)
+        {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+          abort();
+        }
+      }
       return true;
     }
 
@@ -244,19 +289,63 @@ namespace Realm {
     void PosixAIORead::launch(void)
     {
       log_aio.debug("read issued: op=%p cb=%p", this, &cb);
-#ifndef NDEBUG
-      int ret =
+#ifdef REALM_ON_MACOS
+      constexpr unsigned MAX_ATTEMPTS = 8;
+#else
+      constexpr unsigned MAX_ATTEMPTS = 1;
 #endif
-	aio_read(&cb);
-      assert(ret == 0);
+      for (unsigned idx = 0; idx < MAX_ATTEMPTS; idx++)
+      {
+        int ret = aio_read(&cb);
+        if (ret == 0)
+          return;
+        switch (errno)
+        {
+          case EAGAIN:
+            continue;
+          default:
+            {
+              const char *message = realm_strerror(errno);
+              log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+              abort();
+            }
+        }
+      }
+      log_aio.warning("exceeeded max aio read attempts %d, switching to synchronous mode", MAX_ATTEMPTS);
+      uint8_t *buffer = (uint8_t*)cb.aio_buf;
+      while (cb.aio_nbytes) {
+        ssize_t ret = pread(cb.aio_fildes, (void*)buffer, cb.aio_nbytes, cb.aio_offset);
+        if (ret < 0) {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed synchronous IO read [%d]: %s", errno, message);
+          abort();
+        } else if (ret) {
+          assert(((size_t)ret) <= cb.aio_nbytes);
+          buffer += ret;
+          cb.aio_offset += ret;
+          cb.aio_nbytes -= ret;
+        } else {
+          log_aio.fatal("Synchronous IO read failed to make forward progress");
+          abort();
+        }
+      }
+      completed = true;
     }
 
     bool PosixAIORead::check_completion(void)
     {
-      int ret = aio_error(&cb);
-      if(ret == EINPROGRESS) return false;
-      log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
-      assert(ret == 0);
+      if (!completed)
+      {
+        int ret = aio_error(&cb);
+        if(ret == EINPROGRESS) return false;
+        log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
+        if (ret != 0)
+        {
+          const char *message = realm_strerror(errno);
+          log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+          abort();
+        }
+      }
       return true;
     }
 #endif
@@ -556,7 +645,7 @@ namespace Realm {
 	  ++it) {
 	unsigned bw = 0;
 	unsigned latency = 0;
-	if((*it)->supports_path(src_mem, dst_mem,
+	if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
 				src_serdez_id, dst_serdez_id,
 				redop_id,
                                 0, 0, 0, // FIXME
@@ -574,7 +663,7 @@ namespace Realm {
 	    ++it) {
 	  unsigned bw = 0;
 	  unsigned latency = 0;
-	  if((*it)->supports_path(src_mem, dst_mem,
+	  if((*it)->supports_path(ChannelCopyInfo{src_mem, dst_mem},
 				  src_serdez_id, dst_serdez_id,
 				  redop_id,
                                   0, 0, 0, // FIXME

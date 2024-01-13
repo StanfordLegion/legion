@@ -488,7 +488,7 @@ namespace Legion {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
-      FieldAllocator(FieldAllocator &&allocator);
+      FieldAllocator(FieldAllocator &&allocator) noexcept;
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -496,9 +496,10 @@ namespace Legion {
       FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
-      FieldAllocator& operator=(FieldAllocator &&allocator);
+      FieldAllocator& operator=(FieldAllocator &&allocator) noexcept;
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
+      inline bool exists(void) const { return (impl != NULL); }
     public:
       ///@{
       /**
@@ -630,6 +631,8 @@ namespace Legion {
         : args(const_cast<void*>(arg)), arglen(argsize) { }
       UntypedBuffer(const UntypedBuffer &rhs)
         : args(rhs.args), arglen(rhs.arglen) { }
+      UntypedBuffer(UntypedBuffer &&rhs) noexcept
+        : args(rhs.args), arglen(rhs.arglen) { }
     public:
       inline size_t get_size(void) const { return arglen; }
       inline void*  get_ptr(void) const { return args; }
@@ -639,6 +642,8 @@ namespace Legion {
       inline bool operator<(const UntypedBuffer &arg) const
         { return (args < arg.args) && (arglen < arg.arglen); }
       inline UntypedBuffer& operator=(const UntypedBuffer &rhs)
+        { args = rhs.args; arglen = rhs.arglen; return *this; }
+      inline UntypedBuffer& operator=(UntypedBuffer &&rhs) noexcept
         { args = rhs.args; arglen = rhs.arglen; return *this; }
     private:
       void *args;
@@ -663,16 +668,17 @@ namespace Legion {
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
-      ArgumentMap(ArgumentMap &&rhs);
+      ArgumentMap(ArgumentMap &&rhs) noexcept;
       ~ArgumentMap(void);
     public:
       ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
-      ArgumentMap& operator=(ArgumentMap &&rhs);
+      ArgumentMap& operator=(ArgumentMap &&rhs) noexcept;
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
       inline bool operator<(const ArgumentMap &rhs) const
         { return (impl < rhs.impl); }
+      inline bool exists(void) const { return (impl != NULL); }
     public:
       /**
        * Check to see if a point has an argument set
@@ -757,7 +763,7 @@ namespace Legion {
     public:
       Predicate(void);
       Predicate(const Predicate &p);
-      Predicate(Predicate &&p);
+      Predicate(Predicate &&p) noexcept;
       explicit Predicate(bool value);
       ~Predicate(void);
     protected:
@@ -767,10 +773,11 @@ namespace Legion {
       explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
-      Predicate& operator=(Predicate &&p);
+      Predicate& operator=(Predicate &&p) noexcept;
       inline bool operator==(const Predicate &p) const;
       inline bool operator<(const Predicate &p) const;
       inline bool operator!=(const Predicate &p) const;
+      inline bool exists(void) const { return (impl != NULL); }
     private:
       bool const_value;
     };
@@ -1101,7 +1108,7 @@ namespace Legion {
     public:
       ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
-    protected:
+    public:
       void *projection_args; /**< projection arguments buffer*/
       size_t projection_args_size; /**< projection arguments buffer size*/
     };
@@ -1283,7 +1290,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
-      Future(Future &&f);
+      Future(Future &&f) noexcept;
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -1292,12 +1299,13 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       explicit Future(Internal::FutureImpl *impl);
     public:
-      bool operator==(const Future &f) const
+      inline bool exists(void) const { return (impl != NULL); }
+      inline bool operator==(const Future &f) const
         { return impl == f.impl; }
-      bool operator<(const Future &f) const
+      inline bool operator<(const Future &f) const
         { return impl < f.impl; }
       Future& operator=(const Future &f);
-      Future& operator=(Future &&f);
+      Future& operator=(Future &&f) noexcept;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1451,11 +1459,11 @@ namespace Legion {
           const void *buffer, size_t bytes, bool take_ownership = false);
       static Future from_untyped_pointer(
           const void *buffer, size_t bytes, bool take_ownership = false,
-          const char *provenance = NULL);
+          const char *provenance = NULL, bool shard_local = false);
       static Future from_value(const void *buffer, size_t bytes, bool owned,
           const Realm::ExternalInstanceResource &resource,
           void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL,
-          const char *provenance = NULL);
+          const char *provenance = NULL, bool shard_local = false);
     private:
       // This should only be available for accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
@@ -1484,7 +1492,7 @@ namespace Legion {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
-      FutureMap(FutureMap &&map);
+      FutureMap(FutureMap &&map) noexcept;
       ~FutureMap(void);
     private:
       Internal::FutureMapImpl *impl;
@@ -1493,6 +1501,7 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       explicit FutureMap(Internal::FutureMapImpl *impl);
     public:
+      inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const FutureMap &f) const
         { return impl == f.impl; }
       inline bool operator<(const FutureMap &f) const
@@ -1500,7 +1509,7 @@ namespace Legion {
       inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
-      FutureMap& operator=(FutureMap &&f);
+      FutureMap& operator=(FutureMap &&f) noexcept;
     public:
       /**
        * Block until we can return the result for the
@@ -1843,6 +1852,9 @@ namespace Legion {
       bool                               elide_future_return;
     public:
       bool                               silence_warnings;
+    public:
+      // Initial value for reduction
+      Future                             initial_value;
     };
 
     /**
@@ -2276,7 +2288,18 @@ namespace Legion {
      * This can include attaching files or arrays from inter-operating
      * programs. We provide a generic attach launcher than can handle
      * all kinds of attachments. Each attach launcher should be used
-     * for attaching only one kind of resource.
+     * for attaching only one kind of resource. Resources are described
+     * using Realm::ExternalInstanceResource descriptors (interface can
+     * be found in realm/instance.h). There are many different kinds
+     * of external instance resource descriptors including:
+     * - Realm::ExternalMemoryResource for host pointers (realm/instance.h)
+     * - Realm::ExternalFileResource for POSIX files (realm/instance.h)
+     * - Realm::ExternalCudaMemoryResource for CUDA pointers (realm/cuda/cuda_access.h)
+     * - Realm::ExternalHipMemoryResource for HIP pointers (realm/hip/hip_access.h)
+     * - Realm::ExternalHDF5Resource for HDF5 files (realm/hdf5/hdf5_access.h)
+     * ...
+     * Please explore the Realm code base for all the different kinds of
+     * external resources that you can attach to logical regions.
      * @see Runtime
      */
     struct AttachLauncher {
@@ -2285,27 +2308,44 @@ namespace Legion {
                      LogicalRegion handle, LogicalRegion parent,
                      const bool restricted = true,
                      const bool mapped = true);
+      // Declared here to avoid superfluous compiler warnings
+      // Can be remove after deprecated members are removed
+      ~AttachLauncher(void);
     public:
+      inline void initialize_constraints(bool column_major, bool soa,
+                             const std::vector<FieldID> &fields,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalFileResource instead")
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
                               LegionFileMode mode);
+      LEGION_DEPRECATED("Use Realm::ExternalHDF5Resource instead")
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_aos(void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_soa(void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
-                             const std::map<FieldID,size_t> *alignments = NULL);
+                             const std::map<FieldID,size_t> *alignments = NULL); 
     public:
       ExternalResource                              resource;
-      LogicalRegion                                 handle;
       LogicalRegion                                 parent;
+      LogicalRegion                                 handle;
+      std::set<FieldID>                             privilege_fields;
+    public:
+      // This will be cloned each time you perform an attach with this launcher
+      const Realm::ExternalInstanceResource*        external_resource;
+    public:
+      LayoutConstraintSet                           constraints;
+    public:
       // Whether this instance will be restricted when attached
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
@@ -2327,14 +2367,14 @@ namespace Legion {
       std::string                                   provenance;
     public:
       // Data for files
+      LEGION_DEPRECATED("file_name is deprecated, use external_resource")
       const char                                    *file_name;
+      LEGION_DEPRECATED("mode is deprecated, use external_resource")
       LegionFileMode                                mode;
+      LEGION_DEPRECATED("file_fields is deprecated, use external_resource")
       std::vector<FieldID>                          file_fields; // normal files
-      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
-    public:
-      // Data for external instances
-      LayoutConstraintSet                           constraints;
-      std::set<FieldID>                             privilege_fields;
+      // This member must still be populated if you're attaching to an HDF5 file
+      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files 
     public:
       // Optional footprint of the instance in memory in bytes
       size_t                                        footprint;
@@ -2348,29 +2388,45 @@ namespace Legion {
      * \struct IndexAttachLauncher
      * An index attach launcher allows the application to attach
      * many external resources concurrently to different subregions
-     * of a common region tree.
+     * of a common region tree. For more information regarding what
+     * kinds of external resources can be attached please see the
+     * documentation for AttachLauncher.
+     * @see AttachLauncher
+     * @see Runtime
      */
     struct IndexAttachLauncher {
     public:
       IndexAttachLauncher(ExternalResource resource, 
                           LogicalRegion parent,
                           const bool restricted = true);
+      // Declared here to avoid superfluous compiler warnings
+      // Can be remove after deprecated members are removed
+      ~IndexAttachLauncher(void);
     public:
+      inline void initialize_constraints(bool column_major, bool soa,
+                             const std::vector<FieldID> &fields,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      inline void add_external_resource(LogicalRegion handle,
+                              const Realm::ExternalInstanceResource *resource);
+      LEGION_DEPRECATED("Use Realm::ExternalFileResource instead")
       inline void attach_file(LogicalRegion handle,
                               const char *file_name,
                               const std::vector<FieldID> &fields,
                               LegionFileMode mode);
+      LEGION_DEPRECATED("Use Realm::ExternalHDF5Resource instead")
       inline void attach_hdf5(LogicalRegion handle,
                               const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_aos(LogicalRegion handle, 
                              void *base, bool column_major,
                              const std::vector<FieldID> &fields,
                              Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
+      LEGION_DEPRECATED("Use Realm::ExternalMemoryResource instead")
       inline void attach_array_soa(LogicalRegion handle,
                              void *base, bool column_major,
                              const std::vector<FieldID> &fields,
@@ -2378,8 +2434,16 @@ namespace Legion {
                              const std::map<FieldID,size_t> *alignments = NULL);
     public:
       ExternalResource                              resource;
-      std::vector<LogicalRegion>                    handles;
       LogicalRegion                                 parent;
+      std::set<FieldID>                             privilege_fields;
+      std::vector<LogicalRegion>                    handles;
+      // This is the vector external resource objects that are going to 
+      // attached to the vector of logical region handles
+      // These will be cloned each time you perform an attach with this launcher
+      std::vector<const Realm::ExternalInstanceResource*> external_resources;
+    public:
+      LayoutConstraintSet                           constraints;
+    public:
       // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
       // Whether the runtime should check for duplicate resources across 
@@ -2391,18 +2455,22 @@ namespace Legion {
       std::string                                   provenance;
     public:
       // Data for files
+      LEGION_DEPRECATED("mode is deprecated, use external_resources")
       LegionFileMode                                mode;
+      LEGION_DEPRECATED("file_names is deprecated, use external_resources")
       std::vector<const char*>                      file_names;
+      LEGION_DEPRECATED("file_fields is deprecated, use external_resources")
       std::vector<FieldID>                          file_fields; // normal files
+      // This data structure must still be filled in for using HDF5 files
       std::map<FieldID,
         std::vector</*file name*/const char*> >     field_files; // hdf5 files
     public:
       // Data for external instances
-      LayoutConstraintSet                           constraints;
-      std::vector<PointerConstraint>                pointers; 
-      std::set<FieldID>                             privilege_fields;
+      LEGION_DEPRECATED("pointers is deprecated, use external_resources")
+      std::vector<PointerConstraint>                pointers;  
     public:
       // Optional footprint of the instance in memory in bytes
+      // You only need to fill this in when using depcreated fields
       std::vector<size_t>                           footprint;
     public:
       // Inform the runtime about any static dependences
@@ -2585,7 +2653,7 @@ namespace Legion {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
-      PhysicalRegion(PhysicalRegion &&rhs);
+      PhysicalRegion(PhysicalRegion &&rhs) noexcept;
       ~PhysicalRegion(void);
     private:
       Internal::PhysicalRegionImpl *impl;
@@ -2594,7 +2662,8 @@ namespace Legion {
       explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
-      PhysicalRegion& operator=(PhysicalRegion &&rhs);
+      PhysicalRegion& operator=(PhysicalRegion &&rhs) noexcept;
+      inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const PhysicalRegion &reg) const
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
@@ -2758,7 +2827,7 @@ namespace Legion {
     public:
       ExternalResources(void);
       ExternalResources(const ExternalResources &rhs);
-      ExternalResources(ExternalResources &&rhs);
+      ExternalResources(ExternalResources &&rhs) noexcept;
       ~ExternalResources(void);
     private:
       Internal::ExternalResourcesImpl *impl;
@@ -2767,7 +2836,8 @@ namespace Legion {
       explicit ExternalResources(Internal::ExternalResourcesImpl *impl);
     public:
       ExternalResources& operator=(const ExternalResources &rhs);
-      ExternalResources& operator=(ExternalResources &&rhs);
+      ExternalResources& operator=(ExternalResources &&rhs) noexcept;
+      inline bool exists(void) const { return (impl != NULL); }
       inline bool operator==(const ExternalResources &reg) const
         { return (impl == reg.impl); }
       inline bool operator<(const ExternalResources &reg) const
@@ -3612,7 +3682,7 @@ namespace Legion {
     public:
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
-      PieceIterator(PieceIterator &&rhs);
+      PieceIterator(PieceIterator &&rhs) noexcept;
       PieceIterator(const PhysicalRegion &region, FieldID fid,
                     bool privilege_only = true,
                     bool silence_warnings = false,
@@ -3620,7 +3690,7 @@ namespace Legion {
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
-      PieceIterator& operator=(PieceIterator &&rhs);
+      PieceIterator& operator=(PieceIterator &&rhs) noexcept;
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -3655,14 +3725,14 @@ namespace Legion {
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
-      PieceIteratorT(PieceIteratorT &&rhs);
+      PieceIteratorT(PieceIteratorT &&rhs) noexcept;
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
                      bool privilege_only,
                      bool silence_warnings = false,
                      const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
-      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs);
+      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs) noexcept;
     public:
       inline bool step(void);
       inline const Rect<DIM,COORD_T>& operator*(void) const;
@@ -4807,6 +4877,40 @@ namespace Legion {
       virtual LogicalRegion project(LogicalPartition upper_bound,
                                     const DomainPoint &point,
                                     const Domain &launch_domain);
+
+      /**
+       * This method will be invoked on functional projection functors
+       * for projecting from an upper bound logical region when the
+       * the corresponding region requirement has projection arguments
+       * associated with it.
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @param args pointer to the buffer of arguments
+       * @param size size of the buffer of arguments in bytes
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain,
+                                    const void *args, size_t size);
+
+      /**
+       * This method will be invoked on functional projection functors
+       * for projecting from an upper bound logical partition when the
+       * the corresponding region requirement has projection arguments
+       * associated with it.
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @param args pointer to the buffer of arguments
+       * @param size size of the buffer of arguments in bytes
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain,
+                                    const void *args, size_t size);
 
       /**
        * @deprecated
@@ -7014,28 +7118,26 @@ namespace Legion {
                                      const bool unordered = false);
 
       /**
-       * Internally the runtime selects sets of disjoint and complete
-       * partitions to use for guiding the dependence analysis that it
-       * performs on region trees. The runtime has heuristics for selecting
-       * these partitions, but users may want to suggest specific regions and
-       * partitions to use to aid improve runtime performance. This method
-       * allows users to suggest specific regions and partitions to use for
-       * this analysis. The suggested regions and partitions must all be from
-       * the same region tree and must constitute a covering of the parent
-       * region. Furthermore all the partitions in the tree must be disjoint
-       * and complete and any ancestor partitions must also be disjoint
-       * and complete. This call will have no bearing on correctness, but
-       * will influence the amount of runtime overhead observed.
+       * Internally the runtime creates "equivalence sets" which are
+       * subsets of logical regions that it uses for performing its analyses.
+       * In general, these equivalence sets are established on a first touch
+       * basis and then altered using runtime heuristics. However, you can 
+       * influence their selection using this API call which will reset the
+       * equivalence sets for certain fields on a arbitrary region in the
+       * region tree (note you must have privileges on this region). The 
+       * next task to use this region or any overlapping regions will create
+       * new equivalence sets. Therefore it is useful to use this to inform
+       * the runtime when switching from one partition to a new partition.
+       * Note that this method will only impact your performance and has no
+       * bearing on the correctness of your application.
        * @param ctx enclosing task context
        * @param parent the logical region where privileges are derived from
-       * @param regions recommended analysis regions
-       * @param parts recommended analysis partitions
+       * @param region the region to reset the equivalence sets for
        * @param fields the fields for which these should apply
        */
-      void advise_analysis_subtree(Context ctx, LogicalRegion parent,
-                                   const std::set<LogicalRegion> &regions,
-                                   const std::set<LogicalPartition> &parts,
-                                   const std::set<FieldID> &fields);
+      void reset_equivalence_sets(Context ctx, LogicalRegion parent, 
+                                  LogicalRegion region,
+                                  const std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
@@ -7445,7 +7547,8 @@ namespace Legion {
       Future reduce_future_map(Context ctx, const FutureMap &future_map,
                                ReductionOpID redop, bool ordered = true,
                                MapperID map_id = 0, MappingTagID tag = 0,
-                               const char *provenance = NULL);
+                               const char *provenance = NULL,
+                               Future initial_value = Future());
 
       /**
        * Construct a future map from a collection of buffers. The user must
@@ -8646,6 +8749,19 @@ namespace Legion {
       const Task* get_current_task(Context ctx);
 
       /**
+       * Query the space available to this task in a given memory.
+       * This is an instantaneous value and may be subject to change.
+       * If the mapper has provided an upper bound for a pool in this
+       * memory then it will reflect how much space is left available
+       * in that pool, otherwise it will reflect the space left in the
+       * actual memory. Note that the space available does not imply
+       * that you can create an instance of this size as the memory 
+       * may be fragmented and the largest hole might be much smaller
+       * than the size returned by this function.
+       */
+      size_t query_available_memory(Context ctx, Memory target);
+
+      /**
        * Indicate that data in a particular physical region
        * appears to be incorrect for whatever reason.  This
        * will cause the runtime to trap into an error handler
@@ -9161,7 +9277,7 @@ namespace Legion {
        * ever being invoked. The runtime takes ownership for deleting the
        * projection functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
-       * @param functor the objecto register for handling projections
+       * @param functor the object to register for handling projections
        */
       static void preregister_projection_functor(ProjectionID pid,
                                                  ProjectionFunctor *functor);
@@ -9204,7 +9320,14 @@ namespace Legion {
       /**
        * Register a sharding functor for handling control replication
        * queries about which shard owns which a given point in an 
-       * index space launch.
+       * index space launch. The ShardingID must be non-zero because
+       * zero is the special "round-robin" sharding functor. The
+       * runtime takes ownership of for deleting the sharding functor
+       * after the application has finished executing.
+       * @param sid the sharding ID to use for the registration
+       * @param functor the object to register for handling sharding requests 
+       * @param silence_warnings disable warnings about dynamic registration
+       * @param warning_string a string to be reported with any warnings
        */
       void register_sharding_functor(ShardingID sid,
                                      ShardingFunctor *functor,
@@ -9215,7 +9338,11 @@ namespace Legion {
        * Register a sharding functor before the runtime has 
        * started only. The sharding functor will be invoked to
        * handle queries during control replication about which
-       * shard owns a given point in an index space launch.
+       * shard owns a given point in an index space launch. The
+       * runtime takes ownership for deleting the sharding functor
+       * after the application has finished executing.
+       * @param sid the sharding ID to use for the registration
+       * @param functor the object too register for handling sharding 
        */
       static void preregister_sharding_functor(ShardingID sid,
                                                ShardingFunctor *functor);
@@ -9556,16 +9683,23 @@ namespace Legion {
        *              This allows control over the granularity so they
        *              can be made small enough to interleave with other
        *              runtime work. The default is 100 (us).
+       * -lg:prof_call_threshold <int> The minimum size of runtime and
+       *              mapper calls in order for them to be logged by the
+       *              profiler in microseconds. All runtime and mapper calls
+       *              that are less than this threshold will be discarded
+       *              and will not be recorded in the profiling logs. The
+       *              default value is 0 (us) so all calls are logged.
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
        * @param background whether to execute the runtime in the background
        * @param supply_default_mapper whether the runtime should initialize
        *              the default mapper for use by the application
+       * @param filter filter legion and realm command line arguments
        * @return only if running in background, otherwise never
        */
       static int start(int argc, char **argv, bool background = false,
-                       bool supply_default_mapper = true);
+                       bool supply_default_mapper = true, bool filter = false);
 
       /**
        * This 'initialize' method is an optional method that provides
@@ -9578,9 +9712,12 @@ namespace Legion {
        * be passed into the 'start' method or undefined behavior will occur.
        * @param argc pointer to an integer in which to store the argument count 
        * @param argv pointer to array of strings for storing command line args
-       * @param filter remove any runtime command line arguments
+       * @param filter remove any legion and realm command line arguments
+       * @param parse parse any runtime command line arguments during this call
+       *              (if set to false parsing happens during start method)
        */
-      static void initialize(int *argc, char ***argv, bool filter = false);
+      static void initialize(int *argc, char ***argv, 
+                             bool filter = false, bool parse = true);
 
       /**
        * Blocking call to wait for the runtime to shutdown when
@@ -9669,12 +9806,16 @@ namespace Legion {
 
       /**
        * This is the final method for marking the end of an 
-       * implicit top-level task. Note that it executes asychronously
-       * and it is still the responsibility of the user to wait for 
-       * the runtime to shutdown when all of it's effects are done.
+       * implicit top-level task. If there are any asynchronous effects
+       * that were launched during the implicit top-level task (such as
+       * a CUDA kernel launch) then users are required to capture all 
+       * those effects as a Realm event to tell Legion when all those
+       * effects are completed. Finishing an implicit top-level task
+       * still requires waiting explicitly for the runtime to shutdown.
        * The Context object is no longer valid after this call.
        */
-      void finish_implicit_task(Context ctx); 
+      void finish_implicit_task(Context ctx,
+                                Realm::Event effects = Realm::Event::NO_EVENT);
 
       /**
        * Return the maximum number of dimensions that Legion was
@@ -10505,4 +10646,3 @@ namespace Legion {
 #endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 // EOF
-
