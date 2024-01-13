@@ -23,6 +23,8 @@
 #include "legion/suffix_tree.h"
 #include "legion/trie.h"
 
+#include <queue>
+
 template<>
 struct std::hash<Legion::Internal::Murmur3Hasher::Hash> {
   std::size_t operator()(const Legion::Internal::Murmur3Hasher::Hash& h) const noexcept {
@@ -45,10 +47,9 @@ namespace Legion {
     // Forward declarations.
     class BatchedTraceIdentifier;
     class TraceOccurrenceWatcher;
+    class TraceReplayer;
 
-    // TODO (rohany): Can add hashing methods here for hashing? I don't think that
-    //  I want to do this on the Operations themselves because i'm not going to has
-    //  everything about each operation, but just fields that are necessary for tracing.
+    // TraceHashHelper is a utility class to hash Operations.
     class TraceHashHelper {
     public:
       TraceHashHelper();
@@ -64,11 +65,14 @@ namespace Legion {
       Murmur3Hasher hasher;
     };
 
+    // BatchedTraceIdentifier batches up operations until a given
+    // size is hit, and then computes repeated substrings within
+    // the batch of operations.
     class BatchedTraceIdentifier {
     public:
       BatchedTraceIdentifier(
         Runtime* runtime,
-        TraceOccurrenceWatcher* watcher,
+        TraceOccurrenceWatcher& watcher,
         size_t batchsize,  // Number of operations batched at once.
         size_t max_add // Maximum number of traces to add to the watcher at once.
       );
@@ -77,14 +81,16 @@ namespace Legion {
       // We need a runtime here in order to launch meta tasks.
       Runtime* runtime;
       std::vector<Murmur3Hasher::Hash> hashes;
-      TraceOccurrenceWatcher* watcher;
+      TraceOccurrenceWatcher& watcher;
       size_t batchsize;
       size_t max_add;
     };
 
+    // TraceOccurrenceWatcher tracks how many times inserted traces
+    // have occured in the operation stream.
     class TraceOccurrenceWatcher {
     public:
-      TraceOccurrenceWatcher(size_t visit_threshold);
+      TraceOccurrenceWatcher(TraceReplayer& replayer, size_t visit_threshold);
       void process(Murmur3Hasher::Hash hash, size_t opidx);
 
       template<typename T>
@@ -92,6 +98,9 @@ namespace Legion {
       template<typename T>
       bool prefix(T start, T end);
     private:
+      // Reference to a TraceReplayer to dump traces into.
+      TraceReplayer& replayer;
+
       struct TraceMeta {
         // Needs to be default constructable.
         TraceMeta() : opidx(0) { }
@@ -129,8 +138,127 @@ namespace Legion {
       std::vector<TriePointer> active_pointers;
     };
 
+    // OperationExecutor is a virtual class to be used by the
+    // TraceReplayer to shim out internal logic for actually
+    // starting and ending traces and issuing operations.
+    class OperationExecutor {
+    public:
+      virtual TraceID get_fresh_trace_id() = 0;
+      virtual void issue_begin_trace(TraceID id) = 0;
+      virtual void issue_end_trace(TraceID id) = 0;
+      virtual void issue_operation(Operation* op) = 0;
+    };
+
+    // TraceReplayer handles actually buffering and replaying committed traces.
+    class TraceReplayer {
+    public:
+      TraceReplayer(OperationExecutor* executor_)
+        : executor(executor_), operation_start_idx(0) { }
+
+      // Enqueue a new operation, which has the given hash.
+      void process(Operation* op, Murmur3Hasher::Hash hash, size_t opidx);
+      // Flush all pending operations out of the TraceReplayer. Accepts
+      // the current opidx, used for scoring potentially replayed traces.
+      void flush(size_t opidx);
+
+      // Insert a new trace into the TraceReplayer.
+      template<typename T>
+      void insert(T start, T end, size_t opidx);
+      // See if the chosen string is a prefix of a string contained
+      // in the TraceReplayer.
+      template<typename T>
+      bool prefix(T start, T end);
+    private:
+      // Indirection layer to issue operations down to the underlying
+      // runtime system.
+      OperationExecutor* executor;
+
+      struct TraceMeta {
+        // TraceMeta's need to be default construtable.
+        TraceMeta() {}
+        TraceMeta(size_t opidx_, size_t length_)
+          : opidx(opidx_), length(length_), last_visited_opidx(0),
+            decaying_visits(0), replays(0), tid(0) { }
+        // opidx that this trace was inserted at.
+        size_t opidx;
+        // length of the trace.
+        size_t length;
+        // Fields for maintaining a decaying visit count.
+        size_t last_visited_opidx;
+        double decaying_visits;
+        // Number of times the trace has been replayed.
+        size_t replays;
+        // ID for the trace. It is unset if replays == 0.
+        TraceID tid;
+
+        // visit updates the TraceMeta's decaying visit count when visited
+        // at opidx.
+        void visit(size_t opidx);
+        // score computes the TraceMeta's score when observed at opidx.
+        double score(size_t opidx) const;
+        // R is the exponential rate of decay for a trace.
+        static constexpr double R = 0.99;
+        // SCORE_CAP_MULT is the multiplier for how large the score
+        // of a particular trace can ever get.
+        static constexpr double SCORE_CAP_MULT = 10;
+        // REPLAY_SCALE is at most how much a score should be increased
+        // to favor replays.
+        static constexpr size_t REPLAY_SCALE = 2;
+      };
+      Trie<Murmur3Hasher::Hash, TraceMeta> trie;
+
+      // For watching and maintaining decaying visit counts
+      // of pointers for scoring.
+      class WatchPointer {
+      public:
+        WatchPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
+            : node(node_), opidx(opidx_) { }
+        // This pointer only has an advance function, as there's nothing
+        // to do on commit.
+        bool advance(Murmur3Hasher::Hash token);
+        size_t get_opidx() const { return this->opidx; }
+      private:
+        TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
+        size_t opidx;
+      };
+      std::vector<WatchPointer> active_watching_pointers;
+
+      // For the actual committed trie.
+      class CommitPointer {
+      public:
+        CommitPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
+          : node(node_), opidx(opidx_) { }
+        bool advance(Murmur3Hasher::Hash token);
+        bool complete();
+        TraceID replay(OperationExecutor* executor);
+        double score(size_t opidx);
+        size_t get_opidx() const { return this->opidx; }
+        // Length may only be called if complete() has returned
+        // true on this pointer previously.
+        size_t get_length() { return this->node->get_value().length; }
+      private:
+        TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
+        size_t opidx;
+      };
+      std::vector<CommitPointer> active_commit_pointers;
+      std::vector<CommitPointer> completed_commit_pointers;
+
+
+      // Fields for the management of pending operations.
+      std::queue<Operation*> operations;
+      size_t operation_start_idx;
+
+      // flush_buffer executes operations until opidx, or flushes
+      // the entire operation buffer if no opidx is provided.
+      void flush_buffer();
+      void flush_buffer(size_t opidx);
+      // replay_trace executes operations under the trace tid
+      // until opidx, after which it inserts an end trace.
+      void replay_trace(size_t opidx, TraceID tid);
+    };
+
     template <typename T>
-    class AutomaticTracingContext : public T {
+    class AutomaticTracingContext : public T, public OperationExecutor {
     public:
       // TODO (rohany): I'm not sure of the C++-ism to declare this constructor
       //  here and then implement it somewhere else.
@@ -139,17 +267,27 @@ namespace Legion {
         // TODO (rohany): Make all of these constants command line parameters.
         : T(std::forward<Args>(args) ... ),
           opidx(0),
-          identifier(this->runtime, &this->watcher, 100, 10),
-          watcher(15)
+          identifier(this->runtime, this->watcher, 100, 10),
+          watcher(this->replayer, 15),
+          replayer(this)
           {}
     public:
       bool add_to_dependence_queue(Operation *op,
                                    bool unordered = false,
                                    bool outermost = true) override;
+    public:
+      // Overrides for OperationExecutor.
+      TraceID get_fresh_trace_id() override;
+      void issue_begin_trace(TraceID id) override;
+      void issue_end_trace(TraceID id) override;
+      void issue_operation(Operation* op) override;
     private:
       size_t opidx;
       BatchedTraceIdentifier identifier;
       TraceOccurrenceWatcher watcher;
+      TraceReplayer replayer;
+      static constexpr TraceID AUTO_TRACE_ID_START = 1000;
+      TraceID current_trace_id = AUTO_TRACE_ID_START;
     };
 
     // Offline string analysis operations.
@@ -175,7 +313,52 @@ namespace Legion {
 
     template <typename T>
     bool AutomaticTracingContext<T>::add_to_dependence_queue(Operation* op, bool unordered, bool outermost) {
-      // TODO (rohany): unordered operations should always be forwarded to the underlying context and not buffered up.
+      // If we have an unordered operation, just forward it directly without
+      // getting it involved in the tracing infrastructure.
+      if (unordered) {
+        std::cout << "Unordered directly adding to dep queue: " << op->get_ctx_index() << std::endl;
+        return T::add_to_dependence_queue(op, unordered, outermost);
+      }
+
+      // TODO (rohany): In the future, if we allow automatic and explicit tracing
+      //  in the same program, we're going to need to be able to know whether
+      //  trace operations have been issued by the AutomaticTracingContext
+      //  or the application. It's a bit of plumbing right now to get this
+      //  through to all of the applications, so we'll start with the ones
+      //  where it's present, and then disallow trace operations to be issued
+      //   by the application.
+      // Trace operations that we recognize go straight through the context into
+      // the dependence queue, as we're only going to see them as a callback
+      // that we issue while we're already in the dependence queue. This because
+      // the callback structure is
+      // AutoTracingContext::add_to_dependence_queue ->
+      // AutoTracingContext::replay_trace ->
+      // InnerContext::begin_trace ->
+      // AutoTracingContext::add_to_dependence_queue -> HERE.
+      switch (op->get_operation_kind()) {
+        case Operation::OpKind::TRACE_BEGIN_OP_KIND: // Fallthrough.
+        case Operation::OpKind::TRACE_REPLAY_OP_KIND: {
+          assert(op->get_trace()->tid >= AUTO_TRACE_ID_START && op->get_trace()->tid < this->current_trace_id);
+          T::add_to_dependence_queue(op);
+          return true;
+        }
+        case Operation::OpKind::TRACE_CAPTURE_OP_KIND: // Fallthrough.
+        case Operation::OpKind::TRACE_COMPLETE_OP_KIND: {
+          T::add_to_dependence_queue(op);
+          return true;
+        }
+        default: {
+          break;
+        }
+      }
+
+      // TODO (rohany): If we see a TraceBeginOp, TraceReplayOp, TraceCaptureOp, TraceCompleteOp
+      //  with a trace id that we recognize (i.e. it was generated from
+      //  AutomaticTracingContext::get_fresh_trace_id()) then we should just immediately
+      //  forward it to the underlying runtime.
+
+      // If we encounter a traceable operation, then it's time to start
+      // analyzing it and adding it the corresponding operation processors.
       if (is_operation_traceable(op)) {
         Murmur3Hasher::Hash hash = TraceHashHelper{}.hash(op);
         // TODO (rohany): Have to have a hash value that can be used as the sentinel $
@@ -183,11 +366,61 @@ namespace Legion {
         assert(!(hash.x == 0 && hash.y == 0));
         this->identifier.process(hash, this->opidx);
         this->watcher.process(hash, this->opidx);
-
+        this->replayer.process(op, hash, this->opidx);
         this->opidx++;
-      }
+        return true;
+      } else {
+        // TODO (rohany): Do we need to flush the watcher as well, not
+        //  just the replayer?
 
-      return T::add_to_dependence_queue(op, unordered, outermost);
+        // TODO (rohany): We have to do something here for sure around the batched
+        //  trace processor to not have it think about traces that span bad operations.
+
+        // TODO (rohany): Think about what kind of operations we should handle here
+        //  that don't actually affect traces (like TraceSummaryOps).
+
+        // If we see a non-traceable operation, then we need to flush
+        // all of the pending operations sitting in the replayer (as
+        // a trace is no longer possible to replay) before issuing
+        // the un-traceable operation.
+        this->replayer.flush(this->opidx);
+        std::cout << "Flushing for opidx: " << op->get_ctx_index() << std::string(Operation::get_string_rep(op->get_operation_kind())) << std::endl;
+        return T::add_to_dependence_queue(op, unordered, outermost);
+      }
+    }
+
+
+    template <typename T>
+    TraceID AutomaticTracingContext<T>::get_fresh_trace_id() {
+      TraceID result = this->current_trace_id;
+      this->current_trace_id++;
+      return result;
+    }
+
+    template <typename T>
+    void AutomaticTracingContext<T>::issue_begin_trace(Legion::TraceID id) {
+      std::cout << "Attempting begin trace operation" << std::endl;
+      T::begin_trace(
+        id,
+        false /* logical_only */,
+        false /* static_trace */,
+        nullptr /* managed */,
+        false /* dep */,
+        nullptr /* provenance */
+      );
+    }
+
+    template <typename T>
+    void AutomaticTracingContext<T>::issue_end_trace(Legion::TraceID id) {
+      std::cout << "Attempting end trace operation" << std::endl;
+      T::end_trace(id, false /* deprecated */, nullptr /* provenance */);
+    }
+
+    template <typename T>
+    void AutomaticTracingContext<T>::issue_operation(Legion::Internal::Operation *op) {
+      // TODO (rohany): I'm not sure what I'm supposed to pass in for the
+      //  `outermost` parameter.
+      T::add_to_dependence_queue(op, false /* unordered */, true /* outermost */);
     }
 
     template <typename T>
@@ -197,6 +430,16 @@ namespace Legion {
 
     template <typename T>
     bool TraceOccurrenceWatcher::prefix(T start, T end) {
+      return this->trie.prefix(start, end);
+    }
+
+    template <typename T>
+    void TraceReplayer::insert(T start, T end, size_t opidx) {
+      return this->trie.insert(start, end, TraceMeta(opidx, std::distance(start, end)));
+    }
+
+    template <typename T>
+    bool TraceReplayer::prefix(T start, T end) {
       return this->trie.prefix(start, end);
     }
   };
