@@ -516,9 +516,9 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
         bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-        Provenance *provenance) = 0;
+        Provenance *provenance, bool from_application = true) = 0;
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance) = 0;
+                             Provenance *provenance, bool from_application = true) = 0;
       virtual void record_previous_trace(LogicalTrace *trace) = 0;
       virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator) = 0;
@@ -1679,9 +1679,9 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-          Provenance *provenance);
+          Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance);
+                             Provenance *provenance, bool from_application = true);
       virtual void record_previous_trace(LogicalTrace *trace);
       virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator);
@@ -2934,9 +2934,9 @@ namespace Legion {
       virtual Future issue_execution_fence(Provenance *provenance);
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-          Provenance *provenance);
+          Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance);
+                             Provenance *provenance, bool from_application = true);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_future,
                       const Realm::ExternalInstanceResource *resource,
@@ -3929,9 +3929,9 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-          Provenance *provenance);
+          Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance);
+                             Provenance *provenance, bool from_application = true);
       virtual void record_previous_trace(LogicalTrace *trace);
       virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator);

@@ -425,6 +425,9 @@ namespace Legion {
       inline bool is_tracking_parent(void) const { return track_parent; } 
       inline LogicalTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
+      // set_ctx_index is a hack that we only have because context indexes
+      // are assigned before operations are sent through the dependence queue.
+      inline void set_ctx_index(size_t idx) { context_index = idx; }
       inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
       inline Provenance* get_provenance(void) const 
         { return provenance; }

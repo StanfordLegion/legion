@@ -433,6 +433,7 @@ namespace Legion {
       } else {
         tid = value.tid;
       }
+      value.replays++;
       return tid;
     }
 

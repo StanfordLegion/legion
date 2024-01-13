@@ -146,7 +146,7 @@ namespace Legion {
       virtual TraceID get_fresh_trace_id() = 0;
       virtual void issue_begin_trace(TraceID id) = 0;
       virtual void issue_end_trace(TraceID id) = 0;
-      virtual void issue_operation(Operation* op) = 0;
+      virtual bool issue_operation(Operation* op, bool unordered = false, bool outermost = true) = 0;
     };
 
     // TraceReplayer handles actually buffering and replaying committed traces.
@@ -280,7 +280,7 @@ namespace Legion {
       TraceID get_fresh_trace_id() override;
       void issue_begin_trace(TraceID id) override;
       void issue_end_trace(TraceID id) override;
-      void issue_operation(Operation* op) override;
+      bool issue_operation(Operation* op, bool unordered = false, bool outermost = false) override;
     private:
       size_t opidx;
       BatchedTraceIdentifier identifier;
@@ -288,6 +288,24 @@ namespace Legion {
       TraceReplayer replayer;
       static constexpr TraceID AUTO_TRACE_ID_START = 1000;
       TraceID current_trace_id = AUTO_TRACE_ID_START;
+      // Unfortunately, operation context indexes are assigned
+      // at issue time in the runtime, which unfortunately happens
+      // _before_ operations pass through add_to_dependence_queue, and
+      // these ID's are required to be monotonically increasing. This
+      // can become a problem for us as we are going to insert some
+      // begin and end trace operations out of order with respect to
+      // ID assignment in the runtime. So, what we're going to do is
+      // maintain our own context index for issued operations (separately
+      // from the existing operation index counter), and rewrite the
+      // indexes of issued operations on the fly with the new index
+      // we are maintaining here.
+      size_t rewritten_op_context_idx = 0;
+      // We need to maintain whether we are tracing separately from the
+      // inner context, as we'll need to manually attach traces to operations.
+      // Like above, the trace is set when the operation is created, rather
+      // than when it is added to the dependence queue. So we have to set
+      // this ourselves before sending into the internal dependence queue.
+      bool started_auto_trace = false;
     };
 
     // Offline string analysis operations.
@@ -316,8 +334,7 @@ namespace Legion {
       // If we have an unordered operation, just forward it directly without
       // getting it involved in the tracing infrastructure.
       if (unordered) {
-        std::cout << "Unordered directly adding to dep queue: " << op->get_ctx_index() << std::endl;
-        return T::add_to_dependence_queue(op, unordered, outermost);
+        return this->issue_operation(op, unordered, outermost);
       }
 
       // TODO (rohany): In the future, if we allow automatic and explicit tracing
@@ -339,13 +356,11 @@ namespace Legion {
         case Operation::OpKind::TRACE_BEGIN_OP_KIND: // Fallthrough.
         case Operation::OpKind::TRACE_REPLAY_OP_KIND: {
           assert(op->get_trace()->tid >= AUTO_TRACE_ID_START && op->get_trace()->tid < this->current_trace_id);
-          T::add_to_dependence_queue(op);
-          return true;
+          return this->issue_operation(op);
         }
         case Operation::OpKind::TRACE_CAPTURE_OP_KIND: // Fallthrough.
         case Operation::OpKind::TRACE_COMPLETE_OP_KIND: {
-          T::add_to_dependence_queue(op);
-          return true;
+          return this->issue_operation(op);
         }
         default: {
           break;
@@ -385,7 +400,7 @@ namespace Legion {
         // the un-traceable operation.
         this->replayer.flush(this->opidx);
         std::cout << "Flushing for opidx: " << op->get_ctx_index() << std::string(Operation::get_string_rep(op->get_operation_kind())) << std::endl;
-        return T::add_to_dependence_queue(op, unordered, outermost);
+        return this->issue_operation(op, unordered, outermost);
       }
     }
 
@@ -399,28 +414,40 @@ namespace Legion {
 
     template <typename T>
     void AutomaticTracingContext<T>::issue_begin_trace(Legion::TraceID id) {
-      std::cout << "Attempting begin trace operation" << std::endl;
       T::begin_trace(
         id,
         false /* logical_only */,
         false /* static_trace */,
         nullptr /* managed */,
         false /* dep */,
-        nullptr /* provenance */
+        nullptr /* provenance */,
+        false /* from application */
       );
+      // Set started_auto_trace after issuing the begin trace, as it
+      // will set T::current_trace.
+      this->started_auto_trace = true;
     }
 
     template <typename T>
     void AutomaticTracingContext<T>::issue_end_trace(Legion::TraceID id) {
-      std::cout << "Attempting end trace operation" << std::endl;
-      T::end_trace(id, false /* deprecated */, nullptr /* provenance */);
+      // Set started_auto_trace to be false before the operation, as the
+      // issuing of the end trace will set T::current_trace.
+      this->started_auto_trace = false;
+      T::end_trace(id, false /* deprecated */, nullptr /* provenance */, false /* from application */);
     }
 
     template <typename T>
-    void AutomaticTracingContext<T>::issue_operation(Legion::Internal::Operation *op) {
-      // TODO (rohany): I'm not sure what I'm supposed to pass in for the
-      //  `outermost` parameter.
-      T::add_to_dependence_queue(op, false /* unordered */, true /* outermost */);
+    bool AutomaticTracingContext<T>::issue_operation(Legion::Internal::Operation *op, bool unordered, bool outermost) {
+      // Set and then update the separately maintained opidx counter.
+      if (!unordered) {
+        op->set_ctx_index(this->rewritten_op_context_idx);
+        this->rewritten_op_context_idx++;
+        if (this->started_auto_trace) {
+          assert(this->current_trace != nullptr);
+          op->set_trace(this->current_trace, nullptr /* dependencies */);
+        }
+      }
+      return T::add_to_dependence_queue(op, unordered, outermost);
     }
 
     template <typename T>

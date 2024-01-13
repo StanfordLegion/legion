@@ -8345,7 +8345,7 @@ namespace Legion {
                                                bool outermost)
     //--------------------------------------------------------------------------
     {
-      LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
+      LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
       // If this is tracking, add it to our data structure first
       if (op->is_tracking_parent())
       {
@@ -10141,13 +10141,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::begin_trace(TraceID tid, bool logical_only,
         bool static_trace, const std::set<RegionTreeID> *trees,
-        bool deprecated, Provenance *provenance)
+        bool deprecated, Provenance *provenance, bool from_application)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
       if (runtime->no_physical_tracing) logical_only = true;
 
-      AutoRuntimeCall call(this);
+      if (from_application) {
+        AutoRuntimeCall call(this);
+        this->begin_trace(tid, logical_only, static_trace, trees, deprecated, provenance, false /* from application */);
+        return;
+      }
 #ifdef DEBUG_LEGION
       log_run.debug("Beginning a trace in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -10233,12 +10237,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::end_trace(TraceID tid, bool deprecated,
-                                 Provenance *provenance)
+                                 Provenance *provenance, bool from_application)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
 
-      AutoRuntimeCall call(this);
+      if (from_application) {
+        AutoRuntimeCall call(this);
+        this->end_trace(tid, deprecated, provenance, false /* from_application */);
+        return;
+      }
 #ifdef DEBUG_LEGION
       log_run.debug("Ending a trace in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -20051,10 +20059,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplicateContext::begin_trace(TraceID tid, bool logical_only,
                         bool static_trace, const std::set<RegionTreeID> *trees,
-                        bool deprecated, Provenance *provenance)
+                        bool deprecated, Provenance *provenance, bool from_application)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (from_application) {
+        AutoRuntimeCall call(this);
+        this->begin_trace(tid, logical_only, static_trace, trees, deprecated, provenance, false /* from_application */);
+        return;
+      }
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
@@ -20123,10 +20135,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::end_trace(TraceID tid, bool deprecated,
-                                     Provenance *provenance)
+                                     Provenance *provenance, bool from_application)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (from_application) {
+        AutoRuntimeCall call(this);
+        this->end_trace(tid, deprecated, provenance, false /* from application */);
+        return;
+      }
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
@@ -24918,7 +24934,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid, bool logical_only,
         bool static_trace, const std::set<RegionTreeID> *trees,
-        bool deprecated, Provenance *provenance)
+        bool deprecated, Provenance *provenance, bool from_application)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_TRACE,
@@ -24928,7 +24944,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::end_trace(TraceID tid, bool deprecated,
-                                Provenance *provenance)
+                                Provenance *provenance, bool from_application)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_END_TRACE,
