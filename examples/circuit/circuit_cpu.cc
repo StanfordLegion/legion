@@ -663,9 +663,9 @@ void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &piece,
   const AccessorROfloat fa_cap(regions.begin()+2, regions.end(), FID_NODE_CAP);
   const AccessorROfloat fa_leakage(regions.begin()+2, regions.end(), FID_LEAKAGE);
 
-  for (unsigned idx = 0; idx < piece.num_wires; idx++)
+  for (unsigned idx = 0; idx < piece.num_nodes; idx++)
   {
-    const Point<1> node_ptr = piece.first_wire + idx;
+    const Point<1> node_ptr = piece.first_node + idx;
     float voltage = fa_voltage[node_ptr];
     float charge = fa_charge[node_ptr];
     float capacitance = fa_cap[node_ptr];
