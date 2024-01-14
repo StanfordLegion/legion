@@ -10246,7 +10246,8 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(all_shard_effects);
           rez.serialize(done_event);
-          runtime->send_replicate_trigger_complete(owner_space, rez);
+          runtime->send_replicate_trigger_complete(
+              collective_mapping->get_parent(owner_space, local_space), rez);
           return done_event;
         }
         else
@@ -10306,7 +10307,8 @@ namespace Legion {
         {
           Serializer rez;
           rez.serialize(did);
-          runtime->send_replicate_trigger_commit(owner_space, rez);
+          runtime->send_replicate_trigger_commit(
+              collective_mapping->get_parent(owner_space, local_space), rez);
         }
         else
           original_task->trigger_children_committed();
