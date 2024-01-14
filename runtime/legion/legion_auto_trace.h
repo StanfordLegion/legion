@@ -286,8 +286,6 @@ namespace Legion {
       BatchedTraceIdentifier identifier;
       TraceOccurrenceWatcher watcher;
       TraceReplayer replayer;
-      static constexpr TraceID AUTO_TRACE_ID_START = 1000;
-      TraceID current_trace_id = AUTO_TRACE_ID_START;
       // Unfortunately, operation context indexes are assigned
       // at issue time in the runtime, which unfortunately happens
       // _before_ operations pass through add_to_dependence_queue, and
@@ -355,7 +353,7 @@ namespace Legion {
       switch (op->get_operation_kind()) {
         case Operation::OpKind::TRACE_BEGIN_OP_KIND: // Fallthrough.
         case Operation::OpKind::TRACE_REPLAY_OP_KIND: {
-          assert(op->get_trace()->tid >= AUTO_TRACE_ID_START && op->get_trace()->tid < this->current_trace_id);
+          assert(op->get_trace()->tid >= LEGION_MAX_APPLICATION_TRACE_ID && op->get_trace()->tid < LEGION_INITIAL_LIBRARY_ID_OFFSET);
           return this->issue_operation(op);
         }
         case Operation::OpKind::TRACE_CAPTURE_OP_KIND: // Fallthrough.
@@ -407,9 +405,7 @@ namespace Legion {
 
     template <typename T>
     TraceID AutomaticTracingContext<T>::get_fresh_trace_id() {
-      TraceID result = this->current_trace_id;
-      this->current_trace_id++;
-      return result;
+      return this->generate_dynamic_trace_id();
     }
 
     template <typename T>
