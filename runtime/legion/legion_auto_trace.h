@@ -97,6 +97,9 @@ namespace Legion {
       void insert(T start, T end, size_t opidx);
       template<typename T>
       bool prefix(T start, T end);
+
+      // Clear invalidates all active pointers in the watcher.
+      void clear() { this->active_pointers.clear(); }
     private:
       // Reference to a TraceReplayer to dump traces into.
       TraceReplayer& replayer;
@@ -275,6 +278,12 @@ namespace Legion {
       bool add_to_dependence_queue(Operation *op,
                                    bool unordered = false,
                                    bool outermost = true) override;
+      // get_new_unique_hash() generates a hash value that
+      // will not repeat. This is used to represent operations
+      // or events that are not traceable, so that the trace
+      // identification analysis does not identify repeats that
+      // cross over untraceable operations.
+      Murmur3Hasher::Hash get_new_unique_hash();
     public:
       // Overrides for OperationExecutor.
       TraceID get_fresh_trace_id() override;
@@ -304,6 +313,10 @@ namespace Legion {
       // than when it is added to the dependence queue. So we have to set
       // this ourselves before sending into the internal dependence queue.
       bool started_auto_trace = false;
+      // unique_hash_idx_counter maintains a counter of non-traceable
+      // operations seen so far, used to generate unique hashes for
+      // those operations.
+      size_t unique_hash_idx_counter = 0;
     };
 
     // Offline string analysis operations.
@@ -383,14 +396,18 @@ namespace Legion {
         this->opidx++;
         return true;
       } else {
-        // TODO (rohany): Do we need to flush the watcher as well, not
-        //  just the replayer?
-
-        // TODO (rohany): We have to do something here for sure around the batched
-        //  trace processor to not have it think about traces that span bad operations.
-
         // TODO (rohany): Think about what kind of operations we should handle here
         //  that don't actually affect traces (like TraceSummaryOps).
+
+        // When encountering a non-traceable operation, insert a
+        // dummy hash value into the trace identifier so that the
+        // traces it finds don't span across these operations.
+        this->identifier.process(this->get_new_unique_hash(), this->opidx);
+
+        // When encountering a non-traceable operation, invalidate
+        // all active pointers from the TraceOccurrenceWatcher, as
+        // this operation has broken any active traces.
+        this->watcher.clear();
 
         // If we see a non-traceable operation, then we need to flush
         // all of the pending operations sitting in the replayer (as
@@ -444,6 +461,29 @@ namespace Legion {
         }
       }
       return T::add_to_dependence_queue(op, unordered, outermost);
+    }
+
+    // TODO (rohany): Remove this when the actual interface arrives.
+//    template <typename T>
+//    void AutomaticTracingContext<T>::handle_application_wait() {
+//      std::cout << "WAITING IN begin_wait" << std::endl;
+//      // Handling waits from the application is very similar
+//      // to the case in add_to_dependence_queue when we encounter an
+//      // operation that is not traceable. We interrupt traces in
+//      // the identifier, and flush the watcher and replayer.
+//      this->identifier.process(this->get_new_unique_hash(), this->opidx);
+//      this->watcher.clear();
+//      this->replayer.flush(this->opidx);
+//    }
+
+    template <typename T>
+    Murmur3Hasher::Hash AutomaticTracingContext<T>::get_new_unique_hash() {
+      size_t idx = this->unique_hash_idx_counter;
+      this->unique_hash_idx_counter++;
+      Murmur3Hasher hasher(false /* precise */);
+      hasher.hash(Operation::OpKind::LAST_OP_KIND);
+      hasher.hash(idx);
+      return hasher.get_hash();
     }
 
     template <typename T>
