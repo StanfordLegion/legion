@@ -10116,7 +10116,8 @@ namespace Legion {
           Serializer rez;
           rez.serialize(did);
           rez.serialize(mapped_precondition);
-          runtime->send_replicate_post_mapped(owner_space, rez);
+          runtime->send_replicate_post_mapped(
+              collective_mapping->get_parent(owner_space, local_space), rez);
         }
         else
           original_task->handle_post_mapped(mapped_precondition);
@@ -10187,7 +10188,8 @@ namespace Legion {
           if (metasize > 0)
             rez.serialize(metadata, metasize);
           rez.serialize(shard_effects);
-          runtime->send_replicate_post_execution(owner_space, rez);
+          runtime->send_replicate_post_execution(
+              collective_mapping->get_parent(owner_space, local_space), rez);
           if (result != NULL)
             delete result;
         }
