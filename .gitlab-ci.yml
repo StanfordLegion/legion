@@ -215,10 +215,8 @@ cache: &global_cache
   USE_CMAKE: "1"
 .kokkos: &kokkos
   USE_KOKKOS: "1"
-  KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
-  KOKKOS_BRANCH: "4.0.01"
+  KOKKOS_TAG: "4.0.01"
   KOKKOS_CUDA_ARCH: "PASCAL60"
-  KKERNELS_REPO: "https://github.com/kokkos/kokkos-kernels.git"
   KKERNELS_BRANCH: "4.0.01"
 
 .prof: &prof
@@ -321,12 +319,16 @@ before_script:
         if [[ "$EMBED_GASNET" -eq 1 ]]; then
           if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
             # clone gasnet, but make it read only since we want an embedded build
-            git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            # git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+            mv gasnet-master gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
           fi
         else
-          git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          # git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+          mv gasnet-master gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
             export GASNET_ROOT="$PWD/gasnet/debug"
@@ -359,19 +361,9 @@ before_script:
       export CUDAHOSTCXX="$CXX"
     fi
   - |
-    # if kokkos is already existed, pull the branch and remove the build
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
-      if [ -d "kokkos" ]; then
-        pushd $PWD
-        cd kokkos
-        git checkout $KOKKOS_BRANCH
-        git pull origin $KOKKOS_BRANCH
-        rm -rf build
-        popd
-      else
-        git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
-        git -C kokkos log -n 1
-      fi
+      wget -O - https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      mv kokkos-$KOKKOS_TAG kokkos
       mkdir kokkos/build
       cd kokkos/build
       KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
@@ -411,18 +403,9 @@ before_script:
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
 
-      # if kokkos-kernel is already existed, pull the branch and remove the build
-      if [ -d "kokkos-kernels" ]; then
-        pushd $PWD
-        cd kokkos-kernels
-        git checkout $KKERNELS_BRANCH
-        git pull origin $KKERNELS_BRANCH
-        rm -rf build
-        popd
-      else
-        git clone -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
-        git -C kokkos-kernels log -n 1
-      fi
+      wget -O - https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      mv kokkos-kernels-$KOKKOS_TAG kokkos-kernels
+
       # now build kokkos-kernels
       mkdir kokkos-kernels/build
       cd kokkos-kernels/build

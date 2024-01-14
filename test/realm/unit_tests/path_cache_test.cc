@@ -11,7 +11,7 @@ TEST(PathCacheTest, ZeroEntries)
 
   PathLRU cache(num_entries);
   PathLRU::LRUKey key(0, 0, num_bytes, {}, {});
-  auto it = cache.find(key);
+  PathLRU::PathLRUIterator it = cache.find(key);
   EXPECT_TRUE(it == cache.end());
   // seg-fault on zero size cache miss
   // cache.miss(key, MemPathInfo());
@@ -31,7 +31,7 @@ TEST(PathCacheTest, DoubleMissCheckValueUpdate)
     MemPathInfo info;
     info.path.push_back(Memory());
     cache.miss(key, info);
-    auto it = cache.find(key);
+    PathLRU::PathLRUIterator it = cache.find(key);
     EXPECT_EQ((*it).second.path.size(), num_paths);
   }
 
@@ -42,7 +42,7 @@ TEST(PathCacheTest, DoubleMissCheckValueUpdate)
     info.path.push_back(Memory());
     info.path.push_back(Memory());
     cache.miss(key, info);
-    auto it = cache.find(key);
+    PathLRU::PathLRUIterator it = cache.find(key);
     EXPECT_EQ((*it).second.path.size(), num_paths);
   }
 }
@@ -56,7 +56,7 @@ TEST(PathCacheTest, EvictLastRecentlyUsedEntry)
   PathLRU cache(num_entries);
   for(size_t i = 0; i < num_entries; i++) {
     PathLRU::LRUKey key(0, 0, num_bytes + i, {}, {});
-    auto it = cache.find(key);
+    PathLRU::PathLRUIterator it = cache.find(key);
     EXPECT_TRUE(it == cache.end());
     cache.miss(key, MemPathInfo());
   }
@@ -66,7 +66,7 @@ TEST(PathCacheTest, EvictLastRecentlyUsedEntry)
     if(i == evict_idx)
       continue;
     PathLRU::LRUKey key(0, 0, num_bytes + i, {}, {});
-    auto it = cache.find(key);
+    PathLRU::PathLRUIterator it = cache.find(key);
     EXPECT_TRUE(it != cache.end());
     cache.hit(it);
   }
@@ -74,7 +74,7 @@ TEST(PathCacheTest, EvictLastRecentlyUsedEntry)
   // make sure this entry is still in the cache
   {
     PathLRU::LRUKey key(0, 0, num_bytes + evict_idx, {}, {});
-    auto it = cache.find(key);
+    PathLRU::PathLRUIterator it = cache.find(key);
     EXPECT_TRUE(it != cache.end());
   }
 
@@ -87,7 +87,7 @@ TEST(PathCacheTest, EvictLastRecentlyUsedEntry)
   // entry must have bee evicted
   {
     PathLRU::LRUKey key(0, 0, num_bytes + evict_idx, {}, {});
-    auto it = cache.find(key);
+    PathLRU::PathLRUIterator it = cache.find(key);
     EXPECT_TRUE(it == cache.end());
   }
 }

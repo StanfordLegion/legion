@@ -191,9 +191,8 @@ namespace Realm {
       CoreModuleConfig(void);
 
       bool discover_resource(void);
-    public:  
-      virtual bool get_resource(const std::string name, int &value) const;
-      virtual bool get_resource(const std::string name, size_t &value) const;
+
+    public:
       virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
 
     protected:

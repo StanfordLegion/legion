@@ -31,6 +31,11 @@ namespace TestConfig {
   int nutils = 2;
   int nios = 1;
   size_t sysmem = 16*1024*1024;
+
+  size_t numa_mem_size = 2 * 1024 * 1024;
+  size_t numa_nocpu_mem_size = 1 * 1024 * 1024;
+  int num_numa_cpus = 1;
+
   int ngpus = 1;
   size_t zcmem = 32*1024*1024;
   size_t fbmem = 128*1024*1024;
@@ -68,6 +73,35 @@ void top_level_task(const Task *task,
   assert(ret_value == false);
   log_app.print("cpus %d, utils %d, ios %d, sysmem %zu", 
     ncpus, nutils, nios, sysmem);
+
+  {
+    Realm::ModuleConfig *numa_config = rt.get_module_config("numa");
+    if (numa_config) {
+      bool numa_avail = false;
+      ret_value = numa_config->get_resource("numa", numa_avail);
+      assert(ret_value == true);
+      if (numa_avail) {
+        size_t numa_mem_size = 0;
+        size_t numa_nocpu_mem_size = 0;
+        int num_numa_cpus = 0;
+        ret_value = numa_config->get_property("numamem", numa_mem_size);
+        assert(ret_value == true);
+        ret_value = numa_config->get_property("numa_nocpumem", numa_nocpu_mem_size);
+        assert(ret_value == true);
+        ret_value = numa_config->get_property("numacpus", num_numa_cpus);
+        assert(ret_value == true);
+        // test wrong property
+        ret_value = numa_config->get_property("get_error_numa", wrong_config);
+        assert(ret_value == false);
+        log_app.print("numa numamem %zu, numa_nocpumem %zu, numacpsus %d", 
+          numa_mem_size, numa_nocpu_mem_size, num_numa_cpus);
+      } else {
+        log_app.warning("numa is not available");
+      }
+    } else {
+      log_app.print("numa is not loaded");
+    }
+  }
 
   {
     int ngpus = 0;
@@ -238,6 +272,28 @@ int main(int argc, char **argv)
   // test wrong config
   ret_value = core_config->set_property("set_error_core", TestConfig::sysmem);
   assert(ret_value == false);
+
+  Realm::ModuleConfig* numa_config = rt.get_module_config("numa");
+  if (numa_config) {
+    bool numa_avail = false;
+    ret_value = numa_config->get_resource("numa", numa_avail);
+    assert(ret_value == true);
+    if (numa_avail) {
+      ret_value = numa_config->set_property<size_t>("numamem", TestConfig::numa_mem_size);
+      assert(ret_value == true);
+      ret_value = numa_config->set_property<size_t>("numa_nocpumem", TestConfig::numa_nocpu_mem_size);
+      assert(ret_value == true);
+      ret_value = numa_config->set_property<int>("numacpus", TestConfig::num_numa_cpus);
+      assert(ret_value == true);
+      // test wrong config
+      ret_value = numa_config->set_property("set_error_numa", TestConfig::numa_mem_size);
+      assert(ret_value == false);
+    } else {
+      log_app.warning("numa is not available");
+    }
+  } else {
+    log_app.print("numa is not loaded");
+  }
 
   Realm::ModuleConfig* cuda_config = rt.get_module_config("cuda");
   if (cuda_config) {
