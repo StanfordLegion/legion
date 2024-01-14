@@ -2337,6 +2337,7 @@ namespace Legion {
     {
       this->clone_task_op_from(rhs, this->target_proc, 
                                false/*stealable*/, true/*duplicate*/);
+      this->index_point = rhs->index_point;
       this->virtual_mapped = rhs->virtual_mapped;
       this->no_access_regions = rhs->no_access_regions;
       this->target_processors = rhs->target_processors;
