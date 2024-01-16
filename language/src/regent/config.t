@@ -44,6 +44,8 @@ end
 
 config.UNSPECIFIED = -1
 
+local legion_replicable_env = os.getenv('REGENT_LEGION_REPLICABLE')
+
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
@@ -85,7 +87,7 @@ local default_options = {
   ["legion-leaf"] = true,
   ["legion-inner"] = true,
   ["legion-idempotent"] = true,
-  ["legion-replicable"] = true,
+  ["legion-replicable"] = legion_replicable_env == '1' or legion_replicable_env == nil,
 
   -- Dataflow optimization flags:
   ["flow"] = os.getenv('USE_RDIR') == '1' or false,
