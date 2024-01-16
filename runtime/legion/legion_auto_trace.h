@@ -84,6 +84,23 @@ namespace Legion {
       TraceOccurrenceWatcher& watcher;
       size_t batchsize;
       size_t max_add;
+
+      // InFlightProcessingRequest represents a currently executing
+      // offline string processing request. When the BatchedTraceIdentifier
+      // launches a new meta task, it will register it inside the
+      // in_flight_requests queue.
+      struct InFlightProcessingRequest {
+        std::vector<Murmur3Hasher::Hash> hashes;
+        RtEvent finish_event;
+        // Where the meta task should place the result of
+        // the offline computation.
+        std::vector<NonOverlappingRepeatsResult>* result;
+      };
+      std::queue<InFlightProcessingRequest> in_flight_requests;
+      // TODO (rohany): Make this a command line parameter.
+      size_t max_in_flight_requests = 16;
+      // TODO (rohany): Make this a command line parameter.
+      bool wait_on_async_job = false;
     };
 
     // TraceOccurrenceWatcher tracks how many times inserted traces

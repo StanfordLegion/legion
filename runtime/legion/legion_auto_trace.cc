@@ -207,7 +207,7 @@ namespace Legion {
         : runtime(runtime_), watcher(watcher_), batchsize(batchsize_), max_add(max_add_) {
       // Reserve one extra place so that we can insert the sentinel
       // character at the end of the string.
-      this->hashes.reserve(batchsize_ + 1);
+      this->hashes.reserve(this->batchsize + 1);
     }
 
     void BatchedTraceIdentifier::process(Murmur3Hasher::Hash hash, size_t opidx) {
@@ -216,33 +216,59 @@ namespace Legion {
         // TODO (rohany): Define this sentinel somewhere else.
         // Insert the sentinel token before sending the string off to the meta task.
         this->hashes.push_back(Murmur3Hasher::Hash{0, 0});
-        std::vector<NonOverlappingRepeatsResult> result;
-        AutoTraceProcessRepeatsArgs args(&this->hashes, &result);
-        // TODO (rohany): What should the priority be for this?
-        // TODO (rohany): Make sure that we don't have too many of these
-        //  meta tasks pending at once (should have a fixed amount etc).
-        // TODO (rohany): We'll wait on this result for now.
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY).wait();
-
-        // Insert the received traces into the occurrence watcher.
-        size_t count = 0;
-        for (auto trace : result) {
-          // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
-          // TODO (rohany): Do we need to consider superstrings here?
-          auto start = this->hashes.begin() + trace.start;
-          auto end = this->hashes.begin() + trace.end;
-          if (!this->watcher.prefix(start, end)) {
-            this->watcher.insert(start, end, opidx);
-            count++;
-            // Only insert max_add traces at a time.
-            if (count == this->max_add) {
-              break;
+        // Initialize a descriptor for the pending result.
+        this->in_flight_requests.push(InFlightProcessingRequest{});
+        InFlightProcessingRequest& request = this->in_flight_requests.back();
+        // Move the existing vector of hashes into the descriptor, and
+        // allocate a result space for the meta task to write into.
+        request.hashes = std::move(this->hashes);
+        request.result = new std::vector<NonOverlappingRepeatsResult>();
+        AutoTraceProcessRepeatsArgs args(&request.hashes, request.result);
+        // Launch the meta task and record the finish event.
+        request.finish_event = runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
+        // If we're configured to process the job sequentially, then wait on it
+        // right after the submission.
+        if (this->wait_on_async_job) {
+          request.finish_event.wait();
+        }
+        // Finally, allocate a new vector to accumulate hashes into. As before,
+        // allocate one extra spot for the sentinel hash.
+        this->hashes = std::vector<Murmur3Hasher::Hash>();
+        this->hashes.reserve(this->batchsize + 1);
+      }
+      // We'll just check every operation (we can change the frequency here
+      // depending on how expensive this is) whether the first thing in our
+      // pending set of in flight requests is done.
+      if (!this->in_flight_requests.empty()) {
+        // If we've hit the maximum number of in flight requests, then wait
+        // on the first one to finish.
+        if (this->in_flight_requests.size() == this->max_in_flight_requests) {
+          this->in_flight_requests.front().finish_event.wait();
+        }
+        if (this->in_flight_requests.front().finish_event.has_triggered()) {
+          // We have a finished result! Get the answer back.
+          InFlightProcessingRequest& request = this->in_flight_requests.front();
+          // Insert the received traces into the occurrence watcher.
+          size_t count = 0;
+          for (auto trace : *request.result) {
+            // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
+            // TODO (rohany): Do we need to consider superstrings here?
+            auto start = request.hashes.begin() + trace.start;
+            auto end = request.hashes.begin() + trace.end;
+            if (!this->watcher.prefix(start, end)) {
+              this->watcher.insert(start, end, opidx);
+              count++;
+              // Only insert max_add traces at a time.
+              if (count == this->max_add) {
+                break;
+              }
             }
           }
+          // Pop off this request now that we're done processing it.
+          this->in_flight_requests.pop();
+          // At this point, we're done with the vector allocation, so free it.
+          delete request.result;
         }
-        // After we're done processing our trace, clear the memory so that we
-        // can collect more traces.
-        this->hashes.clear();
       }
     }
 
