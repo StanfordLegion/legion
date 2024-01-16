@@ -301,6 +301,9 @@ namespace Legion {
       // identification analysis does not identify repeats that
       // cross over untraceable operations.
       Murmur3Hasher::Hash get_new_unique_hash();
+      // If the application goes into a wait, we need to know about
+      // that, so override TaskContext::begin_wait().
+      inline void begin_wait(bool application_wait) override;
     public:
       // Overrides for OperationExecutor.
       TraceID get_fresh_trace_id() override;
@@ -480,18 +483,20 @@ namespace Legion {
       return T::add_to_dependence_queue(op, unordered, outermost);
     }
 
-    // TODO (rohany): Remove this when the actual interface arrives.
-//    template <typename T>
-//    void AutomaticTracingContext<T>::handle_application_wait() {
-//      std::cout << "WAITING IN begin_wait" << std::endl;
-//      // Handling waits from the application is very similar
-//      // to the case in add_to_dependence_queue when we encounter an
-//      // operation that is not traceable. We interrupt traces in
-//      // the identifier, and flush the watcher and replayer.
-//      this->identifier.process(this->get_new_unique_hash(), this->opidx);
-//      this->watcher.clear();
-//      this->replayer.flush(this->opidx);
-//    }
+    template <typename T>
+    void AutomaticTracingContext<T>::begin_wait(bool application_wait) {
+      if (application_wait) {
+        // Handling waits from the application is very similar
+        // to the case in add_to_dependence_queue when we encounter an
+        // operation that is not traceable. We interrupt traces in
+        // the identifier, and flush the watcher and replayer.
+        this->identifier.process(this->get_new_unique_hash(), this->opidx);
+        this->watcher.clear();
+        this->replayer.flush(this->opidx);
+      }
+      // Need to also do whatever the base context was going to do.
+      T::begin_wait(application_wait);
+    }
 
     template <typename T>
     Murmur3Hasher::Hash AutomaticTracingContext<T>::get_new_unique_hash() {
