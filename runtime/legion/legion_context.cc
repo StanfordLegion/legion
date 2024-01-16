@@ -1176,7 +1176,7 @@ namespace Legion {
       // Always do this with the child mapper
       MapperManager *child_mapper = 
         runtime->find_mapper(executing_processor, child->map_id);
-      child_mapper->invoke_select_task_variant(child, &input, &output);
+      child_mapper->invoke_select_task_variant(child, input, output);
       VariantImpl *variant_impl = runtime->find_variant_impl(child->task_id,
                                    output.chosen_variant, true/*can fail*/);
       if (variant_impl == NULL)
@@ -10774,7 +10774,7 @@ namespace Legion {
     void InnerContext::configure_context(MapperManager *mapper, TaskPriority p)
     //--------------------------------------------------------------------------
     {
-      mapper->invoke_configure_context(owner_task, &context_configuration);
+      mapper->invoke_configure_context(owner_task, context_configuration);
       // Do a little bit of checking on the output.  Make
       // sure that we only set one of the two cases so we
       // are counting by frames or by outstanding tasks.

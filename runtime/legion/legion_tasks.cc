@@ -700,7 +700,7 @@ namespace Legion {
       const TaskPriority parent_priority = parent_ctx->is_priority_mutable() ?
         parent_ctx->get_current_priority() : 0;
       options.parent_priority = parent_priority;
-      mapper->invoke_select_task_options(this, &options, &prioritize);
+      mapper->invoke_select_task_options(this, options, prioritize);
       options_selected = true;
       if (options.initial_proc.kind() == Processor::UTIL_PROC)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -949,7 +949,7 @@ namespace Legion {
       input.region_req_index = index;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
-      mapper->invoke_select_task_sources(this, &input, &output);
+      mapper->invoke_select_task_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -2188,7 +2188,7 @@ namespace Legion {
       input.region_req_index = index;
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
-      mapper->invoke_select_task_sources(this, &input, &output);
+      mapper->invoke_select_task_sources(this, input, output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
@@ -2338,6 +2338,7 @@ namespace Legion {
     {
       this->clone_task_op_from(rhs, this->target_proc, 
                                false/*stealable*/, true/*duplicate*/);
+      this->index_point = rhs->index_point;
       this->virtual_mapped = rhs->virtual_mapped;
       this->no_access_regions = rhs->no_access_regions;
       this->target_processors = rhs->target_processors;
@@ -3670,7 +3671,7 @@ namespace Legion {
       // Now we can invoke the mapper to do the mapping
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
-      mapper->invoke_map_task(this, &input, &output);
+      mapper->invoke_map_task(this, input, output);
       copy_fill_priority = output.copy_fill_priority;
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner);
@@ -3759,7 +3760,7 @@ namespace Legion {
       Mapper::ReplicateTaskInput input;
       Mapper::ReplicateTaskOutput output;
       output.chosen_variant = 0;
-      mapper->invoke_replicate_task(this, &input, &output);
+      mapper->invoke_replicate_task(this, input, output);
       // If we don't have more than one target processor then we're not
       // actually going to replicate this task
       if (output.target_processors.size() <= 1)
@@ -4324,7 +4325,7 @@ namespace Legion {
       // Now we can do the mapper call
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
-      mapper->invoke_post_map_task(this, &input, &output);
+      mapper->invoke_post_map_task(this, input, output);
       // Check and register the results
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -4948,7 +4949,7 @@ namespace Legion {
             info.profiling_responses.attach_overhead(
                 execution_context->overhead_profiler);
         }
-        mapper->invoke_task_report_profiling(this, &info);
+        mapper->invoke_task_report_profiling(this, info);
       }
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
@@ -4996,7 +4997,7 @@ namespace Legion {
             const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
             info.total_reports = outstanding_profiling_requests.load();
             info.profiling_responses.attach_realm_profiling_response(resp);
-            mapper->invoke_task_report_profiling(this, &info);
+            mapper->invoke_task_report_profiling(this, info);
             free(info.buffer);
           }
           const int count = to_perform.size() + 
@@ -5017,7 +5018,7 @@ namespace Legion {
         info.task_response = true;
         info.region_requirement_index = 0;
         info.fill_response = false; // make valgrind happy
-        mapper->invoke_task_report_profiling(this, &info);    
+        mapper->invoke_task_report_profiling(this, info);    
         Runtime::trigger_event(profiling_reported);
       }
     }
@@ -5050,7 +5051,7 @@ namespace Legion {
       info.fill_response = task_prof->fill;
       if (has_tracker)
         info.profiling_responses.attach_overhead(&tracker);
-      mapper->invoke_task_report_profiling(this, &info);
+      mapper->invoke_task_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
@@ -5266,7 +5267,7 @@ namespace Legion {
       output.verify_correctness = false;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
-      mapper->invoke_slice_task(this, &input, &output);
+      mapper->invoke_slice_task(this, input, output);
       if (output.slices.empty())
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'slice_task' "
@@ -9605,7 +9606,7 @@ namespace Legion {
       // Now invoke the mapper call
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
-      mapper->invoke_premap_task(this, &input, &output);
+      mapper->invoke_premap_task(this, input, output);
       // See if we need to update the new target processor
       if (output.new_target_proc.exists())
         this->target_proc = output.new_target_proc;
@@ -9913,7 +9914,7 @@ namespace Legion {
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
               info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_task_report_profiling(this, &info);
+              mapper->invoke_task_report_profiling(this, info);
               free(info.buffer);
             }
             const int count = to_perform.size() +
@@ -9934,7 +9935,7 @@ namespace Legion {
           info.task_response = true;
           info.region_requirement_index = 0;
           info.fill_response = false; // make valgrind happy
-          mapper->invoke_task_report_profiling(this, &info);    
+          mapper->invoke_task_report_profiling(this, info);    
           Runtime::trigger_event(profiling_reported);
         }
         commit_preconditions.insert(profiling_reported);
@@ -10135,7 +10136,7 @@ namespace Legion {
       info.region_requirement_index = task_prof->src;
       info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = task_prof->fill;
-      mapper->invoke_task_report_profiling(this, &info);
+      mapper->invoke_task_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests.load());
