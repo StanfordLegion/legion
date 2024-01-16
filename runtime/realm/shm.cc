@@ -50,12 +50,12 @@ namespace Realm {
     if(ftruncate(hdl, sz) != 0)
 #endif
     {
-      log_shm.warning("failed to resize shared memory region: %d", errno);
+      log_shm.info("failed to resize shared memory region: %s", realm_strerror(errno));
       return false;
     }
     base = mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_SHARED, hdl, 0);
     if(base == nullptr) {
-      log_shm.warning("Failed to map shared memory: %d", errno);
+      log_shm.info("Failed to map shared memory: %s", realm_strerror(errno));
       return false;
     }
     if(numa_node >= 0) {
@@ -83,12 +83,12 @@ namespace Realm {
         INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (size >> 32ULL),
         (size & ~(1ULL << 32ULL)), info.name.c_str(), numa_node);
     if(hMapFile == nullptr) {
-      log_shm.warning("Failed to create shm %s", info.name.c_str());
+      log_shm.info("Failed to create shm %s", info.name.c_str());
       return false;
     }
     info.base = MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, size);
     if(info.base == nullptr) {
-      log_shm.warning("Failed to map shared memory");
+      log_shm.info("Failed to map shared memory");
       CloseHandle(hMapFile);
       return false;
     }
@@ -120,13 +120,13 @@ namespace Realm {
             return true;
           }
         }
-        log_shm.warning("Failed to find unique shm name");
+        log_shm.info("Failed to find unique shm name");
         return false;
       }
     }
 
     if(fd < 0) {
-      log_shm.warning("Failed to create shm %s: %d", name, errno);
+      log_shm.info("Failed to create shm %s: %s", name, realm_strerror(errno));
       return false;
     }
 
@@ -168,12 +168,12 @@ namespace Realm {
     std::string path = '/' + name;
     int fd = shm_open(path.c_str(), O_RDWR, 0);
     if(fd < 0) {
-      log_shm.warning("Failed to open shm: %d", errno);
+      log_shm.info("Failed to open shm: %s", realm_strerror(errno));
       return false;
     }
     info.base = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if(info.base == nullptr) {
-      log_shm.warning("Failed to map shm: %d", errno);
+      log_shm.info("Failed to map shm: %s", realm_strerror(errno));
       close(fd);
       return false;
     }
