@@ -2461,6 +2461,12 @@ namespace Legion {
             program_order_execution(false),
             dump_physical_traces(false),
             enable_automatic_tracing(false),
+            auto_trace_in_flight_jobs(16),
+            auto_trace_wait_async_jobs(false),
+            auto_trace_batchsize(100),
+            auto_trace_commit_threshold(15),
+            auto_trace_max_start_watch(10),
+            auto_trace_min_trace_length(5),
             no_tracing(false),
             no_physical_tracing(false),
             no_trace_optimization(false),
@@ -2520,6 +2526,12 @@ namespace Legion {
         bool program_order_execution;
         bool dump_physical_traces;
         bool enable_automatic_tracing;
+        unsigned auto_trace_in_flight_jobs;
+        bool auto_trace_wait_async_jobs;
+        unsigned auto_trace_batchsize;
+        unsigned auto_trace_commit_threshold;
+        unsigned auto_trace_max_start_watch;
+        unsigned auto_trace_min_trace_length;
         bool no_tracing;
         bool no_physical_tracing;
         bool no_trace_optimization;
@@ -2660,6 +2672,23 @@ namespace Legion {
       const bool program_order_execution;
       const bool dump_physical_traces;
       const bool enable_automatic_tracing;
+      // How many async string processing jobs can be concurrently
+      // executing at once (default 16).
+      const unsigned auto_trace_in_flight_jobs;
+      // Whether or not the runtime should wait on the execution
+      // of string processing jobs (default false).
+      const bool auto_trace_wait_async_jobs;
+      // How many operations the runtime should buffer at once
+      // to find repeated traces (default ?).
+      const unsigned auto_trace_batchsize;
+      // How many times a trace needs to be visited before the
+      // runtime considers automatically replaying it (default 15).
+      const unsigned auto_trace_commit_threshold;
+      // How many traces should be moved to the "watching" state
+      // from the trace identification process (default 10).
+      const unsigned auto_trace_max_start_watch;
+      // The minimum trace length that we are willing to record (default 5).
+      const unsigned auto_trace_min_trace_length;
       const bool no_tracing;
       const bool no_physical_tracing;
       const bool no_trace_optimization;

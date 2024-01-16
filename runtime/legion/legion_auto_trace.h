@@ -77,7 +77,10 @@ namespace Legion {
         Runtime* runtime,
         TraceOccurrenceWatcher& watcher,
         size_t batchsize,  // Number of operations batched at once.
-        size_t max_add // Maximum number of traces to add to the watcher at once.
+        size_t max_add, // Maximum number of traces to add to the watcher at once.
+        size_t max_inflight_requests, // Maximum number of async jobs in flight
+        bool wait_on_async_job, // Whether to wait on concurrent meta tasks
+        size_t min_trace_length // Minimum trace length to identify.
       );
       void process(Murmur3Hasher::Hash hash, size_t opidx);
     private:
@@ -87,6 +90,7 @@ namespace Legion {
       TraceOccurrenceWatcher& watcher;
       size_t batchsize;
       size_t max_add;
+      size_t min_trace_length;
 
       // InFlightProcessingRequest represents a currently executing
       // offline string processing request. When the BatchedTraceIdentifier
@@ -100,10 +104,8 @@ namespace Legion {
         std::vector<NonOverlappingRepeatsResult>* result;
       };
       std::queue<InFlightProcessingRequest> in_flight_requests;
-      // TODO (rohany): Make this a command line parameter.
-      size_t max_in_flight_requests = 16;
-      // TODO (rohany): Make this a command line parameter.
-      bool wait_on_async_job = false;
+      size_t max_in_flight_requests;
+      bool wait_on_async_job;
     };
 
     // TraceOccurrenceWatcher tracks how many times inserted traces
@@ -283,15 +285,18 @@ namespace Legion {
     template <typename T>
     class AutomaticTracingContext : public T, public OperationExecutor {
     public:
-      // TODO (rohany): I'm not sure of the C++-ism to declare this constructor
-      //  here and then implement it somewhere else.
       template <typename ... Args>
       AutomaticTracingContext(Args&& ... args)
-        // TODO (rohany): Make all of these constants command line parameters.
         : T(std::forward<Args>(args) ... ),
           opidx(0),
-          identifier(this->runtime, this->watcher, 100, 10),
-          watcher(this->replayer, 15),
+          identifier(this->runtime,
+                     this->watcher,
+                     this->runtime->auto_trace_batchsize,
+                     this->runtime->auto_trace_max_start_watch,
+                     this->runtime->auto_trace_in_flight_jobs,
+                     this->runtime->auto_trace_wait_async_jobs,
+                     this->runtime->auto_trace_min_trace_length),
+          watcher(this->replayer, this->runtime->auto_trace_commit_threshold),
           replayer(this)
           {}
     public:
@@ -349,11 +354,16 @@ namespace Legion {
     public:
       AutoTraceProcessRepeatsArgs(
        std::vector<Murmur3Hasher::Hash>* operations_,
-       std::vector<NonOverlappingRepeatsResult>* result_
-      ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance), operations(operations_), result(result_) {}
+       std::vector<NonOverlappingRepeatsResult>* result_,
+       size_t min_trace_length_
+      ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
+          operations(operations_),
+          result(result_),
+          min_trace_length(min_trace_length_) {}
     public:
       std::vector<Murmur3Hasher::Hash>* operations;
       std::vector<NonOverlappingRepeatsResult>* result;
+      size_t min_trace_length;
     };
     void auto_trace_process_repeats(const void* args);
 

@@ -16645,6 +16645,12 @@ namespace Legion {
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         enable_automatic_tracing(config.enable_automatic_tracing),
+        auto_trace_in_flight_jobs(config.auto_trace_in_flight_jobs),
+        auto_trace_wait_async_jobs(config.auto_trace_wait_async_jobs),
+        auto_trace_batchsize(config.auto_trace_batchsize),
+        auto_trace_commit_threshold(config.auto_trace_commit_threshold),
+        auto_trace_max_start_watch(config.auto_trace_max_start_watch),
+        auto_trace_min_trace_length(config.auto_trace_min_trace_length),
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
@@ -16867,6 +16873,12 @@ namespace Legion {
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
         enable_automatic_tracing(rhs.enable_automatic_tracing),
+        auto_trace_in_flight_jobs(rhs.auto_trace_in_flight_jobs),
+        auto_trace_wait_async_jobs(rhs.auto_trace_wait_async_jobs),
+        auto_trace_batchsize(rhs.auto_trace_batchsize),
+        auto_trace_commit_threshold(rhs.auto_trace_commit_threshold),
+        auto_trace_max_start_watch(rhs.auto_trace_max_start_watch),
+        auto_trace_min_trace_length(rhs.auto_trace_min_trace_length),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
@@ -30229,6 +30241,18 @@ namespace Legion {
                          config.dump_physical_traces, !filter)
         .add_option_bool("-lg:enable_automatic_tracing",
                          config.enable_automatic_tracing, !filter)
+        .add_option_int("-lg:auto_trace:in_flight_jobs",
+                         config.auto_trace_in_flight_jobs, !filter)
+        .add_option_bool("-lg:auto_trace:wait_async_jobs",
+                         config.auto_trace_wait_async_jobs, !filter)
+        .add_option_int("-lg:auto_trace:batchsize",
+                        config.auto_trace_batchsize, !filter)
+        .add_option_int("-lg:auto_trace:commit_threshold",
+                        config.auto_trace_commit_threshold, !filter)
+        .add_option_int("-lg:auto_trace:max_start_watch",
+                        config.auto_trace_max_start_watch, !filter)
+        .add_option_int("-lg:auto_trace:min_trace_length",
+                        config.auto_trace_min_trace_length, !filter)
         .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
         .add_option_bool("-lg:no_physical_tracing",
                          config.no_physical_tracing, !filter)

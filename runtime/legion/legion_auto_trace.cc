@@ -180,8 +180,8 @@ namespace Legion {
     void auto_trace_process_repeats(const void* args_) {
       log_auto_trace.info() << "Executing processing repeats meta task.";
       const AutoTraceProcessRepeatsArgs* args = (const AutoTraceProcessRepeatsArgs*)args_;
-      // TODO (rohany): Make this a command line parameter.
-      std::vector<NonOverlappingRepeatsResult> result = compute_longest_nonoverlapping_repeats(*args->operations, 5);
+      std::vector<NonOverlappingRepeatsResult> result =
+          compute_longest_nonoverlapping_repeats(*args->operations, args->min_trace_length);
       // Filter the result to remove substrings of longer repeats from consideration.
       size_t copyidx = 0;
       std::unordered_set<size_t> ends;
@@ -202,9 +202,18 @@ namespace Legion {
         Runtime* runtime_,
         TraceOccurrenceWatcher& watcher_,
         size_t batchsize_,
-        size_t max_add_
+        size_t max_add_,
+        size_t max_inflight_requests_,
+        bool wait_on_async_job_,
+        size_t min_trace_length_
         )
-        : runtime(runtime_), watcher(watcher_), batchsize(batchsize_), max_add(max_add_) {
+        : runtime(runtime_),
+          watcher(watcher_),
+          batchsize(batchsize_),
+          max_add(max_add_),
+          max_in_flight_requests(max_inflight_requests_),
+          wait_on_async_job(wait_on_async_job_),
+          min_trace_length(min_trace_length_) {
       // Reserve one extra place so that we can insert the sentinel
       // character at the end of the string.
       this->hashes.reserve(this->batchsize + 1);
@@ -223,7 +232,7 @@ namespace Legion {
         // allocate a result space for the meta task to write into.
         request.hashes = std::move(this->hashes);
         request.result = new std::vector<NonOverlappingRepeatsResult>();
-        AutoTraceProcessRepeatsArgs args(&request.hashes, request.result);
+        AutoTraceProcessRepeatsArgs args(&request.hashes, request.result, this->min_trace_length);
         // Launch the meta task and record the finish event.
         request.finish_event = runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
         // If we're configured to process the job sequentially, then wait on it
