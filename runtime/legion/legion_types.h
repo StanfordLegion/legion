@@ -2525,8 +2525,8 @@ namespace Legion {
     extern Realm::Logger log_garbage;          \
     extern Realm::Logger log_spy;              \
     extern Realm::Logger log_shutdown;         \
-    extern Realm::Logger log_tracing;
-
+    extern Realm::Logger log_tracing;          \
+    extern Realm::Logger log_auto_trace;
   }; // Internal namespace
 
   // Typedefs that are needed everywhere

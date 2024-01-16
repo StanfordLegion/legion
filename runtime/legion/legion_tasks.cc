@@ -5080,7 +5080,7 @@ namespace Legion {
       {
         InnerContext *inner_ctx;
         if (runtime->enable_automatic_tracing) {
-          std::cout << "Created my auto tracing context!" << std::endl;
+          log_auto_trace.info() << "Initializing AutomaticTracingContext<InnerContext>.";
           inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/,

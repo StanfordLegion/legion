@@ -44,6 +44,9 @@ struct std::equal_to<Legion::Internal::Murmur3Hasher::Hash> {
 namespace Legion {
   namespace Internal {
 
+    // Declare all of the necessary loggers.
+    LEGION_EXTERN_LOGGER_DECLARATIONS
+
     // Forward declarations.
     class BatchedTraceIdentifier;
     class TraceOccurrenceWatcher;
@@ -434,7 +437,8 @@ namespace Legion {
         // a trace is no longer possible to replay) before issuing
         // the un-traceable operation.
         this->replayer.flush(this->opidx);
-        std::cout << "Flushing for opidx: " << op->get_ctx_index() << std::string(Operation::get_string_rep(op->get_operation_kind())) << std::endl;
+        log_auto_trace.debug() << "Encountered untraceable operation: "
+                               << Operation::get_string_rep(op->get_operation_kind());
         return this->issue_operation(op, unordered, outermost);
       }
     }

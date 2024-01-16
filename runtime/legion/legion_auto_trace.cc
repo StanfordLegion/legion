@@ -178,6 +178,7 @@ namespace Legion {
     }
 
     void auto_trace_process_repeats(const void* args_) {
+      log_auto_trace.info() << "Executing processing repeats meta task.";
       const AutoTraceProcessRepeatsArgs* args = (const AutoTraceProcessRepeatsArgs*)args_;
       // TODO (rohany): Make this a command line parameter.
       std::vector<NonOverlappingRepeatsResult> result = compute_longest_nonoverlapping_repeats(*args->operations, 5);
@@ -195,7 +196,6 @@ namespace Legion {
       // Erase the unused pieces of result.
       result.erase(result.begin() + copyidx, result.end());
       *args->result = std::move(result);
-      std::cout << "inside my new meta task!" << std::endl;
     }
 
     BatchedTraceIdentifier::BatchedTraceIdentifier(
@@ -297,7 +297,6 @@ namespace Legion {
           auto& value = node->get_value();
           value.visits++;
           if (value.visits >= this->visit_threshold && !value.completed) {
-            std::cout << "PROMOTING TRACE: " << value.opidx << " " << pointer.depth << std::endl;
             value.completed = true;
             std::vector<Murmur3Hasher::Hash> trace(pointer.depth);
             for (size_t j = 0; j < pointer.depth; j++) {
@@ -307,6 +306,9 @@ namespace Legion {
             }
             // TODO (rohany): Do we need to think about superstrings here?
             if (!this->replayer.prefix(trace.begin(), trace.end())) {
+              log_auto_trace.debug() << "Committing trace: "
+                                     << value.opidx  << " of length: "
+                                     << pointer.depth;
               this->replayer.insert(trace.begin(), trace.end(), opidx);
             }
           }
@@ -401,7 +403,9 @@ namespace Legion {
       if (this->operation_start_idx > opidx) {
         return;
       }
-      std::cout << "Replaying trace: " << tid << " of length: " << (opidx - this->operation_start_idx) << std::endl;
+      log_auto_trace.debug() << "Replaying trace " << tid
+                             << " of length "
+                             << (opidx - this->operation_start_idx);
       // Similar logic as flush_buffer, but issue a begin and end trace
       // around the flushed operations.
       this->executor->issue_begin_trace(tid);

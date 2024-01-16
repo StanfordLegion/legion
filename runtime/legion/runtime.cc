@@ -77,6 +77,7 @@ namespace Legion {
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
     Realm::Logger log_tracing("tracing");
+    Realm::Logger log_auto_trace("auto_trace");
     Realm::Logger log_eager("eager");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
