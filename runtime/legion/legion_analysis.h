@@ -323,6 +323,8 @@ namespace Legion {
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events) = 0;
+      virtual void record_future_allreduce(const TraceLocalID &tlid,
+          const std::vector<Memory> &target_memories, size_t future_size) = 0;
     };
 
     /**
@@ -478,6 +480,8 @@ namespace Legion {
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events);
+      virtual void record_future_allreduce(const TraceLocalID &tlid,
+          const std::vector<Memory> &target_memories, size_t future_size);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                     Runtime *runtime, const TraceLocalID &tlid);
@@ -609,6 +613,12 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_reservations(tlid, reservations, applied);
+        }
+      inline void record_future_allreduce(const TraceLocalID &tlid,
+          const std::vector<Memory> &target_memories, size_t future_size) const
+        {
+          base_sanity_check();
+          rec->record_future_allreduce(tlid, target_memories, future_size);
         }
     protected:
       inline void base_sanity_check(void) const
