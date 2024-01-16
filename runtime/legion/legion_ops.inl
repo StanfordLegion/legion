@@ -194,7 +194,7 @@ namespace Legion {
         if (!ready)
         {
           // If false was poisoned then predicate resolve true
-          this->false_guard.wait_faultaware(value);
+          this->false_guard.wait_faultaware(value, true/*from application*/);
           ready = true;
         }
 #endif
