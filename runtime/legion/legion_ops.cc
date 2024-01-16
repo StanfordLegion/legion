@@ -4530,7 +4530,7 @@ namespace Legion {
         if (false_guard.exists())
           // Wait for the predicate to resolve
           // If false was poisoned then the predicate resolved true
-          false_guard.wait_faultaware(value);
+          false_guard.wait_faultaware(value, true/*from application*/);
         return value;
       }
       else

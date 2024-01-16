@@ -2879,10 +2879,10 @@ namespace Legion {
     public:
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
-      inline void wait_faultaware(bool &poisoned) const;
+      inline void wait_faultaware(bool &poisoned, bool from_application) const;
     protected:
-      void begin_context_wait(Context ctx) const;
-      void end_context_wait(Context ctx) const;
+      void begin_context_wait(Context ctx, bool from_application) const;
+      void end_context_wait(Context ctx, bool from_application) const;
     };
 
     class PredEvent : public LgEvent {
@@ -2922,8 +2922,11 @@ namespace Legion {
       inline bool has_triggered_faultignorant(void) const
         { bool poisoned = false; 
           return has_triggered_faultaware(poisoned); }
+      inline void wait_faultaware(bool &poisoned) const
+        { return LgEvent::wait_faultaware(poisoned, true/*application*/); }
       inline void wait_faultignorant(void) const
-        { bool poisoned = false; LgEvent::wait_faultaware(poisoned); }
+        { bool poisoned = false; 
+          LgEvent::wait_faultaware(poisoned, true/*application*/); }
     private:
       // Make these private because we always want to be conscious of faults
       // when testing or waiting on application events
@@ -3255,14 +3258,14 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         if (local_ctx != NULL)
-          begin_context_wait(local_ctx); 
+          begin_context_wait(local_ctx, false/*from application*/); 
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
         if (local_ctx != NULL)
-          end_context_wait(local_ctx);
+          end_context_wait(local_ctx, false/*from application*/);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -3273,13 +3276,13 @@ namespace Legion {
       else // Just do the normal wait
       {
         if (local_ctx != NULL)
-          begin_context_wait(local_ctx);
+          begin_context_wait(local_ctx, false/*from application*/);
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
         if (local_ctx != NULL)
-          end_context_wait(local_ctx);
+          end_context_wait(local_ctx, false/*from application*/);
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
@@ -3305,7 +3308,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void LgEvent::wait_faultaware(bool &poisoned) const
+    inline void LgEvent::wait_faultaware(bool &poisoned, bool from_app) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION_WAITS
@@ -3336,14 +3339,14 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         if (local_ctx != NULL)
-          begin_context_wait(local_ctx);
+          begin_context_wait(local_ctx, from_app);
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
         if (local_ctx != NULL)
-          end_context_wait(local_ctx);
+          end_context_wait(local_ctx, from_app);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -3354,13 +3357,13 @@ namespace Legion {
       else // Just do the normal wait
       {
         if (local_ctx != NULL)
-          begin_context_wait(local_ctx);
+          begin_context_wait(local_ctx, from_app);
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
         if (local_ctx != NULL)
-          end_context_wait(local_ctx);
+          end_context_wait(local_ctx, from_app);
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
