@@ -61,7 +61,8 @@ namespace Legion {
       void hash(FillOp* op);
       void hash(FenceOp* op);
       void hash(CopyOp* op);
-      // TODO (rohany): AllReduceOp, DiscardOp.
+      void hash(AllReduceOp* op);
+      // TODO (rohany): DiscardOp.
       void hash(const RegionRequirement& req);
       void hash(const LogicalRegion& region);
     private:

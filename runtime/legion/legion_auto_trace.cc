@@ -61,6 +61,10 @@ namespace Legion {
           this->hash(dynamic_cast<CopyOp*>(op));
           break;
         }
+        case Operation::OpKind::ALL_REDUCE_OP_KIND: {
+          this->hash(dynamic_cast<AllReduceOp*>(op));
+          break;
+        }
         default: {
           std::cout << "Attempting to hash an unsupported operation kind:"
                     << std::string(Operation::get_string_rep(kind))
@@ -122,6 +126,11 @@ namespace Legion {
       if (op->is_index_space) {
         hasher.hash(op->index_domain);
       }
+    }
+
+    void TraceHashHelper::hash(AllReduceOp* op) {
+      // TODO (rohany): I'm not sure if anything else needs to
+      //  go into the hash other than just the operation kind.
     }
 
     void TraceHashHelper::hash(const RegionRequirement& req) {
