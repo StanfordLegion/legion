@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, datetime, glob, json, multiprocessing, os, platform, shlex, shutil, subprocess, sys, traceback, tempfile, urllib.request
+import argparse, datetime, glob, json, multiprocessing, os, platform, shlex, shutil, subprocess, sys, traceback, tempfile
 import signal
 from pathlib import Path
 
@@ -276,8 +276,10 @@ def clone_github(namespace, repository, output_dir, tmp_dir, branch='master'):
     # cmd(['git', 'clone', '-b', branch, 'https://github.com/%s/%s.git' % (namespace, repository), output_dir])
 
     url = 'https://github.com/%s/%s/archive/refs/heads/%s.tar.gz' % (namespace, repository, branch)
-    with urllib.request.urlopen(url) as f:
-        subprocess.check_call(['tar', '-zxf', '-'], stdin=f, cwd=tmp_dir)
+    wget = subprocess.Popen(['wget', '-O', '-', url], stdout=subprocess.PIPE)
+    subprocess.check_call(['tar', '-zxf', '-'], stdin=wget.stdout, cwd=tmp_dir)
+    if wget.wait() != 0:
+        raise Exception('Fetching URL failed: %s' % url)
     os.rename(os.path.join(tmp_dir, '%s-%s' % (repository, branch)), output_dir)
 
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
