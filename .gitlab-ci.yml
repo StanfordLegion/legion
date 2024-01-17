@@ -267,6 +267,9 @@ cache: &global_cache
 .libdw: &libdw
   REALM_BACKTRACE_USE_LIBDW: "1"
 
+.nocr: &nocr
+  REGENT_LEGION_REPLICABLE: "0"
+
 ###
 ### Setup
 ###
@@ -951,7 +954,11 @@ gcc9_cxx11_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *short, *libdw]
-
+# * Test multi-node remote mapping without control replication in Regent
+gcc9_cxx11_debug_gasnetex_mpi_regent:
+  <<: [*linux_compute, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *libdw, *nocr]
 # Linux with Clang 12
 # * Basic configurations
 #   * Release
