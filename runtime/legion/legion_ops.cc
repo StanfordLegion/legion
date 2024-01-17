@@ -4382,7 +4382,9 @@ namespace Legion {
         Mapper::MemoizeInput  input;
         Mapper::MemoizeOutput output;
         input.trace_id = trace->get_trace_id();
-        output.memoize = false;
+        // If automatic tracing is enabled, then by default set
+        // the output of memoize to true.
+        output.memoize = runtime->enable_automatic_tracing;
         Processor mapper_proc = parent_ctx->get_executing_processor();
         MapperManager *mapper = runtime->find_mapper(mapper_proc, 
                                                      mappable->map_id);

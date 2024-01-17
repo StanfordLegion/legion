@@ -3949,6 +3949,9 @@ namespace Legion {
                                                 MemoizeOutput& output)
     //--------------------------------------------------------------------------
     {
+      // If the runtime has pre-populated true for us, then let that be
+      // the default. Otherwise, use the result of the -dm:memoize flag.
+      if (output.memoize) { return; }
       output.memoize = memoize;
     }
 
