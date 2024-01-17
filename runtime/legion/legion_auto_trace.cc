@@ -187,7 +187,7 @@ namespace Legion {
     }
 
     void auto_trace_process_repeats(const void* args_) {
-      log_auto_trace.info() << "Executing processing repeats meta task.";
+      log_auto_trace.debug() << "Executing processing repeats meta task.";
       const AutoTraceProcessRepeatsArgs* args = (const AutoTraceProcessRepeatsArgs*)args_;
       std::vector<NonOverlappingRepeatsResult> result =
           compute_longest_nonoverlapping_repeats(*args->operations, args->min_trace_length);
