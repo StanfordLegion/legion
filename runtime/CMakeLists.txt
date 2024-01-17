@@ -814,8 +814,6 @@ list(APPEND MAPPER_SRC
 # Legion runtime
 list(APPEND LEGION_SRC
   legion.h
-  legion/accessor.h
-  legion/arrays.h
   legion/bitmask.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc

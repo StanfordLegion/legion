@@ -1097,8 +1097,6 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion.inl \
 		   legion/legion_agency.h \
 		   legion/legion_agency.inl \
-		   legion/accessor.h \
-		   legion/arrays.h \
 		   legion/legion_c.h \
 		   legion/legion_config.h \
 		   legion/legion_constraint.h \
