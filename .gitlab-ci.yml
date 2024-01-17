@@ -294,7 +294,7 @@ before_script:
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
       cd ucx
-      wget -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
+      wget -nv -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
       export UCX_ROOT=$PWD/install
       if [[ -n "$CUDA" ]]; then
         UCX_CONFIG_OPTS="--with-cuda=$CUDA"
@@ -323,14 +323,14 @@ before_script:
           if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
             # clone gasnet, but make it read only since we want an embedded build
             # git clone https://github.com/StanfordLegion/gasnet.git gasnet
-            wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+            wget -nv -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
             mv gasnet-master gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
           fi
         else
           # git clone https://github.com/StanfordLegion/gasnet.git gasnet
-          wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+          wget -nv -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
           mv gasnet-master gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
@@ -365,7 +365,7 @@ before_script:
     fi
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
-      wget -O - https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      wget -nv -O - https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
       mv kokkos-$KOKKOS_TAG kokkos
       mkdir kokkos/build
       cd kokkos/build
@@ -406,7 +406,7 @@ before_script:
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
 
-      wget -O - https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      wget -nv -O - https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
       mv kokkos-kernels-$KOKKOS_TAG kokkos-kernels
 
       # now build kokkos-kernels
