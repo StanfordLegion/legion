@@ -103,8 +103,13 @@ namespace Legion {
         // Where the meta task should place the result of
         // the offline computation.
         std::vector<NonOverlappingRepeatsResult>* result;
+        bool completed = false;
       };
-      std::queue<InFlightProcessingRequest> in_flight_requests;
+      std::list<InFlightProcessingRequest> jobs_in_flight;
+      CompletionQueue jobs_comp_queue;
+      // finish_event_alloc is an allocation used to hold results from
+      // processing the completion queue.
+      RtEvent finish_event_alloc;
       size_t max_in_flight_requests;
       bool wait_on_async_job;
     };

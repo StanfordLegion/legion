@@ -222,7 +222,8 @@ namespace Legion {
           max_add(max_add_),
           max_in_flight_requests(max_inflight_requests_),
           wait_on_async_job(wait_on_async_job_),
-          min_trace_length(min_trace_length_) {
+          min_trace_length(min_trace_length_),
+          jobs_comp_queue(CompletionQueue::create_completion_queue(max_inflight_requests_)) {
       // Reserve one extra place so that we can insert the sentinel
       // character at the end of the string.
       this->hashes.reserve(this->batchsize + 1);
@@ -235,8 +236,8 @@ namespace Legion {
         // Insert the sentinel token before sending the string off to the meta task.
         this->hashes.push_back(Murmur3Hasher::Hash{0, 0});
         // Initialize a descriptor for the pending result.
-        this->in_flight_requests.push(InFlightProcessingRequest{});
-        InFlightProcessingRequest& request = this->in_flight_requests.back();
+        this->jobs_in_flight.push_back(InFlightProcessingRequest{});
+        InFlightProcessingRequest& request = this->jobs_in_flight.back();
         // Move the existing vector of hashes into the descriptor, and
         // allocate a result space for the meta task to write into.
         request.hashes = std::move(this->hashes);
@@ -244,6 +245,7 @@ namespace Legion {
         AutoTraceProcessRepeatsArgs args(&request.hashes, request.result, this->min_trace_length);
         // Launch the meta task and record the finish event.
         request.finish_event = runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
+        this->jobs_comp_queue.add_event(request.finish_event);
         // If we're configured to process the job sequentially, then wait on it
         // right after the submission.
         if (this->wait_on_async_job) {
@@ -254,25 +256,34 @@ namespace Legion {
         this->hashes = std::vector<Murmur3Hasher::Hash>();
         this->hashes.reserve(this->batchsize + 1);
       }
-      // We'll just check every operation (we can change the frequency here
-      // depending on how expensive this is) whether the first thing in our
-      // pending set of in flight requests is done.
-      if (!this->in_flight_requests.empty()) {
-        // If we've hit the maximum number of in flight requests, then wait
-        // on the first one to finish.
-        if (this->in_flight_requests.size() == this->max_in_flight_requests) {
-          this->in_flight_requests.front().finish_event.wait();
+
+      // If we've hit the maximum number of inflight requests, then wait
+      // on one of them to make sure that it gets processed.
+      if (this->jobs_in_flight.size() == this->max_in_flight_requests) {
+        this->jobs_in_flight.front().finish_event.wait();
+      }
+
+      // Query the completion queue to see if any of our jobs finished.
+      size_t num_completed = this->jobs_comp_queue.pop_events(&this->finish_event_alloc, 1);
+      assert(num_completed == 0 || num_completed == 1);
+      // Mark the corresponding in flight descriptor as completed.
+      if (num_completed == 1) {
+        for (auto& it : this->jobs_in_flight) {
+          if (it.finish_event == this->finish_event_alloc) {
+            it.completed = true;
+          }
         }
-        if (this->in_flight_requests.front().finish_event.has_triggered()) {
-          // We have a finished result! Get the answer back.
-          InFlightProcessingRequest& request = this->in_flight_requests.front();
+        // We'll process at most one of the completed jobs so that
+        // we don't pile up a bunch of work all at once.
+        auto& finished = this->jobs_in_flight.front();
+        if (finished.completed) {
           // Insert the received traces into the occurrence watcher.
           size_t count = 0;
-          for (auto trace : *request.result) {
+          for (auto trace : *finished.result) {
             // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
             // TODO (rohany): Do we need to consider superstrings here?
-            auto start = request.hashes.begin() + trace.start;
-            auto end = request.hashes.begin() + trace.end;
+            auto start = finished.hashes.begin() + trace.start;
+            auto end = finished.hashes.begin() + trace.end;
             if (!this->watcher.prefix(start, end)) {
               this->watcher.insert(start, end, opidx);
               count++;
@@ -282,10 +293,9 @@ namespace Legion {
               }
             }
           }
-          // Pop off this request now that we're done processing it.
-          this->in_flight_requests.pop();
-          // At this point, we're done with the vector allocation, so free it.
-          delete request.result;
+          // Free the memory allocated for this descriptor.
+          delete finished.result;
+          this->jobs_in_flight.pop_front();
         }
       }
     }
