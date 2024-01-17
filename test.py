@@ -276,7 +276,7 @@ def clone_github(namespace, repository, output_dir, tmp_dir, branch='master'):
     # cmd(['git', 'clone', '-b', branch, 'https://github.com/%s/%s.git' % (namespace, repository), output_dir])
 
     url = 'https://github.com/%s/%s/archive/refs/heads/%s.tar.gz' % (namespace, repository, branch)
-    wget = subprocess.Popen(['wget', '-O', '-', url], stdout=subprocess.PIPE)
+    wget = subprocess.Popen(['wget', '-nv', '-O', '-', url], stdout=subprocess.PIPE)
     subprocess.check_call(['tar', '-zxf', '-'], stdin=wget.stdout, cwd=tmp_dir)
     if wget.wait() != 0:
         raise Exception('Fetching URL failed: %s' % url)
