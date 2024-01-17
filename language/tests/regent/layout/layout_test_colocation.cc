@@ -31,7 +31,7 @@ using namespace Legion::Mapping;
 /// Mapper
 ///
 
-static LegionRuntime::Logger::Category log_layout_test("layout_test");
+static Logger log_layout_test("layout_test");
 
 class layout_testMapper : public DefaultMapper
 {

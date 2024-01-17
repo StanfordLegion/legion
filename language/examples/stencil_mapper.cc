@@ -22,7 +22,7 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
-static LegionRuntime::Logger::Category log_stencil("stencil");
+static Logger log_stencil("stencil");
 
 class StencilMapper : public DefaultMapper
 {

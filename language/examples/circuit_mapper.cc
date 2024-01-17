@@ -31,7 +31,7 @@ using namespace Legion::Mapping;
 /// Mapper
 ///
 
-static LegionRuntime::Logger::Category log_circuit("circuit");
+static Logger log_circuit("circuit");
 
 class CircuitMapper : public DefaultMapper
 {
