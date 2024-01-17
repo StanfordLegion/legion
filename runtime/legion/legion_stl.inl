@@ -225,13 +225,13 @@ namespace Legion {
 
 #define GET_RAW_POINTERS(x)                                                   \
   std::vector<T##x *> ptrs_##x(task->regions[x].privilege_fields.size(),NULL);\
-  ByteOffset offsets_##x[DIM##x];                                             \
+  int offsets_##x[DIM##x];                                                    \
   Detail::get_raw_pointers<T##x, DIM##x>(task->regions[x], regions[x],        \
                                          ptrs_##x, offsets_##x, runtime, ctx);
 
 #define GET_DENSE_POINTERS(x)                                                 \
   std::vector<T##x *> ptrs_##x(task->regions[x].privilege_fields.size(),NULL);\
-  ByteOffset offset_##x;                                                      \
+  int offset_##x;                                                             \
   Detail::get_dense_pointers<T##x, DIM##x>(task->regions[x], regions[x],      \
                                            ptrs_##x, offset_##x, runtime, ctx);
 
@@ -240,7 +240,7 @@ namespace Legion {
       template<typename T, int DIM>
       static inline void get_raw_pointers(const RegionRequirement &req,
           const PhysicalRegion &region, std::vector<T*> &ptrs, 
-          ByteOffset offsets[DIM], Runtime *runtime, Context ctx)
+          int offsets[DIM], Runtime *runtime, Context ctx)
       {
         if ((req.privilege == NO_ACCESS) || !region.is_mapped())
           return;
@@ -269,7 +269,7 @@ namespace Legion {
       template<typename T, int DIM>
       static inline void get_dense_pointers(const RegionRequirement &req,
           const PhysicalRegion &region, std::vector<T*> &ptrs, 
-          ByteOffset &offset, Runtime *runtime, Context ctx)
+          int &offset, Runtime *runtime, Context ctx)
       {
         if ((req.privilege == NO_ACCESS) || !region.is_mapped())
           return;
@@ -282,7 +282,7 @@ namespace Legion {
           FieldAccessor<LEGION_READ_ONLY,T,DIM> facc(region, *it);
           ptrs[idx] = const_cast<T*>(facc.ptr(region_bounds));
         }
-        offset = ByteOffset(sizeof(T));
+        offset = int(sizeof(T));
       }
     };
 
@@ -290,7 +290,7 @@ namespace Legion {
 
     template<typename T0, int DIM0,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0])>
+                  const std::vector<T0*>&, const int[DIM0])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -300,7 +300,7 @@ namespace Legion {
 
     template<typename T, typename T0, int DIM0, 
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0])>
+               const std::vector<T0*>&, const int[DIM0])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -310,7 +310,7 @@ namespace Legion {
 
     template<typename T0, int DIM0,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -320,7 +320,7 @@ namespace Legion {
 
     template<typename T, typename T0, int DIM0, 
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -332,8 +332,8 @@ namespace Legion {
 
     template<typename T0, int DIM0, typename T1, int DIM1,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -344,8 +344,8 @@ namespace Legion {
 
     template<typename T, typename T0, int DIM0, typename T1, int DIM1,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -356,8 +356,8 @@ namespace Legion {
 
     template<typename T0, int DIM0, typename T1, int DIM1,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -368,8 +368,8 @@ namespace Legion {
 
     template<typename T, typename T0, int DIM0, typename T1, int DIM1,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -383,9 +383,9 @@ namespace Legion {
     template<typename T0, int DIM0, typename T1, int DIM1,
              typename T2, int DIM2,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -399,9 +399,9 @@ namespace Legion {
     template<typename T, typename T0, int DIM0, typename T1, int DIM1,
                          typename T2, int DIM2,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -415,9 +415,9 @@ namespace Legion {
     template<typename T0, int DIM0, typename T1, int DIM1,
              typename T2, int DIM2,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -431,9 +431,9 @@ namespace Legion {
     template<typename T, typename T0, int DIM0, typename T1, int DIM1,
                          typename T2, int DIM2,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -449,10 +449,10 @@ namespace Legion {
     template<typename T0, int DIM0, typename T1, int DIM1,
              typename T2, int DIM2, typename T3, int DIM3,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -467,10 +467,10 @@ namespace Legion {
     template<typename T, typename T0, int DIM0, typename T1, int DIM1,
                          typename T2, int DIM2, typename T3, int DIM3,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -485,10 +485,10 @@ namespace Legion {
     template<typename T0, int DIM0, typename T1, int DIM1,
              typename T2, int DIM2, typename T3, int DIM3,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -503,10 +503,10 @@ namespace Legion {
     template<typename T, typename T0, int DIM0, typename T1, int DIM1,
                          typename T2, int DIM2, typename T3, int DIM3,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -524,11 +524,11 @@ namespace Legion {
              typename T2, int DIM2, typename T3, int DIM3,
              typename T4, int DIM4,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -546,11 +546,11 @@ namespace Legion {
                          typename T2, int DIM2, typename T3, int DIM3,
                          typename T4, int DIM4,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -568,11 +568,11 @@ namespace Legion {
              typename T2, int DIM2, typename T3, int DIM3,
              typename T4, int DIM4,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -590,11 +590,11 @@ namespace Legion {
                          typename T2, int DIM2, typename T3, int DIM3,
                          typename T4, int DIM4,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -614,12 +614,12 @@ namespace Legion {
              typename T2, int DIM2, typename T3, int DIM3,
              typename T4, int DIM4, typename T5, int DIM5,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -638,12 +638,12 @@ namespace Legion {
                          typename T2, int DIM2, typename T3, int DIM3,
                          typename T4, int DIM4, typename T5, int DIM5,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -662,12 +662,12 @@ namespace Legion {
              typename T2, int DIM2, typename T3, int DIM3,
              typename T4, int DIM4, typename T5, int DIM5,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -686,12 +686,12 @@ namespace Legion {
                          typename T2, int DIM2, typename T3, int DIM3,
                          typename T4, int DIM4, typename T5, int DIM5,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -713,13 +713,13 @@ namespace Legion {
              typename T4, int DIM4, typename T5, int DIM5,
              typename T6, int DIM6,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -741,13 +741,13 @@ namespace Legion {
                          typename T4, int DIM4, typename T5, int DIM5,
                          typename T6, int DIM6,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -769,13 +769,13 @@ namespace Legion {
              typename T4, int DIM4, typename T5, int DIM5,
              typename T6, int DIM6,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -797,13 +797,13 @@ namespace Legion {
                          typename T4, int DIM4, typename T5, int DIM5,
                          typename T6, int DIM6,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -827,14 +827,14 @@ namespace Legion {
              typename T4, int DIM4, typename T5, int DIM5,
              typename T6, int DIM6, typename T7, int DIM7,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -857,14 +857,14 @@ namespace Legion {
                          typename T4, int DIM4, typename T5, int DIM5,
                          typename T6, int DIM6, typename T7, int DIM7,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -887,14 +887,14 @@ namespace Legion {
              typename T4, int DIM4, typename T5, int DIM5,
              typename T6, int DIM6, typename T7, int DIM7,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -917,14 +917,14 @@ namespace Legion {
                          typename T4, int DIM4, typename T5, int DIM5,
                          typename T6, int DIM6, typename T7, int DIM7,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -950,15 +950,15 @@ namespace Legion {
              typename T6, int DIM6, typename T7, int DIM7,
              typename T8, int DIM8,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -984,15 +984,15 @@ namespace Legion {
                          typename T6, int DIM6, typename T7, int DIM7,
                          typename T8, int DIM8,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1018,15 +1018,15 @@ namespace Legion {
              typename T6, int DIM6, typename T7, int DIM7,
              typename T8, int DIM8,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1052,15 +1052,15 @@ namespace Legion {
                          typename T6, int DIM6, typename T7, int DIM7,
                          typename T8, int DIM8,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1088,16 +1088,16 @@ namespace Legion {
              typename T6, int DIM6, typename T7, int DIM7,
              typename T8, int DIM8, typename T9, int DIM9,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1124,16 +1124,16 @@ namespace Legion {
                          typename T6, int DIM6, typename T7, int DIM7,
                          typename T8, int DIM8, typename T9, int DIM9,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1160,16 +1160,16 @@ namespace Legion {
              typename T6, int DIM6, typename T7, int DIM7,
              typename T8, int DIM8, typename T9, int DIM9,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1196,16 +1196,16 @@ namespace Legion {
                          typename T6, int DIM6, typename T7, int DIM7,
                          typename T8, int DIM8, typename T9, int DIM9,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1235,17 +1235,17 @@ namespace Legion {
              typename T8, int DIM8, typename T9, int DIM9,
              typename T10, int DIM10,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9],
-                  const std::vector<T10*>&, const ByteOffset[DIM10])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9],
+                  const std::vector<T10*>&, const int[DIM10])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1275,17 +1275,17 @@ namespace Legion {
                          typename T8, int DIM8, typename T9, int DIM9,
                          typename T10, int DIM10,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9],
-               const std::vector<T10*>&, const ByteOffset[DIM10])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9],
+               const std::vector<T10*>&, const int[DIM10])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1315,17 +1315,17 @@ namespace Legion {
              typename T8, int DIM8, typename T9, int DIM9,
              typename T10, int DIM10,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset,
-                  const std::vector<T10*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int,
+                  const std::vector<T10*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1355,17 +1355,17 @@ namespace Legion {
                          typename T8, int DIM8, typename T9, int DIM9,
                          typename T10, int DIM10,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset,
-               const std::vector<T10*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int,
+               const std::vector<T10*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1397,18 +1397,18 @@ namespace Legion {
              typename T8, int DIM8, typename T9, int DIM9,
              typename T10, int DIM10, typename T11, int DIM11,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9],
-                  const std::vector<T10*>&, const ByteOffset[DIM10],
-                  const std::vector<T11*>&, const ByteOffset[DIM11])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9],
+                  const std::vector<T10*>&, const int[DIM10],
+                  const std::vector<T11*>&, const int[DIM11])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1439,18 +1439,18 @@ namespace Legion {
                          typename T8, int DIM8, typename T9, int DIM9,
                          typename T10, int DIM10, typename T11, int DIM11,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9],
-               const std::vector<T10*>&, const ByteOffset[DIM10],
-               const std::vector<T11*>&, const ByteOffset[DIM11])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9],
+               const std::vector<T10*>&, const int[DIM10],
+               const std::vector<T11*>&, const int[DIM11])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1481,18 +1481,18 @@ namespace Legion {
              typename T8, int DIM8, typename T9, int DIM9,
              typename T10, int DIM10, typename T11, int DIM11,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset,
-                  const std::vector<T10*>&, const ByteOffset,
-                  const std::vector<T11*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int,
+                  const std::vector<T10*>&, const int,
+                  const std::vector<T11*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1523,18 +1523,18 @@ namespace Legion {
                          typename T8, int DIM8, typename T9, int DIM9,
                          typename T10, int DIM10, typename T11, int DIM11,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset,
-               const std::vector<T10*>&, const ByteOffset,
-               const std::vector<T11*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int,
+               const std::vector<T10*>&, const int,
+               const std::vector<T11*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1568,19 +1568,19 @@ namespace Legion {
              typename T10, int DIM10, typename T11, int DIM11,
              typename T12, int DIM12,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9],
-                  const std::vector<T10*>&, const ByteOffset[DIM10],
-                  const std::vector<T11*>&, const ByteOffset[DIM11],
-                  const std::vector<T12*>&, const ByteOffset[DIM12])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9],
+                  const std::vector<T10*>&, const int[DIM10],
+                  const std::vector<T11*>&, const int[DIM11],
+                  const std::vector<T12*>&, const int[DIM12])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1614,19 +1614,19 @@ namespace Legion {
                          typename T10, int DIM10, typename T11, int DIM11,
                          typename T12, int DIM12,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9],
-               const std::vector<T10*>&, const ByteOffset[DIM10],
-               const std::vector<T11*>&, const ByteOffset[DIM11],
-               const std::vector<T12*>&, const ByteOffset[DIM12])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9],
+               const std::vector<T10*>&, const int[DIM10],
+               const std::vector<T11*>&, const int[DIM11],
+               const std::vector<T12*>&, const int[DIM12])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1660,19 +1660,19 @@ namespace Legion {
              typename T10, int DIM10, typename T11, int DIM11,
              typename T12, int DIM12,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset,
-                  const std::vector<T10*>&, const ByteOffset,
-                  const std::vector<T11*>&, const ByteOffset,
-                  const std::vector<T12*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int,
+                  const std::vector<T10*>&, const int,
+                  const std::vector<T11*>&, const int,
+                  const std::vector<T12*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1706,19 +1706,19 @@ namespace Legion {
                          typename T10, int DIM10, typename T11, int DIM11,
                          typename T12, int DIM12,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset,
-               const std::vector<T10*>&, const ByteOffset,
-               const std::vector<T11*>&, const ByteOffset,
-               const std::vector<T12*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int,
+               const std::vector<T10*>&, const int,
+               const std::vector<T11*>&, const int,
+               const std::vector<T12*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1754,20 +1754,20 @@ namespace Legion {
              typename T10, int DIM10, typename T11, int DIM11,
              typename T12, int DIM12, typename T13, int DIM13,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9],
-                  const std::vector<T10*>&, const ByteOffset[DIM10],
-                  const std::vector<T11*>&, const ByteOffset[DIM11],
-                  const std::vector<T12*>&, const ByteOffset[DIM12],
-                  const std::vector<T13*>&, const ByteOffset[DIM13])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9],
+                  const std::vector<T10*>&, const int[DIM10],
+                  const std::vector<T11*>&, const int[DIM11],
+                  const std::vector<T12*>&, const int[DIM12],
+                  const std::vector<T13*>&, const int[DIM13])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1802,20 +1802,20 @@ namespace Legion {
                          typename T10, int DIM10, typename T11, int DIM11,
                          typename T12, int DIM12, typename T13, int DIM13,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9],
-               const std::vector<T10*>&, const ByteOffset[DIM10],
-               const std::vector<T11*>&, const ByteOffset[DIM11],
-               const std::vector<T12*>&, const ByteOffset[DIM12],
-               const std::vector<T13*>&, const ByteOffset[DIM13])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9],
+               const std::vector<T10*>&, const int[DIM10],
+               const std::vector<T11*>&, const int[DIM11],
+               const std::vector<T12*>&, const int[DIM12],
+               const std::vector<T13*>&, const int[DIM13])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1850,20 +1850,20 @@ namespace Legion {
              typename T10, int DIM10, typename T11, int DIM11,
              typename T12, int DIM12, typename T13, int DIM13,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset,
-                  const std::vector<T10*>&, const ByteOffset,
-                  const std::vector<T11*>&, const ByteOffset,
-                  const std::vector<T12*>&, const ByteOffset,
-                  const std::vector<T13*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int,
+                  const std::vector<T10*>&, const int,
+                  const std::vector<T11*>&, const int,
+                  const std::vector<T12*>&, const int,
+                  const std::vector<T13*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1898,20 +1898,20 @@ namespace Legion {
                          typename T10, int DIM10, typename T11, int DIM11,
                          typename T12, int DIM12, typename T13, int DIM13,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset,
-               const std::vector<T10*>&, const ByteOffset,
-               const std::vector<T11*>&, const ByteOffset,
-               const std::vector<T12*>&, const ByteOffset,
-               const std::vector<T13*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int,
+               const std::vector<T10*>&, const int,
+               const std::vector<T11*>&, const int,
+               const std::vector<T12*>&, const int,
+               const std::vector<T13*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -1949,21 +1949,21 @@ namespace Legion {
              typename T12, int DIM12, typename T13, int DIM13,
              typename T14, int DIM14,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9],
-                  const std::vector<T10*>&, const ByteOffset[DIM10],
-                  const std::vector<T11*>&, const ByteOffset[DIM11],
-                  const std::vector<T12*>&, const ByteOffset[DIM12],
-                  const std::vector<T13*>&, const ByteOffset[DIM13],
-                  const std::vector<T14*>&, const ByteOffset[DIM14])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9],
+                  const std::vector<T10*>&, const int[DIM10],
+                  const std::vector<T11*>&, const int[DIM11],
+                  const std::vector<T12*>&, const int[DIM12],
+                  const std::vector<T13*>&, const int[DIM13],
+                  const std::vector<T14*>&, const int[DIM14])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2001,21 +2001,21 @@ namespace Legion {
                          typename T12, int DIM12, typename T13, int DIM13,
                          typename T14, int DIM14,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9],
-               const std::vector<T10*>&, const ByteOffset[DIM10],
-               const std::vector<T11*>&, const ByteOffset[DIM11],
-               const std::vector<T12*>&, const ByteOffset[DIM12],
-               const std::vector<T13*>&, const ByteOffset[DIM13],
-               const std::vector<T14*>&, const ByteOffset[DIM14])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9],
+               const std::vector<T10*>&, const int[DIM10],
+               const std::vector<T11*>&, const int[DIM11],
+               const std::vector<T12*>&, const int[DIM12],
+               const std::vector<T13*>&, const int[DIM13],
+               const std::vector<T14*>&, const int[DIM14])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2053,21 +2053,21 @@ namespace Legion {
              typename T12, int DIM12, typename T13, int DIM13,
              typename T14, int DIM14,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset,
-                  const std::vector<T10*>&, const ByteOffset,
-                  const std::vector<T11*>&, const ByteOffset,
-                  const std::vector<T12*>&, const ByteOffset,
-                  const std::vector<T13*>&, const ByteOffset,
-                  const std::vector<T14*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int,
+                  const std::vector<T10*>&, const int,
+                  const std::vector<T11*>&, const int,
+                  const std::vector<T12*>&, const int,
+                  const std::vector<T13*>&, const int,
+                  const std::vector<T14*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2105,21 +2105,21 @@ namespace Legion {
                          typename T12, int DIM12, typename T13, int DIM13,
                          typename T14, int DIM14,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset,
-               const std::vector<T10*>&, const ByteOffset,
-               const std::vector<T11*>&, const ByteOffset,
-               const std::vector<T12*>&, const ByteOffset,
-               const std::vector<T13*>&, const ByteOffset,
-               const std::vector<T14*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int,
+               const std::vector<T10*>&, const int,
+               const std::vector<T11*>&, const int,
+               const std::vector<T12*>&, const int,
+               const std::vector<T13*>&, const int,
+               const std::vector<T14*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2159,22 +2159,22 @@ namespace Legion {
              typename T12, int DIM12, typename T13, int DIM13,
              typename T14, int DIM14, typename T15, int DIM15,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset[DIM0],
-                  const std::vector<T1*>&, const ByteOffset[DIM1],
-                  const std::vector<T2*>&, const ByteOffset[DIM2],
-                  const std::vector<T3*>&, const ByteOffset[DIM3],
-                  const std::vector<T4*>&, const ByteOffset[DIM4],
-                  const std::vector<T5*>&, const ByteOffset[DIM5],
-                  const std::vector<T6*>&, const ByteOffset[DIM6],
-                  const std::vector<T7*>&, const ByteOffset[DIM7],
-                  const std::vector<T8*>&, const ByteOffset[DIM8],
-                  const std::vector<T9*>&, const ByteOffset[DIM9],
-                  const std::vector<T10*>&, const ByteOffset[DIM10],
-                  const std::vector<T11*>&, const ByteOffset[DIM11],
-                  const std::vector<T12*>&, const ByteOffset[DIM12],
-                  const std::vector<T13*>&, const ByteOffset[DIM13],
-                  const std::vector<T14*>&, const ByteOffset[DIM14],
-                  const std::vector<T15*>&, const ByteOffset[DIM15])>
+                  const std::vector<T0*>&, const int[DIM0],
+                  const std::vector<T1*>&, const int[DIM1],
+                  const std::vector<T2*>&, const int[DIM2],
+                  const std::vector<T3*>&, const int[DIM3],
+                  const std::vector<T4*>&, const int[DIM4],
+                  const std::vector<T5*>&, const int[DIM5],
+                  const std::vector<T6*>&, const int[DIM6],
+                  const std::vector<T7*>&, const int[DIM7],
+                  const std::vector<T8*>&, const int[DIM8],
+                  const std::vector<T9*>&, const int[DIM9],
+                  const std::vector<T10*>&, const int[DIM10],
+                  const std::vector<T11*>&, const int[DIM11],
+                  const std::vector<T12*>&, const int[DIM12],
+                  const std::vector<T13*>&, const int[DIM13],
+                  const std::vector<T14*>&, const int[DIM14],
+                  const std::vector<T15*>&, const int[DIM15])>
     static void raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2213,22 +2213,22 @@ namespace Legion {
                          typename T12, int DIM12, typename T13, int DIM13,
                          typename T14, int DIM14, typename T15, int DIM15,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset[DIM0],
-               const std::vector<T1*>&, const ByteOffset[DIM1],
-               const std::vector<T2*>&, const ByteOffset[DIM2],
-               const std::vector<T3*>&, const ByteOffset[DIM3],
-               const std::vector<T4*>&, const ByteOffset[DIM4],
-               const std::vector<T5*>&, const ByteOffset[DIM5],
-               const std::vector<T6*>&, const ByteOffset[DIM6],
-               const std::vector<T7*>&, const ByteOffset[DIM7],
-               const std::vector<T8*>&, const ByteOffset[DIM8],
-               const std::vector<T9*>&, const ByteOffset[DIM9],
-               const std::vector<T10*>&, const ByteOffset[DIM10],
-               const std::vector<T11*>&, const ByteOffset[DIM11],
-               const std::vector<T12*>&, const ByteOffset[DIM12],
-               const std::vector<T13*>&, const ByteOffset[DIM13],
-               const std::vector<T14*>&, const ByteOffset[DIM14],
-               const std::vector<T15*>&, const ByteOffset[DIM15])>
+               const std::vector<T0*>&, const int[DIM0],
+               const std::vector<T1*>&, const int[DIM1],
+               const std::vector<T2*>&, const int[DIM2],
+               const std::vector<T3*>&, const int[DIM3],
+               const std::vector<T4*>&, const int[DIM4],
+               const std::vector<T5*>&, const int[DIM5],
+               const std::vector<T6*>&, const int[DIM6],
+               const std::vector<T7*>&, const int[DIM7],
+               const std::vector<T8*>&, const int[DIM8],
+               const std::vector<T9*>&, const int[DIM9],
+               const std::vector<T10*>&, const int[DIM10],
+               const std::vector<T11*>&, const int[DIM11],
+               const std::vector<T12*>&, const int[DIM12],
+               const std::vector<T13*>&, const int[DIM13],
+               const std::vector<T14*>&, const int[DIM14],
+               const std::vector<T15*>&, const int[DIM15])>
     static T raw_rect_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2267,22 +2267,22 @@ namespace Legion {
              typename T12, int DIM12, typename T13, int DIM13,
              typename T14, int DIM14, typename T15, int DIM15,
       void (*PTR)(const Task*, Context, Runtime*,
-                  const std::vector<T0*>&, const ByteOffset,
-                  const std::vector<T1*>&, const ByteOffset,
-                  const std::vector<T2*>&, const ByteOffset,
-                  const std::vector<T3*>&, const ByteOffset,
-                  const std::vector<T4*>&, const ByteOffset,
-                  const std::vector<T5*>&, const ByteOffset,
-                  const std::vector<T6*>&, const ByteOffset,
-                  const std::vector<T7*>&, const ByteOffset,
-                  const std::vector<T8*>&, const ByteOffset,
-                  const std::vector<T9*>&, const ByteOffset,
-                  const std::vector<T10*>&, const ByteOffset,
-                  const std::vector<T11*>&, const ByteOffset,
-                  const std::vector<T12*>&, const ByteOffset,
-                  const std::vector<T13*>&, const ByteOffset,
-                  const std::vector<T14*>&, const ByteOffset,
-                  const std::vector<T15*>&, const ByteOffset)>
+                  const std::vector<T0*>&, const int,
+                  const std::vector<T1*>&, const int,
+                  const std::vector<T2*>&, const int,
+                  const std::vector<T3*>&, const int,
+                  const std::vector<T4*>&, const int,
+                  const std::vector<T5*>&, const int,
+                  const std::vector<T6*>&, const int,
+                  const std::vector<T7*>&, const int,
+                  const std::vector<T8*>&, const int,
+                  const std::vector<T9*>&, const int,
+                  const std::vector<T10*>&, const int,
+                  const std::vector<T11*>&, const int,
+                  const std::vector<T12*>&, const int,
+                  const std::vector<T13*>&, const int,
+                  const std::vector<T14*>&, const int,
+                  const std::vector<T15*>&, const int)>
     static void raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
@@ -2321,22 +2321,22 @@ namespace Legion {
                          typename T12, int DIM12, typename T13, int DIM13,
                          typename T14, int DIM14, typename T15, int DIM15,
       T (*PTR)(const Task*, Context, Runtime*, 
-               const std::vector<T0*>&, const ByteOffset,
-               const std::vector<T1*>&, const ByteOffset,
-               const std::vector<T2*>&, const ByteOffset,
-               const std::vector<T3*>&, const ByteOffset,
-               const std::vector<T4*>&, const ByteOffset,
-               const std::vector<T5*>&, const ByteOffset,
-               const std::vector<T6*>&, const ByteOffset,
-               const std::vector<T7*>&, const ByteOffset,
-               const std::vector<T8>*&, const ByteOffset,
-               const std::vector<T9*>&, const ByteOffset,
-               const std::vector<T10*>&, const ByteOffset,
-               const std::vector<T11*>&, const ByteOffset,
-               const std::vector<T12*>&, const ByteOffset,
-               const std::vector<T13*>&, const ByteOffset,
-               const std::vector<T14*>&, const ByteOffset,
-               const std::vector<T15*>&, const ByteOffset)>
+               const std::vector<T0*>&, const int,
+               const std::vector<T1*>&, const int,
+               const std::vector<T2*>&, const int,
+               const std::vector<T3*>&, const int,
+               const std::vector<T4*>&, const int,
+               const std::vector<T5*>&, const int,
+               const std::vector<T6*>&, const int,
+               const std::vector<T7*>&, const int,
+               const std::vector<T8>*&, const int,
+               const std::vector<T9*>&, const int,
+               const std::vector<T10*>&, const int,
+               const std::vector<T11*>&, const int,
+               const std::vector<T12*>&, const int,
+               const std::vector<T13*>&, const int,
+               const std::vector<T14*>&, const int,
+               const std::vector<T15*>&, const int)>
     static T raw_dense_task_wrapper(const Task *task, 
        const std::vector<PhysicalRegion>& regions, Context ctx, Runtime *runtime)
     {
