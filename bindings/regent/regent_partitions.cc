@@ -511,7 +511,7 @@ create_cross_product_complete_unstructured(
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
     DomainPoint lh_color = lhs_colors[lhs_idx];
-    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
+    DomainT<1> lh_domain = runtime->get_index_space_domain(ctx, lh_space);
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
