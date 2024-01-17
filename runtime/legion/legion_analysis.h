@@ -1541,12 +1541,6 @@ namespace Legion {
       PhysicalManager* get_physical_manager(void) const;
     public:
       bool is_field_set(FieldID fid) const;
-      LegionRuntime::Accessor::RegionAccessor<
-          LegionRuntime::Accessor::AccessorType::Generic>
-            get_accessor(void) const;
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez) const;
       void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
@@ -1620,10 +1614,6 @@ namespace Legion {
       bool acquire_valid_references(ReferenceSource source) const;
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;
-    public:
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const;
     protected:
       void make_copy(void);
     protected:

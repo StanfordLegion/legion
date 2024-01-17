@@ -90,11 +90,13 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_##DIM##d_t, RectInDomainIterator##DIM##D *);
       LEGION_FOREACH_N(RECT_ITERATOR)
 #undef RECT_ITERATOR
+      LEGION_DISABLE_DEPRECATED_WARNINGS
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);
       NEW_OPAQUE_WRAPPER(legion_domain_point_coloring_t, DomainPointColoring *);
       NEW_OPAQUE_WRAPPER(legion_multi_domain_point_coloring_t, MultiDomainPointColoring *);
+      LEGION_REENABLE_DEPRECATED_WARNINGS
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_field_allocator_t, FieldAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);
@@ -165,6 +167,7 @@ namespace Legion {
 #pragma warning (pop)
 #endif
 
+      LEGION_DISABLE_DEPRECATED_WARNINGS
       static legion_ptr_t
       wrap(ptr_t ptr)
       {
@@ -180,6 +183,7 @@ namespace Legion {
         ptr.value = ptr_.value;
         return ptr;
       }
+      LEGION_REENABLE_DEPRECATED_WARNINGS
 
 #define NEW_POINT_WRAPPER(DIM)                                  \
       typedef Point<DIM,coord_t> Point##DIM##D;                 \

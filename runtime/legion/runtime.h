@@ -836,12 +836,6 @@ namespace Legion {
       bool is_mapped(void) const;
       LogicalRegion get_logical_region(void) const;
       PrivilegeMode get_privilege(void) const;
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(bool silence_warnings = true);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
       ApEvent remap_region(ApEvent new_ready_event);

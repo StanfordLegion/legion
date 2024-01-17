@@ -21,6 +21,7 @@
  */
 
 #include "legion/legion_types.h"
+#include "legion/legion_domain.h"
 
 namespace Legion {
 

@@ -34,7 +34,7 @@ static bishop_mapper_state_init_fn_t mapper_init;
 
 namespace Legion {
   namespace Mapping {
-    extern LegionRuntime::Logger::Category log_bishop;
+    extern Logger log_bishop;
   }
 }
 

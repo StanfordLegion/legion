@@ -249,26 +249,7 @@ namespace Legion {
       {
         TaskMappingInfo *mapping = find_task_mapping(ctx, task, itr.p);
         TaskSlice &slice = output.slices[idx]; 
-        switch (task.index_domain.get_dim())
-        {
-          case 1:
-            {
-              slice.domain = Domain::from_point<1>(itr.p.get_point<1>());
-              break;
-            }
-          case 2:
-            {
-              slice.domain = Domain::from_point<2>(itr.p.get_point<2>());
-              break;
-            }
-          case 3:
-            {
-              slice.domain = Domain::from_point<3>(itr.p.get_point<3>());
-              break;
-            }
-          default:
-            assert(false);
-        }
+        slice.domain = Domain(itr.p, itr.p);
         slice.proc = mapping->target_proc;
         slice.recurse = false;
         slice.stealable = false;

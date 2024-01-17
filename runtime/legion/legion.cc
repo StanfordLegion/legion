@@ -1251,29 +1251,6 @@ namespace Legion {
       }
     }
 
-#ifdef LEGION_PRIVILEGE_CHECKS
-    //--------------------------------------------------------------------------
-    unsigned RegionRequirement::get_accessor_privilege(void) const
-    //--------------------------------------------------------------------------
-    {
-      switch (privilege)
-      {
-        case LEGION_NO_ACCESS:
-          return LegionRuntime::ACCESSOR_NONE;
-        case LEGION_READ_ONLY:
-          return LegionRuntime::ACCESSOR_READ;
-        case LEGION_READ_WRITE:
-        case LEGION_WRITE_DISCARD:
-          return LegionRuntime::ACCESSOR_ALL;
-        case LEGION_REDUCE:
-          return LegionRuntime::ACCESSOR_REDUCE;
-        default:
-          assert(false);
-      }
-      return LegionRuntime::ACCESSOR_NONE;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     bool RegionRequirement::has_field_privilege(FieldID fid) const
     //--------------------------------------------------------------------------
@@ -2776,31 +2753,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_accessor(bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_accessor(silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_field_accessor(FieldID fid, 
-                                           bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_field_accessor(fid, silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalRegion::get_memories(std::set<Memory>& memories,
                         bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
@@ -3357,152 +3309,6 @@ namespace Legion {
         index = impl->get_next(index, current_piece);
       return valid();
     }
-
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-
-    /////////////////////////////////////////////////////////////
-    // Index Iterator  
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 IndexSpace space, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(ctx, space);
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 LogicalRegion handle, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt, IndexSpace space, ptr_t start)
-    //--------------------------------------------------------------------------
-    {
-      Domain dom = rt->get_index_space_domain(space);
-#ifdef DEBUG_LEGION
-      assert(dom.get_dim() == 1);
-#endif
-      const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const IndexIterator &rhs)
-      : is_iterator(rhs.is_iterator), rect_iterator(rhs.rect_iterator)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator::~IndexIterator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexIterator& IndexIterator::operator=(const IndexIterator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      is_iterator = rhs.is_iterator;
-      rect_iterator = rhs.rect_iterator;
-      return *this;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // IndexAllocator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(void)
-      : index_space(IndexSpace::NO_SPACE)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(const IndexAllocator &rhs)
-      : index_space(rhs.index_space), iterator(rhs.iterator)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::IndexAllocator(IndexSpace is, IndexIterator itr)
-      : index_space(is), iterator(itr)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator::~IndexAllocator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator& IndexAllocator::operator=(const IndexAllocator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      index_space = rhs.index_space;
-      iterator = rhs.iterator;
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    ptr_t IndexAllocator::alloc(unsigned num_elements)
-    //--------------------------------------------------------------------------
-    {
-      size_t allocated = 0;
-      ptr_t result = iterator.next_span(allocated, num_elements);
-      if (allocated == num_elements)
-        return result;
-      else
-        return ptr_t::nil();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAllocator::free(ptr_t ptr, unsigned num_elements)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.error("Dynamic free of index space points is "
-                              "no longer supported");
-      assert(false);
-    }
-
-    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // Field Allocator
@@ -4077,6 +3883,8 @@ namespace Legion {
     // Coloring Serializer 
     /////////////////////////////////////////////////////////////
 
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     ColoringSerializer::ColoringSerializer(const Coloring &c)
       : coloring(c)
@@ -4226,6 +4034,8 @@ namespace Legion {
       // Return the number of bytes consumed
       return (size_t(source) - size_t(buffer));
     }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
@@ -4635,22 +4445,6 @@ namespace Legion {
         index_color_space, true/*perform intersections*/, 
         (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_index_partition(
-                                          Context ctx, IndexSpace parent,
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                                      Color part_color)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.error("Call to deprecated 'create_index_partition' "
-                    "method with an accessor in task %s (UID %lld) should be "
-                    "replaced with a call to create_partition_by_field.",
-                    ctx->get_task_name(), ctx->get_unique_id());
-      assert(false);
-      return IndexPartition::NO_PART;
     }
 
     //--------------------------------------------------------------------------
@@ -6272,21 +6066,6 @@ namespace Legion {
     {
       return runtime->get_parent_logical_partition(handle);
     }
-
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-
-    //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
-    //--------------------------------------------------------------------------
-    {
-      Internal::log_run.warning("Dynamic index space allocation is no longer "
-                                "supported. You can only make one allocator "
-                                "per index space and it must always be in the "
-                                "same task that created the index space.");
-      return IndexAllocator(is, IndexIterator(this, ctx, is));
-    }
-
-    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)

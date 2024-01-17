@@ -15,8 +15,6 @@
 
 // NEVER INCLUDE THIS FILE DIRECTLY, INCLUDE legion_stl.h INSTEAD!
 
-#include "legion/arrays.h"
-#include "legion/accessor.h"
 #include "legion/legion_utilities.h"
 // Useful for IDEs 
 #include "legion/legion_stl.h"

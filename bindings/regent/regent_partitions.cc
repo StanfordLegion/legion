@@ -358,12 +358,9 @@ legion_terra_index_cross_product_create_list(
       IndexPartition rh_subpart = runtime->get_index_partition(ctx, rh_space, sub_color);
       IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_subpart, lh_color);
 
-      IndexIterator rh_it(runtime, ctx, rh_subspace);
-      if (rh_it.has_next()) {
-        product[lh_space].push_back(rh_subspace);
-      } else {
-        product[lh_space].push_back(IndexSpace::NO_SPACE);
-      }
+      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_subspace);
+      product[lh_space].resize(product[lh_space].size() + rh_domain.get_volume(), rh_subspace);
+      product[lh_space].push_back(IndexSpace::NO_SPACE);
     }
   }
 
@@ -512,20 +509,19 @@ create_cross_product_complete_unstructured(
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
     DomainPoint lh_color = lhs_colors[lhs_idx];
+    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
 
       coloring[rh_space][lh_color];
-      for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
-        size_t rh_count = 0;
-        ptr_t rh_ptr = rh_it.next_span(rh_count);
-        ptr_t rh_end = rh_ptr.value + rh_count - 1;
+      DomainT<1> rh_domain = runtime->get_index_space_domain(ctx, rh_space);
+      for (RectInDomainIterator<1> rh_it(rh_domain); rh_it(); rh_it++) {
+        ptr_t rh_end = rh_it->hi[0];
 
-        for (IndexIterator lh_it(runtime, ctx, lh_space, rh_ptr); lh_it.has_next();) {
-          size_t lh_count = 0;
-          ptr_t lh_ptr = lh_it.next_span(lh_count);
-          ptr_t lh_end = lh_ptr.value + lh_count - 1;
+        for (RectInDomainIterator<1> lh_it(lh_domain); lh_it(); lh_it++) {
+          ptr_t lh_ptr = lh_it->lo[0];
+          ptr_t lh_end = lh_it->hi[0];
 
           if (lh_ptr.value > rh_end.value) {
             break;

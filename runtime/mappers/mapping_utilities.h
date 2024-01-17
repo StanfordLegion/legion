@@ -344,16 +344,4 @@ namespace Legion {
   }; // namespace Mapping
 }; // namespace Legion
 
-// For backwards compatbility
-namespace LegionRuntime {
-  namespace HighLevel {
-    namespace MappingUtilities {
-      typedef Legion::Mapping::Utilities::MachineQueryInterface
-        MachineQueryInterface;
-      typedef Legion::Mapping::Utilities::MappingMemoizer MappingMemoizer;
-      typedef Legion::Mapping::Utilities::MappingProfiler MappingProfiler;
-    };
-  };
-};
-
 #endif // __MAPPING_UTILITIES__

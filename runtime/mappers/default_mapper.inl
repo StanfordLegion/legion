@@ -65,26 +65,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM>
-    /*static*/ void DefaultMapper::default_decompose_points(
-                               const LegionRuntime::Arrays::Rect<DIM> &rect,
-                               const std::vector<Processor> &targets,
-                               const LegionRuntime::Arrays::Point<DIM> &blocks,
-                               bool recurse, bool stealable,
-                               std::vector<TaskSlice> &slices)
-    //--------------------------------------------------------------------------
-    {
-      const Domain dom_rect = Domain::from_rect<DIM>(rect);
-      const DomainT<DIM,coord_t> point_space = dom_rect;
-
-      const DomainPoint dom_point = DomainPoint::from_point<DIM>(blocks);
-      const Point<DIM,coord_t> num_blocks = dom_point;
-
-      default_decompose_points(point_space, targets, num_blocks, 
-                               recurse, stealable, slices);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
     /*static*/ Point<DIM,coord_t> DefaultMapper::default_select_num_blocks( 
                                              long long int factor, 
                                              const Rect<DIM,coord_t> &to_factor)
