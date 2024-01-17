@@ -132,8 +132,11 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
 
     if use_cmake:
         if not os.path.exists(os.path.join(build_dir, 'CMakeCache.txt')):
+            llvm_cmakedir = ''
+            if os.environ.get('LLVM_CONFIG', None):
+                llvm_cmakedir = subprocess.check_output([os.environ['LLVM_CONFIG'], '--cmakedir']).decode('utf-8').strip()
             subprocess.check_call(
-                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
+                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir, '-DLLVM_HINTS=%s' % llvm_cmakedir],
                 cwd=build_dir)
         subprocess.check_call(
             [make_exe, 'install', '-j', str(thread_count)],
