@@ -22841,7 +22841,7 @@ namespace Legion {
     void AllReduceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      Operation::activate();
+      MemoizableOp::activate();
       redop_id = 0;
       future_result_size = 0;
       serdez_redop_buffer = NULL;
@@ -22853,7 +22853,7 @@ namespace Legion {
     void AllReduceOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      Operation::deactivate(false/*free*/);
+      MemoizableOp::deactivate(false/*free*/);
       future_map = FutureMap();
       result = Future();
       initial_value = Future();
