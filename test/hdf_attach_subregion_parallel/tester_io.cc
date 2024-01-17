@@ -25,9 +25,8 @@
 #include <unistd.h>
 #include <math.h>
 #include <cmath>
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
+
+using namespace Legion;
 
 /*
  * In this example we illustrate how to do parallel I/O of subregions 
@@ -259,18 +258,16 @@ void init_field_task(const Task *task,
 #endif
 
   FieldID fid = *(task->regions[0].privilege_fields.begin());
-  RegionAccessor<AccessorType::Generic, double> acc_temp = 
-    regions[0].get_field_accessor(fid).typeify<double>();
-  
   Domain dom = runtime->get_index_space_domain(ctx, 
     task->regions[0].region.get_index_space());
 
   switch (dom.get_dim()) {
     case 2:
       {
-        Rect<2> rect = dom.get_rect<2>();
-        for (GenericPointInRectIterator<2> pir(rect); pir; pir++) {
-          acc_temp.write(DomainPoint::from_point<2>(pir.p),
+        Rect<2> rect = dom;
+        FieldAccessor<LEGION_WRITE_DISCARD,double,2> acc_temp(regions[0], fid);
+        for (PointInRectIterator<2> pir(rect); pir(); pir++) {
+          acc_temp.write(*pir,
               task->index_point[0]*extent +
               task->index_point[1]*extent + drand48());
         }
@@ -279,9 +276,10 @@ void init_field_task(const Task *task,
 
     case 3:
       {
-        Rect<3> rect = dom.get_rect<3>();
-        for (GenericPointInRectIterator<3> pir(rect); pir; pir++) {
-          acc_temp.write(DomainPoint::from_point<3>(pir.p),
+        Rect<3> rect = dom;
+        FieldAccessor<LEGION_WRITE_DISCARD,double,3> acc_temp(regions[0], fid);
+        for (PointInRectIterator<3> pir(rect); pir(); pir++) {
+          acc_temp.write(*pir,
               task->index_point[0]*extent +
               task->index_point[1]*extent +
               task->index_point[2]*extent + drand48());
@@ -319,15 +317,12 @@ void check_task(const Task *task,
   switch (dom.get_dim()) {
     case 2:
       {
-        Rect<2> rect = dom.get_rect<2>();
+        Rect<2> rect = dom;
         for (unsigned i = 0; i < task->regions[0].instance_fields.size(); i++) {
-          RegionAccessor<AccessorType::Generic, double> acc_src = 
-            regions[0].get_field_accessor(i).typeify<double>();
-          RegionAccessor<AccessorType::Generic, double> acc_dst = 
-            regions[1].get_field_accessor(i).typeify<double>();
-          for (GenericPointInRectIterator<2> pir(rect); pir; pir++) {
-            if (acc_src.read(DomainPoint::from_point<2>(pir.p)) !=
-                acc_dst.read(DomainPoint::from_point<2>(pir.p))) 
+          FieldAccessor<LEGION_READ_ONLY,double,2> acc_src(regions[0], i);
+          FieldAccessor<LEGION_READ_ONLY,double,2> acc_dst(regions[1], i);
+          for (PointInRectIterator<2> pir(rect); pir(); pir++) {
+            if (acc_src.read(*pir) != acc_dst.read(*pir))
               all_passed = false;
             values_checked++;
           }
@@ -337,15 +332,12 @@ void check_task(const Task *task,
 
     case 3:
       {
-        Rect<3> rect = dom.get_rect<3>();
+        Rect<3> rect = dom;
         for (unsigned i = 0; i < task->regions[0].instance_fields.size(); i++) {
-          RegionAccessor<AccessorType::Generic, double> acc_src = 
-            regions[0].get_field_accessor(i).typeify<double>();
-          RegionAccessor<AccessorType::Generic, double> acc_dst = 
-            regions[1].get_field_accessor(i).typeify<double>();
-          for (GenericPointInRectIterator<3> pir(rect); pir; pir++) {
-            if (acc_src.read(DomainPoint::from_point<3>(pir.p)) !=
-                acc_dst.read(DomainPoint::from_point<3>(pir.p))) 
+          FieldAccessor<LEGION_READ_ONLY,double,3> acc_src(regions[0], i);
+          FieldAccessor<LEGION_READ_ONLY,double,3> acc_dst(regions[1], i);
+          for (PointInRectIterator<3> pir(rect); pir(); pir++) {
+            if (acc_src[*pir] != acc_dst[*pir])
               all_passed = false;
             values_checked++;
           }
