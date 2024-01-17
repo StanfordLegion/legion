@@ -220,10 +220,10 @@ namespace Legion {
           watcher(watcher_),
           batchsize(batchsize_),
           max_add(max_add_),
-          max_in_flight_requests(max_inflight_requests_),
-          wait_on_async_job(wait_on_async_job_),
           min_trace_length(min_trace_length_),
-          jobs_comp_queue(CompletionQueue::create_completion_queue(max_inflight_requests_)) {
+          jobs_comp_queue(CompletionQueue::create_completion_queue(max_inflight_requests_)),
+          max_in_flight_requests(max_inflight_requests_),
+          wait_on_async_job(wait_on_async_job_) {
       // Reserve one extra place so that we can insert the sentinel
       // character at the end of the string.
       this->hashes.reserve(this->batchsize + 1);
