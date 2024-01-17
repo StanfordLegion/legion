@@ -359,8 +359,10 @@ legion_terra_index_cross_product_create_list(
       IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_subpart, lh_color);
 
       Domain rh_domain = runtime->get_index_space_domain(ctx, rh_subspace);
-      product[lh_space].resize(product[lh_space].size() + rh_domain.get_volume(), rh_subspace);
-      product[lh_space].push_back(IndexSpace::NO_SPACE);
+      if (!rh_domain.empty())
+        product[lh_space].push_back(rh_space);
+      else
+        product[lh_space].push_back(IndexSpace::NO_SPACE);
     }
   }
 
