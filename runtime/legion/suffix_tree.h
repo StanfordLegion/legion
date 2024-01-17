@@ -32,19 +32,23 @@ namespace Legion {
     // has a GPL license, so not sure where to go from here.
     template<typename T>
     class SuffixTree;
+    template<typename T>
+    class SuffixTreeNode;
+
+    // Custom allocator for SuffixTreeNodes.
+    template<typename T>
+    class SuffixTreeNodeAllocator {
+    public:
+      virtual SuffixTreeNode<T>* alloc(SuffixTreeNode<T>* parent, size_t start, size_t end, bool internal) = 0;
+    };
 
     template<typename T>
     class SuffixTreeNode {
     public:
+      // Default constructor as well, so that it can be put in vectors.
+      SuffixTreeNode() : parent(nullptr), start(0), end(0), internal(false) {}
       SuffixTreeNode(SuffixTreeNode* parent_, size_t start_, size_t end_, bool internal_) :
         parent(parent_), start(start_), end(end_), internal(internal_) {}
-
-      ~SuffixTreeNode() {
-        // TODO (rohany): I can't make the C++ type checker happy...
-        for (auto it = children.begin(); it != children.end(); it++) {
-          delete it->second;
-        }
-      }
 
       size_t depth() { return end - start; }
       bool is_internal() { return this->internal; }
@@ -54,12 +58,12 @@ namespace Legion {
       size_t get_end() { return this->end; }
 
     protected:
-      SuffixTreeNode<T>* split_edge(const std::vector<T>& str, size_t new_len, SuffixTreeNode<T>* child) {
+      SuffixTreeNode<T>* split_edge(SuffixTreeNodeAllocator<T>& alloc, const std::vector<T>& str, size_t new_len, SuffixTreeNode<T>* child) {
         assert(this->depth() < new_len && new_len < child->depth());
 
         size_t new_edge_end = child->start + new_len;
         // It is always safe to shorten a path.
-        SuffixTreeNode<T>* new_node = new SuffixTreeNode<T>(this, child->start, new_edge_end, true /* internal */);
+        SuffixTreeNode<T>* new_node = alloc.alloc(this, child->start, new_edge_end, true /* internal*/);
 
         // Substitute new node.
         this->children[
@@ -145,13 +149,16 @@ namespace Legion {
 
     // Suffix Tree class.
     template<typename T>
-    class SuffixTree {
+    class SuffixTree : public SuffixTreeNodeAllocator<T> {
     public:
       // TODO (rohany): I don't know a clean way to handle this, but the user of this
       //  method must provide a "properly" formatted string to the SuffixTree. This means
       //  that the final token in `str` must be a token that is not equal to all other
       //  characters in the string.
-      SuffixTree(const std::vector<T>& str) {
+      SuffixTree(const std::vector<T>& str)
+          // The maximum number of nodes in a suffix tree is 2*N.
+        : node_alloc(2 * str.size() + 1),
+          node_alloc_idx(0) {
         #ifdef DEBUG_LEGION
         // Check that the string is properly formatted.
         for (size_t i = 0; i < str.size() - 1; i++) {
@@ -159,12 +166,8 @@ namespace Legion {
         }
         #endif
 
-        this->root = new SuffixTreeNode<T>(nullptr, 0, 0, true /* internal */);
+        this->root = this->alloc(nullptr, 0, 0, true /* internal */);
         build(str);
-      }
-
-      ~SuffixTree() {
-        delete this->root;
       }
 
       bool find(const std::vector<T>& base_str, const std::vector<T>& query_str) {
@@ -174,6 +177,12 @@ namespace Legion {
       }
 
       SuffixTreeNode<T>* get_root() { return this->root; }
+
+      SuffixTreeNode<T>* alloc(SuffixTreeNode<T>* parent, size_t start, size_t end, bool internal) override {
+        assert(this->node_alloc_idx < this->node_alloc.size());
+        return new (&this->node_alloc[this->node_alloc_idx++]) SuffixTreeNode<T>(parent, start, end, internal);
+      }
+
     private:
       void build(const std::vector<T>& str) {
         this->root->suffix_link = this->root;
@@ -212,7 +221,7 @@ namespace Legion {
             if (c->depth() > depth) {
               // The path ended in the middle of an edge.
               assert(c->parent != nullptr);
-              c = c->parent->split_edge(str, depth, c);
+              c = c->parent->split_edge(*this, str, depth, c);
             }
 
             // debug
@@ -245,14 +254,14 @@ namespace Legion {
 
           if (child != nullptr) {
             // The path ended in the middle of an edge.
-            head = head->split_edge(str, matched_len, child);
+            head = head->split_edge(*this, str, matched_len, child);
           }
 
           // debug
           // std::cout << "new head is head " << c->is_internal() << " depth=" << head->depth() << std::endl;
           // debug
 
-          head->children[str[start + matched_len]] = new SuffixTreeNode<T>(head, start, end, false /* internal */);
+          head->children[str[start + matched_len]] = this->alloc(head, start, end, false /* internal */);
 
           // debug
           // std::cout << "Added ";
@@ -265,6 +274,9 @@ namespace Legion {
       }
 
       SuffixTreeNode<T>* root;
+      // Allocation scratch space for suffix tree nodes.
+      std::vector<SuffixTreeNode<T>> node_alloc;
+      size_t node_alloc_idx;
     };
 
     // Non overlapping repeats implementation.
