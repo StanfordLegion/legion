@@ -2164,7 +2164,6 @@ namespace Realm {
       assert(dim >= 1);
 
       GPUFuncInfo &func_info = indirect_copy_kernels[dim - 1][log_field_size];
-
       launch_kernel(func_info, copy_info, volume, stream);
     }
 

@@ -993,6 +993,29 @@ namespace Realm {
       GPUCompletionEvent event;
     };
 
+    class GPUGatherTransferCompletion : public GPUCompletionNotification {
+    public:
+      GPUGatherTransferCompletion(XferDes *_xd, int _read_port_idx, size_t _read_offset,
+                                  size_t _read_size, int _write_port_idx,
+                                  size_t _write_offset, size_t _write_size,
+                                  int _read_ind_port_idx = -1, size_t _read_ind_offset = 0,
+                                  size_t _read_ind_size = 0, int _write_ind_port_idx = -1,
+                                  size_t _write_ind_offset = 0, size_t _write_ind_size = 0);
+
+          virtual void request_completed(void);
+
+    protected:
+      XferDes *xd;
+      int read_port_idx;
+      size_t read_offset, read_size;
+      int read_ind_port_idx;
+      size_t read_ind_offset, read_ind_size;
+      int write_port_idx;
+      size_t write_offset, write_size;
+      int write_ind_port_idx;
+      size_t write_ind_offset, write_ind_size;
+    };
+
     class GPUTransferCompletion : public GPUCompletionNotification {
     public:
       GPUTransferCompletion(XferDes *_xd, int _read_port_idx,

@@ -1259,6 +1259,12 @@ namespace Realm {
 	bool flush = out_port->iter->get_addresses(out_port->addrlist,
                                                    out_nonaffine);
 	write_bytes_avail = out_port->addrlist.bytes_pending();
+        // TODO(apryakhin@): We add this to handle scatter when both
+        // indirection and source are coming from IB and this needs
+        // good testing.
+        if (out_port->indirect_port_idx >= 0 && write_bytes_avail) {
+          min_xfer_size = std::min(write_bytes_avail, min_xfer_size);
+        }
         if(flush) {
           if(write_bytes_avail > 0) {
             // ignore a nonaffine piece as we still have some affine bytes

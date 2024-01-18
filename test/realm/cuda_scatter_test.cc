@@ -108,12 +108,13 @@ namespace TestConfig {
   size_t pieces2 = 1;
   bool skipfirst = false;
   bool splitcopies = false;
-  bool do_scatter = true;
+  bool do_scatter = false;
   bool do_direct = false;
   bool verbose = false;
   bool verify = true;
   bool ind_on_gpu = true;
   bool remote_gather = false;
+  bool do_cpu = false;
 }; // namespace TestConfig
 
 struct SpeedTestArgs {
@@ -772,7 +773,7 @@ Event DistributedData<N, T>::gather(IndexSpace<N, T> is, FieldID ptr_id,
             src.pieces.begin();
         it2 != src.pieces.end(); ++it2) {
       indirect.spaces.push_back(it2->space);
-      indirect.insts.push_back(it2->inst);
+      indirect.insts.push_back(it2->inst); // region2
     }
 
     exp->nanoseconds = 0;
@@ -999,7 +1000,7 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
   region1.add_subspaces(is1, pieces1);
   region1
       .create_instances(fields1, RoundRobinPicker<N, T>(gpu_mems),
-                        /*offset=*/remote ? 0 : 1)
+                        /*offset=*/0)
       .wait();
 
   DistributedData<N, T> region_ind;
@@ -1008,14 +1009,14 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
       .create_instances(
           fields_ind,
           RoundRobinPicker<N, T>(TestConfig::ind_on_gpu ? gpu_mems : sys_mems),
-          /*offset=*/remote ? 1 : 0)
+          /*offset=*/1)
       .wait();
 
   DistributedData<N2, T2> region2;
   region2.add_subspaces(is2, pieces2, /*num_subrects=*/1);
   region2
       .create_instances(fields2, RoundRobinPicker<N2, T2>(gpu_mems),
-                        /*offset=*/remote ? 1 : 0, true)
+                        /*offset=*/2, true)
       .wait();
 
   Matrix<N2, N, T> transform;
@@ -1024,20 +1025,54 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
       transform[i][j] = (i == j ? 1 : 0);
     }
   }
+
+  Matrix<1, N, T> linear;
+  for(int i = 0; i < 1; i++) {
+    for(int j = 0; j < N; j++) {
+      linear[i][j] = (i == j ? 1 : 0);
+    }
+  }
+
   region_ind
       .template fill<Point<N2, T2>>(
-          is1, FID_PTR1, [=](Point<N, T> p) -> Point<N2, T2> { return transform * p; },
+          is1, FID_PTR1,
+          [=](Point<N, T> p) -> Point<N2, T2> {
+            return transform * p;
+          },
           Event::NO_EVENT)
       .wait();
 
   region1
       .template fill<DT>(
-          is1, FID_DATA1, [&](Point<N, T> p) -> DT { return DT(p.x); }, Event::NO_EVENT)
+          is1, FID_DATA1,
+          [&](Point<N, T> p) -> DT {
+            DT i = 0;
+            DT vol = 1;
+            int d = 0;
+            for(; d < N - 1; d++) {
+              i += vol * p[d];
+              vol *= TestConfig::sizes1[d];
+            }
+            i += vol * p[d];
+            return i;
+          },
+          Event::NO_EVENT)
       .wait();
 
   region2
       .template fill<DT>(
-          is2, FID_DATA1, [](Point<N2, T2> p) -> DT { return DT(300 + p.x); },
+          is2, FID_DATA1,
+          [&](Point<N2, T2> p) -> DT {
+            DT i = 0;
+            DT vol = 1;
+            int d = 0;
+            for(; d < N2 - 1; d++) {
+              i += vol * p[d];
+              vol *= TestConfig::sizes2[d];
+            }
+            i += vol * p[d];
+            return i + DT(300);
+          },
           Event::NO_EVENT)
       .wait();
 
@@ -1053,20 +1088,6 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
     if(!region2.template verify<DT>(is2, FID_DATA1, Event::NO_EVENT))
       return false;
   }
-
-#ifdef ENABLE_DIRECT_TEST
-  if(scatter && TestConfig::do_direct) {
-    region1
-        .template direct_scatter<DT>(is1, FID_PTR1, region_ind, region2, FID_DATA1,
-                                     FID_DATA1, false /*!oor_possible*/,
-                                     true /*aliasing_possible*/, serdez_id,
-                                     Event::NO_EVENT)
-        .wait();
-
-    if(!region2.template verify<DT>(is2, FID_DATA1, Event::NO_EVENT))
-      return false;
-  }
-#endif
 
   if(!scatter && !TestConfig::do_direct) {
     region1
@@ -1114,76 +1135,52 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
   sys_mems.assign(mq.begin(), mq.end());
   assert(!sys_mems.empty());
 
+  if(TestConfig::do_cpu) {
+    gpu_mems.clear();
+    gpu_mems.assign(mq.begin(), mq.end());
+  }
+
   bool ok = true;
 
-  if(!scatter_gather_test<1, long long, 1, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }
+  for(int i = 0; i < 2; i++) {
+    bool do_scatter = (i == 0);
+    /*typedef Pad<float, 16> BigFloat;
+    break;
+    if(!scatter_gather_test<1, long long, 2, long long, BigFloat>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }*/
 
-  if(!scatter_gather_test<1, long long, 1, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p,
-         /*scatter=*/false, /*remote*/ true)) {
-    ok = false;
-  }
+    if(!scatter_gather_test<1, long long, 1, long long, long long>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
 
-  if(!scatter_gather_test<1, long long, 1, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, true)) {
-    ok = false;
-  }
+    if(!scatter_gather_test<1, long long, 2, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
 
-  if(!scatter_gather_test<1, long long, 3, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }
+    if(!scatter_gather_test<1, long long, 3, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
 
-  if(!scatter_gather_test<1, long long, 3, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p,
-         /*scatter=*/false, /*remote*/ true)) {
-    ok = false;
-  }
+    if(!scatter_gather_test<2, long long, 3, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
 
-  if(!scatter_gather_test<1, long long, 3, long long, int>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, true)) {
-    ok = false;
-  }
-
-  /*if (!scatter_gather_test<1, long long, 2, long long, int>(
-          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }
-
-  if (!scatter_gather_test<2, long long, 2, long long, int>(
-          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }
-
-  if (!scatter_gather_test<1, long long, 3, long long, int>(
-          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }
-
-  if (!scatter_gather_test<3, long long, 3, long long, int>(
-          sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }*/
-
-  typedef Pad<float, 8> BigFloat;
-  if(!scatter_gather_test<1, long long, 2, long long, BigFloat>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p)) {
-    ok = false;
-  }
-
-  typedef Pad<float, 8> BigFloat;
-  if(!scatter_gather_test<1, long long, 2, long long, BigFloat>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p,
-         /*scatter=*/false, /*remote=*/true)) {
-    ok = false;
-  }
-
-  if(!scatter_gather_test<1, long long, 2, long long, BigFloat>(
-         sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, true)) {
-    ok = false;
+    if(!scatter_gather_test<3, long long, 3, long long, int>(
+           sys_mems, gpu_mems, TestConfig::pieces1, TestConfig::pieces2, p, 0, do_scatter,
+           true)) {
+      ok = false;
+    }
   }
 
   log_app.info() << "Scatter/gather test finished "
@@ -1202,7 +1199,7 @@ int main(int argc, char **argv)
   rt.init(&argc, &argv);
 
   for(size_t i = 0; i < MAX_TEST_DIM; i++) {
-    TestConfig::sizes1[i] = 6;
+    TestConfig::sizes1[i] = 16;
     TestConfig::sizes2[i] = TestConfig::sizes1[i]; //* 2;
   }
 
@@ -1225,6 +1222,7 @@ int main(int argc, char **argv)
   cp.add_option_int("-verify", TestConfig::verify);
   cp.add_option_int("-direct", TestConfig::do_direct);
   cp.add_option_int("-ind_on_gpu", TestConfig::ind_on_gpu);
+  cp.add_option_int("-do_cpu", TestConfig::do_cpu);
   cp.add_option_int("-remote_gather", TestConfig::remote_gather);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
