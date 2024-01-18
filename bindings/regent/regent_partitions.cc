@@ -360,7 +360,7 @@ legion_terra_index_cross_product_create_list(
 
       Domain rh_domain = runtime->get_index_space_domain(ctx, rh_subspace);
       if (!rh_domain.empty())
-        product[lh_space].push_back(rh_space);
+        product[lh_space].push_back(rh_subspace);
       else
         product[lh_space].push_back(IndexSpace::NO_SPACE);
     }
