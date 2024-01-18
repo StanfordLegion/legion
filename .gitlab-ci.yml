@@ -70,21 +70,16 @@ cache: &global_cache
   CXX: "clang++"
 
 .terra70: &terra70
-  LLVM_CONFIG: "llvm-config-7"
   TERRA_DIR: "/usr/local/terra70"
 .terra9: &terra9
-  LLVM_CONFIG: "llvm-config-9"
   TERRA_DIR: "/usr/local/terra9"
 .terra10: &terra10
-  LLVM_CONFIG: "llvm-config-10"
   TERRA_DIR: "/usr/local/terra10"
 .terra12: &terra12
-  LLVM_CONFIG: "llvm-config-12"
   TERRA_DIR: "/usr/local/terra12"
 .terra13: &terra13 # macOS only
   TERRA_DIR: "/usr/local/terra-13"
 .terra14: &terra14
-  LLVM_CONFIG: "llvm-config-14"
   TERRA_DIR: "/usr/local/terra14"
 
 .llvm7: &llvm7
