@@ -4788,15 +4788,6 @@ namespace Legion {
                                          const char *file_name, 
                                          const int line_number,
                                          const char *message);
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    public:
-      static const char* find_privilege_task_name(void *impl);
-#endif
-#ifdef LEGION_BOUNDS_CHECKS
-    public:
-      static void check_bounds(void *impl, ptr_t ptr);
-      static void check_bounds(void *impl, const DomainPoint &dp);
-#endif
     public:
       // Static member variables
       static TaskID legion_main_id;
