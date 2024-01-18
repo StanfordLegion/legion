@@ -5079,7 +5079,9 @@ namespace Legion {
       if (!leaf_task)
       {
         InnerContext *inner_ctx;
-        if (runtime->enable_automatic_tracing) {
+        // Use the automatic tracing context if it is enabled and this is the
+        // top level task. Otherwise, use a normal inner context.
+        if (runtime->enable_automatic_tracing && this->task_id == Runtime::legion_main_id) {
           log_auto_trace.info() << "Initializing AutomaticTracingContext<InnerContext>.";
           inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
