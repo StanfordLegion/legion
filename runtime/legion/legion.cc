@@ -4176,6 +4176,8 @@ namespace Legion {
       ctx->destroy_index_space(handle, unordered, recurse, provenance);
     } 
 
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(Context ctx,
                                           IndexSpace parent,
@@ -4446,6 +4448,8 @@ namespace Legion {
         (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
       return result;
     }
+
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(Context ctx, IndexPartition handle)
@@ -5531,6 +5535,8 @@ namespace Legion {
       return runtime->get_index_partition_depth(handle);
     }
 
+    LEGION_DISABLE_DEPRECATED_WARNINGS
+
     //--------------------------------------------------------------------------
     ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
@@ -5543,6 +5549,8 @@ namespace Legion {
         return pointer;
       return ptr_t::nil();
     }
+    
+    LEGION_REENABLE_DEPRECATED_WARNINGS
 
     //--------------------------------------------------------------------------
     DomainPoint Runtime::safe_cast(Context ctx, DomainPoint point, 

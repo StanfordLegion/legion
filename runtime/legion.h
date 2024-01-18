@@ -5213,6 +5213,7 @@ namespace Legion {
       // Index Partition Operations Based on Coloring
       // (These are deprecated, use the dependent partitioning calls instead)
       //------------------------------------------------------------------------
+      LEGION_DISABLE_DEPRECATED_WARNINGS
       /**
        * @deprecated
        * Create an index partition from a point coloring
@@ -5338,6 +5339,7 @@ namespace Legion {
 					    const T& mapping,
 					    Color color = 
                                                     LEGION_AUTO_GENERATE_ID);
+      LEGION_REENABLE_DEPRECATED_WARNINGS
 
       /**
        * Create a new shared ownership of an index partition to prevent it 
@@ -6737,8 +6739,10 @@ namespace Legion {
        * @param region the target logical region
        * @return the same pointer if it can be safely cast, otherwise nil
        */
+      LEGION_DISABLE_DEPRECATED_WARNINGS
       LEGION_DEPRECATED("everything associated with ptr_t is deprecated")
       ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
+      LEGION_REENABLE_DEPRECATED_WARNINGS
 
       /**
        * Safe case a domain point down to a target region.  If the point
