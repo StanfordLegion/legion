@@ -1389,7 +1389,7 @@ namespace Realm {
 
     // if the thread is still in our all_workers list, this was unexpected
     if(all_workers.count(thread) > 0) {
-      printf("unexpected worker termination: %p\n", thread);
+      printf("unexpected worker termination: %p\n", static_cast<void *>(thread));
 
       // if this was our last worker, and we're not shutting down,
       //  something bad probably happened - fire up a new worker and

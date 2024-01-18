@@ -117,6 +117,11 @@ namespace Realm {
 
     virtual void populate_profiling_measurements(ProfilingMeasurementCollection& pmc) const;
 
+    ExecutionException(const ExecutionException &) = default;
+    ExecutionException &operator=(const ExecutionException &) = default;
+    ExecutionException(ExecutionException &&) noexcept = default;
+    ExecutionException &operator=(ExecutionException &&) noexcept = default;
+
     int error_code;
     ByteArray details;
     Backtrace backtrace;

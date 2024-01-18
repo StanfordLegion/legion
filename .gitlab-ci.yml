@@ -287,6 +287,7 @@ before_script:
       echo "Unknown platform. Setting THREADS to 1."
       export THREADS=1
     fi
+    export VERBOSE=1
   - |
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
