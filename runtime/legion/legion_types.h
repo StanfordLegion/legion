@@ -3434,6 +3434,7 @@ namespace Legion {
     __CUDA_HD__ static inline ptr_t nil(void) { ptr_t p; p.value = -1LL; return p; }
   };
 
+  LEGION_DISABLE_DEPRECATED_WARNINGS
   template<typename T> struct ColoredPoints; 
   LEGION_DEPRECATED("Coloring is a deprecated type")
   typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
@@ -3447,6 +3448,7 @@ namespace Legion {
   typedef std::map<DomainPoint,Domain> DomainPointColoring;
   LEGION_DEPRECATED("MultiDomainPointColoring is a deprecated type")
   typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
+  LEGION_REENABLE_DEPRECATED_WARNINGS
 
 }; // Legion namespace
 
