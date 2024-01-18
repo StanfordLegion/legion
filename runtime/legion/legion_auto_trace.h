@@ -102,7 +102,7 @@ namespace Legion {
         RtEvent finish_event;
         // Where the meta task should place the result of
         // the offline computation.
-        std::vector<NonOverlappingRepeatsResult>* result;
+        std::vector<NonOverlappingRepeatsResult> result;
         bool completed = false;
       };
       std::list<InFlightProcessingRequest> jobs_in_flight;

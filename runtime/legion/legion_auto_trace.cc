@@ -241,8 +241,7 @@ namespace Legion {
         // Move the existing vector of hashes into the descriptor, and
         // allocate a result space for the meta task to write into.
         request.hashes = std::move(this->hashes);
-        request.result = new std::vector<NonOverlappingRepeatsResult>();
-        AutoTraceProcessRepeatsArgs args(&request.hashes, request.result, this->min_trace_length);
+        AutoTraceProcessRepeatsArgs args(&request.hashes, &request.result, this->min_trace_length);
         // Launch the meta task and record the finish event.
         request.finish_event = runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
         this->jobs_comp_queue.add_event(request.finish_event);
@@ -279,7 +278,7 @@ namespace Legion {
         if (finished.completed) {
           // Insert the received traces into the occurrence watcher.
           size_t count = 0;
-          for (auto trace : *finished.result) {
+          for (auto trace : finished.result) {
             // TODO (rohany): Deal with the maximum number of traces permitted in the trie.
             // TODO (rohany): Do we need to consider superstrings here?
             auto start = finished.hashes.begin() + trace.start;
@@ -293,8 +292,6 @@ namespace Legion {
               }
             }
           }
-          // Free the memory allocated for this descriptor.
-          delete finished.result;
           this->jobs_in_flight.pop_front();
         }
       }
