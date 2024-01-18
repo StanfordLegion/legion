@@ -679,7 +679,7 @@ gcc9_cxx11_release_legion_fortran:
 gcc9_cxx11_release_llvm_cmake_regent_pretty:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *cmake, *regent_pretty, *incremental, *short, *shared]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *llvm12, *cmake, *regent_pretty, *incremental, *short, *shared]
 #   * Debug (Privilege and Bounds Checks)
 gcc9_cxx11_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
@@ -736,11 +736,11 @@ gcc9_cxx11_debug_python3_legion:
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *shared, *libdw]
 gcc9_cxx11_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *regent, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *regent, *libdw]
 #   * HDF5
 gcc9_cxx11_debug_hdf5_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -861,29 +861,29 @@ gcc9_cxx11_debug_python3_regent:
 gcc9_cxx11_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *legion, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
 gcc9_cxx11_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + MPI
 gcc9_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *legion, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
 gcc9_cxx11_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + UCX
 #gcc9_cxx11_debug_llvm_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *legion]
+#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *legion]
 #gcc9_cxx11_debug_llvm_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *regent, *incremental]
+#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 gcc9_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
@@ -957,7 +957,7 @@ clang12_cxx11_release_legion_fortran:
 clang12_cxx11_release_llvm_cmake_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_normal, *llvm, *cmake, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *release, *cxx11_normal, *llvm, *llvm12, *cmake, *regent, *incremental, *libdw]
 #   * Debug (Privilege and Bounds Checks)
 clang12_cxx11_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1001,11 +1001,11 @@ clang12_cxx11_debug_python3_legion:
 clang12_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *cmake, *legion, *ctest, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *libdw]
 clang12_cxx11_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *regent, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *regent, *libdw]
 #   * HDF5
 clang12_cxx11_debug_hdf5_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1051,29 +1051,29 @@ clang12_cxx11_debug_python3_regent:
 clang12_cxx11_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
 clang12_cxx11_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + MPI
 clang12_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
 clang12_cxx11_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + UCX
 #clang12_cxx11_debug_llvm_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *legion]
+#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *legion]
 #clang12_cxx11_debug_llvm_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *regent, *incremental]
+#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 clang12_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
