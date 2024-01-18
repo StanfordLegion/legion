@@ -24,6 +24,8 @@ namespace Realm {
 
   class IndexSpaceGenericImpl {
   public:
+    IndexSpaceGenericImpl() = default;
+
     virtual ~IndexSpaceGenericImpl();
 
     virtual IndexSpaceGenericImpl *clone_at(void *dst) const = 0;
@@ -44,6 +46,11 @@ namespace Realm {
                                        FieldID fid,
                                        uintptr_t& rel_base,
                                        uintptr_t& limit) const = 0;
+
+    IndexSpaceGenericImpl(const IndexSpaceGenericImpl &) = default;
+    IndexSpaceGenericImpl &operator=(const IndexSpaceGenericImpl &) = default;
+    IndexSpaceGenericImpl(IndexSpaceGenericImpl &&) noexcept = default;
+    IndexSpaceGenericImpl &operator=(IndexSpaceGenericImpl &&) noexcept = default;
   };
 
   template <int N, typename T>
