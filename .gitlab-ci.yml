@@ -1313,7 +1313,7 @@ p100_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
 p100_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda121, *ucx, *regent]
+    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *p100_cuda121, *ucx, *regent]
 
 # Kokkos tests:
 clang12_cxx17_debug_kokkos_legion:
