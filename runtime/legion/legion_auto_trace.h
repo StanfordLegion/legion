@@ -426,11 +426,6 @@ namespace Legion {
         }
       }
 
-      // TODO (rohany): If we see a TraceBeginOp, TraceReplayOp, TraceCaptureOp, TraceCompleteOp
-      //  with a trace id that we recognize (i.e. it was generated from
-      //  AutomaticTracingContext::get_fresh_trace_id()) then we should just immediately
-      //  forward it to the underlying runtime.
-
       // If we encounter a traceable operation, then it's time to start
       // analyzing it and adding it the corresponding operation processors.
       if (is_operation_traceable(op)) {
