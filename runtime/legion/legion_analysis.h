@@ -3242,7 +3242,7 @@ namespace Legion {
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &create_now,
           LegionMap<AddressSpaceID,FieldMaskSet<EqKDTree> > &to_notify);
       RtEvent initialize_new_equivalence_set(EquivalenceSet *set,
-          const FieldMask &mask, Runtime *runtime,
+          const FieldMask &mask, Runtime *runtime, bool filter_invalidations,
           std::map<EquivalenceSet*,LegionList<SourceState> > &creation_sources);
       void finalize_equivalence_sets(RtUserEvent compute_event,
           InnerContext *context, Runtime *runtime, unsigned parent_req_index,
@@ -3327,7 +3327,7 @@ namespace Legion {
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
       public:
-        DeferApplyStateArgs(EquivalenceSet *set, bool forward,
+        DeferApplyStateArgs(EquivalenceSet *set, bool forward, bool filter,
                             std::vector<RtEvent> &applied_events,
                             ExprLogicalViews &valid_updates,
                             FieldMaskSet<IndexSpaceExpression> &init_updates,
@@ -3356,6 +3356,7 @@ namespace Legion {
         TraceViewSet *postcondition_updates;
         const RtUserEvent done_event;
         const bool forward_to_owner;
+        const bool filter_invalidations;
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
@@ -3465,7 +3466,8 @@ namespace Legion {
                       IndexSpaceExpression *clone_expr,
                       const bool record_invalidate,
                       std::vector<RtEvent> &applied_events, 
-                      const bool invalidate_overlap = false);
+                      const bool invalidate_overlap,
+                      const bool filter_invalidations);
       void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
       void update_tracing_valid_views(LogicalView *view,
                                       IndexSpaceExpression *expr,
@@ -3676,20 +3678,22 @@ namespace Legion {
             const bool pack_invalidates);
       void unpack_state_and_apply(Deserializer &derez, 
           const AddressSpaceID source, std::vector<RtEvent> &ready_events,
-          const bool forward_to_owner = true);
+          const bool forward_to_owner, const bool filter_invalidations);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &mask, bool record_invalidation);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           IndexSpaceExpression *clone_expr,
                           std::vector<RtEvent> &applied_events,
                           const bool invalidate_overlap,
-                          const bool record_invalidate);
+                          const bool record_invalidate,
+                          const bool filter_invalidations);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
                     const bool invalidate_overlap,
-                    const bool record_invalidate);
+                    const bool record_invalidate,
+                    const bool filter_invalidations);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask,
             const bool find_invalidates, LegionMap<IndexSpaceExpression*,
@@ -3725,7 +3729,7 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             std::vector<RtEvent> &applied_events,
             const bool needs_lock, const bool forward_to_owner,
-            const bool unpack_references);
+            const bool unpack_references, const bool filter_invalidations);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
