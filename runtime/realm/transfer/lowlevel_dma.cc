@@ -202,7 +202,8 @@ namespace Realm {
 
     void PosixAIOWrite::launch(void)
     {
-      log_aio.debug("write issued: op=%p cb=%p", this, &cb);
+      log_aio.debug("write issued: op=%p cb=%p", static_cast<void *>(this),
+                    static_cast<void *>(&cb));
 #ifdef REALM_ON_MACOS
       constexpr unsigned MAX_ATTEMPTS = 8;
 #else
@@ -252,7 +253,8 @@ namespace Realm {
       {
         int ret = aio_error(&cb);
         if(ret == EINPROGRESS) return false;
-        log_aio.debug("write returned: op=%p cb=%p ret=%d", this, &cb, ret);
+        log_aio.debug("write returned: op=%p cb=%p ret=%d", static_cast<void *>(this),
+                      static_cast<void *>(&cb), ret);
         if (ret != 0)
         {
           const char *message = realm_strerror(errno);
@@ -288,7 +290,8 @@ namespace Realm {
 
     void PosixAIORead::launch(void)
     {
-      log_aio.debug("read issued: op=%p cb=%p", this, &cb);
+      log_aio.debug("read issued: op=%p cb=%p", static_cast<void *>(this),
+                    static_cast<void *>(&cb));
 #ifdef REALM_ON_MACOS
       constexpr unsigned MAX_ATTEMPTS = 8;
 #else
@@ -338,7 +341,8 @@ namespace Realm {
       {
         int ret = aio_error(&cb);
         if(ret == EINPROGRESS) return false;
-        log_aio.debug("read returned: op=%p cb=%p ret=%d", this, &cb, ret);
+        log_aio.debug("read returned: op=%p cb=%p ret=%d", static_cast<void *>(this),
+                      static_cast<void *>(&cb), ret);
         if (ret != 0)
         {
           const char *message = realm_strerror(errno);
@@ -378,14 +382,16 @@ namespace Realm {
 
     void AIOFenceOp::launch(void)
     {
-      log_aio.debug("fence launched: op=%p req=%p", this, req);
+      log_aio.debug("fence launched: op=%p req=%p", static_cast<void *>(this),
+                    static_cast<void *>(req));
       completed = true;
     }
 
     bool AIOFenceOp::check_completion(void)
     {
       assert(completed);
-      log_aio.debug("fence completed: op=%p req=%p", this, req);
+      log_aio.debug("fence completed: op=%p req=%p", static_cast<void *>(this),
+                    static_cast<void *>(req));
       f->mark_finished(true /*successful*/);
       return true;
     }
@@ -529,7 +535,7 @@ namespace Realm {
       while(!launched_operations.empty()) {
 	AIOOperation *op = launched_operations.front();
 	if(!op->check_completion()) break;
-	log_aio.debug("aio op completed: op=%p", op);
+        log_aio.debug("aio op completed: op=%p", static_cast<void *>(op));
         // <NEW_DMA>
         if (op->req != NULL) {
           Request* request = (Request*)(op->req);
@@ -584,8 +590,8 @@ namespace Realm {
 	while(!work_until.is_expired()) {
 	  AIOOperation *op = launched_operations.front();
 	  if(!op->check_completion()) break;
-	  log_aio.debug("aio op completed: op=%p", op);
-	  // <NEW_DMA>
+          log_aio.debug("aio op completed: op=%p", static_cast<void *>(op));
+          // <NEW_DMA>
 	  if (op->req != NULL) {
 	    Request* request = (Request*)(op->req);
 	    request->xd->notify_request_read_done(request);

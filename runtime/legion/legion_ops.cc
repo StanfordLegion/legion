@@ -7092,6 +7092,46 @@ namespace Legion {
                                        record_valid);
           log_mapping_decision(gather_idx, src_indirect_requirements[idx],
                                gather_targets);
+          if (output.compute_preimages)
+          {
+            // Check that all the gather instances are in host memories
+            // since Realm doesn't currently support GPU preimages
+            for (std::vector<PhysicalManager*>::const_iterator it =
+                  gather_sources.begin(); it != gather_sources.end(); it++)
+            {
+              const Memory::Kind kind = (*it)->memory_manager->memory.kind();
+              if ((kind != Memory::GLOBAL_MEM) && 
+                  (kind != Memory::SYSTEM_MEM) &&
+                  (kind != Memory::REGDMA_MEM) && 
+                  (kind != Memory::SOCKET_MEM) &&
+                  (kind != Memory::Z_COPY_MEM))
+              {
+                const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+                  REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+                };
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                              "Invalid mapper output from invocation of "
+                              "'map_copy' on mapper %s for copy operation "
+                              "%lld in task %s (UID %lld). Mapper requested "
+                              "that Legion perform preimage optimization on "
+                              "the source indirection instances but mapped at "
+                              "least one of the source indirection instances "
+                              "to a %s memory which is not a host-visible "
+                              "memory. Realm only supports preimage "
+                              "computations on host-visibile memories (see "
+                              "Legion issue #516 for more details). For now, "
+                              "please ensure that all indirection instances "
+                              "are in host-visible memory when requesting the "
+                              "preimage optimization for copy operations.",
+                              mapper->get_mapper_name(), get_unique_op_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id(),
+                              mem_names[kind])
+              }
+            }
+          }
         }
         if (idx < dst_indirect_requirements.size())
         { 
@@ -7130,6 +7170,46 @@ namespace Legion {
                                       record_valid);
           log_mapping_decision(scatter_idx, dst_indirect_requirements[idx],
                                scatter_targets);
+          if (output.compute_preimages)
+          {
+            // Check that all the scatter instances are in host memories
+            // since Realm doesn't currently support GPU preimages
+            for (std::vector<PhysicalManager*>::const_iterator it =
+                  scatter_sources.begin(); it != scatter_sources.end(); it++)
+            {
+              const Memory::Kind kind = (*it)->memory_manager->memory.kind();
+              if ((kind != Memory::GLOBAL_MEM) && 
+                  (kind != Memory::SYSTEM_MEM) &&
+                  (kind != Memory::REGDMA_MEM) && 
+                  (kind != Memory::SOCKET_MEM) &&
+                  (kind != Memory::Z_COPY_MEM))
+              {
+                const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+                  REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+                };
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                              "Invalid mapper output from invocation of "
+                              "'map_copy' on mapper %s for copy operation "
+                              "%lld in task %s (UID %lld). Mapper requested "
+                              "that Legion perform preimage optimization on "
+                              "the destination indirection instances but "
+                              "mapped at least one of the destination "
+                              "indirection instances to a %s memory which is "
+                              "not a host-visible memory. Realm only supports "
+                              "preimage computations on host-visibile memories "
+                              "(see Legion issue #516 for more details). For "
+                              "now, please ensure that all indirection "
+                              "instances are in host-visible memory when "
+                              "requesting the preimage optimization for copy "
+                              "operations.", mapper->get_mapper_name(), 
+                              get_unique_op_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id(),
+                              mem_names[kind])
+              }
+            }
+          }
         }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation

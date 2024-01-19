@@ -988,6 +988,18 @@ if(COMPILER_SUPPORTS_DEFCHECK)
   target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:--defcheck;legion_defines.h>)
 endif()
 
+# compiler options' check for realm
+check_cxx_compiler_flag("-Wdeprecated" COMPILER_SUPPORTS_CXX_WDEPRECATED)
+if(COMPILER_SUPPORTS_CXX_WDEPRECATED)
+  target_compile_options(RealmRuntime PRIVATE -Wdeprecated)
+endif()
+check_cxx_compiler_flag("-Wformat-pedantic" COMPILER_SUPPORTS_CXX_FORMAT_PEDENTIC)
+if(COMPILER_SUPPORTS_CXX_FORMAT_PEDENTIC)
+  target_compile_options(RealmRuntime PRIVATE -Wformat-pedantic)
+endif()
+
+
+
 target_include_directories(LegionRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
