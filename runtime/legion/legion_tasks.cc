@@ -8204,11 +8204,20 @@ namespace Legion {
                              shard_id, get_unique_id());
       if (!leaf_task)
       {
-        // If we have a control replication context then we do the special path
-        ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+        // If we have a control replication context then we do the special path.
+        // Also, see if we need to create an AutomaticTracingContext.
+        ReplicateContext* repl_ctx;
+        if (this->runtime->enable_automatic_tracing && this->task_id == Runtime::legion_main_id) {
+          repl_ctx = new ReplAutomaticTracingContext<ReplicateContext>(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, execution_fence_event,
             shard_manager, inline_task, parent_ctx->is_concurrent_context());
+        } else {
+          repl_ctx = new ReplicateContext(runtime, this,
+            get_depth(), v->is_inner(), regions, output_regions,
+            parent_req_indexes, virtual_mapped, execution_fence_event,
+            shard_manager, inline_task, parent_ctx->is_concurrent_context());
+        }
         repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);

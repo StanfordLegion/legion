@@ -353,6 +353,15 @@ namespace Legion {
       size_t unique_hash_idx_counter = 0;
     };
 
+    // ReplAutomaticTracingContext is a wrapper around the
+    // AutomaticTracingContext for any variants needed for control replication.
+    template <typename T>
+    class ReplAutomaticTracingContext : public AutomaticTracingContext<T> {
+    public:
+      template <typename ... Args>
+      ReplAutomaticTracingContext(Args&& ... args) : AutomaticTracingContext<T>(std::forward<Args>(args)...) {}
+    };
+
     // Offline string analysis operations.
     struct AutoTraceProcessRepeatsArgs : public LgTaskArgs<AutoTraceProcessRepeatsArgs> {
     public:
