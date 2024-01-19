@@ -848,15 +848,6 @@ namespace Legion {
       void get_memories(std::set<Memory>& memories, 
           bool silence_warnings, const char *warning_string) const;
       void get_fields(std::vector<FieldID>& fields) const;
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    public:
-      const char* get_task_name(void) const;
-#endif
-#ifdef LEGION_BOUNDS_CHECKS
-    public:
-      bool contains_ptr(ptr_t ptr);
-      bool contains_point(const DomainPoint &dp);
-#endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
       PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only,

@@ -5027,39 +5027,6 @@ namespace Legion {
                     req.privilege_fields.end());
     }
 
-
-#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
-    //--------------------------------------------------------------------------
-    const char* PhysicalRegionImpl::get_task_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return context->get_task_name();
-    }
-#endif
-
-#ifdef LEGION_BOUNDS_CHECKS 
-    //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::contains_ptr(ptr_t ptr)
-    //--------------------------------------------------------------------------
-    {
-      if (!bounds.exists())
-        bounds = runtime->forest->get_node(req.region.get_index_space())->
-                    get_color_space_domain();
-      DomainPoint dp(ptr.value);
-      return bounds.contains(dp);
-    }
-    
-    //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::contains_point(const DomainPoint &dp)
-    //--------------------------------------------------------------------------
-    {
-      if (!bounds.exists())
-        bounds = runtime->forest->get_node(req.region.get_index_space())->
-                    get_color_space_domain();
-      return bounds.contains(dp);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::get_bounds(void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
