@@ -357,7 +357,7 @@ void hist_batch_task(const void *args, size_t arglen,
   const HistBatchArgs<BucketType> *hbargs = (const HistBatchArgs<BucketType> *)args;
 
   // get a reduction accessor for the instance
-  AffineAccessor<BucketType,1,coord_t> ria(hbargs->inst, 0/*field id*/);
+  AffineAccessor<BucketType, 1, coord_t> ria(hbargs->inst, 0/*field id*/);
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
@@ -394,7 +394,7 @@ void hist_batch_localize_task(const void *args, size_t arglen,
 		      ProfilingRequestSet()).wait();
 
   // get an array accessor for the instance
-  AffineAccessor<BucketType,1,coord_t> ria(lclinst, 0/*field id*/);
+  AffineAccessor<BucketType, 1, coord_t> ria(lclinst, 0/*field id*/);
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
@@ -437,7 +437,7 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
 		      &BucketReduction::identity, fld[0].size).wait();
 
   // get a reduction accessor for the instance
-  AffineAccessor<BucketReduction::RHS,1,coord_t> ria(redinst, 0/*field id*/);
+  AffineAccessor<BucketReduction::RHS, 1, coord_t> ria(redinst, 0/*field id*/);
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
