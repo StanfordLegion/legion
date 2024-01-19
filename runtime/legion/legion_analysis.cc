@@ -14184,8 +14184,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::update_initialized_data(IndexSpaceExpression *expr,
-                                                 const bool expr_covers,
-                                                 const FieldMask &user_mask)
+                                              const bool expr_covers,
+                                              const FieldMask &user_mask,
+                                              bool filter_partial_invalidations)
     //--------------------------------------------------------------------------
     {
       if (!expr_covers)
@@ -14311,6 +14312,42 @@ namespace Legion {
         }
         if (initialized_data.insert(set_expr, user_mask))
           set_expr->add_nested_expression_reference(did);
+      }
+      // It used to be the case that partial invalidations were monotonic
+      // growing in an equivalence set, but then we added the
+      // find_congruent_existing_equivalence_set function which allowed an
+      // equivalence set to be reused with just the right shape even if it
+      // has been previously invalidated for certain fields, in such cases
+      // we need to remove the partial invalidations when we apply the new
+      // state here so we filter out any partial invalidation overlap.
+      // Importantly since we know that this only occurs with
+      // find_congruent_existing_equivalence_set which ensures that any
+      // initialization update that overlaps on a field of a previous
+      // partial invalidation implies that we're going to be updating the
+      // whole equivalence set back to an initialized state for that
+      // particular field so we can invalidate all partial invalidations
+      // for that particular field and not have to test expressions.
+      if (filter_partial_invalidations &&
+          !(user_mask * partial_invalidations.get_valid_mask()))
+      {
+        // Remove any partial invalidations with overlapping fields
+        std::vector<IndexSpaceExpression*> to_delete;
+        for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+              partial_invalidations.begin(); it !=
+              partial_invalidations.end(); it++)
+        {
+          it.filter(user_mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          partial_invalidations.erase(*it);
+          if ((*it)->remove_nested_expression_reference(did))
+            delete (*it);
+        }
+        partial_invalidations.filter_valid_mask(user_mask);
       }
     }
 
@@ -14793,6 +14830,7 @@ namespace Legion {
                 delete (*it);
             }
           }
+          total_valid_instances.filter_valid_mask(filter_mask);
         }
         if (!(filter_mask * partial_valid_fields))
         {
@@ -20786,9 +20824,11 @@ namespace Legion {
             initialized_updates.begin(); it != initialized_updates.end(); it++)
       {
         if (it->first->get_volume() == dst_volume)
-          update_initialized_data(set_expr, true/*covers*/, it->second);
+          update_initialized_data(set_expr, true/*covers*/, it->second,
+              true/*filter partial invalidations*/);
         else
-          update_initialized_data(it->first,false/*covers*/,it->second);
+          update_initialized_data(it->first, false/*covers*/,it->second,
+              true/*filter partial_invalidations*/);
       }
       if (!invalidated_updates.empty())
       {

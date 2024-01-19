@@ -3505,7 +3505,8 @@ namespace Legion {
                                   std::set<RtEvent> &applied_events) const;
       void update_initialized_data(IndexSpaceExpression *expr, 
                                    const bool expr_covers,
-                                   const FieldMask &user_mask);
+                                   const FieldMask &user_mask,
+                                   bool filter_partial_invalidations = false);
       template<typename T>
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
