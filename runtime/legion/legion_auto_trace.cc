@@ -180,7 +180,6 @@ namespace Legion {
             return false;
           }
           return true;
-          break;
         }
         default:
           return true;
