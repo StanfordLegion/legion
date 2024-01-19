@@ -10305,10 +10305,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_blocking_call(void)
+    void InnerContext::record_blocking_call(bool in_operation_stream)
     //--------------------------------------------------------------------------
     {
-      if (current_trace != NULL)
+      if (current_trace != NULL && in_operation_stream)
         current_trace->record_blocking_call();
     }
 
@@ -24974,7 +24974,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_blocking_call(void)
+    void LeafContext::record_blocking_call(bool in_operation_stream)
     //--------------------------------------------------------------------------
     {
     }

@@ -976,8 +976,11 @@ namespace Legion {
              implicit_context->get_unique_id(),
              (warning_string == NULL) ? "" : warning_string)
       }
-      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-        implicit_context->record_blocking_call();
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances) {
+        // If the future doesn't have a valid context index, then the future
+        // was produced outside of the operation stream.
+        implicit_context->record_blocking_call(this->producer_context_index != SIZE_MAX);
+      }
       bool poisoned = false;
       const ApEvent complete = get_ready_event();
       if (!complete.has_triggered_faultaware(poisoned))
@@ -1568,8 +1571,11 @@ namespace Legion {
                 context->get_unique_id(),
                 (warning_string == NULL) ? "" : warning_string)
         }
-        if (block && producer_op != NULL && Internal::implicit_context != NULL)
-          Internal::implicit_context->record_blocking_call();
+        if (block && producer_op != NULL && Internal::implicit_context != NULL) {
+          // If the future doesn't have a valid context index, then the future
+          // was produced outside of the operation stream.
+          Internal::implicit_context->record_blocking_call(this->producer_context_index != SIZE_MAX);
+        }
       }
       if (block)
       {
@@ -3953,8 +3959,10 @@ namespace Legion {
             context->get_task_name(),
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      if ((op != NULL) && (Internal::implicit_context != NULL))
-        Internal::implicit_context->record_blocking_call();
+      if ((op != NULL) && (Internal::implicit_context != NULL)) {
+        // Future maps can only be created by Operations.
+        Internal::implicit_context->record_blocking_call(true /* in_operation_stream */);
+      }
       bool poisoned = false;
       if (!completion_event.has_triggered_faultaware(poisoned))
         completion_event.wait_faultaware(poisoned);
@@ -4669,8 +4677,10 @@ namespace Legion {
             "performance degredation. Warning string: %s", 
             context->get_task_name(), context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      if ((op != NULL) && (Internal::implicit_context != NULL))
-        Internal::implicit_context->record_blocking_call();
+      if ((op != NULL) && (Internal::implicit_context != NULL)) {
+        // FutureMaps can only be created by Operations.
+        Internal::implicit_context->record_blocking_call(true /* in_operation_stream */);
+      }
       for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
       {
         Murmur3Hasher hasher(repl_ctx, 
@@ -4809,8 +4819,10 @@ namespace Legion {
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
-      if (context != NULL)
-        context->record_blocking_call();
+      if (context != NULL) {
+        // PhysicalRegion waits are part of the operation stream.
+        context->record_blocking_call(true /* in_operation_stream */);
+      }
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
