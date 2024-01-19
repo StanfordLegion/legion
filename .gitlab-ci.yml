@@ -955,7 +955,7 @@ gcc9_cxx11_debug_private:
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *short, *libdw]
 # * Test multi-node remote mapping without control replication in Regent
-gcc9_cxx11_debug_gasnetex_mpi_regent:
+gcc9_cxx11_debug_gasnetex_mpi_regent_nocr:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *libdw, *nocr]
