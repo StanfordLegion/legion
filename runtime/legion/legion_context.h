@@ -21,6 +21,7 @@
 #include "legion/legion_mapping.h"
 #include "legion/legion_instances.h"
 #include "legion/legion_allocation.h"
+#include "legion/suffix_tree.h"
 
 namespace Legion {
   namespace Internal {
@@ -947,6 +948,26 @@ namespace Legion {
         const PartitionKind kind;
         const char *const func;
       };
+
+      // Offline string analysis operations.
+      struct AutoTraceProcessRepeatsArgs : public LgTaskArgs<AutoTraceProcessRepeatsArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID;
+      public:
+        AutoTraceProcessRepeatsArgs(
+            std::vector<Murmur3Hasher::Hash>* operations_,
+            std::vector<NonOverlappingRepeatsResult>* result_,
+            size_t min_trace_length_
+        ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
+            operations(operations_),
+            result(result_),
+            min_trace_length(min_trace_length_) {}
+      public:
+        std::vector<Murmur3Hasher::Hash>* operations;
+        std::vector<NonOverlappingRepeatsResult>* result;
+        size_t min_trace_length;
+      };
+
       template<typename T>
       struct QueueEntry {
       public:
@@ -2148,6 +2169,33 @@ namespace Legion {
       RtEvent inorder_concurrent_replay_analysis;
       RtEvent total_hack_function_for_inorder_concurrent_replay_analysis(
                                                             RtEvent mapped);
+    protected:
+      // The InnerContext and ReplicateContext will handle the execution
+      // and synchronization of asynchronous trace identification meta
+      // tasks, either on a single shard, or multiple shards.
+
+      // initialize_async_trace_analysis initializes any state needed
+      // for this context to handle asynchronous trace analysis.
+      void initialize_async_trace_analysis(size_t max_in_flight);
+      // enqueue_trace_analysis_meta_task enqueues an
+      // AutoTraceProcessRepeats meta task at the given logical
+      // operation counter. It can optionally immediately wait on
+      // the job to complete. It is up to the caller to make sure
+      // that at most max_in_flight jobs are currently executing.
+      RtEvent enqueue_trace_analysis_meta_task(
+        const AutoTraceProcessRepeatsArgs& args,
+        size_t opidx,
+        bool wait
+      );
+      // poll_pending_trace_analysis_tasks returns the finish event
+      // of a meta task if one has completed, or NO_RT_EVENT if no
+      // tasks have completed yet. If must_pop is true, then it will
+      // always return a valid finish event, but requires that the
+      // caller has done the necessary synchronization.
+      RtEvent poll_pending_trace_analysis_tasks(size_t opidx, bool must_pop);
+    private:
+      // The InnerContext just maintains a completion queue for pending tasks.
+      CompletionQueue trace_analysis_comp_queue;
     };
 
     /**
@@ -3394,6 +3442,43 @@ namespace Legion {
       unsigned unordered_ops_counter;
       unsigned unordered_ops_epoch;
       UnorderedExchange *unordered_collective;
+    protected:
+      // The ReplicateContext will also provide definitions of
+      // asynchronous trace processing task management APIs.
+      // See the definitions above in the InnerContext for
+      // more information about how they work.
+      void initialize_async_trace_analysis(size_t max_in_flight);
+      RtEvent enqueue_trace_analysis_meta_task(
+          const AutoTraceProcessRepeatsArgs& args,
+          size_t opidx,
+          bool wait
+      );
+      RtEvent poll_pending_trace_analysis_tasks(
+          size_t opidx,
+          bool must_pop
+      );
+    private:
+      // Unlike the InnerContext, the ReplicateContext uses a different
+      // strategy to make sure that all shards agree to complete (and thus
+      // ingest the results of the trace analysis) at the same logical
+      // time. In order to avoid unnecessary blocking of the top level
+      // task, we do this by maintaining an interval of operations that every
+      // shard agrees to wait on a task after. Then, when the shards wait,
+      // they all record (and tell each other) if anyone actually had to wait.
+      // If any shard actually had to wait, then we double interval. This way
+      // we eventually hit a steady state where no blocking is occurring.
+      size_t trace_analysis_async_task_wait_interval = 10;
+      struct InFlightTraceAnalysisTask {
+        InFlightTraceAnalysisTask(RtEvent finish_event, size_t opidx)
+          : finish_event(finish_event), opidx(opidx) {}
+        RtEvent finish_event;
+        size_t opidx;
+      };
+      std::list<InFlightTraceAnalysisTask> trace_analysis_inflight_tasks;
+      // trace_analysis_did_block_collective is a collective that holds on
+      // to the "previous" wait's result of shards reducing whether or not
+      // they had to wait.
+      std::unique_ptr<AllReduceCollective<SumReduction<bool>>> trace_analysis_did_block_collective;
     };
 
     /**

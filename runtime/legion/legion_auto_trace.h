@@ -69,13 +69,30 @@ namespace Legion {
       Murmur3Hasher hasher;
     };
 
+    // TraceProcessingJobExecutor is an interface that hides the details
+    // of executing and waiting for async trace processing jobs. It is
+    // implemented by the InnerContext and ReplicateContext to handle
+    // standard and control-replicated executions separately.
+    class TraceProcessingJobExecutor {
+    public:
+      virtual RtEvent enqueue_task(
+        const InnerContext::AutoTraceProcessRepeatsArgs& args,
+        size_t opidx,
+        bool wait
+      ) = 0;
+      virtual RtEvent poll_pending_tasks(
+        size_t opidx,
+        bool must_pop
+      ) = 0;
+    };
+
     // BatchedTraceIdentifier batches up operations until a given
     // size is hit, and then computes repeated substrings within
     // the batch of operations.
     class BatchedTraceIdentifier {
     public:
       BatchedTraceIdentifier(
-        Runtime* runtime,
+        TraceProcessingJobExecutor* executor,
         TraceOccurrenceWatcher& watcher,
         size_t batchsize,  // Number of operations batched at once.
         size_t max_add, // Maximum number of traces to add to the watcher at once.
@@ -86,7 +103,7 @@ namespace Legion {
       void process(Murmur3Hasher::Hash hash, size_t opidx);
     private:
       // We need a runtime here in order to launch meta tasks.
-      Runtime* runtime;
+      TraceProcessingJobExecutor* executor;
       std::vector<Murmur3Hasher::Hash> hashes;
       TraceOccurrenceWatcher& watcher;
       size_t batchsize;
@@ -106,10 +123,6 @@ namespace Legion {
         bool completed = false;
       };
       std::list<InFlightProcessingRequest> jobs_in_flight;
-      CompletionQueue jobs_comp_queue;
-      // finish_event_alloc is an allocation used to hold results from
-      // processing the completion queue.
-      RtEvent finish_event_alloc;
       size_t max_in_flight_requests;
       bool wait_on_async_job;
     };
@@ -289,13 +302,15 @@ namespace Legion {
     };
 
     template <typename T>
-    class AutomaticTracingContext : public T, public OperationExecutor {
+    class AutomaticTracingContext : public T,
+                                    public OperationExecutor,
+                                    public TraceProcessingJobExecutor {
     public:
       template <typename ... Args>
       AutomaticTracingContext(Args&& ... args)
         : T(std::forward<Args>(args) ... ),
           opidx(0),
-          identifier(this->runtime,
+          identifier(this,
                      this->watcher,
                      this->runtime->auto_trace_batchsize,
                      this->runtime->auto_trace_max_start_watch,
@@ -304,7 +319,10 @@ namespace Legion {
                      this->runtime->auto_trace_min_trace_length),
           watcher(this->replayer, this->runtime->auto_trace_commit_threshold),
           replayer(this)
-          {}
+        {
+          // Perform any initialization for async trace analysis needed.
+          T::initialize_async_trace_analysis(this->runtime->auto_trace_in_flight_jobs);
+        }
     public:
       bool add_to_dependence_queue(Operation *op,
                                    bool unordered = false,
@@ -324,6 +342,10 @@ namespace Legion {
       void issue_begin_trace(TraceID id) override;
       void issue_end_trace(TraceID id) override;
       bool issue_operation(Operation* op, bool unordered = false, bool outermost = false) override;
+    public:
+      // Overrides for TraceJobProcessingExecutor.
+      RtEvent enqueue_task(const InnerContext::AutoTraceProcessRepeatsArgs& args, size_t opidx, bool wait) override;
+      RtEvent poll_pending_tasks(size_t opidx, bool must_pop) override;
     private:
       size_t opidx;
       BatchedTraceIdentifier identifier;
@@ -353,33 +375,6 @@ namespace Legion {
       size_t unique_hash_idx_counter = 0;
     };
 
-    // ReplAutomaticTracingContext is a wrapper around the
-    // AutomaticTracingContext for any variants needed for control replication.
-    template <typename T>
-    class ReplAutomaticTracingContext : public AutomaticTracingContext<T> {
-    public:
-      template <typename ... Args>
-      ReplAutomaticTracingContext(Args&& ... args) : AutomaticTracingContext<T>(std::forward<Args>(args)...) {}
-    };
-
-    // Offline string analysis operations.
-    struct AutoTraceProcessRepeatsArgs : public LgTaskArgs<AutoTraceProcessRepeatsArgs> {
-    public:
-      static const LgTaskID TASK_ID = LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID;
-    public:
-      AutoTraceProcessRepeatsArgs(
-       std::vector<Murmur3Hasher::Hash>* operations_,
-       std::vector<NonOverlappingRepeatsResult>* result_,
-       size_t min_trace_length_
-      ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
-          operations(operations_),
-          result(result_),
-          min_trace_length(min_trace_length_) {}
-    public:
-      std::vector<Murmur3Hasher::Hash>* operations;
-      std::vector<NonOverlappingRepeatsResult>* result;
-      size_t min_trace_length;
-    };
     void auto_trace_process_repeats(const void* args);
 
     // Utility functions.
@@ -530,6 +525,23 @@ namespace Legion {
       hasher.hash(Operation::OpKind::LAST_OP_KIND);
       hasher.hash(idx);
       return hasher.get_hash();
+    }
+
+    template <typename T>
+    RtEvent AutomaticTracingContext<T>::enqueue_task(
+        const InnerContext::AutoTraceProcessRepeatsArgs& args,
+        size_t opidx,
+        bool wait
+    ) {
+      return T::enqueue_trace_analysis_meta_task(args, opidx, wait);
+    }
+
+    template <typename T>
+    RtEvent AutomaticTracingContext<T>::poll_pending_tasks(
+        size_t opidx,
+        bool must_pop
+    ) {
+      return T::poll_pending_trace_analysis_tasks(opidx, must_pop);
     }
 
     template <typename T>

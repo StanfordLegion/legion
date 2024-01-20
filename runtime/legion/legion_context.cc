@@ -1246,7 +1246,8 @@ namespace Legion {
         currently_active_context(false), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit_creation(NULL),
-        last_implicit_creation_gen(0)
+        last_implicit_creation_gen(0),
+        trace_analysis_comp_queue(CompletionQueue::NO_QUEUE)
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -1324,6 +1325,8 @@ namespace Legion {
         deferred_commit_comp_queue.destroy();
       if (post_task_comp_queue.exists())
         post_task_comp_queue.destroy();
+      if (trace_analysis_comp_queue.exists())
+        trace_analysis_comp_queue.destroy();
       for (std::map<TraceID,LogicalTrace*>::const_iterator it = 
             traces.begin(); it != traces.end(); it++)
         if (it->second->remove_reference())
@@ -12710,6 +12713,34 @@ namespace Legion {
       return inorder_concurrent_replay_analysis;
     }
 
+    void InnerContext::initialize_async_trace_analysis(size_t max_in_flight) {
+      this->trace_analysis_comp_queue = CompletionQueue::create_completion_queue(max_in_flight);
+    }
+
+    RtEvent InnerContext::enqueue_trace_analysis_meta_task(
+      const AutoTraceProcessRepeatsArgs &args,
+      size_t opidx,
+      bool wait
+    ) {
+      // TODO (rohany): Not sure of the priority to use here.
+      RtEvent event = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
+      this->trace_analysis_comp_queue.add_event(event);
+      if (wait) { event.wait(); }
+      return event;
+    }
+
+    RtEvent InnerContext::poll_pending_trace_analysis_tasks(size_t opidx, bool must_pop) {
+      // All there is to do here is check the completion queue for any results.
+      RtEvent finish_event = RtEvent::NO_RT_EVENT;
+      size_t num_completed = this->trace_analysis_comp_queue.pop_events(&finish_event, 1);
+      // If must_pop is true, then the AutomaticTracingContext must have waited
+      // on the first finish event, so we must have gotten something out of
+      // the completion queue.
+      if (must_pop) { assert(num_completed == 1); }
+      return finish_event;
+    }
+
+
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////
@@ -22663,6 +22694,72 @@ namespace Legion {
       // on the output because it's not actually used for sharding
       return shard_manager->find_sharding_function(
                 LEGION_MAX_APPLICATION_SHARDING_ID + 1, true/*skip checks*/);
+    }
+
+    void ReplicateContext::initialize_async_trace_analysis(size_t max_in_flight) { }
+
+    RtEvent ReplicateContext::enqueue_trace_analysis_meta_task(
+      const AutoTraceProcessRepeatsArgs &args,
+      size_t opidx,
+      bool wait
+    ) {
+      // TODO (rohany): What priority to use here?
+      RtEvent result = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
+      this->trace_analysis_inflight_tasks.emplace_back(result, opidx);
+      if (wait) { result.wait(); }
+      return result;
+    }
+
+    RtEvent ReplicateContext::poll_pending_trace_analysis_tasks(size_t opidx, bool must_pop) {
+      // If we're forced to pop an event off of the pending list, then do that
+      // separately. Note that if must_pop is true, the first pending event
+      // must have been triggered already by the AutomaticTracingContext.
+      if (must_pop) {
+        assert(!this->trace_analysis_inflight_tasks.empty());
+        InFlightTraceAnalysisTask& task = this->trace_analysis_inflight_tasks.front();
+        RtEvent result = task.finish_event;
+        assert(result.has_triggered());
+        this->trace_analysis_inflight_tasks.pop_front();
+        return result;
+      }
+
+      // If there aren't any pending tasks, return.
+      if (this->trace_analysis_inflight_tasks.empty()) { return RtEvent::NO_RT_EVENT; }
+      InFlightTraceAnalysisTask& task = this->trace_analysis_inflight_tasks.front();
+
+      // If we haven't hit an opidx where we've agreed to wait on the result of the
+      // job, then return NO_EVENT.
+      if (task.opidx + this->trace_analysis_async_task_wait_interval > opidx) { return RtEvent::NO_RT_EVENT; }
+
+      // Wait on the task now, and record whether we had to wait.
+      bool ready = true;
+      if (!task.finish_event.has_triggered()) {
+        ready = false;
+        task.finish_event.wait();
+      }
+      // Save the event before we pop this descriptor off of the list.
+      RtEvent result = task.finish_event;
+
+      // Now see if we've had to wait on the finish event from a previous job.
+      if (this->trace_analysis_did_block_collective != nullptr) {
+        // If anyone did wait, then double the agreed on wait interval.
+        if (this->trace_analysis_did_block_collective->get_result()) {
+          this->trace_analysis_async_task_wait_interval *= 2;
+        }
+      }
+
+      // Enqueue an allreduce to figure out if this amount of blocking
+      // was enough or not. We aren't officially C++14 to be able to
+      // use std::make_unique.
+      this->trace_analysis_did_block_collective =
+          std::unique_ptr<AllReduceCollective<SumReduction<bool>>>(
+              new AllReduceCollective<SumReduction<bool>>(COLLECTIVE_LOC_106, this));
+      // Reduce to see if any shard was not ready.
+      this->trace_analysis_did_block_collective->async_all_reduce(!ready);
+
+      // Finally, pop the returned descriptor off of the queue.
+      this->trace_analysis_inflight_tasks.pop_front();
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
