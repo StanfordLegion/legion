@@ -289,6 +289,19 @@ def cmd(command, env=None, cwd=None, timelimit=None):
     else:
         return subprocess.check_call(command, env=env, cwd=cwd)
 
+def clone_github(namespace, repository, output_dir, tmp_dir, branch='master'):
+    # GitHub clones fail regularly, so we need to replace "git clone"
+    # with fetching the repository tarball.
+
+    # cmd(['git', 'clone', '-b', branch, 'https://github.com/%s/%s.git' % (namespace, repository), output_dir])
+
+    url = 'https://github.com/%s/%s/archive/refs/heads/%s.tar.gz' % (namespace, repository, branch)
+    wget = subprocess.Popen(['wget', '-nv', '-O', '-', url], stdout=subprocess.PIPE)
+    subprocess.check_call(['tar', '-zxf', '-'], stdin=wget.stdout, cwd=tmp_dir)
+    if wget.wait() != 0:
+        raise Exception('Fetching URL failed: %s' % url)
+    os.rename(os.path.join(tmp_dir, '%s-%s' % (repository, branch)), output_dir)
+
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([sys.executable, os.path.join(root_dir, 'language/travis.py')], env=env)
 
@@ -431,7 +444,7 @@ def run_test_legion_fortran(launcher, root_dir, tmp_dir, bin_dir, env, thread_co
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
     fuzz_dir = os.path.join(tmp_dir, 'fuzz-tester')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
+    clone_github('StanfordLegion', 'fuzz-tester', fuzz_dir, tmp_dir)
     # TODO; Merge deppart branch into master after this makes it to stable Legion branch
     cmd(['git', 'checkout', 'deppart'], cwd=fuzz_dir)
     cmd(['python3', 'main.py'], env=env, cwd=fuzz_dir)
@@ -454,7 +467,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
-    cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
+    clone_github('Charles-Chao-Chen', 'fastSolver2', solver_dir, tmp_dir)
     # cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
         ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
@@ -463,7 +476,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Parallel Research Kernels: Stencil
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
-    cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
+    clone_github('magnatelee', 'PRK', prk_dir, tmp_dir)
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
@@ -484,7 +497,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Contact: Mike Bauer <mbauer@nvidia.com>
     snap_dir = os.path.join(tmp_dir, 'snap')
     # TODO: Merge deppart branch into master after this makes it to stable Legion branch
-    cmd(['git', 'clone', '-b', 'ctrlrepl', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    clone_github('StanfordLegion', 'Legion-SNAP', snap_dir, tmp_dir, branch='ctrlrepl')
     # This can't handle flags before application arguments, so place
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
@@ -494,7 +507,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Soleil-X
     # Contact: Manolis Papadakis <mpapadak@stanford.edu>
     soleil_dir = os.path.join(tmp_dir, 'soleil-x')
-    cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/soleil-x.git', soleil_dir])
+    clone_github('stanfordhpccenter', 'soleil-x', soleil_dir, tmp_dir)
     soleil_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
         ('SOLEIL_DIR', soleil_dir),
@@ -507,7 +520,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
-    # cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
+    # clone_github('stanfordhpccenter', 'HTR-solver', htr_dir, tmp_dir)
     # NOTE: the legion-ci branch currently requires g++ (not clang) to build and
     #  is REALLY slow unless you set DEBUG=0
     cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
@@ -524,7 +537,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # TaskAMR
     # Contact: Jonathan Graham <jgraham@lanl.gov>
     task_amr_dir = os.path.join(tmp_dir, 'task_amr')
-    cmd(['git', 'clone', 'https://github.com/lanl/TaskAMR.git', task_amr_dir])
+    clone_github('lanl', 'TaskAMR', task_amr_dir, tmp_dir)
     task_amr_env = dict(list(env.items()) + [
         ('LEGION_ROOT', root_dir),
     ])
@@ -533,7 +546,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Barnes-Hut
     # Contact: Haithem Turki <turki.haithem@gmail.com>
     barnes_hut_dir = os.path.join(tmp_dir, 'barnes_hut')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/barnes-hut.git', barnes_hut_dir])
+    clone_github('StanfordLegion', 'barnes-hut', barnes_hut_dir, tmp_dir)
     regent_path = os.path.join(root_dir, 'language', 'regent.py')
     cmd([sys.executable, regent_path, 'hdf5_converter.rg',
          '-i', 'input/bodies-16384-blitz.csv',

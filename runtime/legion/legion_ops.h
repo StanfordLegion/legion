@@ -1163,6 +1163,9 @@ namespace Legion {
       RtEvent record_complete_replay(const TraceInfo &trace_info,
                     RtEvent ready = RtEvent::NO_RT_EVENT,
                     ApEvent precondition = ApEvent::NO_AP_EVENT);
+      template<typename OP, bool HAS_SYNCS>
+      static ApEvent compute_sync_precondition_with_syncs(OP *op, 
+                                    const TraceInfo &trace_info);
     public:
       static void handle_record_complete_replay(const void *args);
     protected:
@@ -4349,13 +4352,13 @@ namespace Legion {
      * \class AllReduceOp 
      * Operation for reducing future maps down to futures
      */
-    class AllReduceOp : public Operation {
+    class AllReduceOp : public MemoizableOp {
     public:
       AllReduceOp(Runtime *rt);
-      AllReduceOp(const AllReduceOp &rhs);
+      AllReduceOp(const AllReduceOp &rhs) = delete;
       virtual ~AllReduceOp(void);
     public:
-      AllReduceOp& operator=(const AllReduceOp &rhs);
+      AllReduceOp& operator=(const AllReduceOp &rhs) = delete;
     public:
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
                         ReductionOpID redop, bool deterministic,
@@ -4378,9 +4381,9 @@ namespace Legion {
       ApEvent finalize_serdez_targets(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_execution(void);
+      virtual void trigger_replay(void);
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);
@@ -4395,6 +4398,7 @@ namespace Legion {
                           FutureImpl *future);
       void subscribe_to_future(std::vector<RtEvent> &ready_events,
                                FutureImpl *future);
+      void perform_allreduce(void);
     protected:
       FutureMap future_map;
       ReductionOpID redop_id;
@@ -4404,6 +4408,7 @@ namespace Legion {
       std::map<DomainPoint,FutureImpl*> sources;
       std::vector<FutureInstance*> targets;
       std::vector<Memory> target_memories;
+      std::vector<RtEvent> map_applied_conditions;
       size_t future_result_size;
       FutureInstance *serdez_redop_instance;
       void *serdez_redop_buffer;

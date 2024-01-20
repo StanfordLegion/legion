@@ -218,11 +218,11 @@ namespace Realm {
     // bidirectional socket that mimics a mailbox
     OsHandle fd = socket(AF_UNIX, SOCK_DGRAM, 0);
     if(fd < 0) {
-      log_mailbox.error("Failed to create socket! errno: %d\n", errno);
+      log_mailbox.info("Failed to create socket! errno: %s\n", realm_strerror(errno));
       return Realm::INVALID_OS_HANDLE;
     }
     if(bind(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) != 0) {
-      log_mailbox.error("Failed to bind socket! errno: %d\n", errno);
+      log_mailbox.info("Failed to bind socket! errno: %s\n", realm_strerror(errno));
       close(fd);
       return Realm::INVALID_OS_HANDLE;
     }
@@ -280,7 +280,7 @@ namespace Realm {
     if(sendmsg(mailbox, &msg, 0) > 0) {
       return true;
     }
-    log_mailbox.error("Failed to send message: %d\n", errno);
+    log_mailbox.info("Failed to send message: %s", realm_strerror(errno));
 #endif
     // TODO: Add support for windows
     return false;
@@ -325,13 +325,13 @@ namespace Realm {
     // Make sure any file descriptors are closed if we fork+exec
     ssize_t bytes = recvmsg(mailbox, &msg, MSG_CMSG_CLOEXEC);
     if(bytes < 0) {
-      log_mailbox.error("Failed to recv message: %d", errno);
+      log_mailbox.info("Failed to recv message: %s", realm_strerror(errno));
       return false;
     }
 
     // Make sure we got the entire message
     if((msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
-      log_mailbox.error("Failed to recv the entire message!");
+      log_mailbox.info("Failed to recv the entire message!");
       return false;
     }
 

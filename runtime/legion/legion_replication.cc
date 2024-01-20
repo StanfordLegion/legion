@@ -5764,27 +5764,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplAllReduceOp::ReplAllReduceOp(const ReplAllReduceOp &rhs)
-      : AllReduceOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplAllReduceOp::~ReplAllReduceOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplAllReduceOp& ReplAllReduceOp::operator=(const ReplAllReduceOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -10116,7 +10098,8 @@ namespace Legion {
           Serializer rez;
           rez.serialize(did);
           rez.serialize(mapped_precondition);
-          runtime->send_replicate_post_mapped(owner_space, rez);
+          runtime->send_replicate_post_mapped(
+              collective_mapping->get_parent(owner_space, local_space), rez);
         }
         else
           original_task->handle_post_mapped(mapped_precondition);
@@ -10187,7 +10170,8 @@ namespace Legion {
           if (metasize > 0)
             rez.serialize(metadata, metasize);
           rez.serialize(shard_effects);
-          runtime->send_replicate_post_execution(owner_space, rez);
+          runtime->send_replicate_post_execution(
+              collective_mapping->get_parent(owner_space, local_space), rez);
           if (result != NULL)
             delete result;
         }
@@ -10244,7 +10228,8 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(all_shard_effects);
           rez.serialize(done_event);
-          runtime->send_replicate_trigger_complete(owner_space, rez);
+          runtime->send_replicate_trigger_complete(
+              collective_mapping->get_parent(owner_space, local_space), rez);
           return done_event;
         }
         else
@@ -10304,7 +10289,8 @@ namespace Legion {
         {
           Serializer rez;
           rez.serialize(did);
-          runtime->send_replicate_trigger_commit(owner_space, rez);
+          runtime->send_replicate_trigger_commit(
+              collective_mapping->get_parent(owner_space, local_space), rez);
         }
         else
           original_task->trigger_children_committed();

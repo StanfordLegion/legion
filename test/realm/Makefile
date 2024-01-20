@@ -195,7 +195,7 @@ task_stream : task_stream_gpu.o
 endif
 
 %.o : %.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
-	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) $(REALM_CXX_CHECK)
 
 $(REALM_OBJS) : CC_FLAGS+=$(REALM_SYMBOL_VISIBILITY)
 
