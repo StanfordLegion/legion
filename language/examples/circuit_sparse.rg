@@ -623,25 +623,6 @@ task create_colorings(conf : Config)
   return coloring
 end
 
-task create_ghost_partition(conf         : Config,
-                            all_shared   : region(node),
-                            ghost_ranges : region(ghost_range))
-where
-  reads(ghost_ranges)
-do
-  var ghost_node_map = c.legion_point_coloring_create()
-  var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
-
-  for range in ghost_ranges do
-    c.legion_point_coloring_add_range(ghost_node_map,
-      range,
-      c.legion_ptr_t { value = range.rect.lo },
-      c.legion_ptr_t { value = range.rect.hi })
-  end
-
-  return partition(aliased, all_shared, ghost_node_map, ghost_ranges.ispace)
-end
-
 task parse_input(conf : Config)
   conf = parse_input_args(conf)
 
@@ -784,7 +765,7 @@ task toplevel()
     end
   end
 
-  var rp_ghost = create_ghost_partition(conf, all_shared, ghost_ranges)
+  var rp_ghost = image(aliased, all_shared, rp_ghost_ranges, ghost_ranges.rect)
 
   __demand(__spmd)
   for j = 0, 1 do
