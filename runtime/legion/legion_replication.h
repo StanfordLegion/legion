@@ -2571,10 +2571,10 @@ namespace Legion {
     class ReplAllReduceOp : public AllReduceOp {
     public:
       ReplAllReduceOp(Runtime *rt);
-      ReplAllReduceOp(const ReplAllReduceOp &rhs);
+      ReplAllReduceOp(const ReplAllReduceOp &rhs) = delete;
       virtual ~ReplAllReduceOp(void);
     public:
-      ReplAllReduceOp& operator=(const ReplAllReduceOp &rhs);
+      ReplAllReduceOp& operator=(const ReplAllReduceOp &rhs) = delete;
     public:
       void initialize_replication(ReplicateContext *ctx);
     public:

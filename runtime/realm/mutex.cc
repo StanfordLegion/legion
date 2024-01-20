@@ -244,7 +244,8 @@ namespace Realm {
 
       default:
         {
-          fprintf(stderr, "FATAL: unexpected doorbell state: this=%p val=%d\n", this, val);
+          fprintf(stderr, "FATAL: unexpected doorbell state: this=%p val=%d\n",
+                  static_cast<void *>(this), val);
           abort();
         }
       }

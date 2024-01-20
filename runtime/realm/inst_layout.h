@@ -341,6 +341,11 @@ namespace Realm {
     InstancePieceList(void);
     ~InstancePieceList(void);
 
+    InstancePieceList(const InstancePieceList &) = default;
+    InstancePieceList &operator=(const InstancePieceList &) = default;
+    InstancePieceList(InstancePieceList &&) noexcept = default;
+    InstancePieceList &operator=(InstancePieceList &&) noexcept = default;
+
     const InstanceLayoutPiece<N,T> *find_piece(Point<N,T> p) const;
 
     void relocate(size_t base_offset);
@@ -465,6 +470,8 @@ namespace Realm {
     operator FT(void) const;
 
     // "write"
+    AccessorRefHelper(const AccessorRefHelper &) = default;
+    AccessorRefHelper(AccessorRefHelper &&) noexcept = default;
     AccessorRefHelper<FT>& operator=(const FT& newval);
     AccessorRefHelper<FT>& operator=(const AccessorRefHelper<FT>& rhs);
 
@@ -628,6 +635,11 @@ namespace Realm {
     REALM_CUDA_HD
     ~AffineAccessor(void);
 
+    AffineAccessor(const AffineAccessor &) = default;
+    AffineAccessor &operator=(const AffineAccessor &) = default;
+    AffineAccessor(AffineAccessor &&) noexcept = default;
+    AffineAccessor &operator=(AffineAccessor &&) noexcept = default;
+
     static bool is_compatible(RegionInstance inst, FieldID field_id);
     static bool is_compatible(RegionInstance inst, FieldID field_id, const Rect<N,T>& subrect);
     template <int N2, typename T2>
@@ -772,6 +784,11 @@ namespace Realm {
 
     REALM_CUDA_HD
     ~MultiAffineAccessor(void);
+
+    MultiAffineAccessor(const MultiAffineAccessor &) = default;
+    MultiAffineAccessor &operator=(const MultiAffineAccessor &) = default;
+    MultiAffineAccessor(MultiAffineAccessor &&) noexcept = default;
+    MultiAffineAccessor &operator=(MultiAffineAccessor &&) noexcept = default;
 
     static bool is_compatible(RegionInstance inst, FieldID field_id);
     static bool is_compatible(RegionInstance inst, FieldID field_id,

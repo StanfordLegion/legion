@@ -303,7 +303,8 @@ namespace Realm {
       me = _me;
       owner = _init_owner;
       count = ZERO_COUNT;
-      log_reservation.spew("count init " IDFMT "=[%p]=%d", me.id, &count, count);
+      log_reservation.spew("count init " IDFMT "=[%p]=%d", me.id,
+                           static_cast<void *>(&count), count);
       mode = 0;
       in_use = false;
       remote_waiter_mask = NodeSet(); 
@@ -409,8 +410,9 @@ namespace Realm {
 	       local_shared.begin()->first > mode))) {
 	    mode = new_mode;
 	    count++;
-	    log_reservation.spew("count ++(1) [%p]=%d", &count, count);
-	    got_lock = true;
+            log_reservation.spew("count ++(1) [%p]=%d", static_cast<void *>(&count),
+                                 count);
+            got_lock = true;
 #ifdef DEBUG_REALM
 	    // if this is a shared mode, there should be no waiters or retry
 	    //  events for that mode
@@ -430,8 +432,9 @@ namespace Realm {
 	    assert(mode != MODE_EXCL);
 	    if(mode == new_mode) {
 	      count++;
-	      log_reservation.spew("count ++(2) [%p]=%d", &count, count);
-	      got_lock = true;
+              log_reservation.spew("count ++(2) [%p]=%d", static_cast<void *>(&count),
+                                   count);
+              got_lock = true;
 	    }
 	  }
 	

@@ -106,17 +106,17 @@ namespace Legion {
     const PredUserEvent PredUserEvent::NO_PRED_USER_EVENT = {};
 
     //--------------------------------------------------------------------------
-    void LgEvent::begin_context_wait(Context ctx) const
+    void LgEvent::begin_context_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      ctx->begin_wait();
+      ctx->begin_wait(from_application);
     }
 
     //--------------------------------------------------------------------------
-    void LgEvent::end_context_wait(Context ctx) const
+    void LgEvent::end_context_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      ctx->end_wait();
+      ctx->end_wait(from_application);
     }
 
     /////////////////////////////////////////////////////////////
@@ -27994,10 +27994,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<AllReduceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     AllReduceOp* Runtime::get_available_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(all_reduce_op_lock, available_all_reduce_ops);
+      return get_available<AllReduceOp, Memoizable<AllReduceOp> >(
+                      all_reduce_op_lock, available_all_reduce_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28124,10 +28134,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<ReplAllReduceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     ReplAllReduceOp* Runtime::get_available_repl_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(all_reduce_op_lock, available_repl_all_reduce_ops);
+      return get_available<ReplAllReduceOp, Memoizable<ReplAllReduceOp> >(
+                        all_reduce_op_lock, available_repl_all_reduce_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -30811,7 +30831,7 @@ namespace Legion {
             "Illegal call to unbind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      ctx->begin_wait();
+      ctx->begin_wait(true/*from application*/);
       implicit_context = NULL;
     }
 
@@ -30824,7 +30844,7 @@ namespace Legion {
             "Illegal call to bind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      ctx->end_wait();
+      ctx->end_wait(true/*from application*/);
       implicit_runtime = this;
       implicit_context = ctx;
       implicit_provenance = ctx->owner_task->get_unique_op_id();
