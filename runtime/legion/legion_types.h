@@ -2467,6 +2467,7 @@ namespace Legion {
     friend class Internal::ReplDetachOp;                    \
     friend class Internal::ReplAcquireOp;                   \
     friend class Internal::ReplReleaseOp;                   \
+    friend class Internal::MemoizableOp;                    \
     template<typename OP>                                   \
     friend class Internal::Memoizable;                      \
     friend class Internal::ShardManager;                    \

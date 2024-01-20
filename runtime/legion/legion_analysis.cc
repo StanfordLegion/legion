@@ -1130,6 +1130,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_future_allreduce(const TraceLocalID &tlid,
+        const std::vector<Memory> &target_memories, size_t future_size)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called on a remote node
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ RemoteTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
                 Deserializer &derez, Runtime *runtime, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------

@@ -22872,33 +22872,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AllReduceOp::AllReduceOp(Runtime *rt)
-      : Operation(rt)
+      : MemoizableOp(rt)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    AllReduceOp::AllReduceOp(const AllReduceOp &rhs)
-      : Operation(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     AllReduceOp::~AllReduceOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    AllReduceOp& AllReduceOp::operator=(const AllReduceOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -22939,7 +22921,7 @@ namespace Legion {
     void AllReduceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      Operation::activate();
+      MemoizableOp::activate();
       redop_id = 0;
       future_result_size = 0;
       serdez_redop_buffer = NULL;
@@ -22951,13 +22933,14 @@ namespace Legion {
     void AllReduceOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      Operation::deactivate(false/*free*/);
+      MemoizableOp::deactivate(false/*free*/);
       future_map = FutureMap();
       result = Future();
       initial_value = Future();
       sources.clear();
       targets.clear();
       target_memories.clear();
+      map_applied_conditions.clear();
       if (serdez_redop_buffer != NULL)
         free(serdez_redop_buffer);
       if (serdez_redop_instance != NULL)
@@ -22998,25 +22981,6 @@ namespace Legion {
         future->request_runtime_instance(this, false/*eager*/);
       if (ready.exists() && !ready.has_triggered())
         preconditions.push_back(ready);
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      populate_sources();
-      std::vector<RtEvent> preconditions;
-      // Always make sure we'll have buffers ready on the host for us to
-      // access in order to use for doing the all-reduce
-      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
-            sources.begin(); it != sources.end(); it++)
-        prepare_future(preconditions, it->second);
-      if (initial_value.impl != NULL)
-        prepare_future(preconditions, initial_value.impl);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -23102,11 +23066,36 @@ namespace Legion {
     {
       // Invoke the mapper to do figure out where to put the data
       invoke_mapper();
-      // Compute the future reduction size
-      if (serdez_redop_fns == NULL)
-        future_result_size = redop->sizeof_rhs;
-      else
-        future_result_size = serdez_upper_bound;
+      // Then we can perform the all-reduce 
+      perform_allreduce(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_replay(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      tpl->get_allreduce_mapping(this, target_memories, future_result_size);
+      perform_allreduce();
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::perform_allreduce(void)
+    //--------------------------------------------------------------------------
+    {
+      // Call from both trigger_mapping and trigger_replay
+      // Request host buffers for any of the source instances
+      populate_sources();
+      // Always make sure we'll have buffers ready on the host for us to
+      // access in order to use for doing the all-reduce
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+            sources.begin(); it != sources.end(); it++)
+        prepare_future(map_applied_conditions, it->second);
+      if (initial_value.impl != NULL)
+        prepare_future(map_applied_conditions, initial_value.impl);
       if (future_result_size < SIZE_MAX)
       {
         // We can only make the future results now if we have an actual
@@ -23114,7 +23103,10 @@ namespace Legion {
         // mapper didn't specify an upper bound on the size of the results
         create_future_instances(); 
         // We're done with our mapping at the point we've made all the instances
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
       }
       // Subscribe to all the futures and then perform the computation
       std::vector<RtEvent> ready_events;
@@ -23150,7 +23142,10 @@ namespace Legion {
           // Make the instances for the target memories
           create_future_instances(); 
           // We're done with our mapping now that we've made all the instances
-          complete_mapping();
+          if (!map_applied_conditions.empty())
+            complete_mapping(Runtime::merge_events(map_applied_conditions));
+          else
+            complete_mapping();
         }
         // Check that the result is smaller than the bound
         if (serdez_upper_bound < future_result_size)
@@ -23228,6 +23223,27 @@ namespace Legion {
       }
       else
         target_memories.push_back(runtime->runtime_system_memory);
+      // Compute the future reduction size
+      if (serdez_redop_fns == NULL)
+        future_result_size = redop->sizeof_rhs;
+      else
+        future_result_size = serdez_upper_bound;
+      if (is_recording())
+      {
+        if (future_result_size == SIZE_MAX)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output. Mapper %s did not specify an upper "
+              "bound on serdez future all-reduce operation %lld being "
+              "traced in task %s (UID %lld). All serdez future reductions "
+              "being captured in traces must provide an upper bound on the "
+              "size of the future result.", mapper->get_mapper_name(),
+              get_unique_op_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const TraceInfo trace_info(this);
+        const TraceLocalID tlid = get_trace_local_id();
+        trace_info.record_future_allreduce(tlid, target_memories,
+                                           future_result_size);
+      }
     }
 
     //--------------------------------------------------------------------------
