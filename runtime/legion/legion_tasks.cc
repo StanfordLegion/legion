@@ -12700,10 +12700,10 @@ namespace Legion {
     size_t SliceTask::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      if (is_remote())
-        return launch_space->get_volume();
-      else
-        return index_owner->get_collective_points();
+#ifdef DEBUG_LEGION
+      assert(is_remote());
+#endif
+      return points.size();
     }
 
     //--------------------------------------------------------------------------
