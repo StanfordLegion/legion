@@ -306,8 +306,7 @@ namespace Legion {
       NOT_OPEN                = 0,
       OPEN_READ_ONLY          = 1,
       OPEN_READ_WRITE         = 2, // unknown dirty information below
-      OPEN_SINGLE_REDUCE      = 3, // only one open child with reductions below
-      OPEN_MULTI_REDUCE       = 4, // multiple open children with same reduction
+      OPEN_REDUCE             = 3, // make sure to check reduction value
     }; 
 
     // Internal reduction operators

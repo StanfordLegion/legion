@@ -5365,7 +5365,7 @@ namespace Legion {
         open_state = OPEN_READ_WRITE;
       else if (IS_REDUCE(usage))
       {
-        open_state = OPEN_SINGLE_REDUCE;
+        open_state = OPEN_REDUCE;
         redop = usage.redop;
       }
       if (open_children.insert(child, m))
@@ -5436,10 +5436,8 @@ namespace Legion {
       else
       {
 #ifdef DEBUG_LEGION
-        assert((open_state == OPEN_SINGLE_REDUCE) ||
-               (open_state == OPEN_MULTI_REDUCE));
-        assert((rhs.open_state == OPEN_SINGLE_REDUCE) ||
-               (rhs.open_state == OPEN_MULTI_REDUCE));
+        assert(open_state == OPEN_REDUCE);
+        assert(rhs.open_state == OPEN_REDUCE);
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
@@ -5479,12 +5477,7 @@ namespace Legion {
           redop = 0;
         }
         else
-        {
-          if (open_children.size() == 1)
-            open_state = OPEN_SINGLE_REDUCE;
-          else
-            open_state = OPEN_MULTI_REDUCE;
-        }
+          open_state = OPEN_REDUCE;
       }
     }
 
@@ -5571,15 +5564,9 @@ namespace Legion {
                         open_children.size());
             break;
           }
-        case OPEN_SINGLE_REDUCE:
+        case OPEN_REDUCE:
           {
-            logger->log("Field State: OPEN SINGLE REDUCE Mode %d (%ld)", 
-                        redop, open_children.size());
-            break;
-          }
-        case OPEN_MULTI_REDUCE:
-          {
-            logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
+            logger->log("Field State: OPEN REDUCE Mode %d (%ld)", 
                         redop, open_children.size());
             break;
           }
@@ -5626,15 +5613,9 @@ namespace Legion {
                         open_children.size());
             break;
           }
-        case OPEN_SINGLE_REDUCE:
+        case OPEN_REDUCE:
           {
-            logger->log("Field State: OPEN SINGLE REDUCE Mode %d (%ld)", 
-                        redop, open_children.size());
-            break;
-          }
-        case OPEN_MULTI_REDUCE:
-          {
-            logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
+            logger->log("Field State: OPEN REDUCE Mode %d (%ld)", 
                         redop, open_children.size());
             break;
           }
