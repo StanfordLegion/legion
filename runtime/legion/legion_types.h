@@ -3392,63 +3392,6 @@ namespace Legion {
     inline size_t legion_deserialize(const void *buffer);
   };
 
-  // These things should all be deprecated but they are still alive:
-  // Imported ptr_t definition from old common.h
-  struct 
-  LEGION_DEPRECATED("ptr_t and everything associated with it is deprecated") ptr_t
-  {
-  public:
-    __CUDA_HD__ ptr_t(void) : value(0) { }
-    __CUDA_HD__ ptr_t(const ptr_t &p) : value(p.value) { }
-    __CUDA_HD__ ptr_t(long long int v) : value(v) { }
-  public:
-    long long int value;
-  public:
-    __CUDA_HD__ inline ptr_t& operator=(const ptr_t &ptr) { value = ptr.value; return *this; }
-    __CUDA_HD__ inline bool operator==(const ptr_t &ptr) const { return (ptr.value == this->value); }
-    __CUDA_HD__ inline bool operator!=(const ptr_t &ptr) const { return (ptr.value != this->value); }
-    __CUDA_HD__ inline bool operator< (const ptr_t &ptr) const { return (ptr.value <  this->value); }
-    __CUDA_HD__ inline operator bool(void) const { return (value != -1LL); }
-    __CUDA_HD__ inline bool operator!(void) const { return (value == -1LL); }
-
-    __CUDA_HD__ inline ptr_t operator+(const ptr_t &ptr) const { return ptr_t(value + ptr.value); }
-    __CUDA_HD__ inline ptr_t operator+(unsigned offset) const { return ptr_t(value + offset); }
-    __CUDA_HD__ inline ptr_t operator+(int offset) const { return ptr_t(value + offset); }
-
-    // Subtraction operation on pointers
-    __CUDA_HD__ inline ptr_t operator-(const ptr_t &ptr) const { return ptr_t(value - ptr.value); }
-    __CUDA_HD__ inline ptr_t operator-(unsigned offset) const { return ptr_t(value - offset); }
-    __CUDA_HD__ inline ptr_t operator-(int offset) const { return ptr_t(value - offset); }
-
-    __CUDA_HD__ inline ptr_t& operator++(void) { value++; return *this; }
-    __CUDA_HD__ inline ptr_t operator++(int) { value++; return *this; }
-    __CUDA_HD__ inline ptr_t& operator--(void) { value--; return *this; }
-    __CUDA_HD__ inline ptr_t operator--(int) { value--; return *this; }
-
-    // Thank you Eric for type cast operators!
-    __CUDA_HD__ inline operator long long int(void) const { return value; }
-
-    __CUDA_HD__ inline bool is_null(void) const { return (value == -1LL); }
-
-    __CUDA_HD__ static inline ptr_t nil(void) { ptr_t p; p.value = -1LL; return p; }
-  };
-
-  LEGION_DISABLE_DEPRECATED_WARNINGS
-  template<typename T> struct ColoredPoints; 
-  LEGION_DEPRECATED("Coloring is a deprecated type")
-  typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
-  LEGION_DEPRECATED("DomainColoring is a deprecated type")
-  typedef std::map<Color,Domain> DomainColoring;
-  LEGION_DEPRECATED("MultiDomainColoring is a deprecated type")
-  typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-  LEGION_DEPRECATED("PointColoring is a deprecated type")
-  typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
-  LEGION_DEPRECATED("DomainPointColoring is a deprecated type")
-  typedef std::map<DomainPoint,Domain> DomainPointColoring;
-  LEGION_DEPRECATED("MultiDomainPointColoring is a deprecated type")
-  typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
-  LEGION_REENABLE_DEPRECATED_WARNINGS
-
 }; // Legion namespace
 
 #endif // __LEGION_TYPES_H__

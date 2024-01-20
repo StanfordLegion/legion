@@ -31,10 +31,24 @@
 #include <string.h>
 #include <algorithm>
 
+static inline bool operator<(const legion_ptr_t &lhs, const legion_ptr_t &rhs)
+{ return lhs.value < rhs.value; }
+
 namespace Legion {
 
     class CContext;
     class TaskMut;
+
+    struct ColoredPoints {
+    public:
+      std::set<legion_ptr_t> points;
+      std::set<std::pair<legion_ptr_t,legion_ptr_t> > ranges;
+    };
+    typedef std::map<Color,ColoredPoints> Coloring;
+    typedef std::map<Color,Domain> DomainColoring;
+    typedef std::map<DomainPoint,ColoredPoints> PointColoring;
+    typedef std::map<DomainPoint,Domain> DomainPointColoring;
+    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring; 
 
     class CObjectWrapper {
     public:
@@ -90,13 +104,11 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_##DIM##d_t, RectInDomainIterator##DIM##D *);
       LEGION_FOREACH_N(RECT_ITERATOR)
 #undef RECT_ITERATOR
-      LEGION_DISABLE_DEPRECATED_WARNINGS
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);
       NEW_OPAQUE_WRAPPER(legion_domain_point_coloring_t, DomainPointColoring *);
       NEW_OPAQUE_WRAPPER(legion_multi_domain_point_coloring_t, MultiDomainPointColoring *);
-      LEGION_REENABLE_DEPRECATED_WARNINGS
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_field_allocator_t, FieldAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);
@@ -166,24 +178,6 @@ namespace Legion {
 #ifdef __PGIC__
 #pragma warning (pop)
 #endif
-
-      LEGION_DISABLE_DEPRECATED_WARNINGS
-      static legion_ptr_t
-      wrap(ptr_t ptr)
-      {
-        legion_ptr_t ptr_;
-        ptr_.value = ptr.value;
-        return ptr_;
-      }
-
-      static ptr_t
-      unwrap(legion_ptr_t ptr_)
-      {
-        ptr_t ptr;
-        ptr.value = ptr_.value;
-        return ptr;
-      }
-      LEGION_REENABLE_DEPRECATED_WARNINGS
 
 #define NEW_POINT_WRAPPER(DIM)                                  \
       typedef Point<DIM,coord_t> Point##DIM##D;                 \

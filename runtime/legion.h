@@ -4592,19 +4592,7 @@ namespace Legion {
 
     //==========================================================================
     //                           Runtime Classes
-    //==========================================================================
-
-    /**
-     * @deprecated 
-     * \struct ColoredPoints
-     * Colored points struct for describing colorings.
-     */
-    template<typename T>
-    struct ColoredPoints {
-    public:
-      std::set<T> points;
-      std::set<std::pair<T,T> > ranges;
-    };
+    //========================================================================== 
 
     /**
      * \struct InputArgs
@@ -5209,138 +5197,6 @@ namespace Legion {
                                const bool recurse = true,
                                const char *provenance = NULL);
     public:
-      //------------------------------------------------------------------------
-      // Index Partition Operations Based on Coloring
-      // (These are deprecated, use the dependent partitioning calls instead)
-      //------------------------------------------------------------------------
-      LEGION_DISABLE_DEPRECATED_WARNINGS
-      /**
-       * @deprecated
-       * Create an index partition from a point coloring
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param color_space space of colors for the partition
-       * @param coloring the coloring of the parent index space
-       * @param part_kind the kind of partition or whether to compute it
-       * @param color optional color for the new partition
-       * @param allocable whether the child index spaces are allocable
-       * @return handle for the new index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const PointColoring &coloring,
-                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID,
-                                  bool allocable = false);
-      /**
-       * @deprecated
-       * See the previous create_index_partition call
-       * Create an index partition.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param coloring the coloring of the parent index space
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
-                                        const Coloring &coloring, bool disjoint,
-                                        Color color = LEGION_AUTO_GENERATE_ID);
-
-      /**
-       * @deprecated
-       * Create an index partition from a domain point coloring
-       * @param ctx the enclosing task context
-       * @param parent the index space being partitioned
-       * @param color_space space of colors for the partition
-       * @param coloring the coloring of the parent index space
-       * @param part_kind the kind of partition or whether to compute it
-       * @param color optional color for the new partition
-       * @return handle for the new index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const DomainPointColoring &coloring,
-                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
-      /**
-       * @deprecated
-       * See the previous create index partition call
-       * Create an index partition from a domain color space and coloring.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param color_space the domain of colors 
-       * @param coloring the domain coloring of the parent index space
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
-					    Domain color_space, 
-                                            const DomainColoring &coloring,
-					    bool disjoint,
-                                            Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
-
-      /**
-       * @deprecated
-       * Create an index partition from a multi-domain point coloring
-       * @param ctx the enclosing task context
-       * @param parent the index space being partitioned
-       * @param color_space space of colors for the partition
-       * @param coloring the coloring of the parent index space
-       * @param part_kind the kind of partition or whether to compute it
-       * @param color optional color for the new partition
-       * @return handle for the new index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const MultiDomainPointColoring &coloring,
-                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
-      /**
-       * @deprecated
-       * See the previous create index partition call
-       * Create an index partitiong from a domain color space and
-       * a multi-domain coloring which allows multiple domains to
-       * be associated with each color.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param color_space the domain of colors
-       * @param coloring the multi-domain coloring
-       * @param disjoint whether the partitioning is disjoint or not
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint,
-                                            Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
-      /**
-       * @deprecated
-       * Create an index partitioning from a typed mapping.
-       * @param ctx the enclosing task context
-       * @param parent index space being partitioned
-       * @param mapping the mapping of points to colors
-       * @param color optional color name for the partition
-       * @return handle for the next index partition
-       */
-      template <typename T>
-      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-					    const T& mapping,
-					    Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
-      LEGION_REENABLE_DEPRECATED_WARNINGS
-
       /**
        * Create a new shared ownership of an index partition to prevent it 
        * from being destroyed by other potential owners. Every call to this
@@ -6731,19 +6587,6 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Safe Cast Operations
       //------------------------------------------------------------------------
-      /**
-       * Safe cast a pointer down to a target region.  If the pointer
-       * is not in the target region, then a nil pointer is returned.
-       * @param ctx enclosing task context
-       * @param pointer the pointer to be case
-       * @param region the target logical region
-       * @return the same pointer if it can be safely cast, otherwise nil
-       */
-      LEGION_DISABLE_DEPRECATED_WARNINGS
-      LEGION_DEPRECATED("everything associated with ptr_t is deprecated")
-      ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
-      LEGION_REENABLE_DEPRECATED_WARNINGS
-
       /**
        * Safe case a domain point down to a target region.  If the point
        * is not in the target region, then an empty domain point
@@ -10387,50 +10230,6 @@ namespace Legion {
       friend class Mapper;
       Internal::Runtime *runtime;
     };
-
-    //==========================================================================
-    //                        Compiler Helper Classes
-    //==========================================================================
-
-    LEGION_DISABLE_DEPRECATED_WARNINGS
-    /**
-     * \class ColoringSerializer
-     * This is a decorator class that helps the Legion compiler
-     * with returning colorings as the result of task calls.
-     */
-    class ColoringSerializer {
-    public:
-      ColoringSerializer(void) { }
-      ColoringSerializer(const Coloring &c);
-    public:
-      size_t legion_buffer_size(void) const;
-      size_t legion_serialize(void *buffer) const;
-      size_t legion_deserialize(const void *buffer);
-    public:
-      inline Coloring& ref(void) { return coloring; }
-    private:
-      Coloring coloring;
-    };
-
-    /**
-     * \class DomainColoringSerializer
-     * This is a decorator class that helps the Legion compiler
-     * with returning domain colorings as the result of task calls.
-     */
-    class DomainColoringSerializer {
-    public:
-      DomainColoringSerializer(void) { }
-      DomainColoringSerializer(const DomainColoring &c);
-    public:
-      size_t legion_buffer_size(void) const;
-      size_t legion_serialize(void *buffer) const;
-      size_t legion_deserialize(const void *buffer);
-    public:
-      inline DomainColoring& ref(void) { return coloring; }
-    private:
-      DomainColoring coloring;
-    };
-    LEGION_REENABLE_DEPRECATED_WARNINGS
 
 }; // namespace Legion
 
