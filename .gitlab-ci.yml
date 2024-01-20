@@ -525,7 +525,7 @@ before_script:
   rules:
     # some jobs are tagged and can only run on certain hardware - a CI variable
     #  is used to enable these jobs in case that hardware is offline
-    - if: '$IS_NVIDIA_JOB == "1" && $RUN_NVIDIA_JOBS != "1"'
+    - if: '$IS_NVIDIA_JOB == "1" && $RUN_P100_JOBS != "1"'
       when: never
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
