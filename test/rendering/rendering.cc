@@ -322,14 +322,18 @@ void main_task(const Task *task,
 
   Rect<1> color_bounds(Point<1>(0),Point<1>(npar-1));
   Domain color_domain = color_bounds;
-  DomainColoring coloring;
+  IndexSpace color_space = runtime->create_index_space(ctx, color_domain);
+
+  std::map<DomainPoint,Domain> coloring;
   for (int color = 0; color < npar; color ++) {
     Point<1> left = color * (rect_A.volume() / npar);
     Point<1> right = left + rect_A.volume() / npar - 1;
     Rect<1> sub_rect(left, right);
-    coloring[color] = Domain(sub_rect);
+    coloring[DomainPoint(color)] = Domain(sub_rect);
   }
-  IndexPartition ip = runtime->create_index_partition(ctx, lr_A.get_index_space(), color_domain, coloring, true);
+  IndexPartition ip = 
+    runtime->create_partition_by_domain(ctx, lr_A.get_index_space(),
+        coloring, color_space, true/*intersections*/, LEGION_DISJOINT_KIND);
   LogicalPartition lp =
     runtime->get_logical_partition(ctx, lr_A, ip);
 

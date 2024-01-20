@@ -145,7 +145,7 @@ void top_level_task(const Task *task,
       break;
 
     case 3:
-      elem_domain = Domain::from_rect<3>(Rect<3>(
+      elem_domain = Domain(Rect<3>(
             make_point(0, 0, 0),
             make_point(
               elem_rect_hi_val,
@@ -168,15 +168,14 @@ void top_level_task(const Task *task,
     case 2:
       {
         Point<2> patch_color; patch_color.x[0] = patch_color.x[1] = patch_val;
-        Blockify<2> coloring(patch_color); 
-        ip  = runtime->create_index_partition(ctx, is, coloring);
+        ip = runtime->create_partition_by_blockify(ctx, is, DomainPoint(patch_color));
       }
       break;
 
     case 3:
       {
-        Blockify<3> coloring(make_point(patch_val, patch_val, patch_val));
-        ip  = runtime->create_index_partition(ctx, is, coloring);
+        Point<3> patch_color = make_point(patch_val, patch_val, patch_val);
+        ip = runtime->create_partition_by_blockify(ctx, is, DomainPoint(patch_color));
       }
       break;
 
