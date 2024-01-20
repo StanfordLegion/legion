@@ -39,7 +39,8 @@
 #define IS_WRITE_DISCARD(req) \
   (((req).privilege & LEGION_WRITE_ONLY) == LEGION_WRITE_ONLY)
 #define IS_READ_DISCARD(req) \
-  (((req).privilege & LEGION_READ_DISCARD) == LEGION_READ_DISCARD)
+  (((req).privilege & (LEGION_READ_PRIV | LEGION_DISCARD_OUTPUT_MASK)) \
+   == (LEGION_READ_PRIV | LEGION_DISCARD_OUTPUT_MASK))
 #define FILTER_DISCARD(req) \
   ((req).privilege & ~(LEGION_DISCARD_INPUT_MASK | LEGION_DISCARD_OUTPUT_MASK))
 #define IS_COLLECTIVE(req) \
