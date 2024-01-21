@@ -13,57 +13,43 @@
 -- limitations under the License.
 
 -- runs-with:
--- [[ "-ll:gpu", "1", "-ll:fsize", "7000", "-ll:csize", "7000" ]]
+-- [[ "-ll:gpu", "1" ]]
 
 import "regent"
 
 local format = require("std/format")
 
 __demand(__cuda)
-task inc(r : region(ispace(int1d), int8), v : int8)
+task increment_slot(r : region(ispace(int1d), int64))
 where reads writes(r) do
   for e in r do
-    r[e] += v
+    r[e%r.bounds] += 1
   end
 end
 
-task check(r : region(ispace(int1d), int8), v : int8)
+task check(r : region(ispace(int1d), int64))
 where reads(r) do
-  var pass = true
-  var last_fail_value : int64 = -1
-  var last_fail_index : int1d = -1
-  var total_failures = 0
+  var total : int64 = 0
   for e in r do
-    if last_fail_index >= int1d(0) and r[e] ~= last_fail_value then
-      if last_fail_index < e-1 then
-        format.println("(repeats another {} times)", e-last_fail_index-1)
-      end
-      last_fail_index = int1d(-1)
-    end
-    if r[e] ~= v then
-      if r[e] ~= last_fail_value then
-        total_failures += 1
-        if total_failures <= 10 then
-          format.println("expected {} but got: r[{}] = {}", v, e, r[e])
-          last_fail_value = r[e]
-          last_fail_index = e
-        end
-      end
-      pass = false
-    end
+    total += r[e]
   end
-  if last_fail_index >= int1d(0) and last_fail_index < r.bounds.hi then
-    format.println("(repeats another {} times)", r.bounds.hi-last_fail_index)
+  var pass = total == r.volume
+  if not pass then
+    format.println("expected {} but got {}", r.volume, total)
   end
   return pass
 end
 
 task test_size(size : int64)
+  -- The exact number of elements doesn't matter, just make it large
+  -- enough to reduce contention on atomic operations.
+  var buf_size = 16384
+
   format.println("Running size {} ({.2e})", size, double(size))
-  var r = region(ispace(int1d, size), int8)
-  fill(r, 1)
-  inc(r, 20)
-  var ok = check(r, 21)
+  var r = region(ispace(int1d, buf_size), int64)
+  fill(r, 0)
+  increment_slot(r)
+  var ok = check(r)
   regentlib.assert(ok, "test failed")
 end
 
@@ -91,6 +77,6 @@ task main()
   __fence(__execution, __block)
   test_size(1000000000)
   __fence(__execution, __block)
-  test_size(7000000000LL)
+  test_size(10000000000LL)
 end
 regentlib.start(main)
