@@ -457,35 +457,40 @@ before_script:
     - linux
     - avx
 
-# For CUDA tests, always use a specific machine:
-.p100: &p100
+# For CUDA tests, always use a CUDA-capable machine:
+.nvidia: &nvidia
   tags:
-    - p100
+    - nvidia
+# For tests that require a larger GPU:
+.nvidia_16gb: &nvidia_16gb
+  tags:
+    - nvidia
+    - 16gb
 
-.p100_base: &p100_base
-  IS_P100_JOB: "1"
+.cuda_base: &cuda_base
+  IS_NVIDIA_JOB: "1"
   USE_CUDA: "1"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
-.p100_cuda112: &p100_cuda112
-  <<: *p100_base
+.cuda112: &cuda112
+  <<: *cuda_base
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
   GPU_ARCH: "60"
   USE_NVTX: "1"
 
-.p100_cuda117: &p100_cuda117
-  <<: *p100_base
+.cuda117: &cuda117
+  <<: *cuda_base
   CUDA: "/usr/local/cuda-11.7"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
   GPU_ARCH: "60"
   USE_NVTX: "1"
 
-.p100_cuda121: &p100_cuda121
-  <<: *p100_base
+.cuda121: &cuda121
+  <<: *cuda_base
   CUDA: "/usr/local/cuda-12.1"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
@@ -520,7 +525,7 @@ before_script:
   rules:
     # some jobs are tagged and can only run on certain hardware - a CI variable
     #  is used to enable these jobs in case that hardware is offline
-    - if: '$IS_P100_JOB == "1" && $RUN_P100_JOBS != "1"'
+    - if: '$IS_NVIDIA_JOB == "1" && $RUN_P100_JOBS != "1"'
       when: never
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
@@ -1254,66 +1259,66 @@ clang14_cxx20_debug_regent:
     <<: [*clang14, *terra14, *debug, *cxx20_normal, *regent]
 
 # CUDA tests:
-p100_cuda112_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
-  <<: [*p100, *tests]
+nvidia_cuda112_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
-p100_cuda112_gcc9_cxx14_release_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx14_normal, *cuda112, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
+nvidia_cuda112_gcc9_cxx14_release_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda112, *legion, *cmake, *ctest, *shared]
-p100_cuda117_gcc9_cxx17_debug_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx14_normal, *cuda112, *legion, *cmake, *ctest, *shared]
+nvidia_cuda117_gcc9_cxx17_debug_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda117, *legion, *short, *cmake, *ctest, *shared, *libdw]
-p100_cuda117_gcc9_cxx17_release_cmake_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx17_normal, *cuda117, *legion, *short, *cmake, *ctest, *shared, *libdw]
+nvidia_cuda117_gcc9_cxx17_release_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda117, *cmake, *legion, *ctest, *shared]
-p100_cuda121_gcc9_cxx14_release_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx17_normal, *cuda117, *cmake, *legion, *ctest, *shared]
+nvidia_cuda121_gcc9_cxx14_release_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda121, *legion, *cmake, *ctest, *shared]
-p100_cuda121_gcc9_cxx14_debug_checks_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx14_normal, *cuda121, *legion, *cmake, *ctest, *shared]
+nvidia_cuda121_gcc9_cxx14_debug_checks_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *checks, *p100_cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
-p100_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx14_normal, *checks, *cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
+nvidia_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda121, *cmake, *legion, *ctest, *shared]
-p100_cuda121_clang12_cxx14_release_cuda_regent:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx14_normal, *cuda121, *cmake, *legion, *ctest, *shared]
+nvidia_cuda121_clang12_cxx14_release_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *regent, *cmake, *ctest, *short]
-p100_cuda121_clang12_cxx14_release_cmake_cuda_regent:
-  <<: [*p100, *tests]
+    <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *regent, *cmake, *ctest, *short]
+nvidia_cuda121_clang12_cxx14_release_cmake_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *cmake, *ctest, *regent, *shared]
-p100_cuda121_gcc9_cxx17_debug_maxdim4_external2:
-  <<: [*p100, *external_tests]
+    <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *cmake, *ctest, *regent, *shared]
+nvidia_cuda121_gcc9_cxx17_debug_maxdim4_external2:
+  <<: [*nvidia_16gb, *external_tests]
   variables:
-    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *p100_cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
+    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
-p100_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
-  <<: [*p100, *tests]
+nvidia_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
-p100_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
+nvidia_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *p100_cuda121, *gasnetex_mpi, *regent]
+    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *gasnetex_mpi, *regent]
 
 # CUDA+UCX tests:
-p100_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
- <<: [*p100, *tests]
+nvidia_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
+ <<: [*nvidia, *tests]
  variables:
-   <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
-p100_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
-  <<: [*p100, *tests]
+   <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
+nvidia_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *p100_cuda121, *ucx, *regent]
+    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *ucx, *regent]
 
 # Kokkos tests:
 clang12_cxx17_debug_kokkos_legion:
@@ -1329,22 +1334,22 @@ clang10_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
 #     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
-p100_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
-  <<: [*p100, *tests]
+nvidia_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion, *ctest, *libdw]
-p100_cuda121_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
-  <<: [*p100, *tests]
+    <<: [*clang10, *debug, *cxx17_normal, *cuda112, *kokkos, *cmake, *legion, *ctest, *libdw]
+nvidia_cuda121_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *debug, *cxx17_normal, *p100_cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
-p100_cuda117_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
-  <<: [*p100, *tests]
+    <<: [*clang12, *debug, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+nvidia_cuda117_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda117, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
-p100_cuda121_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx17_normal, *cuda117, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
+nvidia_cuda121_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc9, *debug, *shared, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
 
 # HPCSDK (nvc++) tests:
 # Make all HPC SDK tests use cmake since nvc++ is really slow and can't handle doing compile+link
