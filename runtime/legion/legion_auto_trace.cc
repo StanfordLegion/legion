@@ -188,7 +188,7 @@ namespace Legion {
 
     void auto_trace_process_repeats(const void* args_) {
       log_auto_trace.debug() << "Executing processing repeats meta task.";
-      const AutoTraceProcessRepeatsArgs* args = (const AutoTraceProcessRepeatsArgs*)args_;
+      const InnerContext::AutoTraceProcessRepeatsArgs* args = (const InnerContext::AutoTraceProcessRepeatsArgs*)args_;
       std::vector<NonOverlappingRepeatsResult> result =
           compute_longest_nonoverlapping_repeats(*args->operations, args->min_trace_length);
       // Filter the result to remove substrings of longer repeats from consideration.
@@ -208,7 +208,7 @@ namespace Legion {
     }
 
     BatchedTraceIdentifier::BatchedTraceIdentifier(
-        Runtime* runtime_,
+        TraceProcessingJobExecutor* executor_,
         TraceOccurrenceWatcher& watcher_,
         size_t batchsize_,
         size_t max_add_,
@@ -216,12 +216,11 @@ namespace Legion {
         bool wait_on_async_job_,
         size_t min_trace_length_
         )
-        : runtime(runtime_),
+        : executor(executor_),
           watcher(watcher_),
           batchsize(batchsize_),
           max_add(max_add_),
           min_trace_length(min_trace_length_),
-          jobs_comp_queue(CompletionQueue::create_completion_queue(max_inflight_requests_)),
           max_in_flight_requests(max_inflight_requests_),
           wait_on_async_job(wait_on_async_job_) {
       // Reserve one extra place so that we can insert the sentinel
@@ -241,15 +240,9 @@ namespace Legion {
         // Move the existing vector of hashes into the descriptor, and
         // allocate a result space for the meta task to write into.
         request.hashes = std::move(this->hashes);
-        AutoTraceProcessRepeatsArgs args(&request.hashes, &request.result, this->min_trace_length);
+        InnerContext::AutoTraceProcessRepeatsArgs args(&request.hashes, &request.result, this->min_trace_length);
         // Launch the meta task and record the finish event.
-        request.finish_event = runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY);
-        this->jobs_comp_queue.add_event(request.finish_event);
-        // If we're configured to process the job sequentially, then wait on it
-        // right after the submission.
-        if (this->wait_on_async_job) {
-          request.finish_event.wait();
-        }
+        request.finish_event = this->executor->enqueue_task(args, opidx, this->wait_on_async_job);
         // Finally, allocate a new vector to accumulate hashes into. As before,
         // allocate one extra spot for the sentinel hash.
         this->hashes = std::vector<Murmur3Hasher::Hash>();
@@ -262,14 +255,17 @@ namespace Legion {
         this->jobs_in_flight.front().finish_event.wait();
       }
 
-      // Query the completion queue to see if any of our jobs finished.
-      size_t num_completed = this->jobs_comp_queue.pop_events(&this->finish_event_alloc, 1);
-      assert(num_completed == 0 || num_completed == 1);
+      // Query the completion queue to see if any of our jobs finished. If
+      // we did a wait above, then we are expecting to be able to pop a
+      // finished task here.
+      RtEvent finish_event = this->executor->poll_pending_tasks(
+          opidx, this->jobs_in_flight.size() == this->max_in_flight_requests);
       // Mark the corresponding in flight descriptor as completed.
-      if (num_completed == 1) {
+      if (finish_event != RtEvent::NO_RT_EVENT) {
         for (auto& it : this->jobs_in_flight) {
-          if (it.finish_event == this->finish_event_alloc) {
+          if (it.finish_event == finish_event) {
             it.completed = true;
+            break;
           }
         }
         // We'll process at most one of the completed jobs so that

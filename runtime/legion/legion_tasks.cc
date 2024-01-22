@@ -8208,7 +8208,8 @@ namespace Legion {
         // Also, see if we need to create an AutomaticTracingContext.
         ReplicateContext* repl_ctx;
         if (this->runtime->enable_automatic_tracing && this->task_id == Runtime::legion_main_id) {
-          repl_ctx = new ReplAutomaticTracingContext<ReplicateContext>(runtime, this,
+          log_auto_trace.info() << "Initializing AutomaticTracingContext<ReplicateContext>.";
+          repl_ctx = new AutomaticTracingContext<ReplicateContext>(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, execution_fence_event,
             shard_manager, inline_task, parent_ctx->is_concurrent_context());
