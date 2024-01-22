@@ -232,6 +232,11 @@ namespace Realm {
     BasicRangeAllocator(void);
     ~BasicRangeAllocator(void);
 
+    BasicRangeAllocator(const BasicRangeAllocator &) = default;
+    BasicRangeAllocator &operator=(const BasicRangeAllocator &) = default;
+    BasicRangeAllocator(BasicRangeAllocator &&) noexcept = default;
+    BasicRangeAllocator &operator=(BasicRangeAllocator &&) noexcept = default;
+
     void swap(BasicRangeAllocator<RT, TT>& swap_with);
 
     void add_range(RT first, RT last);

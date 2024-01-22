@@ -70,21 +70,16 @@ cache: &global_cache
   CXX: "clang++"
 
 .terra70: &terra70
-  LLVM_CONFIG: "llvm-config-7"
   TERRA_DIR: "/usr/local/terra70"
 .terra9: &terra9
-  LLVM_CONFIG: "llvm-config-9"
   TERRA_DIR: "/usr/local/terra9"
 .terra10: &terra10
-  LLVM_CONFIG: "llvm-config-10"
   TERRA_DIR: "/usr/local/terra10"
 .terra12: &terra12
-  LLVM_CONFIG: "llvm-config-12"
   TERRA_DIR: "/usr/local/terra12"
 .terra13: &terra13 # macOS only
   TERRA_DIR: "/usr/local/terra-13"
 .terra14: &terra14
-  LLVM_CONFIG: "llvm-config-14"
   TERRA_DIR: "/usr/local/terra14"
 
 .llvm7: &llvm7
@@ -267,6 +262,9 @@ cache: &global_cache
 .libdw: &libdw
   REALM_BACKTRACE_USE_LIBDW: "1"
 
+.nocr: &nocr
+  REGENT_LEGION_REPLICABLE: "0"
+
 ###
 ### Setup
 ###
@@ -291,7 +289,7 @@ before_script:
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
       cd ucx
-      wget -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
+      wget -nv -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
       export UCX_ROOT=$PWD/install
       if [[ -n "$CUDA" ]]; then
         UCX_CONFIG_OPTS="--with-cuda=$CUDA"
@@ -320,14 +318,14 @@ before_script:
           if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
             # clone gasnet, but make it read only since we want an embedded build
             # git clone https://github.com/StanfordLegion/gasnet.git gasnet
-            wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+            wget -nv -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
             mv gasnet-master gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
           fi
         else
           # git clone https://github.com/StanfordLegion/gasnet.git gasnet
-          wget -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
+          wget -nv -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
           mv gasnet-master gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
@@ -362,7 +360,7 @@ before_script:
     fi
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
-      wget -O - https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      wget -nv -O - https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
       mv kokkos-$KOKKOS_TAG kokkos
       mkdir kokkos/build
       cd kokkos/build
@@ -403,7 +401,7 @@ before_script:
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
 
-      wget -O - https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      wget -nv -O - https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
       mv kokkos-kernels-$KOKKOS_TAG kokkos-kernels
 
       # now build kokkos-kernels
@@ -462,35 +460,40 @@ before_script:
     - linux
     - avx
 
-# For CUDA tests, always use a specific machine:
-.p100: &p100
+# For CUDA tests, always use a CUDA-capable machine:
+.nvidia: &nvidia
   tags:
-    - p100
+    - nvidia
+# For tests that require a larger GPU:
+.nvidia_16gb: &nvidia_16gb
+  tags:
+    - nvidia
+    - 16gb
 
-.p100_base: &p100_base
-  IS_P100_JOB: "1"
+.cuda_base: &cuda_base
+  IS_NVIDIA_JOB: "1"
   USE_CUDA: "1"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
-.p100_cuda112: &p100_cuda112
-  <<: *p100_base
+.cuda112: &cuda112
+  <<: *cuda_base
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
   GPU_ARCH: "60"
   USE_NVTX: "1"
 
-.p100_cuda117: &p100_cuda117
-  <<: *p100_base
+.cuda117: &cuda117
+  <<: *cuda_base
   CUDA: "/usr/local/cuda-11.7"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
   GPU_ARCH: "60"
   USE_NVTX: "1"
 
-.p100_cuda121: &p100_cuda121
-  <<: *p100_base
+.cuda121: &cuda121
+  <<: *cuda_base
   CUDA: "/usr/local/cuda-12.1"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
@@ -525,7 +528,7 @@ before_script:
   rules:
     # some jobs are tagged and can only run on certain hardware - a CI variable
     #  is used to enable these jobs in case that hardware is offline
-    - if: '$IS_P100_JOB == "1" && $RUN_P100_JOBS != "1"'
+    - if: '$IS_NVIDIA_JOB == "1" && $RUN_P100_JOBS != "1"'
       when: never
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
@@ -684,7 +687,7 @@ gcc9_cxx11_release_legion_fortran:
 gcc9_cxx11_release_llvm_cmake_regent_pretty:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *cmake, *regent_pretty, *incremental, *short, *shared]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *llvm12, *cmake, *regent_pretty, *incremental, *short, *shared]
 #   * Debug (Privilege and Bounds Checks)
 gcc9_cxx11_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
@@ -741,11 +744,11 @@ gcc9_cxx11_debug_python3_legion:
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *shared, *libdw]
 gcc9_cxx11_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *regent, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *regent, *libdw]
 #   * HDF5
 gcc9_cxx11_debug_hdf5_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -866,29 +869,29 @@ gcc9_cxx11_debug_python3_regent:
 gcc9_cxx11_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *legion, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
 gcc9_cxx11_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + MPI
 gcc9_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *legion, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
 gcc9_cxx11_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + UCX
 #gcc9_cxx11_debug_llvm_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *legion]
+#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *legion]
 #gcc9_cxx11_debug_llvm_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *regent, *incremental]
+#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 gcc9_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
@@ -951,7 +954,11 @@ gcc9_cxx11_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *hdf5, *private, *short, *libdw]
-
+# * Test multi-node remote mapping without control replication in Regent
+gcc9_cxx11_debug_gasnetex_mpi_regent_nocr:
+  <<: [*linux_compute, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *libdw, *nocr]
 # Linux with Clang 12
 # * Basic configurations
 #   * Release
@@ -962,7 +969,7 @@ clang12_cxx11_release_legion_fortran:
 clang12_cxx11_release_llvm_cmake_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_normal, *llvm, *cmake, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *release, *cxx11_normal, *llvm, *llvm12, *cmake, *regent, *incremental, *libdw]
 #   * Debug (Privilege and Bounds Checks)
 clang12_cxx11_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1006,11 +1013,11 @@ clang12_cxx11_debug_python3_legion:
 clang12_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *cmake, *legion, *ctest, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *libdw]
 clang12_cxx11_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *regent, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *regent, *libdw]
 #   * HDF5
 clang12_cxx11_debug_hdf5_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1056,29 +1063,29 @@ clang12_cxx11_debug_python3_regent:
 clang12_cxx11_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *legion, *libdw]
 clang12_cxx11_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *gasnetex_mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + MPI
 clang12_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *legion, *libdw]
 clang12_cxx11_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *mpi, *regent, *incremental, *libdw]
 # * Integration: LLVM + UCX
 #clang12_cxx11_debug_llvm_ucx_legion:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *legion]
+#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *legion]
 #clang12_cxx11_debug_llvm_ucx_regent:
 #  <<: [*linux_compute, *image_2004, *tests]
 #  variables:
-#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *ucx, *regent, *incremental]
+#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *llvm, *llvm12, *ucx, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 clang12_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_2004, *tests]
@@ -1259,66 +1266,66 @@ clang14_cxx20_debug_regent:
     <<: [*clang14, *terra14, *debug, *cxx20_normal, *regent]
 
 # CUDA tests:
-p100_cuda112_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
-  <<: [*p100, *tests]
+nvidia_cuda112_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
-p100_cuda112_gcc9_cxx14_release_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx14_normal, *cuda112, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
+nvidia_cuda112_gcc9_cxx14_release_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda112, *legion, *cmake, *ctest, *shared]
-p100_cuda117_gcc9_cxx17_debug_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx14_normal, *cuda112, *legion, *cmake, *ctest, *shared]
+nvidia_cuda117_gcc9_cxx17_debug_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda117, *legion, *short, *cmake, *ctest, *shared, *libdw]
-p100_cuda117_gcc9_cxx17_release_cmake_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx17_normal, *cuda117, *legion, *short, *cmake, *ctest, *shared, *libdw]
+nvidia_cuda117_gcc9_cxx17_release_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda117, *cmake, *legion, *ctest, *shared]
-p100_cuda121_gcc9_cxx14_release_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx17_normal, *cuda117, *cmake, *legion, *ctest, *shared]
+nvidia_cuda121_gcc9_cxx14_release_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda121, *legion, *cmake, *ctest, *shared]
-p100_cuda121_gcc9_cxx14_debug_checks_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx14_normal, *cuda121, *legion, *cmake, *ctest, *shared]
+nvidia_cuda121_gcc9_cxx14_debug_checks_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *checks, *p100_cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
-p100_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx14_normal, *checks, *cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
+nvidia_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda121, *cmake, *legion, *ctest, *shared]
-p100_cuda121_clang12_cxx14_release_cuda_regent:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *release, *cxx14_normal, *cuda121, *cmake, *legion, *ctest, *shared]
+nvidia_cuda121_clang12_cxx14_release_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *regent, *cmake, *ctest, *short]
-p100_cuda121_clang12_cxx14_release_cmake_cuda_regent:
-  <<: [*p100, *tests]
+    <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *regent, *cmake, *ctest, *short]
+nvidia_cuda121_clang12_cxx14_release_cmake_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx14_normal, *p100_cuda121, *cmake, *ctest, *regent, *shared]
-p100_cuda121_gcc9_cxx17_debug_maxdim4_external2:
-  <<: [*p100, *external_tests]
+    <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *cmake, *ctest, *regent, *shared]
+nvidia_cuda121_gcc9_cxx17_debug_maxdim4_external2:
+  <<: [*nvidia_16gb, *external_tests]
   variables:
-    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *p100_cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
+    <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
-p100_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
-  <<: [*p100, *tests]
+nvidia_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
-p100_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
+nvidia_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *p100_cuda121, *gasnetex_mpi, *regent]
+    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *gasnetex_mpi, *regent]
 
 # CUDA+UCX tests:
-p100_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
- <<: [*p100, *tests]
+nvidia_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
+ <<: [*nvidia, *tests]
  variables:
-   <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
-p100_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
-  <<: [*p100, *tests]
+   <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
+nvidia_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
+  <<: [*nvidia_16gb, *tests]
   variables:
-    <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda121, *ucx, *regent]
+    <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *ucx, *regent]
 
 # Kokkos tests:
 clang12_cxx17_debug_kokkos_legion:
@@ -1334,22 +1341,22 @@ clang10_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
 #     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
-p100_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
-  <<: [*p100, *tests]
+nvidia_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion, *ctest, *libdw]
-p100_cuda121_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
-  <<: [*p100, *tests]
+    <<: [*clang10, *debug, *cxx17_normal, *cuda112, *kokkos, *cmake, *legion, *ctest, *libdw]
+nvidia_cuda121_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *debug, *cxx17_normal, *p100_cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
-p100_cuda117_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
-  <<: [*p100, *tests]
+    <<: [*clang12, *debug, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+nvidia_cuda117_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda117, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
-p100_cuda121_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
-  <<: [*p100, *tests]
+    <<: [*gcc9, *debug, *cxx17_normal, *cuda117, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
+nvidia_cuda121_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
+  <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc9, *debug, *shared, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
 
 # HPCSDK (nvc++) tests:
 # Make all HPC SDK tests use cmake since nvc++ is really slow and can't handle doing compile+link

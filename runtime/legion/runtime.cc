@@ -7346,8 +7346,6 @@ namespace Legion {
       ImplicitShardManager *manager = runtime->find_implicit_shard_manager(
           task_id, mapper_id, kind, shards_per_address_space);
       manager->process_implicit_rendezvous(derez);
-      if (manager->remove_reference())
-        delete manager;
     }
 
     /////////////////////////////////////////////////////////////
@@ -27956,10 +27954,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<AllReduceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     AllReduceOp* Runtime::get_available_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(all_reduce_op_lock, available_all_reduce_ops);
+      return get_available<AllReduceOp, Memoizable<AllReduceOp> >(
+                      all_reduce_op_lock, available_all_reduce_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28086,10 +28094,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<ReplAllReduceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     ReplAllReduceOp* Runtime::get_available_repl_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(all_reduce_op_lock, available_repl_all_reduce_ops);
+      return get_available<ReplAllReduceOp, Memoizable<ReplAllReduceOp> >(
+                        all_reduce_op_lock, available_repl_all_reduce_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -30655,14 +30673,11 @@ namespace Legion {
       std::map<TaskID,ImplicitShardManager*>::iterator finder = 
         implicit_shard_managers.find(top_task_id);
       if (finder != implicit_shard_managers.end())
-      {
-        finder->second->add_reference();
         return finder->second;
-      }
       ImplicitShardManager *result = new ImplicitShardManager(this,
           top_task_id, mapper_id, kind, shards_per_address_space);
       implicit_shard_managers[top_task_id] = result;
-      result->add_reference();
+      result->add_reference(shards_per_address_space);
       return result;
     }
 

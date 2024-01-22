@@ -117,6 +117,9 @@ namespace Legion {
                                               const TraceInfo &trace_info) const
     //--------------------------------------------------------------------------
     {
+      // If you get a compiler error here, don't forget that you can statically
+      // specialize this method for particular OP types, see FenceOp or 
+      // AllReduceOp in runtime.cc
       if (!this->wait_barriers.empty() || !this->grants.empty())
       {
         std::vector<ApEvent> sync_preconditions;
@@ -127,7 +130,7 @@ namespace Legion {
           ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
           sync_preconditions.push_back(e);
           if (this->runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(this->unique_op_id, e);
+            LegionSpy::log_phase_barrier_wait(this->get_unique_op_id(), e);
         }
         for (std::vector<Grant>::const_iterator it =
               this->grants.begin(); it != this->grants.end(); it++)
@@ -135,15 +138,15 @@ namespace Legion {
           ApEvent e = it->impl->acquire_grant();
           sync_preconditions.push_back(e);
         }
-        if (this->execution_fence_event.exists())
-          sync_preconditions.push_back(this->execution_fence_event);
+        if (this->has_execution_fence_event())
+          sync_preconditions.push_back(this->get_execution_fence_event());
         ApEvent result = Runtime::merge_events(NULL, sync_preconditions);
         if (this->is_recording())
           trace_info.record_op_sync_event(result);
         return result;
       }
       else // nothing to record since we just depend on the fence
-        return this->execution_fence_event;
+        return this->get_execution_fence_event();
     }
 
     /////////////////////////////////////////////////////////////
@@ -194,7 +197,7 @@ namespace Legion {
         if (!ready)
         {
           // If false was poisoned then predicate resolve true
-          this->false_guard.wait_faultaware(value);
+          this->false_guard.wait_faultaware(value, true/*from application*/);
           ready = true;
         }
 #endif

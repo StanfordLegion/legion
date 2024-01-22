@@ -700,6 +700,11 @@ namespace Legion {
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
+    private:
+      struct CachedAllreduce {
+        std::vector<Memory> target_memories;
+        size_t future_size;
+      };
     protected:
       struct InstanceUser {
       public:
@@ -905,6 +910,8 @@ namespace Legion {
                              std::deque<InstanceSet> &physical_instances) const;
       void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;
+      void get_allreduce_mapping(AllReduceOp *op,
+          std::vector<Memory> &target_memories, size_t &future_size);
     public:
       virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
                                            const TraceLocalID &tlid);
@@ -1022,6 +1029,8 @@ namespace Legion {
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events); 
+      virtual void record_future_allreduce(const TraceLocalID &tlid,
+          const std::vector<Memory> &target_memories, size_t future_size);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1107,6 +1116,7 @@ namespace Legion {
       CachedPremappings cached_premappings;
       CachedMappings cached_mappings;
       std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
+      std::map<TraceLocalID,CachedAllreduce> cached_allreduces;
       bool has_virtual_mapping;
       bool has_no_consensus;
     protected:

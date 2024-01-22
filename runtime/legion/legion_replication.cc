@@ -5764,27 +5764,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplAllReduceOp::ReplAllReduceOp(const ReplAllReduceOp &rhs)
-      : AllReduceOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ReplAllReduceOp::~ReplAllReduceOp(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplAllReduceOp& ReplAllReduceOp::operator=(const ReplAllReduceOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -11372,8 +11354,6 @@ namespace Legion {
           implicit_manager->set_shard_manager(manager, top_context);
         if (to_trigger.exists())
           Runtime::trigger_event(to_trigger);
-        if (implicit_manager->remove_reference())
-          delete implicit_manager;
       }
     }
 

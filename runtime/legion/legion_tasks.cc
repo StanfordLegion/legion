@@ -6024,7 +6024,7 @@ namespace Legion {
           req.parent = region;
           req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
-        req.privilege = WRITE_DISCARD;
+        req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
         output_regions.push_back(req);
@@ -9369,7 +9369,7 @@ namespace Legion {
           req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
 
-        req.privilege = WRITE_DISCARD;
+        req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
         output_regions.push_back(req);
@@ -12722,10 +12722,10 @@ namespace Legion {
     size_t SliceTask::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      if (is_remote())
-        return launch_space->get_volume();
-      else
-        return index_owner->get_collective_points();
+#ifdef DEBUG_LEGION
+      assert(is_remote());
+#endif
+      return points.size();
     }
 
     //--------------------------------------------------------------------------

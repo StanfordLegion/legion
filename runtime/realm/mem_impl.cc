@@ -1320,7 +1320,7 @@ namespace Realm {
       base = 0;
       prealloced = true;
     }
-    log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size,
+    log_malloc.debug("CPU memory at %p, size = %zd%s%s", static_cast<void *>(base), _size,
                      prealloced ? " (prealloced)" : "",
                      (segment && segment->single_network) ? " (registered)" : "");
   }
