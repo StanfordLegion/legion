@@ -2537,8 +2537,7 @@ namespace Legion {
       decrement_total_outstanding_requests();
 #endif
       LegionProfDesc::CalibrationErr calibration_err;
-      //calibration_err.calibration_err = Realm::Clock::get_calibration_error();
-      calibration_err.calibration_err = 0;
+      calibration_err.calibration_err = Realm::Clock::get_calibration_error();
       serializer->serialize(calibration_err);
       if (!done_event.has_triggered())
         done_event.wait();
