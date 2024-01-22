@@ -186,6 +186,15 @@ namespace Legion {
       }
     }
 
+    bool is_operation_ignorable_in_traces(Operation* op) {
+      switch (op->get_operation_kind()) {
+        case Operation::OpKind::DISCARD_OP_KIND:
+          return true;
+        default:
+          return false;
+      }
+    }
+
     void auto_trace_process_repeats(const void* args_) {
       log_auto_trace.debug() << "Executing processing repeats meta task.";
       const InnerContext::AutoTraceProcessRepeatsArgs* args = (const InnerContext::AutoTraceProcessRepeatsArgs*)args_;
@@ -467,6 +476,7 @@ namespace Legion {
       }
       // Otherwise, move down to the node's child.
       this->node = it->second;
+      this->depth++;
       return true;
     }
 
@@ -538,7 +548,6 @@ namespace Legion {
 
     void TraceReplayer::process(Legion::Internal::Operation *op, Murmur3Hasher::Hash hash, size_t opidx) {
       this->operations.push(op);
-
       // Update all watching pointers. This is very similar to the advancing
       // of pointers in the TraceOccurrenceWatcher.
       this->active_watching_pointers.emplace_back(this->trie.get_root(), opidx);
@@ -734,6 +743,33 @@ namespace Legion {
           //  get there.
           assert(false);
         }
+      }
+    }
+
+    void TraceReplayer::process_trace_noop(Legion::Internal::Operation *op) {
+      assert(is_operation_ignorable_in_traces(op));
+      // If the operation is a noop during traces, then the replayer
+      // takes a much simpler process. In particular, none of the pointers
+      // advance or are cancelled, but their depth increases to account
+      // for the extra operation. Do a special advance on each active
+      // commit pointer.
+      this->operations.push(op);
+      for (auto& pointer : this->active_commit_pointers) {
+        pointer.advance_for_trace_noop();
+      }
+
+      // Because this operation does not invalidate any pointers,
+      // we don't always need to compute a minumum and flush the
+      // head of the buffer up until the minimum. This is because
+      // a previous operation already did that for the active pointers,
+      // and this operation does not create any new active or complete
+      // pointers. So the addition of this operation cannot require
+      // re-flushing the head of the buffer. However, to make the
+      // processing of these operations slightly more eager, we'll
+      // flush them through if there aren't any active pointers,
+      // rather than waiting for the next operation to come along.
+      if (this->active_commit_pointers.empty() && this->completed_commit_pointers.empty()) {
+        this->flush_buffer();
       }
     }
 

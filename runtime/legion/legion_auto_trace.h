@@ -201,6 +201,7 @@ namespace Legion {
 
       // Enqueue a new operation, which has the given hash.
       void process(Operation* op, Murmur3Hasher::Hash hash, size_t opidx);
+      void process_trace_noop(Operation* op);
       // Flush all pending operations out of the TraceReplayer. Accepts
       // the current opidx, used for scoring potentially replayed traces.
       void flush(size_t opidx);
@@ -225,7 +226,7 @@ namespace Legion {
             decaying_visits(0), replays(0), tid(0) { }
         // opidx that this trace was inserted at.
         size_t opidx;
-        // length of the trace.
+        // length of the trace. This is used for scoring only.
         size_t length;
         // Fields for maintaining a decaying visit count.
         size_t last_visited_opidx;
@@ -271,18 +272,20 @@ namespace Legion {
       class CommitPointer {
       public:
         CommitPointer(TrieNode<Murmur3Hasher::Hash, TraceMeta>* node_, size_t opidx_)
-          : node(node_), opidx(opidx_) { }
+          : node(node_), opidx(opidx_), depth(0) { }
         bool advance(Murmur3Hasher::Hash token);
+        void advance_for_trace_noop() { this->depth++; }
         bool complete();
         TraceID replay(OperationExecutor* executor);
         double score(size_t opidx);
         size_t get_opidx() const { return this->opidx; }
-        // Length may only be called if complete() has returned
-        // true on this pointer previously.
-        size_t get_length() { return this->node->get_value().length; }
+        size_t get_length() { return this->depth; }
       private:
         TrieNode<Murmur3Hasher::Hash, TraceMeta>* node;
         size_t opidx;
+        // depth is the number of operations (traceable and trace no-ops)
+        // contained within the trace.
+        size_t depth;
       };
       std::vector<CommitPointer> active_commit_pointers;
       std::vector<CommitPointer> completed_commit_pointers;
@@ -379,6 +382,7 @@ namespace Legion {
 
     // Utility functions.
     bool is_operation_traceable(Operation* op);
+    bool is_operation_ignorable_in_traces(Operation* op);
 
 
     // TODO (rohany): Can we move these declarations to another file?
@@ -433,10 +437,15 @@ namespace Legion {
         this->replayer.process(op, hash, this->opidx);
         this->opidx++;
         return true;
+      } else if (is_operation_ignorable_in_traces(op)) {
+        // If the operation we are processing is "ignorable" in traces
+        // then we won't consider it for trace identification or counting
+        // watches in the identifier and watcher. The idea here is to thread
+        // these operations through the pipeline unless we are replaying a
+        // trace, in which case they will be dropped.
+        this->replayer.process_trace_noop(op);
+        this->opidx++;
       } else {
-        // TODO (rohany): Think about what kind of operations we should handle here
-        //  that don't actually affect traces (like TraceSummaryOps).
-
         // When encountering a non-traceable operation, insert a
         // dummy hash value into the trace identifier so that the
         // traces it finds don't span across these operations.
@@ -492,8 +501,16 @@ namespace Legion {
     bool AutomaticTracingContext<T>::issue_operation(Legion::Internal::Operation *op, bool unordered, bool outermost) {
       // Set and then update the separately maintained opidx counter.
       if (!unordered) {
+        // If we're tracing and this operation is a trace no-op, then no-op.
+        if (this->started_auto_trace && is_operation_ignorable_in_traces(op)) {
+          this->rewritten_op_context_idx++;
+          return true;
+        }
+
         op->set_ctx_index(this->rewritten_op_context_idx);
         this->rewritten_op_context_idx++;
+        // TODO (rohany): This might not be needed once Mike refactors
+        //  context index assignment.
         if (this->started_auto_trace) {
           assert(this->current_trace != nullptr);
           op->set_trace(this->current_trace, nullptr /* dependencies */);
