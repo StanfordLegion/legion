@@ -7332,8 +7332,6 @@ namespace Legion {
       ImplicitShardManager *manager = runtime->find_implicit_shard_manager(
           task_id, mapper_id, kind, shards_per_address_space);
       manager->process_implicit_rendezvous(derez);
-      if (manager->remove_reference())
-        delete manager;
     }
 
     /////////////////////////////////////////////////////////////
@@ -30633,14 +30631,11 @@ namespace Legion {
       std::map<TaskID,ImplicitShardManager*>::iterator finder = 
         implicit_shard_managers.find(top_task_id);
       if (finder != implicit_shard_managers.end())
-      {
-        finder->second->add_reference();
         return finder->second;
-      }
       ImplicitShardManager *result = new ImplicitShardManager(this,
           top_task_id, mapper_id, kind, shards_per_address_space);
       implicit_shard_managers[top_task_id] = result;
-      result->add_reference();
+      result->add_reference(shards_per_address_space);
       return result;
     }
 
