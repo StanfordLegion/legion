@@ -1583,8 +1583,7 @@ namespace Legion {
     void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
-      if ((last_memoized > 0) && 
-          (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING))
+      if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
