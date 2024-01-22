@@ -3584,10 +3584,19 @@ namespace Legion {
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
-      InnerContext *inner_ctx = new InnerContext(runtime, this, 
+      InnerContext *inner_ctx;
+      if (this->runtime->enable_automatic_tracing) {
+        log_auto_trace.info() << "Initializing AutomaticTracingContext<InnerContext>.";
+        inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
           0/*did*/, false/*inline*/, true/*implicit*/);
+      } else {
+        inner_ctx = new InnerContext(runtime, this,
+          get_depth(), false/*is inner*/, regions, output_regions,
+          parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
+          0/*did*/, false/*inline*/, true/*implicit*/);
+      }
       execution_context = inner_ctx;
       execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;
@@ -8242,10 +8251,19 @@ namespace Legion {
     InnerContext* ShardTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
-      ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+      ReplicateContext *repl_ctx;
+      if (this->runtime->enable_automatic_tracing) {
+        log_auto_trace.info() << "Initializing AutomaticTracingContext<ReplicateContext>.";
+        repl_ctx = new AutomaticTracingContext<ReplicateContext>(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, execution_fence_event,
           shard_manager, false/*inline task*/, true/*implicit*/);
+      } else {
+        repl_ctx = new ReplicateContext(runtime, this,
+          get_depth(), false/*is inner*/, regions, output_regions,
+          parent_req_indexes, virtual_mapped, execution_fence_event,
+          shard_manager, false/*inline task*/, true/*implicit*/);
+      }
       repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
