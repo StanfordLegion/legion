@@ -6012,7 +6012,7 @@ namespace Legion {
           req.parent = region;
           req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
-        req.privilege = WRITE_DISCARD;
+        req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
         output_regions.push_back(req);
@@ -9347,7 +9347,7 @@ namespace Legion {
           req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
 
-        req.privilege = WRITE_DISCARD;
+        req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
         output_regions.push_back(req);
