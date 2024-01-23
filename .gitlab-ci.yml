@@ -478,7 +478,6 @@ before_script:
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
-  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 .cuda117: &cuda117
@@ -486,7 +485,6 @@ before_script:
   CUDA: "/usr/local/cuda-11.7"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
-  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 .cuda121: &cuda121
@@ -494,7 +492,6 @@ before_script:
   CUDA: "/usr/local/cuda-12.1"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
-  GPU_ARCH: "60"
   USE_NVTX: "1"
 
 ###
