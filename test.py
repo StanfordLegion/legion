@@ -511,6 +511,17 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         ('CXX', 'g++'),
         ('DEBUG', '0'),
     ])
+
+    # Try to auto-detect the runner's GPU_ARCH for the test
+    if env['USE_CUDA'] == '1' and 'GPU_ARCH' not in env:
+        try:
+            device_query = subprocess.check_output(['nvidia-smi', '-i', '0', '-q']).decode('utf-8').splitlines()
+            htr_env['GPU_ARCH'] = [line.split()[-1].lower() for line in device_query if line.strip().startswith('Product Architecture')][0]
+            print("Auto-detected GPU_ARCH='%s'" % htr_env['GPU_ARCH'])
+        except OSError:
+            print('Command failed: %s' % cmd, file=sys.stderr, flush=True)
+            raise
+
     cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
 
     # TaskAMR
