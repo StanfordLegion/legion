@@ -461,11 +461,6 @@ before_script:
 .nvidia: &nvidia
   tags:
     - nvidia
-# For tests that require a larger GPU:
-.nvidia_16gb: &nvidia_16gb
-  tags:
-    - nvidia
-    - 16gb
 
 .cuda_base: &cuda_base
   IS_NVIDIA_JOB: "1"
@@ -1293,7 +1288,7 @@ nvidia_cuda121_clang12_cxx14_release_cmake_cuda_regent:
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *cmake, *ctest, *regent, *shared]
 nvidia_cuda121_gcc9_cxx17_debug_maxdim4_external2:
-  <<: [*nvidia_16gb, *external_tests]
+  <<: [*nvidia, *external_tests]
   variables:
     <<: [*gcc9, *llvm12, *debug, *cxx17_normal, *cuda121, *maxdim4, *openmp, *hdf5, *external2, *short]
 
