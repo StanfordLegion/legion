@@ -968,8 +968,8 @@ namespace Realm {
         log_gpudma.info() << "cuda gather/scatter copy"
                           << " xd=" << std::hex << guid << std::dec
                           << " min_xfer_size=" << min_xfer_size
-                          << " max_bytes=" << max_bytes
-                          << " xd=" << std::hex << out_port->peer_guid << std::dec;
+                          << " max_bytes=" << max_bytes << " xd=" << std::hex
+                          << out_port->peer_guid << std::dec;
 
         if(max_bytes == 0) {
           break;
@@ -1010,13 +1010,11 @@ namespace Realm {
           addr_size = out_port->iter->get_address_size();
           write_ind_bytes = (max_bytes / addr_info.bytes_per_chunk) * addr_size;
 
-
           dst_ind_base = reinterpret_cast<uintptr_t>(
               input_ports[out_port->indirect_port_idx].mem->get_direct_ptr(
                   out_port->iter->get_base_offset(), 0));
 
-          dst_ind_base +=
-              (out_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
+          dst_ind_base += (out_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
         } else {
           out_base += out_alc.get_offset();
         }
@@ -1033,8 +1031,7 @@ namespace Realm {
               input_ports[in_port->indirect_port_idx].mem->get_direct_ptr(
                   in_port->iter->get_base_offset(), 0));
 
-          src_ind_base +=
-              (in_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
+          src_ind_base += (in_alc.get_offset() / addr_info.bytes_per_chunk) * addr_size;
         } else {
           in_base += in_alc.get_offset();
         }
@@ -1560,71 +1557,63 @@ namespace Realm {
 	req->xd->notify_request_write_done(req);
       }
 
+      ////////////////////////////////////////////////////////////////////////
+      //
+      // class GPUGatherTransferCompletion
 
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class GPUGatherTransferCompletion
+      GPUGatherTransferCompletion::GPUGatherTransferCompletion(
+          XferDes *_xd, int _read_port_idx, size_t _read_offset, size_t _read_size,
+          int _write_port_idx, size_t _write_offset, size_t _write_size,
+          int _read_ind_port_idx, size_t _read_ind_offset, size_t _read_ind_size,
+          int _write_ind_port_idx, size_t _write_ind_offset, size_t _write_ind_size)
+        : xd(_xd)
+        , read_port_idx(_read_port_idx)
+        , read_offset(_read_offset)
+        , read_size(_read_size)
+        , read_ind_port_idx(_read_ind_port_idx)
+        , read_ind_offset(_read_ind_offset)
+        , read_ind_size(_read_ind_size)
+        , write_port_idx(_write_port_idx)
+        , write_offset(_write_offset)
+        , write_size(_write_size)
+        , write_ind_port_idx(_write_ind_port_idx)
+        , write_ind_offset(_write_ind_offset)
+        , write_ind_size(_write_ind_size)
+      {}
 
-    GPUGatherTransferCompletion::GPUGatherTransferCompletion(XferDes *_xd,
-                                                 int _read_port_idx,
-                                                 size_t _read_offset,
-                                                 size_t _read_size,
-                                                 int _write_port_idx,
-                                                 size_t _write_offset,
-                                                 size_t _write_size,
-                                                 int _read_ind_port_idx,
-                                                 size_t _read_ind_offset,
-                                                 size_t _read_ind_size,
-                                                 int _write_ind_port_idx,
-                                                 size_t _write_ind_offset,
-                                                 size_t _write_ind_size)
-      : xd(_xd)
-      , read_port_idx(_read_port_idx)
-      , read_offset(_read_offset)
-      , read_size(_read_size)
-      , read_ind_port_idx(_read_ind_port_idx)
-      , read_ind_offset(_read_ind_offset)
-      , read_ind_size(_read_ind_size)
-      , write_port_idx(_write_port_idx)
-      , write_offset(_write_offset)
-      , write_size(_write_size)
-      , write_ind_port_idx(_write_ind_port_idx)
-      , write_ind_offset(_write_ind_offset)
-      , write_ind_size(_write_ind_size)
-    {}
+      void GPUGatherTransferCompletion::request_completed(void)
+      {
 
-    void GPUGatherTransferCompletion::request_completed(void)
-    {
+        log_gpudma.info() << "gpu gather complete: xd=" << std::hex << xd->guid
+                          << std::dec << " read=" << read_port_idx << "/" << read_offset
+                          << " write=" << write_port_idx << "/" << write_offset
+                          << " bytes=" << write_size;
 
-      log_gpudma.info() << "gpu gather complete: xd=" << std::hex << xd->guid << std::dec
-                        << " read=" << read_port_idx << "/" << read_offset
-                        << " write=" << write_port_idx << "/" << write_offset
-                        << " bytes=" << write_size;
+        if(read_ind_port_idx >= 0) {
+          XferDes::XferPort &iip = xd->input_ports[read_ind_port_idx];
+          xd->update_bytes_read(read_ind_port_idx, iip.local_bytes_total, read_ind_size);
+          iip.local_bytes_total += read_ind_size;
+        }
 
-      if(read_ind_port_idx >= 0) {
-        XferDes::XferPort &iip = xd->input_ports[read_ind_port_idx];
-        xd->update_bytes_read(read_ind_port_idx, iip.local_bytes_total, read_ind_size);
-        iip.local_bytes_total += read_ind_size;
+        if(write_ind_port_idx >= 0) {
+          XferDes::XferPort &iip = xd->input_ports[write_ind_port_idx];
+          xd->update_bytes_read(write_ind_port_idx, iip.local_bytes_total,
+                                write_ind_size);
+          iip.local_bytes_total += write_ind_size;
+        }
+
+        if(read_port_idx >= 0) {
+          xd->update_bytes_read(read_port_idx, read_offset, read_size);
+        }
+        if(write_port_idx >= 0) {
+          xd->update_bytes_write(write_port_idx, write_offset, write_size);
+        }
+
+        xd->update_progress();
+        xd->remove_reference();
+        // TODO(apryakhin@): Do we need to update this?
+        delete this;
       }
-
-      if(write_ind_port_idx >= 0) {
-        XferDes::XferPort &iip = xd->input_ports[write_ind_port_idx];
-        xd->update_bytes_read(write_ind_port_idx, iip.local_bytes_total, write_ind_size);
-        iip.local_bytes_total += write_ind_size;
-      }
-
-      if(read_port_idx >= 0) {
-        xd->update_bytes_read(read_port_idx, read_offset, read_size);
-      }
-      if(write_port_idx >= 0) {
-        xd->update_bytes_write(write_port_idx, write_offset, write_size);
-      }
-
-      xd->update_progress();
-      xd->remove_reference();
-      // TODO(apryakhin@): Do we need to update this?
-      delete this;
-    }
 
     ////////////////////////////////////////////////////////////////////////
     //

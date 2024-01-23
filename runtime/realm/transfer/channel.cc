@@ -1262,7 +1262,7 @@ namespace Realm {
         // TODO(apryakhin@): We add this to handle scatter when both
         // indirection and source are coming from IB and this needs
         // good testing.
-        if (out_port->indirect_port_idx >= 0 && write_bytes_avail) {
+        if(out_port->indirect_port_idx >= 0 && write_bytes_avail) {
           min_xfer_size = std::min(write_bytes_avail, min_xfer_size);
         }
         if(flush) {

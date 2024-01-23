@@ -1035,10 +1035,7 @@ bool scatter_gather_test(const std::vector<Memory> &sys_mems,
 
   region_ind
       .template fill<Point<N2, T2>>(
-          is1, FID_PTR1,
-          [=](Point<N, T> p) -> Point<N2, T2> {
-            return transform * p;
-          },
+          is1, FID_PTR1, [=](Point<N, T> p) -> Point<N2, T2> { return transform * p; },
           Event::NO_EVENT)
       .wait();
 

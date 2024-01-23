@@ -1368,13 +1368,11 @@ namespace Realm {
 	size_t amt = addrs_in->step(addr_max_bytes, a_info, 0,
 				    false /*!tentative*/);
 
-	if(amt == 0) {
-	  return nonempty;
+        if(amt == 0) {
+          return nonempty;
         }
-	memcpy(points,
-	       reinterpret_cast<const void *>(addrs_mem_base +
-					      a_info.base_offset),
-	       amt);
+        memcpy(points,
+               reinterpret_cast<const void *>(addrs_mem_base + a_info.base_offset), amt);
         // handle reads of partial points
         while((amt % sizeof(Point<N,T>)) != 0) {
           // get some more - should never be empty
@@ -3485,8 +3483,8 @@ namespace Realm {
 
 	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
 	  ibe.memory = path_infos[0].path[i + 1];
-	  ibe.size = Config::ib_size_bytes;//1 << 20; /*TODO*/
-	}
+          ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
+        }
       }
     } else {
       // step 1: we need the address decoder, possibly with some hops to get
@@ -3805,8 +3803,8 @@ namespace Realm {
 
 	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
 	  ibe.memory = path_infos[0].path[i + 1];
-	  ibe.size = Config::ib_size_bytes;//1 << 20; /*TODO*/
-	}
+          ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
+        }
       }
     } else {
       // step 1: we need the address decoder, possibly with some hops to get
@@ -4914,8 +4912,8 @@ namespace Realm {
       for(size_t i = 0; i < graph.xd_nodes.size(); i++) {
         if(graph.xd_nodes[i].redop.id != 0) {
           log_xplan.debug()
-              << "analysis: plan=" << (void *)this << " xds[" << i
-              << "]: channel_node" << graph.xd_nodes[i].target_node << " inputs="
+              << "analysis: plan=" << (void *)this << " xds[" << i << "]: channel_node"
+              << graph.xd_nodes[i].target_node << " inputs="
               << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
               << " outputs="
               << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
@@ -5397,7 +5395,7 @@ namespace Realm {
             ii.ib_offset = 0;
             ii.ib_size = 0;
             break;
-	  }
+          }
 	case TransferGraph::XDTemplate::IO_EDGE:
 	  {
 	    ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
@@ -5409,8 +5407,8 @@ namespace Realm {
 	    ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
             ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
             ii.serdez_id = 0;
-	    break;
-	  }
+            break;
+          }
 	case TransferGraph::XDTemplate::IO_FILL_DATA:
 	  {
 	    // don't actually want an input in this case

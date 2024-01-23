@@ -998,11 +998,13 @@ namespace Realm {
       GPUGatherTransferCompletion(XferDes *_xd, int _read_port_idx, size_t _read_offset,
                                   size_t _read_size, int _write_port_idx,
                                   size_t _write_offset, size_t _write_size,
-                                  int _read_ind_port_idx = -1, size_t _read_ind_offset = 0,
-                                  size_t _read_ind_size = 0, int _write_ind_port_idx = -1,
-                                  size_t _write_ind_offset = 0, size_t _write_ind_size = 0);
+                                  int _read_ind_port_idx = -1,
+                                  size_t _read_ind_offset = 0, size_t _read_ind_size = 0,
+                                  int _write_ind_port_idx = -1,
+                                  size_t _write_ind_offset = 0,
+                                  size_t _write_ind_size = 0);
 
-          virtual void request_completed(void);
+      virtual void request_completed(void);
 
     protected:
       XferDes *xd;
