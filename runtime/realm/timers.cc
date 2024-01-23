@@ -89,8 +89,14 @@ namespace Realm {
 
   /*static*/ void Clock::set_zero_time(void)
   {
-    uint64_t native = native_time();
-    zero_time = native_to_nanoseconds.convert_forward_absolute(native);
+    zero_time = native_time_slower();
+#if REALM_TIMERS_USE_RDTSC
+    if(cpu_tsc_enabled) {
+      // shift our tsc->system time calibration to zero out here now
+      uint64_t tsc = raw_cpu_tsc();
+      native_to_nanoseconds.adjust(tsc, zero_time);
+    }
+#endif
   }
 
   /*static*/ void Clock::calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
@@ -266,8 +272,24 @@ namespace Realm {
 #endif
   }
 
-  // TODO: add the implementation
-  /*static*/ long long Clock::get_calibration_error(void) { return 0; }
+  /*static*/ long long Clock::get_calibration_error()
+  {
+#if REALM_TIMERS_USE_RDTSC
+    if(cpu_tsc_enabled) {
+      // how far ahead is realm's native->nanoseconds conversion than the
+      //  system time (which is always what native_time_slower returns)?
+      uint64_t native = native_time();
+      uint64_t systime = native_time_slower();
+      uint64_t now = native_to_nanoseconds.convert_forward_absolute(native);
+      return (now - systime);
+    } else
+#endif
+    {
+      // we're reporting system time directly, so there is no error
+      return 0;
+    }
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -331,6 +353,13 @@ namespace Realm {
 #endif
 
     return true;
+  }
+
+  void Clock::TimescaleConverter::adjust(uint64_t ta, uint64_t tb)
+  {
+    // 'ta' and 'tb' are just our new "zeros"
+    a_zero = ta;
+    b_zero = tb;
   }
 
 

@@ -87,6 +87,10 @@ namespace Realm {
       //  time intervals differ by a factor of more than 2^32)
       bool set(uint64_t ta1, uint64_t tb1, uint64_t ta2, uint64_t tb2);
 
+      // adjusts the affine translation to maintain the same slope but pass
+      //  through a specified (ta, tb) pair
+      void adjust(uint64_t ta, uint64_t tb);
+
       // conversion of absolute times ("forward" = A->B, "reverse" = B-A)
       uint64_t convert_forward_absolute(uint64_t ta);
       uint64_t convert_reverse_absolute(uint64_t tb);
