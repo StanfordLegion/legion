@@ -1137,11 +1137,7 @@ namespace Realm {
             addr_max_bytes =
                 iip.seq_remote.span_exists(iip.local_bytes_total, addr_max_bytes);
             size_t rem = addr_max_bytes % sizeof(Point<N, T>);
-            std::cout << "ADDR_MAX_BYTES=" << addr_max_bytes << " rem=" << rem
-                      << std::endl;
             if(rem > 0) {
-              std::cout << "ADDR_MAX_BYTES=" << addr_max_bytes << " minus=" << rem
-                        << std::endl;
               addr_max_bytes -= rem;
             }
             if(addr_max_bytes == 0) {
@@ -1153,7 +1149,6 @@ namespace Realm {
         }
 
         size_t amt = addrs_in->step(addr_max_bytes, a_info, 0, false);
-        std::cout << "AMT=" << amt << std::endl;
         if(amt == 0) {
           return nonempty;
         }
@@ -1161,7 +1156,6 @@ namespace Realm {
         // TODO: handle partial point reads
         addrs_in_offset = a_info.base_offset;
         num_points = amt / sizeof(Point<N, T>);
-        std::cout << "NUM POINTS=" << num_points << std::endl;
       }
       r.lo[0] = point_pos;
       r.hi[0] = point_pos + num_points - 1;
