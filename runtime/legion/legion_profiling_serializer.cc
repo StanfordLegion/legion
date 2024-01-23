@@ -78,12 +78,10 @@ namespace Legion {
          << "id:" << PROC_DESC_ID                 << delim
          << "proc_id:ProcID:" << sizeof(ProcID)   << delim
          << "kind:ProcKind:"  << sizeof(ProcKind) << delim
-#ifdef LEGION_USE_CUDA
          << "uuid:string:"            << "-1"         << delim
          << "name:string:"            << "-1"         << delim
          << "driver_version:int:"     << sizeof(int)  << delim
          << "compute_capability:int:" << sizeof(int)
-#endif
          << "}" << std::endl;
 
       ss << "MaxDimDesc {"
@@ -1137,7 +1135,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
 #ifdef LEGION_USE_CUDA
       char uuid_str[proc_desc.cuda_device_info.UUID_SIZE];
-      for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
+      for (size_t i=0; i<proc_desc.cuda_device_info.UUID_SIZE; i++) {
         sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
       }
 
@@ -1661,7 +1659,7 @@ namespace Legion {
 				      &machine_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Machine Desc %d %d %s %llu %d",
+      log_prof.print("Machine Desc %d %d %s %lu %d",
                      machine_desc.node_id, machine_desc.num_nodes,
                      machine_desc.process_info.hostname, machine_desc.process_info.hostid,
                      machine_desc.process_info.processid);
