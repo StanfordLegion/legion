@@ -3394,7 +3394,7 @@ fn process_record(
             state.zero_time = TimestampDelta(*zero_time);
         }
         Record::CalibrationErr { calibration_err } => {
-                state.calibration_err = *calibration_err;
+            state.calibration_err = *calibration_err;
         }
         Record::ProcDesc { proc_id, kind, .. } => {
             let kind = match ProcKind::try_from(*kind) {

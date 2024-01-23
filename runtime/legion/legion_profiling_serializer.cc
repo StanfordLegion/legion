@@ -1147,6 +1147,13 @@ namespace Legion {
                       sizeof(proc_desc.cuda_device_info.driver_version));
       lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.compute_capability),
                       sizeof(proc_desc.cuda_device_info.compute_capability));
+#else
+      char placeholder_str[10] = "NULL";
+      int placeholder_int = 0;
+      lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);
+      lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);
+      lp_fwrite(f, (char*)&(placeholder_int), sizeof(placeholder_int));
+      lp_fwrite(f, (char*)&(placeholder_int), sizeof(placeholder_int));
 #endif
     }
     //--------------------------------------------------------------------------
@@ -1654,7 +1661,7 @@ namespace Legion {
 				      &machine_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Machine Desc %d %d %s %ld %d",
+      log_prof.print("Machine Desc %d %d %s %llu %d",
                      machine_desc.node_id, machine_desc.num_nodes,
                      machine_desc.process_info.hostname, machine_desc.process_info.hostid,
                      machine_desc.process_info.processid);
@@ -1949,7 +1956,7 @@ namespace Legion {
 #ifdef LEGION_USE_CUDA
       if (proc_desc.kind == Processor::TOC_PROC) {
         char uuid_str[proc_desc.cuda_device_info.UUID_SIZE];
-        for (int i=0; i<sizeof proc_desc.cuda_device_info.uuid; i++) {
+        for (size_t i=0; i<proc_desc.cuda_device_info.UUID_SIZE; i++) {
           sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
         }
 
