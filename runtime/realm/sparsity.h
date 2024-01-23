@@ -82,7 +82,7 @@ namespace Realm {
     /**
      * Add one reference to the sparsity map.
      */
-    void add_reference(void);
+    void add_references(int count = 1);
 
     /**
      * Remove references from the sparsity map.

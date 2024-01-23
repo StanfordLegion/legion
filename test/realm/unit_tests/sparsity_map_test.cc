@@ -5,7 +5,7 @@
 
 using namespace Realm;
 
-class TransferIteratorTest : public ::testing::TestWithParam<int> {
+class SparsityMapTest : public ::testing::TestWithParam<int> {
 protected:
   static void SetUpTestSuite()
   {
@@ -30,9 +30,9 @@ protected:
   static Runtime *runtime_;
 };
 
-Runtime *TransferIteratorTest::runtime_ = nullptr;
+Runtime *SparsityMapTest::runtime_ = nullptr;
 
-TEST_F(TransferIteratorTest, Destroy)
+TEST_F(SparsityMapTest, Destroy)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
   sparsity_map.destroy();
@@ -41,7 +41,7 @@ TEST_F(TransferIteratorTest, Destroy)
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, DestroyWithEvent)
+TEST_F(SparsityMapTest, DestroyWithEvent)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
   UserEvent event = UserEvent::create_user_event();
@@ -54,7 +54,7 @@ TEST_F(TransferIteratorTest, DestroyWithEvent)
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, DoubleDestroy)
+TEST_F(SparsityMapTest, DoubleDestroy)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
   sparsity_map.destroy();
@@ -64,7 +64,7 @@ TEST_F(TransferIteratorTest, DoubleDestroy)
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, RemoveReference)
+TEST_F(SparsityMapTest, RemoveReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
   sparsity_map.remove_references();
@@ -73,7 +73,7 @@ TEST_F(TransferIteratorTest, RemoveReference)
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, RemoveZeroReferences)
+TEST_F(SparsityMapTest, RemoveZeroReferences)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
   sparsity_map.remove_references(0);
@@ -82,7 +82,7 @@ TEST_F(TransferIteratorTest, RemoveZeroReferences)
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, RemoveTwoReferences)
+TEST_F(SparsityMapTest, RemoveTwoReferences)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
   sparsity_map.remove_references(2);
@@ -91,63 +91,62 @@ TEST_F(TransferIteratorTest, RemoveTwoReferences)
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, AddRemoveReference)
+TEST_F(SparsityMapTest, AddRemoveReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  sparsity_map.add_reference();
+  sparsity_map.add_references();
   sparsity_map.remove_references();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, AddRemoveZeroReference)
+TEST_F(SparsityMapTest, AddRemoveZeroReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  sparsity_map.add_reference();
+  sparsity_map.add_references();
   sparsity_map.remove_references(0);
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
   EXPECT_TRUE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, DoubleAddRemoveReference)
+TEST_F(SparsityMapTest, DoubleAddRemoveReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  sparsity_map.add_reference();
-  sparsity_map.add_reference();
+  sparsity_map.add_references();
+  sparsity_map.add_references();
   sparsity_map.remove_references();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
   EXPECT_TRUE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, DoubleAddRemoveTwoReference)
+TEST_F(SparsityMapTest, DoubleAddRemoveTwoReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  sparsity_map.add_reference();
-  sparsity_map.add_reference();
+  sparsity_map.add_references(2);
   sparsity_map.remove_references(2);
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, DestroyWithReference)
+TEST_F(SparsityMapTest, DestroyWithReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  sparsity_map.add_reference();
+  sparsity_map.add_references();
   sparsity_map.destroy();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);
   EXPECT_FALSE(impl->is_valid());
 }
 
-TEST_F(TransferIteratorTest, DestroyWithDoubleReference)
+TEST_F(SparsityMapTest, DestroyWithDoubleReference)
 {
   SparsityMap<1> sparsity_map = SparsityMap<1>::construct(rects, true, true);
-  sparsity_map.add_reference();
-  sparsity_map.add_reference();
+  sparsity_map.add_references();
+  sparsity_map.add_references();
   sparsity_map.destroy();
   auto *impl = sparsity_map.impl();
   EXPECT_NE(impl, nullptr);

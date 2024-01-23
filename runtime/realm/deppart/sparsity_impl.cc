@@ -39,18 +39,19 @@ namespace Realm {
     : id(_id)
   {}
 
-  void SparsityMapRefCounter::add_reference(void)
+  void SparsityMapRefCounter::add_references(int count)
   {
     if(!get_runtime())
       return;
     if(ID(*this).is_sparsity()) {
       NodeID owner = ID(*this).sparsity_creator_node();
       if(owner == Network::my_node_id) {
-        get_runtime()->get_sparsity_impl(*this)->add_reference();
+        get_runtime()->get_sparsity_impl(*this)->add_references(count);
       } else {
         ActiveMessage<typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
             amsg(owner);
         amsg->id = id;
+        amsg->count = count;
         amsg.commit();
       }
     }
@@ -80,7 +81,7 @@ namespace Realm {
   {
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
     if(wrapper) {
-      wrapper->add_reference();
+      wrapper->add_references(msg.count);
     }
   }
 
@@ -127,9 +128,9 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::add_reference()
+  void SparsityMap<N, T>::add_references(int count)
   {
-    SparsityMapRefCounter(id).add_reference();
+    SparsityMapRefCounter(id).add_references(count);
   }
 
   template <int N, typename T>
@@ -226,11 +227,11 @@ namespace Realm {
 
   void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
 
-  void SparsityMapImplWrapper::add_reference(void)
+  void SparsityMapImplWrapper::add_references(int count)
   {
     AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
-      references++;
+      references += count;
     }
   }
 
@@ -1753,7 +1754,7 @@ namespace Realm {
 
   /*static*/ ActiveMessageHandlerReg<
       typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
-      SparsityMapRefCounter::sparse_untyped_add_reference_message_handler_reg;
+      SparsityMapRefCounter::sparse_untyped_add_references_message_handler_reg;
 
   /*static*/ ActiveMessageHandlerReg<
       typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
