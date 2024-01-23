@@ -1288,11 +1288,11 @@ nvidia_cuda121_gcc9_cxx14_release_cmake_cuda_legion:
   variables:
     <<: [*gcc9, *release, *cxx14_normal, *cuda121, *cmake, *legion, *ctest, *shared]
 nvidia_cuda121_clang12_cxx14_release_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *regent, *cmake, *ctest, *short]
 nvidia_cuda121_clang12_cxx14_release_cmake_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*clang12, *llvm12, *release, *cxx14_normal, *cuda121, *cmake, *ctest, *regent, *shared]
 nvidia_cuda121_gcc9_cxx17_debug_maxdim4_external2:
@@ -1306,7 +1306,7 @@ nvidia_cuda117_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
   variables:
     <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
 nvidia_cuda121_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *gasnetex_mpi, *regent]
 
@@ -1316,7 +1316,7 @@ nvidia_cuda117_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
  variables:
    <<: [*gcc9, *debug, *cxx14_normal, *cuda117, *cmake, *ucx, *legion, *ctest, *short, *libdw]
 nvidia_cuda121_gcc9_cxx14_release_ucx_cuda_regent:
-  <<: [*nvidia_16gb, *tests]
+  <<: [*nvidia, *tests]
   variables:
     <<: [*gcc9, *llvm12, *release, *cxx14_normal, *cuda121, *ucx, *regent]
 
