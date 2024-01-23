@@ -10,6 +10,7 @@ import legion_info_build
 # Hack: I can't get initialize/finalize_option to work, so just parse
 # the arguments here...
 parser = argparse.ArgumentParser()
+parser.add_argument('--cmake-source-dir', required=False)
 parser.add_argument('--cmake-build-dir', required=False)
 parser.add_argument('--prefix', required=False)
 args, unknown = parser.parse_known_args()
@@ -28,8 +29,8 @@ class my_build_py(build_py):
     def run(self):
         if not self.dry_run:
             self.mkpath(self.build_lib)
-            legion_cffi_build.build_cffi(None, args.cmake_build_dir, self.build_lib, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
-            legion_cffi_build.build_cffi(args.prefix + '/lib/' + canonical_python_lib, args.cmake_build_dir, self.build_lib, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
+            legion_cffi_build.build_cffi(None, args.cmake_source_dir, args.cmake_build_dir, self.build_lib, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
+            legion_cffi_build.build_cffi(args.prefix + '/lib/' + canonical_python_lib, args.cmake_source_dir, args.cmake_build_dir, self.build_lib, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
             legion_info_build.build_legion_info()
         build_py.run(self)
 
