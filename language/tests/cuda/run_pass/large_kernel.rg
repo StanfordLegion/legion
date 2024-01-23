@@ -20,27 +20,29 @@ import "regent"
 local format = require("std/format")
 
 __demand(__cuda)
-task increment_slot(r : region(ispace(int1d), int64))
+task increment_slot(r : region(ispace(int1d), int64), launch_space : ispace(int1d))
 where reads writes(r) do
-  for e in r do
+  for e in launch_space do
     r[e%r.bounds] += 1
   end
 end
 
-task check(r : region(ispace(int1d), int64))
+task check(r : region(ispace(int1d), int64), expected : int64)
 where reads(r) do
   var total : int64 = 0
   for e in r do
     total += r[e]
   end
-  var pass = total == r.volume
+  var pass = total == expected
   if not pass then
-    format.println("expected {} but got {}", r.volume, total)
+    format.println("expected {} but got {}", expected, total)
   end
   return pass
 end
 
 task test_size(size : int64)
+  var launch_space = ispace(int1d, size)
+
   -- The exact number of elements doesn't matter, just make it large
   -- enough to reduce contention on atomic operations.
   var buf_size = 16384
@@ -48,8 +50,8 @@ task test_size(size : int64)
   format.println("Running size {} ({.2e})", size, double(size))
   var r = region(ispace(int1d, buf_size), int64)
   fill(r, 0)
-  increment_slot(r)
-  var ok = check(r)
+  increment_slot(r, launch_space)
+  var ok = check(r, size)
   regentlib.assert(ok, "test failed")
 end
 
