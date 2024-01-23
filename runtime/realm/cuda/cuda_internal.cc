@@ -828,28 +828,28 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPUScatterGatherXferDes
+    // class GPUIndirectXferDes
 
     template <int N>
-    static MemcpyUnstructuredInfo<N>
-    make_indirect_info(const TransferIterator::AddressInfo &info, size_t bytes,
+    static MemcpyIndirectInfo<N>
+    make_indirect_info(const TransferIterator::AddressInfo &addr_info, size_t bytes,
                        uintptr_t in_base, uintptr_t out_base, uintptr_t src_ind_base,
                        uintptr_t dst_ind_base, bool do_scatter = false)
     {
-      MemcpyUnstructuredInfo<N> memcpy_info;
-      memset(&memcpy_info, 0, sizeof(MemcpyUnstructuredInfo<N>));
+      MemcpyIndirectInfo<N> memcpy_info;
+      memset(&memcpy_info, 0, sizeof(MemcpyIndirectInfo<N>));
       memcpy_info.src_ind = src_ind_base;
       memcpy_info.dst_ind = dst_ind_base;
       memcpy_info.src.addr = in_base;
       memcpy_info.dst.addr = out_base;
-      memcpy_info.field_size = info.bytes_per_chunk;
+      memcpy_info.field_size = addr_info.bytes_per_chunk;
       assert(memcpy_info.field_size);
       memcpy_info.volume = bytes / memcpy_info.field_size;
       assert(memcpy_info.volume);
       if(do_scatter) {
-        memcpy_info.dst.addr += info.base_offset;
+        memcpy_info.dst.addr += addr_info.base_offset;
       } else {
-        memcpy_info.src.addr += info.base_offset;
+        memcpy_info.src.addr += addr_info.base_offset;
       }
       return memcpy_info;
     }
@@ -858,34 +858,34 @@ namespace Realm {
                                      uintptr_t in_base, uintptr_t out_base,
                                      uintptr_t src_ind_base, uintptr_t dst_ind_base,
                                      size_t bytes,
-                                     const TransferIterator::AddressInfo &info)
+                                     const TransferIterator::AddressInfo &addr_info)
     {
       bool do_scatter = (dst_ind_base != 0);
-      if(info.num_lines == 0 && info.num_planes == 0) {
-        auto memcpy_info = make_indirect_info<1>(info, bytes, in_base, out_base,
-                                                 src_ind_base, dst_ind_base, do_scatter);
+      if(addr_info.num_lines == 0 && addr_info.num_planes == 0) {
+        MemcpyIndirectInfo<1> memcpy_info = make_indirect_info<1>(
+            addr_info, bytes, in_base, out_base, src_ind_base, dst_ind_base, do_scatter);
         gpu->launch_indirect_copy_kernel(&memcpy_info, 1, addr_size,
                                          memcpy_info.field_size, memcpy_info.volume,
                                          stream);
-      } else if(info.num_planes == 0) {
-        auto memcpy_info = make_indirect_info<2>(info, bytes, in_base, out_base,
-                                                 src_ind_base, dst_ind_base, do_scatter);
+      } else if(addr_info.num_planes == 0) {
+        MemcpyIndirectInfo<2> memcpy_info = make_indirect_info<2>(
+            addr_info, bytes, in_base, out_base, src_ind_base, dst_ind_base, do_scatter);
         if(do_scatter)
-          memcpy_info.dst.strides[0] = info.num_lines;
+          memcpy_info.dst.strides[0] = addr_info.num_lines;
         else
-          memcpy_info.src.strides[0] = info.num_lines;
+          memcpy_info.src.strides[0] = addr_info.num_lines;
         gpu->launch_indirect_copy_kernel(&memcpy_info, 2, addr_size,
                                          memcpy_info.field_size, memcpy_info.volume,
                                          stream);
       } else {
-        auto memcpy_info = make_indirect_info<3>(info, bytes, in_base, out_base,
-                                                 src_ind_base, dst_ind_base, do_scatter);
+        MemcpyIndirectInfo<3> memcpy_info = make_indirect_info<3>(
+            addr_info, bytes, in_base, out_base, src_ind_base, dst_ind_base, do_scatter);
         if(do_scatter) {
-          memcpy_info.dst.strides[0] = info.num_lines;
-          memcpy_info.dst.strides[1] = info.num_planes;
+          memcpy_info.dst.strides[0] = addr_info.num_lines;
+          memcpy_info.dst.strides[1] = addr_info.num_planes;
         } else {
-          memcpy_info.src.strides[0] = info.num_lines;
-          memcpy_info.src.strides[1] = info.num_planes;
+          memcpy_info.src.strides[0] = addr_info.num_lines;
+          memcpy_info.src.strides[1] = addr_info.num_planes;
         }
         gpu->launch_indirect_copy_kernel(&memcpy_info, 3, addr_size,
                                          memcpy_info.field_size, memcpy_info.volume,
@@ -893,7 +893,7 @@ namespace Realm {
       }
     }
 
-    GPUScatterGatherXferDes::GPUScatterGatherXferDes(
+    GPUIndirectXferDes::GPUIndirectXferDes(
         uintptr_t _dma_op, Channel *_channel, NodeID _launch_node, XferDesID _guid,
         const std::vector<XferDesPortInfo> &inputs_info,
         const std::vector<XferDesPortInfo> &outputs_info, int _priority,
@@ -924,15 +924,15 @@ namespace Realm {
       }
     }
 
-    long GPUScatterGatherXferDes::get_requests(Request **requests, long nr)
+    long GPUIndirectXferDes::get_requests(Request **requests, long nr)
     {
       // unused
       assert(0);
       return 0;
     }
 
-    bool GPUScatterGatherXferDes::progress_xd(GPUScatterGatherChannel *channel,
-                                              TimeLimit work_until)
+    bool GPUIndirectXferDes::progress_xd(GPUIndirectChannel *channel,
+                                         TimeLimit work_until)
     {
       bool did_work = false;
       // TODO: add span
@@ -1075,7 +1075,7 @@ namespace Realm {
                             << " in_spart_start=" << in_span_start
                             << " out_span_start=" << out_span_start;
 
-          stream->add_notification(new GPUGatherTransferCompletion(
+          stream->add_notification(new GPUIndirectTransferCompletion(
               this, input_control.current_io_port, in_span_start, total_bytes,
               output_control.current_io_port, out_span_start, bytes_to_fence,
               in_port->indirect_port_idx, 0, read_ind_bytes, out_port->indirect_port_idx,
@@ -1097,7 +1097,7 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPUScatterGatherChannel
+    // class GPUIndirectChannel
 
     static bool supports_scatter_gather_path(ChannelCopyInfo channel_copy_info,
                                              NodeID node)
@@ -1120,9 +1120,9 @@ namespace Realm {
       return true;
     }
 
-    GPUScatterGatherChannel::GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,
-                                                     BackgroundWorkManager *bgwork)
-      : SingleXDQChannel<GPUScatterGatherChannel, GPUScatterGatherXferDes>(
+    GPUIndirectChannel::GPUIndirectChannel(GPU *_src_gpu, XferDesKind _kind,
+                                           BackgroundWorkManager *bgwork)
+      : SingleXDQChannel<GPUIndirectChannel, GPUIndirectXferDes>(
             bgwork, _kind,
             stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index
                             << " kind=" << (int)_kind << ")")
@@ -1202,9 +1202,9 @@ namespace Realm {
       }
     }
 
-    GPUScatterGatherChannel::~GPUScatterGatherChannel() {}
+    GPUIndirectChannel::~GPUIndirectChannel() {}
 
-    Memory GPUScatterGatherChannel::suggest_ib_memories(Memory memory) const
+    Memory GPUIndirectChannel::suggest_ib_memories(Memory memory) const
     {
       if(memory.kind() != Memory::GPU_FB_MEM ||
          node != NodeID(ID(memory).memory_owner_node())) {
@@ -1219,9 +1219,9 @@ namespace Realm {
       return Memory::NO_MEMORY;
     }
 
-    bool GPUScatterGatherChannel::needs_wrapping_iterator() const { return true; }
+    bool GPUIndirectChannel::needs_wrapping_iterator() const { return true; }
 
-    uint64_t GPUScatterGatherChannel::supports_path(
+    uint64_t GPUIndirectChannel::supports_path(
         ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
         CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
         const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
@@ -1235,7 +1235,7 @@ namespace Realm {
                                     bw_ret, lat_ret);
     }
 
-    XferDes *GPUScatterGatherChannel::create_xfer_des(
+    XferDes *GPUIndirectChannel::create_xfer_des(
         uintptr_t dma_op, NodeID launch_node, XferDesID guid,
         const std::vector<XferDesPortInfo> &inputs_info,
         const std::vector<XferDesPortInfo> &outputs_info, int priority,
@@ -1244,11 +1244,11 @@ namespace Realm {
     {
       // assert(redop_info.id == 0);
       assert(fill_size == 0);
-      return new GPUScatterGatherXferDes(dma_op, this, launch_node, guid, inputs_info,
-                                         outputs_info, priority, redop_info);
+      return new GPUIndirectXferDes(dma_op, this, launch_node, guid, inputs_info,
+                                    outputs_info, priority, redop_info);
     }
 
-    long GPUScatterGatherChannel::submit(Request **requests, long nr)
+    long GPUIndirectChannel::submit(Request **requests, long nr)
     {
       // unused
       assert(0);
@@ -1257,18 +1257,18 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPUScatterGatherRemoteChannelInfo
+    // class GPUIndirectRemoteChannelInfo
     //
 
-    GPUScatterGatherRemoteChannelInfo::GPUScatterGatherRemoteChannelInfo(
+    GPUIndirectRemoteChannelInfo::GPUIndirectRemoteChannelInfo(
         NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
         const std::vector<Channel::SupportedPath> &_paths)
       : SimpleRemoteChannelInfo(_owner, _kind, _remote_ptr, _paths)
     {}
 
-    RemoteChannel *GPUScatterGatherRemoteChannelInfo::create_remote_channel()
+    RemoteChannel *GPUIndirectRemoteChannelInfo::create_remote_channel()
     {
-      GPUScatterGatherRemoteChannel *rc = new GPUScatterGatherRemoteChannel(remote_ptr);
+      GPUIndirectRemoteChannel *rc = new GPUIndirectRemoteChannel(remote_ptr);
       rc->node = owner;
       rc->kind = kind;
       rc->paths.swap(paths);
@@ -1276,7 +1276,7 @@ namespace Realm {
     }
 
     template <typename S>
-    bool GPUScatterGatherRemoteChannelInfo::serialize(S &serializer) const
+    bool GPUIndirectRemoteChannelInfo::serialize(S &serializer) const
     {
       return ((serializer << owner) && (serializer << kind) &&
               (serializer << remote_ptr) && (serializer << paths));
@@ -1284,7 +1284,7 @@ namespace Realm {
 
     template <typename S>
     /*static*/ RemoteChannelInfo *
-    GPUScatterGatherRemoteChannelInfo::deserialize_new(S &deserializer)
+    GPUIndirectRemoteChannelInfo::deserialize_new(S &deserializer)
     {
       NodeID owner;
       XferDesKind kind;
@@ -1293,31 +1293,31 @@ namespace Realm {
 
       if((deserializer >> owner) && (deserializer >> kind) &&
          (deserializer >> remote_ptr) && (deserializer >> paths)) {
-        return new GPUScatterGatherRemoteChannelInfo(owner, kind, remote_ptr, paths);
+        return new GPUIndirectRemoteChannelInfo(owner, kind, remote_ptr, paths);
       } else {
         return 0;
       }
     }
 
     /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
-                                                        GPUScatterGatherRemoteChannelInfo>
-        GPUScatterGatherRemoteChannelInfo::serdez_subclass;
+                                                        GPUIndirectRemoteChannelInfo>
+        GPUIndirectRemoteChannelInfo::serdez_subclass;
 
-    RemoteChannelInfo *GPUScatterGatherChannel::construct_remote_info() const
+    RemoteChannelInfo *GPUIndirectChannel::construct_remote_info() const
     {
-      return new GPUScatterGatherRemoteChannelInfo(
-          node, kind, reinterpret_cast<uintptr_t>(this), paths);
+      return new GPUIndirectRemoteChannelInfo(node, kind,
+                                              reinterpret_cast<uintptr_t>(this), paths);
     }
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPUScatterGatherRemoteChannel
+    // class GPUIndirectRemoteChannel
     //
 
-    GPUScatterGatherRemoteChannel::GPUScatterGatherRemoteChannel(uintptr_t _remote_ptr)
+    GPUIndirectRemoteChannel::GPUIndirectRemoteChannel(uintptr_t _remote_ptr)
       : RemoteChannel(_remote_ptr)
     {}
 
-    Memory GPUScatterGatherRemoteChannel::suggest_ib_memories(Memory memory) const
+    Memory GPUIndirectRemoteChannel::suggest_ib_memories(Memory memory) const
     {
       if(memory.kind() != Memory::GPU_FB_MEM ||
          node != NodeID(ID(memory).memory_owner_node())) {
@@ -1332,7 +1332,7 @@ namespace Realm {
       return Memory::NO_MEMORY;
     }
 
-    uint64_t GPUScatterGatherRemoteChannel::supports_path(
+    uint64_t GPUIndirectRemoteChannel::supports_path(
         ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
         CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
         const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
@@ -1346,7 +1346,7 @@ namespace Realm {
                                     bw_ret, lat_ret);
     }
 
-    bool GPUScatterGatherRemoteChannel::needs_wrapping_iterator() const { return true; }
+    bool GPUIndirectRemoteChannel::needs_wrapping_iterator() const { return true; }
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1559,9 +1559,9 @@ namespace Realm {
 
       ////////////////////////////////////////////////////////////////////////
       //
-      // class GPUGatherTransferCompletion
+      // class GPUIndirectTransferCompletion
 
-      GPUGatherTransferCompletion::GPUGatherTransferCompletion(
+      GPUIndirectTransferCompletion::GPUIndirectTransferCompletion(
           XferDes *_xd, int _read_port_idx, size_t _read_offset, size_t _read_size,
           int _write_port_idx, size_t _write_offset, size_t _write_size,
           int _read_ind_port_idx, size_t _read_ind_offset, size_t _read_ind_size,
@@ -1581,7 +1581,7 @@ namespace Realm {
         , write_ind_size(_write_ind_size)
       {}
 
-      void GPUGatherTransferCompletion::request_completed(void)
+      void GPUIndirectTransferCompletion::request_completed(void)
       {
 
         log_gpudma.info() << "gpu gather complete: xd=" << std::hex << xd->guid

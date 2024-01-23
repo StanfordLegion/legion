@@ -198,7 +198,7 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
 
 template <typename T, size_t N, typename Offset_t = size_t>
 static __device__ inline void
-memcpy_indirect_points(Realm::Cuda::MemcpyUnstructuredInfo<N> info)
+memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<N> info)
 {
   Offset_t offset = blockIdx.x * blockDim.x + threadIdx.x;
   __restrict__ Offset_t *dst_ind_base = reinterpret_cast<Offset_t *>(info.dst_ind);
@@ -253,10 +253,11 @@ memcpy_indirect_points(Realm::Cuda::MemcpyUnstructuredInfo<N> info)
     memcpy_kernel_transpose<type, offt>(info, tile_shared_##name);                       \
   }
 
-#define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                  \
-  extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name( \
-      Realm::Cuda::MemcpyUnstructuredInfo<dim> info) {                        \
-    memcpy_indirect_points<type, dim, offt>(info);                            \
+#define MEMCPY_INDIRECT_TEMPLATE_INST(type, dim, offt, name)                             \
+  extern "C" __global__ __launch_bounds__(256, 8) void memcpy_indirect##name(            \
+      Realm::Cuda::MemcpyIndirectInfo<dim> info)                                         \
+  {                                                                                      \
+    memcpy_indirect_points<type, dim, offt>(info);                                       \
   }
 
 #define INST_TEMPLATES(type, sz, dim, off)                                     \

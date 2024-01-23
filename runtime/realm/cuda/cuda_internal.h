@@ -993,16 +993,14 @@ namespace Realm {
       GPUCompletionEvent event;
     };
 
-    class GPUGatherTransferCompletion : public GPUCompletionNotification {
+    class GPUIndirectTransferCompletion : public GPUCompletionNotification {
     public:
-      GPUGatherTransferCompletion(XferDes *_xd, int _read_port_idx, size_t _read_offset,
-                                  size_t _read_size, int _write_port_idx,
-                                  size_t _write_offset, size_t _write_size,
-                                  int _read_ind_port_idx = -1,
-                                  size_t _read_ind_offset = 0, size_t _read_ind_size = 0,
-                                  int _write_ind_port_idx = -1,
-                                  size_t _write_ind_offset = 0,
-                                  size_t _write_ind_size = 0);
+      GPUIndirectTransferCompletion(
+          XferDes *_xd, int _read_port_idx, size_t _read_offset, size_t _read_size,
+          int _write_port_idx, size_t _write_offset, size_t _write_size,
+          int _read_ind_port_idx = -1, size_t _read_ind_offset = 0,
+          size_t _read_ind_size = 0, int _write_ind_port_idx = -1,
+          size_t _write_ind_offset = 0, size_t _write_ind_size = 0);
 
       virtual void request_completed(void);
 
@@ -1078,30 +1076,28 @@ namespace Realm {
       std::vector<bool> dst_is_ipc;
     };
 
-    class GPUScatterGatherChannel;
+    class GPUIndirectChannel;
 
-    class GPUScatterGatherXferDes : public XferDes {
+    class GPUIndirectXferDes : public XferDes {
     public:
-      GPUScatterGatherXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
-                              XferDesID _guid,
-                              const std::vector<XferDesPortInfo> &inputs_info,
-                              const std::vector<XferDesPortInfo> &outputs_info,
-                              int _priority, XferDesRedopInfo _redop_info);
+      GPUIndirectXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
+                         XferDesID _guid, const std::vector<XferDesPortInfo> &inputs_info,
+                         const std::vector<XferDesPortInfo> &outputs_info, int _priority,
+                         XferDesRedopInfo _redop_info);
 
       long get_requests(Request **requests, long nr);
-      bool progress_xd(GPUScatterGatherChannel *channel, TimeLimit work_until);
+      bool progress_xd(GPUIndirectChannel *channel, TimeLimit work_until);
 
     protected:
       std::vector<GPU *> src_gpus, dst_gpus;
       std::vector<bool> dst_is_ipc;
     };
 
-    class GPUScatterGatherChannel
-      : public SingleXDQChannel<GPUScatterGatherChannel, GPUScatterGatherXferDes> {
+    class GPUIndirectChannel
+      : public SingleXDQChannel<GPUIndirectChannel, GPUIndirectXferDes> {
     public:
-      GPUScatterGatherChannel(GPU *_src_gpu, XferDesKind _kind,
-                              BackgroundWorkManager *bgwork);
-      ~GPUScatterGatherChannel();
+      GPUIndirectChannel(GPU *_src_gpu, XferDesKind _kind, BackgroundWorkManager *bgwork);
+      ~GPUIndirectChannel();
 
       // multi-threading of cuda copies for a given device is disabled by
       //  default (can be re-enabled with -cuda:mtdma 1)
@@ -1130,15 +1126,15 @@ namespace Realm {
       long submit(Request **requests, long nr);
 
     protected:
-      friend class GPUScatterGatherXferDes;
+      friend class GPUIndirectXferDes;
       GPU *src_gpu;
     };
 
-    class GPUScatterGatherRemoteChannelInfo : public SimpleRemoteChannelInfo {
+    class GPUIndirectRemoteChannelInfo : public SimpleRemoteChannelInfo {
     public:
-      GPUScatterGatherRemoteChannelInfo(
-          NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
-          const std::vector<Channel::SupportedPath> &_paths);
+      GPUIndirectRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
+                                   uintptr_t _remote_ptr,
+                                   const std::vector<Channel::SupportedPath> &_paths);
 
       virtual RemoteChannel *create_remote_channel();
 
@@ -1150,15 +1146,15 @@ namespace Realm {
 
     protected:
       static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
-                                                      GPUScatterGatherRemoteChannelInfo>
+                                                      GPUIndirectRemoteChannelInfo>
           serdez_subclass;
     };
 
-    class GPUScatterGatherRemoteChannel : public RemoteChannel {
-      friend class GPUScatterGatherRemoteChannelInfo;
+    class GPUIndirectRemoteChannel : public RemoteChannel {
+      friend class GPUIndirectRemoteChannelInfo;
 
     public:
-      GPUScatterGatherRemoteChannel(uintptr_t _remote_ptr);
+      GPUIndirectRemoteChannel(uintptr_t _remote_ptr);
       virtual Memory suggest_ib_memories(Memory memory) const;
       virtual uint64_t
       supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,

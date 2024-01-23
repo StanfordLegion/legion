@@ -110,7 +110,7 @@ namespace Realm {
     };
 
     template <size_t N, typename Offset_t = size_t>
-    struct MemcpyUnstructuredInfo {
+    struct MemcpyIndirectInfo {
       Offset_t volume;
       Offset_t field_size;
       uintptr_t src_ind;
