@@ -28,12 +28,11 @@ def find_header(filename, search_dir):
         if os.path.exists(legion_h_path):
             return prefix_dir, legion_h_path
 
-    runtime_dir = os.path.join(root_dir, search_dir)
-    result = try_prefix(filename, runtime_dir)
+    result = try_prefix(filename, search_dir)
     if result:
         return result
 
-    raise Exception('Unable to locate header file:' + filename + " in:" + runtime_dir)
+    raise Exception('Unable to locate header file: ' + filename + ' in: ' + search_dir)
 
 def build_cffi(libname, source_dir, defines_dir, output_dir, header_files, header_file_search_dirs, output_file):
     if source_dir is None:
