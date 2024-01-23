@@ -38,8 +38,7 @@ void node_task_0(const void *args, size_t arglen, const void *userdata, size_t u
 {
   TaskArgs &task_args = *(TaskArgs *)args;
   // add remote reference
-  task_args.sparsity_map.add_reference();
-  task_args.sparsity_map.add_reference();
+  task_args.sparsity_map.add_references(2);
   // remove remote reference
   task_args.sparsity_map.remove_references(2);
   // deferred remote destroy
@@ -79,7 +78,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     {
       TaskArgs args;
-      sparsity_maps.back().add_reference();
+      sparsity_maps.back().add_references();
       args.sparsity_map = sparsity_maps.back();
       args.node = Network::my_node_id;
       args.wait_on = done;
