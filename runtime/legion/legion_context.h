@@ -23,6 +23,8 @@
 #include "legion/legion_allocation.h"
 #include "legion/suffix_tree.h"
 
+#include <memory>
+
 namespace Legion {
   namespace Internal {
    
