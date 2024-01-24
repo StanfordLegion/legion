@@ -741,7 +741,7 @@ gcc9_cxx11_debug_openmp_system_regent:
 gcc9_cxx11_debug_python3_cmake_prof_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *jupyter, *cmake, *legion, *ctest, *prof, *shared, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *cmake, *legion, *ctest, *prof, *shared, *short]
 #   * LLVM
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1003,10 +1003,10 @@ clang12_cxx11_debug_openmp_regent:
   variables:
     <<: [*clang12, *terra12, *debug, *cxx11_normal, *openmp, *regent, *libdw]
 #   * Python
-clang12_cxx11_debug_python3_cmake_legion:
+clang12_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *jupyter, *legion, *libdw]
 #   * LLVM
 clang12_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
