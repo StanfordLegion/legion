@@ -366,6 +366,8 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
         # In CMake, we still need this, but only for tests.
         ('PYTHONPATH', ':'.join([env.get('PYTHONPATH'), python_dir])),
     ])
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
     # If we're not already using shared libraries, clean up because
     # we're going to force them
     if bin_dir is None and env['SHARED_OBJECTS'] != '1':
@@ -378,6 +380,9 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
     python_dir = os.path.join(root_dir, 'bindings', 'python')
+    env = env.copy()
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
     # If we're not already using shared libraries, clean up because
     # we're going to force them
     if bin_dir is None and env['SHARED_OBJECTS'] != '1':
