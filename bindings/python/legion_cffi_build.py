@@ -84,6 +84,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.canonical:
-        build_cffi(args.libname, args.defines_dir, args.output_dir, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
+        build_cffi(args.libname, None, args.defines_dir, args.output_dir, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
     else:
-        build_cffi(None, args.defines_dir, args.output_dir, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
+        build_cffi(None, None, args.defines_dir, args.output_dir, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
