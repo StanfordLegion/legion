@@ -76,7 +76,7 @@ endif()
 cmake_minimum_required(VERSION 3.19)
 
 # Use setup.py script to install the Python bindings library
-install(CODE "execute_process(COMMAND ${Python3_EXECUTABLE} -m pip install --prefix \"\${CMAKE_INSTALL_PREFIX}\" --global-option=--cmake-source-dir \"--global-option=${CMAKE_SOURCE_DIR}\" --global-option=--cmake-build-dir \"--global-option=${Legion_BINARY_DIR}/runtime\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT COMMAND_ERROR_IS_FATAL ANY)")
+install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E env CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR} CMAKE_BUILD_DIR=${Legion_BINARY_DIR}/runtime CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} ${Python3_EXECUTABLE} -m pip install --prefix \"\${CMAKE_INSTALL_PREFIX}\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT COMMAND_ERROR_IS_FATAL ANY)")
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/examples
