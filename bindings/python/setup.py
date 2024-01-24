@@ -7,6 +7,17 @@ import legion_cffi_build
 
 import legion_info_build
 
+# Apparently, command-line arguments are no longer a reliable way to pass
+# values to setup.py scripts. Because pip and setuptools can't agree on the
+# correct answer (and worse, both have deprecated their respective options),
+# there is no portable and consistent way to do this across versions. You can
+# see some of the links below for context.
+#
+# So we just give up! Environment variables FTW.
+#
+# https://github.com/nv-legate/legate.core/pull/908#issuecomment-1846448625
+# https://github.com/pypa/pip/issues/11859#issuecomment-1778620671
+
 cmake_source_dir = os.environ.get('CMAKE_SOURCE_DIR')
 cmake_build_dir = os.environ.get('CMAKE_BUILD_DIR')
 cmake_install_prefix = os.environ.get('CMAKE_INSTALL_PREFIX')

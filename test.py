@@ -883,8 +883,10 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     python_dir = None
     if env['USE_PYTHON'] == '1':
         for dir_entry in os.scandir(os.path.join(install_dir, 'lib')):
-            if dir_entry.name.startswith('python') and os.path.exists(os.path.join(dir_entry.path, 'site-packages')):
-                python_dir = dir_entry.path
+            if dir_entry.name.startswith('python'):
+                site_packages = os.path.join(dir_entry.path, 'site-packages')
+                if os.path.exists(site_packages):
+                    python_dir = site_packages
         if python_dir is None:
             raise Exception('Unable to find Python site-packages in installation directory')
     return bin_dir, python_dir
