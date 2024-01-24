@@ -357,8 +357,7 @@ void top_level_task(const Task *task,
   int max_iters = 0;
   int future_lag = 0;
   int show_residuals = 1;
-  // By default this code has a blocking call, so tracing won't succeed.
-  int use_tracing = 0;
+  int use_tracing = 1;
   bool verbose = false;
 
   // default is an 8^3 grid with 8 4^3 blocks
