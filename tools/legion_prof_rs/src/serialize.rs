@@ -375,7 +375,7 @@ fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, host_id) = le_u64(input)?;
     let (input, process_id) = le_u32(input)?;
     let node_id = NodeID(u64::from(nodeid));
-	Ok((
+    Ok((
         input,
         Record::MachineDesc {
             node_id,
@@ -397,7 +397,7 @@ fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, name) = parse_string(input)?;
     let (input, driver_version) = le_i32(input)?;
     let (input, compute_capability) = le_i32(input)?;
-	Ok((
+    Ok((
         input,
         Record::ProcDesc {
             proc_id,
