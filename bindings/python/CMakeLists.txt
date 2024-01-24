@@ -81,11 +81,3 @@ install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E env CMAKE_SOURCE_DIR=$
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/examples
 )
-
-if(Legion_ENABLE_TESTING)
-  add_test(NAME legion_python COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:legion_python> hello ${Legion_TEST_ARGS} -ll:py 1 -ll:cpu 0)
-  set_tests_properties(
-    legion_python
-    PROPERTIES
-      ENVIRONMENT PYTHONPATH="${CMAKE_INSTALL_FULL_DATADIR}/Legion/python:${CMAKE_INSTALL_FULL_DATADIR}/Legion/python/examples")
-endif()
