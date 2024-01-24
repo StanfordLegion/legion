@@ -5229,16 +5229,25 @@ namespace Realm {
       return realm_event;
     }
 
-    bool CudaModule::get_cuda_device_info(Processor p, CudaDeviceInfo *info) const
+    bool CudaModule::get_cuda_device_uuid(Processor p, Uuid *uuid) const
     {
       for(const GPU *gpu : gpus) {
         if((gpu->proc->me) == p) {
-          memcpy(&(info->name), &(gpu->info->name),
-                 sizeof(char) * CudaDeviceInfo::MAX_NAME_LENGTH);
-          assert(sizeof(CUuuid) == sizeof(uint8_t) * CudaDeviceInfo::UUID_SIZE);
-          memcpy(&(info->uuid), &(gpu->info->uuid), sizeof(CUuuid));
-          info->driver_version = 1000 * gpu->info->major + gpu->info->minor;
-          info->compute_capability = 10 * gpu->info->major + gpu->info->minor;
+          static_assert(sizeof(CUuuid) == sizeof(char) * UUID_SIZE,
+                        "UUID_SIZE is not set correctly");
+          memcpy(uuid, &(gpu->info->uuid), sizeof(CUuuid));
+          return true;
+        }
+      }
+      // can not find the Processor p, so return false
+      return false;
+    }
+
+    bool CudaModule::get_cuda_device_id(Processor p, int *device) const
+    {
+      for(const GPU *gpu : gpus) {
+        if((gpu->proc->me) == p) {
+          *device = gpu->info->index;
           return true;
         }
       }

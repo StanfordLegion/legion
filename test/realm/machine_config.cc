@@ -10,6 +10,10 @@
 #include <cassert>
 #include <iomanip>
 
+#ifdef REALM_USE_CUDA
+#include <cuda.h>
+#endif
+
 #ifdef REALM_ON_WINDOWS
 #include <malloc.h>
 #else
@@ -65,11 +69,11 @@ namespace TestConfig {
 };
 
 #ifdef REALM_USE_CUDA
-static std::string convert_uuid(uint8_t *cu_uuid)
+static std::string convert_uuid(char *cu_uuid)
 {
   stringbuilder ss;
   ss << "GPU-";
-  for(size_t i = 0; i < Cuda::CudaDeviceInfo::UUID_SIZE; i++) {
+  for(size_t i = 0; i < Cuda::UUID_SIZE; i++) {
     switch(i) {
     case 4:
     case 6:
@@ -80,6 +84,18 @@ static std::string convert_uuid(uint8_t *cu_uuid)
     ss << std::hex << std::setfill('0') << std::setw(2) << (0xFF & (int)cu_uuid[i]);
   }
   return ss;
+}
+
+static bool compare_uuid(char *expected, char *actual)
+{
+  for(size_t i = 0; i < Cuda::UUID_SIZE; i++) {
+    if(expected[i] != actual[i]) {
+      log_app.error("wrong at %zu", i);
+      assert(0);
+      return false;
+    }
+  }
+  return true;
 }
 #endif
 
@@ -332,15 +348,18 @@ void top_level_task(const void *args, size_t arglen,
           log_app.print("Rank %u, Processor ID " IDFMT " is GPU.", p.address_space(),
                         proc.id);
 #ifdef REALM_USE_CUDA
-          Cuda::CudaDeviceInfo cuda_device_info;
-          ret_value = Cuda::get_cuda_device_info(p, &cuda_device_info);
+          Cuda::Uuid cuda_uuid;
+          ret_value = Cuda::get_cuda_device_uuid(proc, &cuda_uuid);
           if(ret_value) {
-            std::string uuid = convert_uuid(&(cuda_device_info.uuid[0]));
-            log_app.print("GPU Processor %llx, driver_version:%d, compute_capability:%d, "
-                          "uuid:%s, name:%s",
-                          p.id, cuda_device_info.driver_version,
-                          cuda_device_info.compute_capability, uuid.c_str(),
-                          cuda_device_info.name);
+            int device_id;
+            assert(Cuda::get_cuda_device_id(proc, &device_id));
+            CUuuid expected_uuid;
+            cuDeviceGetUuid(&expected_uuid, device_id);
+            assert(
+                compare_uuid(reinterpret_cast<char *>(&expected_uuid), &(cuda_uuid[0])));
+            std::string uuid = convert_uuid(&(cuda_uuid[0]));
+            log_app.print("GPU Processor %llx, devide_id %d, uuid:%s", proc.id, device_id,
+                          uuid.c_str());
           }
 #endif
           num_gpus ++;
