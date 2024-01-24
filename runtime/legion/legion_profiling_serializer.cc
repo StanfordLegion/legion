@@ -1659,7 +1659,7 @@ namespace Legion {
 				      &machine_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Machine Desc %d %d %s %lu %d",
+      log_prof.print("Machine Desc %d %d %s %llu %d",
                      machine_desc.node_id, machine_desc.num_nodes,
                      machine_desc.process_info.hostname, machine_desc.process_info.hostid,
                      machine_desc.process_info.processid);
