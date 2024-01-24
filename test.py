@@ -359,9 +359,11 @@ def run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
+    # Note: still need source_dir to find tests.
+    python_source_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
+        ('PYTHONPATH', ':'.join([python_dir, python_source_dir])),
     ])
     # If we're not already using shared libraries, clean up because
     # we're going to force them
@@ -377,7 +379,6 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
         ('PYTHONPATH', ':'.join([python_dir])),
-        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
     ])
     # If we're not already using shared libraries, clean up because
     # we're going to force them
