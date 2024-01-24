@@ -384,7 +384,7 @@ namespace Legion {
         ProcID proc_id;
         ProcKind kind;
 #ifdef LEGION_USE_CUDA
-        Realm::Cuda::CudaDeviceInfo cuda_device_info;
+        Realm::Cuda::Uuid cuda_device_uuid;
 #endif
       };
       struct MemDesc {

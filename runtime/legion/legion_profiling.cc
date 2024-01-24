@@ -986,12 +986,8 @@ namespace Legion {
       info.proc_id = p.id;
       info.kind = p.kind();
 #ifdef LEGION_USE_CUDA
-    if(!Realm::Cuda::get_cuda_device_info(p, &info.cuda_device_info)) {
-        info.cuda_device_info.uuid[0] = 0;
-        info.cuda_device_info.name[0] = 0;
-        info.cuda_device_info.driver_version = 0;
-        info.cuda_device_info.compute_capability = 0;
-
+      if(!Realm::Cuda::get_cuda_device_uuid(p, &info.cuda_device_uuid)) {
+        info.cuda_device_uuid[0] = 0;
       }
 #endif
       const size_t diff = sizeof(ProcDesc);

@@ -78,10 +78,7 @@ namespace Legion {
          << "id:" << PROC_DESC_ID                 << delim
          << "proc_id:ProcID:" << sizeof(ProcID)   << delim
          << "kind:ProcKind:"  << sizeof(ProcKind) << delim
-         << "uuid:string:"            << "-1"         << delim
-         << "name:string:"            << "-1"         << delim
-         << "driver_version:int:"     << sizeof(int)  << delim
-         << "compute_capability:int:" << sizeof(int)
+         << "uuid:string:"            << "-1"
          << "}" << std::endl;
 
       ss << "MaxDimDesc {"
@@ -1134,24 +1131,15 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
 #ifdef LEGION_USE_CUDA
-      char uuid_str[proc_desc.cuda_device_info.UUID_SIZE];
-      for (size_t i=0; i<proc_desc.cuda_device_info.UUID_SIZE; i++) {
-        sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
+      char uuid_str[Realm::Cuda::UUID_SIZE];
+      for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+        sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_uuid[i] & 0xFF);
       }
 
       lp_fwrite(f, uuid_str, strlen(uuid_str) + 1);
-      lp_fwrite(f, proc_desc.cuda_device_info.name, strlen(proc_desc.cuda_device_info.name) + 1);
-      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.driver_version),
-                      sizeof(proc_desc.cuda_device_info.driver_version));
-      lp_fwrite(f, (char*)&(proc_desc.cuda_device_info.compute_capability),
-                      sizeof(proc_desc.cuda_device_info.compute_capability));
 #else
       char placeholder_str[10] = "NULL";
-      int placeholder_int = 0;
       lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);
-      lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);
-      lp_fwrite(f, (char*)&(placeholder_int), sizeof(placeholder_int));
-      lp_fwrite(f, (char*)&(placeholder_int), sizeof(placeholder_int));
 #endif
     }
     //--------------------------------------------------------------------------
@@ -1954,15 +1942,12 @@ namespace Legion {
                      proc_desc.proc_id, proc_desc.kind);
 #ifdef LEGION_USE_CUDA
       if (proc_desc.kind == Processor::TOC_PROC) {
-        char uuid_str[proc_desc.cuda_device_info.UUID_SIZE];
-        for (size_t i=0; i<proc_desc.cuda_device_info.UUID_SIZE; i++) {
-          sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_info.uuid[i] & 0xFF);
+        char uuid_str[Realm::Cuda::UUID_SIZE];
+        for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+          sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_uuid[i] & 0xFF);
         }
 
-        log_prof.print("Prof CUDA Proc Desc %s %s %d %d",
-                      uuid_str, proc_desc.cuda_device_info.name,
-                      proc_desc.cuda_device_info.driver_version,
-                      proc_desc.cuda_device_info.compute_capability);
+        log_prof.print("Prof CUDA Proc Desc %s", uuid_str);
       }
 #endif
     }

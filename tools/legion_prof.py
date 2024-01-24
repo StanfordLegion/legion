@@ -3969,9 +3969,6 @@ class State(object):
     @typecheck
     def log_proc_desc(self, proc_id: int, kind: int,
                       uuid: Optional[str] = None,
-                      name: Optional[str] = None,
-                      driver_version: Optional[int] = None,
-                      compute_capability: Optopnal[int] = None
     ) -> None:
         assert kind in processor_kinds
         kind_str = processor_kinds[kind]

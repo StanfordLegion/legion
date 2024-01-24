@@ -90,7 +90,7 @@ pub enum Record {
     MaxDimDesc { max_dim: MaxDim },
     MachineDesc { node_id: NodeID, num_nodes: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
-    ProcDesc { proc_id: ProcID, kind: ProcKind, uuid: String, name: String, driver_version: i32, compute_capability: i32 },
+    ProcDesc { proc_id: ProcID, kind: ProcKind, uuid: String },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
     IndexSpacePointDesc { ispace_id: ISpaceID, dim: u32, rem: Point },
@@ -394,18 +394,12 @@ fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
     let (input, kind) = le_i32(input)?;
     let (input, uuid) = parse_string(input)?;
-    let (input, name) = parse_string(input)?;
-    let (input, driver_version) = le_i32(input)?;
-    let (input, compute_capability) = le_i32(input)?;
     Ok((
         input,
         Record::ProcDesc {
             proc_id,
             kind,
             uuid,
-            name,
-            driver_version,
-            compute_capability,
         },
     ))
 }
