@@ -36,18 +36,36 @@ task calculate_new_currents(r : region(ispace(int1d), fs))
 where
   reads writes(r)
 do
+  for x in r do
+    r[x].field += 1.0
+  end
 end
 
 task distribute_charge(r : region(ispace(int1d), fs))
 where
   reduces +(r.field)
 do
+  for x in r do
+    r[x].field += 2.0
+  end
 end
 
 task update_voltages(r : region(ispace(int1d), fs))
 where
   reads writes(r)
 do
+  for x in r do
+    r[x].field += 3.0
+  end
+end
+
+task checker(i : int, r : region(ispace(int1d), fs))
+where
+  reads(r)
+do
+  for x in r do
+    regentlib.assert(r[x].field == 606.0, "test failed")
+  end
 end
 
 
@@ -85,6 +103,10 @@ task main()
 
   for i in is1 do
     update_voltages(p1[i])
+  end
+
+  for i in is2 do
+    checker(i, p2[i])
   end
 end
 regentlib.start(main)
