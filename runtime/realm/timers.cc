@@ -290,7 +290,6 @@ namespace Realm {
     }
   }
 
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class Clock::TimescaleConverter
@@ -361,6 +360,5 @@ namespace Realm {
     a_zero = ta;
     b_zero = tb;
   }
-
 
 }; // namespace Realm
