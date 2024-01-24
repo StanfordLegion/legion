@@ -356,14 +356,15 @@ def run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
         flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
     run_cxx(legion_kokkos_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
-def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir, env, thread_count, timelimit):
+def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
-    # Note: still need source_dir to find tests.
-    python_source_dir = os.path.join(root_dir, 'bindings', 'python')
+    python_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir, python_source_dir])),
+        # In Make, this is where all Python files lives.
+        # In CMake, we still need this, but only for tests.
+        ('PYTHONPATH', ':'.join([env.get('PYTHONPATH'), python_dir])),
     ])
     # If we're not already using shared libraries, clean up because
     # we're going to force them
@@ -373,13 +374,10 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir,
     if bin_dir is None and env['SHARED_OBJECTS'] != '1':
         cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
-def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir, env, thread_count, timelimit):
+def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
-    # Hack: Fix up the environment so that Python can find all the examples.
-    env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
-    ])
+    python_dir = os.path.join(root_dir, 'bindings', 'python')
     # If we're not already using shared libraries, clean up because
     # we're going to force them
     if bin_dir is None and env['SHARED_OBJECTS'] != '1':
@@ -1221,6 +1219,10 @@ def run_tests(test_modules=None,
                 if use_python:
                     python_dir = os.path.join(root_dir, 'bindings', 'python')
 
+        # Set PYTHONPATH for Python tests.
+        if use_python:
+            env['PYTHONPATH'] = python_dir
+
         # Run tests.
         if test_regent:
             with Stage('regent'):
@@ -1237,7 +1239,7 @@ def run_tests(test_modules=None,
                 if use_kokkos:
                     run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_python:
-                    run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir, env, thread_count, timelimit)
+                    run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_hdf:
                     run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_fortran:
@@ -1269,7 +1271,7 @@ def run_tests(test_modules=None,
                 run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_jupyter:
             with Stage('jupyter'):
-                run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, python_dir, env, thread_count, timelimit)
+                run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
