@@ -1810,6 +1810,10 @@ class RuntimeCallKind(StatObject):
         self.name = name
         self.color: Optional[str] = None
 
+    @typecheck
+    def __hash__(self) -> int:
+        return hash(self.runtime_call_kind)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RuntimeCallKind):
             assert 0, "Wrong type of other" + str(type(other))
