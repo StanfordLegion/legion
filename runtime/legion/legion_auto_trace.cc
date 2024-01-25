@@ -325,7 +325,14 @@ namespace Legion {
           // some work to do. First, increment the number of visits on the node.
           TrieNode<Murmur3Hasher::Hash, TraceMeta>* node = pointer.node;
           auto& value = node->get_value();
-          value.visits++;
+          // Visits only count if they occur at least len(trace) operations
+          // after the previous visit. This avoids overcounting traces that
+          // look like ABCABC with a count at each repetition of ABC rather
+          // than at each occurrence of ABCABC.
+          if (opidx - value.previous_visited_opidx >= pointer.depth) {
+            value.visits++;
+            value.previous_visited_opidx = opidx;
+          }
           if (value.visits >= this->visit_threshold && !value.completed) {
             value.completed = true;
             std::vector<Murmur3Hasher::Hash> trace(pointer.depth);
@@ -370,15 +377,26 @@ namespace Legion {
     constexpr double TraceReplayer::TraceMeta::R;
     constexpr double TraceReplayer::TraceMeta::SCORE_CAP_MULT;
     constexpr size_t TraceReplayer::TraceMeta::REPLAY_SCALE;
+    constexpr size_t TraceReplayer::TraceMeta::IDEMPOTENT_VISIT_SCALE;
 
     void TraceReplayer::TraceMeta::visit(size_t opidx) {
       // First, compute the difference in trace lengths that
       // this trace was last visited at.
       size_t previous_visit = this->last_visited_opidx;
       size_t diff_in_traces = (opidx - previous_visit) / this->length;
+      // Visits only count if they are at least 1 trace length away.
+      if (diff_in_traces == 0) { return; }
       // Compute the new visit count by decaying the old visit count
       // and then adding one.
       this->decaying_visits = (pow(R, diff_in_traces) * this->decaying_visits) + 1;
+      // If we visited this trace exactly len(trace) operations after
+      // the previous visit, then we're able to replay this trace back-to-back,
+      // which is nice to know for scoring. Check previous_visit != 0 to ensure
+      // that we at least have one visit before counting idempotent visits.
+      if (previous_visit != 0 && (opidx - previous_visit) == this->length) {
+        this->idempotent_visits++;
+      }
+      this->last_visited_opidx = opidx;
     }
 
     double TraceReplayer::TraceMeta::score(size_t opidx) const {
@@ -401,7 +419,8 @@ namespace Legion {
       // Then, increase the score a little bit if a trace has already been
       // replayed to favor replays.
       size_t capped_replays = std::max(std::min(REPLAY_SCALE, this->replays), (size_t)1);
-      return score * (double)capped_replays;
+      size_t capped_idemp_visits = std::max(std::min(IDEMPOTENT_VISIT_SCALE, this->idempotent_visits), (size_t)1);
+      return score * (double)capped_replays * (double)capped_idemp_visits;
     }
 
     void TraceReplayer::flush_buffer() {

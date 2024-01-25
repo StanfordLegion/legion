@@ -161,6 +161,8 @@ namespace Legion {
         // Once a trace has been completed, it will not be
         // returned from complete() anymore.
         bool completed = false;
+        // The opidx that this trace was previously visited at.
+        size_t previous_visited_opidx = 0;
       };
       Trie<Murmur3Hasher::Hash, TraceMeta> trie;
       size_t visit_threshold;
@@ -219,11 +221,12 @@ namespace Legion {
       OperationExecutor* executor;
 
       struct TraceMeta {
-        // TraceMeta's need to be default construtable.
+        // TraceMeta's need to be default constructable.
         TraceMeta() {}
         TraceMeta(size_t opidx_, size_t length_)
           : opidx(opidx_), length(length_), last_visited_opidx(0),
-            decaying_visits(0), replays(0), tid(0) { }
+            decaying_visits(0), replays(0),
+            idempotent_visits(0), tid(0) { }
         // opidx that this trace was inserted at.
         size_t opidx;
         // length of the trace. This is used for scoring only.
@@ -233,6 +236,9 @@ namespace Legion {
         double decaying_visits;
         // Number of times the trace has been replayed.
         size_t replays;
+        // Number of times the trace has been visited in
+        // an idempotent manner.
+        size_t idempotent_visits;
         // ID for the trace. It is unset if replays == 0.
         TraceID tid;
 
@@ -249,6 +255,9 @@ namespace Legion {
         // REPLAY_SCALE is at most how much a score should be increased
         // to favor replays.
         static constexpr size_t REPLAY_SCALE = 2;
+        // IDEMPOTENT_VISIT_SCALE is at most how much a score should
+        // be increased to favor idempotent replays.
+        static constexpr size_t IDEMPOTENT_VISIT_SCALE = 2;
       };
       Trie<Murmur3Hasher::Hash, TraceMeta> trie;
 
