@@ -226,7 +226,8 @@ namespace Legion {
         TraceMeta(size_t opidx_, size_t length_)
           : opidx(opidx_), length(length_), last_visited_opidx(0),
             decaying_visits(0), replays(0),
-            idempotent_visits(0), tid(0) { }
+            last_idempotent_visit_opidx(0),
+            decaying_idempotent_visits(0.0), tid(0) { }
         // opidx that this trace was inserted at.
         size_t opidx;
         // length of the trace. This is used for scoring only.
@@ -237,8 +238,9 @@ namespace Legion {
         // Number of times the trace has been replayed.
         size_t replays;
         // Number of times the trace has been visited in
-        // an idempotent manner.
-        size_t idempotent_visits;
+        // an idempotent manner (tracked in a decaying manner).
+        size_t last_idempotent_visit_opidx;
+        double decaying_idempotent_visits;
         // ID for the trace. It is unset if replays == 0.
         TraceID tid;
 
@@ -257,7 +259,7 @@ namespace Legion {
         static constexpr size_t REPLAY_SCALE = 2;
         // IDEMPOTENT_VISIT_SCALE is at most how much a score should
         // be increased to favor idempotent replays.
-        static constexpr size_t IDEMPOTENT_VISIT_SCALE = 2;
+        static constexpr double IDEMPOTENT_VISIT_SCALE = 2.0;
       };
       Trie<Murmur3Hasher::Hash, TraceMeta> trie;
 

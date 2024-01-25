@@ -377,7 +377,7 @@ namespace Legion {
     constexpr double TraceReplayer::TraceMeta::R;
     constexpr double TraceReplayer::TraceMeta::SCORE_CAP_MULT;
     constexpr size_t TraceReplayer::TraceMeta::REPLAY_SCALE;
-    constexpr size_t TraceReplayer::TraceMeta::IDEMPOTENT_VISIT_SCALE;
+    constexpr double TraceReplayer::TraceMeta::IDEMPOTENT_VISIT_SCALE;
 
     void TraceReplayer::TraceMeta::visit(size_t opidx) {
       // First, compute the difference in trace lengths that
@@ -394,7 +394,10 @@ namespace Legion {
       // which is nice to know for scoring. Check previous_visit != 0 to ensure
       // that we at least have one visit before counting idempotent visits.
       if (previous_visit != 0 && (opidx - previous_visit) == this->length) {
-        this->idempotent_visits++;
+        size_t previous_idemp_visit = this->last_idempotent_visit_opidx;
+        size_t idemp_diff = (opidx - previous_idemp_visit) / this->length;
+        this->decaying_idempotent_visits = (pow(R, idemp_diff) * this->decaying_idempotent_visits) + 1;
+        this->last_idempotent_visit_opidx = opidx;
       }
       this->last_visited_opidx = opidx;
     }
@@ -419,8 +422,8 @@ namespace Legion {
       // Then, increase the score a little bit if a trace has already been
       // replayed to favor replays.
       size_t capped_replays = std::max(std::min(REPLAY_SCALE, this->replays), (size_t)1);
-      size_t capped_idemp_visits = std::max(std::min(IDEMPOTENT_VISIT_SCALE, this->idempotent_visits), (size_t)1);
-      return score * (double)capped_replays * (double)capped_idemp_visits;
+      double capped_idemp_visits = std::max(std::min(IDEMPOTENT_VISIT_SCALE, this->decaying_idempotent_visits), 1.0);
+      return score * (double)capped_replays * capped_idemp_visits;
     }
 
     void TraceReplayer::flush_buffer() {
