@@ -362,28 +362,33 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     python_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
-        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
+        # In Make, this is where all Python files lives.
+        # In CMake, we still need this, but only for tests.
+        ('PYTHONPATH', ':'.join([env.get('PYTHONPATH'), python_dir])),
     ])
-    # Clean up around python because we are going to make shared objects
-    # which is not something that anyone else does
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
+    # If we're not already using shared libraries, clean up because
+    # we're going to force them
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
 def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
     python_dir = os.path.join(root_dir, 'bindings', 'python')
-    # Hack: Fix up the environment so that Python can find all the examples.
-    env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([python_dir])),
-        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
-    ])
-    # Clean up around python because we are going to make shared objects
-    # which is not something that anyone else does
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
-    cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
+    env = env.copy()
+    if bin_dir is None:
+        env['LD_LIBRARY_PATH'] = python_dir
+    # If we're not already using shared libraries, clean up because
+    # we're going to force them
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None:
+        cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
     jupyter_dir = os.path.join(root_dir, 'jupyter_notebook')
     jupyter_install_cmd = [sys.executable, './install_jupyter.py', '--legion-prefix', python_dir, '--verbose']
     cmd(jupyter_install_cmd, env=env, cwd=jupyter_dir)
@@ -395,7 +400,8 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     cmd(canonical_jupyter_test_cmd, env=env)
     canonical_python_test_cmd = [sys.executable, canonical_jupyter_test_file]
     cmd(canonical_python_test_cmd, env=env)
-    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    if bin_dir is None and env['SHARED_OBJECTS'] != '1':
+        cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
 def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
@@ -876,7 +882,18 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     verbose_env['VERBOSE'] = '1'
     cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=verbose_env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
-    return os.path.join(build_dir, 'bin')
+
+    bin_dir = os.path.join(build_dir, 'bin')
+    python_dir = None
+    if env['USE_PYTHON'] == '1':
+        for dir_entry in os.scandir(os.path.join(install_dir, 'lib')):
+            if dir_entry.name.startswith('python'):
+                site_packages = os.path.join(dir_entry.path, 'site-packages')
+                if os.path.exists(site_packages):
+                    python_dir = site_packages
+        if python_dir is None:
+            raise Exception('Unable to find Python site-packages in installation directory')
+    return bin_dir, python_dir
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
@@ -1191,7 +1208,7 @@ def run_tests(test_modules=None,
                 # cmake, except for some unusual cases with Regent
                 # (ask @eslaught for details about Regent cases)
                 assert test_ctest or test_regent
-                bin_dir = build_cmake(
+                bin_dir, python_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
                     test_regent, test_legion_cxx, test_external1,
                     test_external2,
@@ -1203,6 +1220,13 @@ def run_tests(test_modules=None,
                     # These configurations also need to be cleaned first.
                     test_external1, test_external2, test_private)
                 bin_dir = None
+                python_dir = None
+                if use_python:
+                    python_dir = os.path.join(root_dir, 'bindings', 'python')
+
+        # Set PYTHONPATH for Python tests.
+        if use_python:
+            env['PYTHONPATH'] = python_dir
 
         # Run tests.
         if test_regent:

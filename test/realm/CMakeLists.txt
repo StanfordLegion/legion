@@ -113,6 +113,10 @@ foreach(test IN LISTS REALM_TESTS)
   endif()
 endforeach()
 
+if(Legion_USE_LIBDL)
+  target_link_libraries(taskreg ${CMAKE_DL_LIBS})
+endif()
+
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)

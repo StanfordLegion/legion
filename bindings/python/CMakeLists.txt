@@ -71,17 +71,13 @@ install(TARGETS legion_canonical_python
 if (NOT DEFINED Legion_PYTHON_EXTRA_INSTALL_ARGS)
   set(Legion_PYTHON_EXTRA_INSTALL_ARGS "")
 endif()
+
+# Note: CMake 3.19 required for COMMAND_ERROR_IS_FATAL argument to execute_process()
+cmake_minimum_required(VERSION 3.19)
+
 # Use setup.py script to install the Python bindings library
-install(CODE "execute_process(COMMAND ${Python3_EXECUTABLE} -m pip install --global-option=--cmake-build-dir \"--global-option=${Legion_BINARY_DIR}/runtime\" --global-option=--prefix \"--global-option=\${CMAKE_INSTALL_PREFIX}\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT)")
+install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E env CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR} CMAKE_BUILD_DIR=${Legion_BINARY_DIR}/runtime CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} ${Python3_EXECUTABLE} -m pip install --prefix \"\${CMAKE_INSTALL_PREFIX}\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT COMMAND_ERROR_IS_FATAL ANY)")
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/examples
 )
-
-if(Legion_ENABLE_TESTING)
-  add_test(NAME legion_python COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:legion_python> hello ${Legion_TEST_ARGS} -ll:py 1 -ll:cpu 0)
-  set_tests_properties(
-    legion_python
-    PROPERTIES
-      ENVIRONMENT PYTHONPATH="${CMAKE_INSTALL_FULL_DATADIR}/Legion/python:${CMAKE_INSTALL_FULL_DATADIR}/Legion/python/examples")
-endif()

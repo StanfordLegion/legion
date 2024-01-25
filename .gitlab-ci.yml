@@ -283,6 +283,14 @@ before_script:
       export THREADS=1
     fi
   - |
+    # Some features require higher CMake versions - grab them here so
+    # the default can remain an older version
+    if [[ "$USE_CMAKE" -eq 1 && "$USE_PYTHON" -eq 1 ]]; then
+      wget -nv https://github.com/Kitware/CMake/releases/download/v3.19.8/cmake-3.19.8-Linux-x86_64.tar.gz
+      echo "db0d7d225150dd6e08ce54995e671f9b4801b8e93e22df1eef52339f6bbbecd9  cmake-3.19.8-Linux-x86_64.tar.gz" | shasum --check
+      tar -zxf cmake-3.19.8-Linux-x86_64.tar.gz
+      PATH=`pwd`/cmake-3.19.8-Linux-x86_64/bin:$PATH
+    fi
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
       cd ucx
@@ -725,10 +733,10 @@ gcc9_cxx11_debug_openmp_system_regent:
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *openmp, *openmp_system, *regent, *libdw, *short]
 #   * Python
-gcc9_cxx11_debug_python3_legion:
+gcc9_cxx11_debug_python3_cmake_prof_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *legion, *prof, *jupyter, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *cmake, *legion, *ctest, *prof, *shared, *short]
 #   * LLVM
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
@@ -993,7 +1001,7 @@ clang12_cxx11_debug_openmp_regent:
 clang12_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *legion, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx11_normal, *python3, *jupyter, *legion, *libdw]
 #   * LLVM
 clang12_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
