@@ -47,10 +47,7 @@ local sqrt = regentlib.sqrt(double)
 -------------------------------------------------------------------------------
 
 local launcher = require("launcher")
-if os.getenv('SAVE_MAPPER_ONLY') == '1' then
-  launcher.compile_mapper(true, "miniaero_sequential")
-  os.exit(0)
-end
+local cmapper = launcher.build_library("miniaero_sequential")
 
 -------------------------------------------------------------------------------
 -- constants
@@ -2761,4 +2758,4 @@ task toplevel()
   end
 end
 
-launcher.launch(toplevel, "miniaero_sequential")
+launcher.launch(toplevel, "miniaero_sequential", cmapper.register_mappers, {"-lminiaero_sequential"})

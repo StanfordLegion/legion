@@ -14,6 +14,10 @@
 
 import "regent"
 
+local launcher = require("launcher")
+
+local cmapper = launcher.build_library("miniaero")
+
 local c = regentlib.c
 local std = terralib.includec("stdlib.h")
 local cstring = terralib.includec("string.h")
@@ -21,12 +25,6 @@ local cmath = terralib.includecstring [[
 #include <math.h>
 #define DBL_EPSILON 2.2204460492503131e-16
 ]]
-
-local launcher = require("launcher")
-if os.getenv('SAVE_MAPPER_ONLY') == '1' then
-  launcher.compile_mapper(true, "miniaero")
-  os.exit(0)
-end
 
 local DENSE_FACES = true
 
@@ -3494,4 +3492,4 @@ task toplevel()
   end
 end
 
-launcher.launch(toplevel, "miniaero")
+launcher.launch(toplevel, "miniaero", cmapper.register_mappers, {"-lminiaero"})

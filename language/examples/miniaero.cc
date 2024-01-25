@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "miniaero_mapper.h"
+#include "miniaero.h"
 
 #include <algorithm>
 #include <cassert>
