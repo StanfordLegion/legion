@@ -30,6 +30,7 @@
 #include <map>
 #include <set>
 #include <list>
+#include <limits>
 #include <deque>
 #include <vector>
 #include <typeinfo>
