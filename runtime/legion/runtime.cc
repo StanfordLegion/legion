@@ -18187,7 +18187,7 @@ namespace Legion {
           { \
             DomainT<DIM,coord_t> color_index_space; \
             forest->get_index_space_domain(color_space, &color_index_space, \
-                                           color_space.get_type_tag()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             return Domain(color_index_space); \
           }
         LEGION_FOREACH_N(DIMFUNC)

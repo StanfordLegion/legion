@@ -12219,6 +12219,7 @@ namespace Legion {
     {
       owner_task->handle_post_mapped();
       owner_task->record_inner_termination(ApEvent::NO_AP_EVENT);
+      unmap_all_regions(false/*external*/);
       TaskContext::handle_mispredication();
     }
 

@@ -19038,9 +19038,13 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second);
-        if (view->is_reduction_kind())
+        if (view->is_reduction_kind() && !IS_REDUCE(usage))
         {
-          // Invalidate this reduction view since we read it
+          // Invalidate this reduction view since we read it. We need
+          // to check !IS_REDUCE(usage) as both reads and reductions
+          // fall through to this code path. If we actually performed
+          // a reduction, then we don't want to be removing it from the
+          // postcondition, as the reduction buffers are now valid.
           if (tracing_postconditions != NULL)
             tracing_postconditions->invalidate(view, expr, user_mask);
           return;
@@ -19069,10 +19073,24 @@ namespace Legion {
                                                    const FieldMask &mask) 
     //--------------------------------------------------------------------------
     {
-      if (tracing_anticonditions == NULL)
+      // Here, we have to do the converse of the anticondition
+      // check in update_tracing_valid_views. In particular, if the
+      // trace has already read this particular equivalence set, then
+      // we don't need to add the equivalence set to the anti-conditions,
+      // as the reduction data has already been consumed, and can be read
+      // out from the resulting instance.
+      FieldMaskSet<IndexSpaceExpression> not_dominated;
+      if (tracing_preconditions != NULL)
+        tracing_preconditions->dominates(view, expr, mask, not_dominated);
+      else
+        not_dominated.insert(expr, mask);
+
+      if ((tracing_anticonditions == NULL) && !not_dominated.empty())
         tracing_anticonditions =
           new TraceViewSet(context, did, set_expr, tree_id);
-      tracing_anticonditions->insert(view, expr, mask);
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            not_dominated.begin(); it != not_dominated.end(); it++)
+        tracing_anticonditions->insert(view, it->first, it->second);
     }
 
     //--------------------------------------------------------------------------

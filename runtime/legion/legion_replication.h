@@ -3151,7 +3151,8 @@ namespace Legion {
       virtual size_t get_collective_points(void) const;
     public:
       void distribute_explicit(SingleTask *task, VariantID chosen_variant,
-                               std::vector<Processor> &target_processors);
+                               std::vector<Processor> &target_processors,
+                               std::vector<VariantID> &leaf_variants);
       void distribute_implicit(TaskID top_task_id, MapperID mapper_id,
                                Processor::Kind kind, unsigned shards_per_space,
                                InnerContext *top_context);
