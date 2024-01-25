@@ -36,6 +36,7 @@ pub enum ValueFormat {
     MemKind,
     MessageKind,
     Point,
+    UUID,
     ProcID,
     ProcKind,
     RuntimeCallKind,
@@ -69,6 +70,7 @@ pub struct RecordFormat {
 type DepPartOpKind = i32;
 // type IDType = u64;
 type MaxDim = i32;
+type UUIDSize = u32;
 type MemKind = i32;
 // type MessageKind = i32;
 type ProcKind = i32;
@@ -80,6 +82,9 @@ pub struct Array(pub Vec<u64>);
 #[derive(Debug, Clone, Serialize)]
 pub struct Point(pub Vec<u64>);
 
+#[derive(Debug, Clone, Serialize)]
+pub struct UUID(pub Vec<u8>);
+
 #[rustfmt::skip]
 #[derive(Debug, Clone, Serialize)]
 pub enum Record {
@@ -90,7 +95,7 @@ pub enum Record {
     MaxDimDesc { max_dim: MaxDim },
     MachineDesc { node_id: NodeID, num_nodes: u32, hostname: String, host_id: u64, process_id: u32 },
     ZeroTime { zero_time: i64 },
-    ProcDesc { proc_id: ProcID, kind: ProcKind, uuid: String },
+    ProcDesc { proc_id: ProcID, kind: ProcKind, uuid_size: UUIDSize, cuda_device_uuid: UUID },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
     IndexSpacePointDesc { ispace_id: ISpaceID, dim: u32, rem: Point },
@@ -143,6 +148,8 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "MemKind" => Some(ValueFormat::MemKind),
         "MessageKind" => Some(ValueFormat::MessageKind),
         "point" => Some(ValueFormat::Point),
+        "uuid" => Some(ValueFormat::UUID),
+        "uuid_size" => Some(ValueFormat::U32),
         "ProcID" => Some(ValueFormat::ProcID),
         "ProcKind" => Some(ValueFormat::ProcKind),
         "RuntimeCallKind" => Some(ValueFormat::RuntimeCallKind),
@@ -267,6 +274,11 @@ fn parse_point(input: &[u8], max_dim: i32) -> IResult<&[u8], Point> {
     let n = max_dim as usize;
     let (input, values) = many_m_n(n, n, le_u64)(input)?;
     Ok((input, Point(values)))
+}
+fn parse_cuda_device_uuid(input: &[u8], uuid_size: u32) -> IResult<&[u8], UUID> {
+    let n = uuid_size as usize;
+    let (input, values) = many_m_n(n, n, le_u8)(input)?;
+    Ok((input, UUID(values)))
 }
 fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
     let (input, value) = map_res(take_till(is_nul), |x: &[u8]| {
@@ -393,13 +405,15 @@ fn parse_zero_time(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
     let (input, kind) = le_i32(input)?;
-    let (input, uuid) = parse_string(input)?;
+    let (input, uuid_size) = le_u32(input)?;
+    let (input, cuda_device_uuid) = parse_cuda_device_uuid(input, uuid_size)?;
     Ok((
         input,
         Record::ProcDesc {
             proc_id,
             kind,
-            uuid,
+            uuid_size,
+            cuda_device_uuid,
         },
     ))
 }

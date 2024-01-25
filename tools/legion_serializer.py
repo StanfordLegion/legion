@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
 max_dim_val = 0
+uuid_size = 0
 
 # use to parse the node id from mem_id, proc_id
 @typecheck
@@ -352,6 +353,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "long long":          "q", # long long
         "array":              "Q", # unsigned long long
         "point":              "Q", # unsigned long long
+        "uuid":               "b", # signed char
+        "uuid_size":          "I", # unsigned int
         "int":                "i", # int
         "ProcKind":           "i", # int (really an enum so this depends)
         "MemKind":            "i", # int (really an enum so this depends)
@@ -399,14 +402,28 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                     values.append(value)
                 return values
             return array_reader
+        if param_type == "uuid":
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def uuid_reader(log: io.BufferedReader) -> List:
+                global uuid_size
+                values = []
+                for index in range(uuid_size):
+                    raw_val = log.read(num_bytes)
+                    value = struct.unpack(fmt, raw_val)[0]
+                    values.append(value)
+                return values
+            return uuid_reader
         else:
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
             def reader(log: io.BufferedReader) -> str:
                 global max_dim_val
+                global uuid_size
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
                 if param_type == "maxdim":
                     max_dim_val = val
+                if param_type == "uuid_size":
+                    uuid_size = val
                 return val
             return reader
 

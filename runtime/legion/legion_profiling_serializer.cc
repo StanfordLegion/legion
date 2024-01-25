@@ -75,10 +75,11 @@ namespace Legion {
          << "}" << std::endl;
 
       ss << "ProcDesc {" 
-         << "id:" << PROC_DESC_ID                 << delim
-         << "proc_id:ProcID:" << sizeof(ProcID)   << delim
-         << "kind:ProcKind:"  << sizeof(ProcKind) << delim
-         << "uuid:string:"            << "-1"
+         << "id:" << PROC_DESC_ID                     << delim
+         << "proc_id:ProcID:"     << sizeof(ProcID)   << delim
+         << "kind:ProcKind:"      << sizeof(ProcKind) << delim
+         << "uuid_size:uuid_size:" << sizeof(unsigned) << delim
+         << "cuda_device_uuid:uuid:"          << sizeof(char)
          << "}" << std::endl;
 
       ss << "MaxDimDesc {"
@@ -1131,15 +1132,27 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
 #ifdef LEGION_USE_CUDA
-      char uuid_str[Realm::Cuda::UUID_SIZE];
+      /*char uuid_str[Realm::Cuda::UUID_SIZE];
       for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
         sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_uuid[i] & 0xFF);
       }
 
-      lp_fwrite(f, uuid_str, strlen(uuid_str) + 1);
+      lp_fwrite(f, uuid_str, strlen(uuid_str) + 1);*/
+      unsigned uuid_size = Realm::Cuda::UUID_SIZE;
+      lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
+      for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+        lp_fwrite(f, (char*)&(proc_desc.cuda_device_uuid[i]),
+            sizeof(char));
+      }
 #else
-      char placeholder_str[10] = "NULL";
-      lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);
+      /*char placeholder_str[10] = "NULL";
+      lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);*/
+      unsigned uuid_size = Realm::Cuda::UUID_SIZE;
+      lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
+      char uuid_str[Realm::Cuda::UUID_SIZE] = {0};
+      for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+        lp_fwrite(f, (char*)&(uuid_str[i]),
+            sizeof(char));
 #endif
     }
     //--------------------------------------------------------------------------
