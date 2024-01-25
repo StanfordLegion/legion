@@ -696,7 +696,6 @@ namespace Legion {
         bool                    postmap_task;
         std::vector<Processor>  target_procs;
         std::vector<Memory>     future_locations;
-        std::vector<size_t>     future_size_bounds;
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
@@ -897,8 +896,6 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
-                             const std::vector<size_t> &future_size_bounds,
-                             const std::vector<TaskTreeCoordinates> &coords,
                              std::set<RtEvent> &applied_events);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
@@ -906,7 +903,6 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::vector<Memory> &future_locations,
-                             std::vector<size_t> &future_size_bounds,
                              std::deque<InstanceSet> &physical_instances) const;
       void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;

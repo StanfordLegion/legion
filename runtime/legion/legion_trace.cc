@@ -821,13 +821,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      tracing = false;
-      current_template = NULL;
       has_blocking_call = has_block;
-      is_recording = false;
       remove_trace_reference = remove_trace_ref;
     }
 
@@ -865,6 +859,9 @@ namespace Legion {
     void TraceCaptureOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      is_recording = false;
       // Indicate that we are done capturing this trace
       trace->end_trace_execution(this);
       // Register this fence with all previous users in the parent's context
@@ -965,14 +962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      tracing = false;
-      current_template = NULL;
-      replayed = false;
       has_blocking_call = has_block;
-      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1009,6 +999,10 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      replayed = false;
+      is_recording = false;
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 
@@ -1410,12 +1404,16 @@ namespace Legion {
                                             Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       fence_kind = MAPPING_FENCE;
-      context_index = invalidator->get_ctx_index();
+      context_index = invalidator->get_context_index();
       if (runtime->legion_spy_enabled)
+      {
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-            unique_op_id, context_index, false/*execution fence*/);
+            unique_op_id, false/*execution fence*/);
+        LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
+            context_index, unique_op_id);
+      }
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
@@ -6350,8 +6348,6 @@ namespace Legion {
     void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
-                              const std::vector<size_t> &future_size_bounds,
-                              const std::vector<TaskTreeCoordinates> &coords,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -6368,43 +6364,6 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.future_locations = output.future_locations;
-      mapping.future_size_bounds = future_size_bounds;
-      // Check to see if the future coordinates are inside of our trace
-      // They have to be inside of our trace in order for it to be safe
-      // for use to be able to re-use their upper bound sizes (because
-      // we know those tasks are reusing the same variants)
-      for (unsigned idx = 0; idx < future_size_bounds.size(); idx++)
-      {
-        // If there's no upper bound then no need to check if the
-        // future is inside 
-        if (future_size_bounds[idx] == SIZE_MAX)
-          continue;
-        const TaskTreeCoordinates &future_coords = coords[idx];
-#ifdef DEBUG_LEGION
-        assert(future_coords.size() <= coordinates.size()); 
-#endif
-        if (future_coords.empty() ||
-            (future_coords.size() < coordinates.size()))
-        {
-          mapping.future_size_bounds[idx] = SIZE_MAX;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        // If the size of the coordinates are the same we better
-        // be inside the same parent task or something is really wrong
-        for (unsigned idx2 = 0; idx2 < (future_coords.size()-1); idx2++)
-          assert(future_coords[idx2] == coordinates[idx2]);
-#endif
-#endif
-        // check to see if it came after the start of the trace
-        unsigned last = future_coords.size() - 1;
-        if (coordinates[last].context_index <=future_coords[last].context_index)
-          continue;
-        // Otherwise not inside the trace and therefore we cannot
-        // record the bounds for the future
-        mapping.future_size_bounds[idx] = SIZE_MAX;
-      }
       mapping.physical_instances = physical_instances;
       for (std::deque<InstanceSet>::iterator it =
            mapping.physical_instances.begin(); it !=
@@ -6428,7 +6387,6 @@ namespace Legion {
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
                               std::vector<Memory> &future_locations,
-                              std::vector<size_t> &future_size_bounds,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
@@ -6446,7 +6404,6 @@ namespace Legion {
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
       future_locations = finder->second.future_locations;
-      future_size_bounds = finder->second.future_size_bounds;
       physical_instances = finder->second.physical_instances;
     }
 

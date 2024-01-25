@@ -3733,7 +3733,7 @@ namespace Legion {
             unique_intra_space_deps.insert(key);
         }
         if (record_dependence)
-          repl_ctx->record_intra_space_dependence(context_index, point, 
+          repl_ctx->record_intra_space_dependence(context_index, point,
                                                   point_mapped, next_shard);
       }
       else // The next shard is ourself, so we can do the normal thing
@@ -4880,7 +4880,7 @@ namespace Legion {
         ReplIndividualTask *task = 
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx],
-                              provenance, false/*track*/, false/*top level*/,
+                              provenance, false/*top level*/,
                               true/*must epoch*/);
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
@@ -5208,7 +5208,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::receive_resources(size_t return_index,
+    void ReplMustEpochOp::receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
               std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
@@ -7909,9 +7909,7 @@ namespace Legion {
                   Provenance *provenance, bool has_block, bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-      tracing = false;
-      current_template = NULL;
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance); 
       has_blocking_call = has_block;
       remove_trace_reference = remove_trace_ref;
       // Get a collective ID to use for check all replayable
@@ -7966,6 +7964,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
+      tracing = false;
+      current_template = NULL;
       // Indicate that we are done capturing this trace
       trace->end_trace_execution(this);
       if (trace->is_recording())
@@ -8136,10 +8136,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      tracing = false;
-      current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
-      replayed = false;
       has_blocking_call = has_block;
       // Get a collective ID to use for check all replayable
       replayable_collective_id = 
@@ -8191,6 +8188,9 @@ namespace Legion {
     void ReplTraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      tracing = false;
+      current_template = NULL;
+      replayed = false;
       trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(trace);
 
@@ -8738,12 +8738,12 @@ namespace Legion {
       // Do NOT call 'initialize' here, we're in the dependence
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, provenance);
       fence_kind = MAPPING_FENCE;
-      context_index = invalidator->get_ctx_index();
+      context_index = invalidator->get_context_index();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-            unique_op_id, context_index, false/*execution fence*/);
+            unique_op_id, false/*execution fence*/);
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
@@ -9776,6 +9776,16 @@ namespace Legion {
           finder = created_futures.find(did);
         if (finder != created_futures.end())
         {
+          // Make sure to bump the future coordinate for this context as well
+#ifndef NDEBUG
+#ifdef DEBUG_LEGION
+          const uint64_t coord =
+#endif
+#endif
+            ctx->get_next_future_coordinate();
+#ifdef DEBUG_LEGION
+          assert(coord == finder->second.first->coordinate.context_index);
+#endif
           Future result(finder->second.first);
 #ifdef DEBUG_LEGION
           assert(finder->second.second > 0);
@@ -9790,7 +9800,8 @@ namespace Legion {
         }
         // Didn't find it so make it
         FutureImpl *result = new FutureImpl(ctx, runtime, false/*register*/,
-            did, op, op->get_generation(), op->get_ctx_index(), index_point,
+            did, op, op->get_generation(),
+            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -9809,7 +9820,8 @@ namespace Legion {
       else
       {
         FutureImpl *impl = new FutureImpl(ctx, runtime, false/*register*/,
-            did, op, op->get_generation(), op->get_ctx_index(), index_point,
+            did, op, op->get_generation(),
+            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -9825,7 +9837,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap ShardManager::deduplicate_future_map_creation(
         ReplicateContext *ctx, Operation *op, IndexSpaceNode *domain,
-        IndexSpaceNode *shard_domain, DistributedID map_did, 
+        IndexSpaceNode *shard_domain, DistributedID map_did,
         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -9837,6 +9849,16 @@ namespace Legion {
           finder = created_future_maps.find(map_did);
         if (finder != created_future_maps.end())
         {
+          // Make sure to bump the future coordinate for this context as well
+#ifndef NDEBUG
+#ifdef DEBUG_LEGION
+          const uint64_t coord =
+#endif
+#endif
+            ctx->get_next_future_coordinate();
+#ifdef DEBUG_LEGION
+          assert(coord == finder->second.first->future_coordinate);
+#endif
           FutureMap result(finder->second.first);
 #ifdef DEBUG_LEGION
           assert(finder->second.second > 0);
@@ -9877,10 +9899,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap ShardManager::deduplicate_future_map_creation(
         ReplicateContext *ctx, IndexSpaceNode *domain,
-        IndexSpaceNode *shard_domain, size_t index,
-        DistributedID map_did, ApEvent completion, Provenance *provenance)
+        IndexSpaceNode *shard_domain, DistributedID map_did,
+        ApEvent completion, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
+      // This future map isn't associated with an oeration so no coordinate
+      constexpr uint64_t coordinate = std::numeric_limits<uint64_t>::max();
       if (local_shards.size() > 1)
       {
         AutoLock m_lock(manager_lock);
@@ -9903,8 +9927,8 @@ namespace Legion {
         }
         // Didn't find it so make it
         ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, runtime,
-                                domain, shard_domain, map_did, index,
-                                completion, provenance, collective_mapping);
+                              domain, shard_domain, map_did, coordinate,
+                              completion, provenance, collective_mapping);
         // Add a reference to it to keep it from being deleted and then 
         // register it with the runtime
         result->add_nested_gc_ref(did);
@@ -9919,7 +9943,7 @@ namespace Legion {
       else
       {
         ReplFutureMapImpl *impl = new ReplFutureMapImpl(ctx, this, runtime,
-            domain, shard_domain, map_did, index, completion,
+            domain, shard_domain, map_did, coordinate, completion,
             provenance, collective_mapping);
         // Get a reference on it before we register it
         FutureMap result(impl);
@@ -9939,7 +9963,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::exchange_shard_local_op_data(size_t context_index,
+    void ShardManager::exchange_shard_local_op_data(uint64_t context_index,
                                                     size_t exchange_index,
                                                     const void *data,
                                                     size_t size)
@@ -9966,7 +9990,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::find_shard_local_op_data(size_t context_index,
+    void ShardManager::find_shard_local_op_data(uint64_t context_index,
                                                 size_t exchange_index,
                                                 void *result, size_t size)
     //--------------------------------------------------------------------------
@@ -10019,7 +10043,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::barrier_shard_local(size_t context_index,
+    void ShardManager::barrier_shard_local(uint64_t context_index,
                                            size_t exchange_index)
     //--------------------------------------------------------------------------
     {

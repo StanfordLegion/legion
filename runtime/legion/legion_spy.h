@@ -542,21 +542,19 @@ namespace Legion {
       static inline void log_individual_task(UniqueID context,
                                              UniqueID unique_id,
                                              Processor::TaskFuncID task_id,
-                                             size_t context_index,
                                              const char *name)
       {
-        log_spy.print("Individual Task %llu %u %llu %zd %s", 
-		      context, task_id, unique_id, context_index, name);
+        log_spy.print("Individual Task %llu %u %llu %s", 
+		      context, task_id, unique_id, name);
       }
 
       static inline void log_index_task(UniqueID context,
                                         UniqueID unique_id,
                                         Processor::TaskFuncID task_id,
-                                        size_t context_index,
                                         const char *name)
       {
-        log_spy.print("Index Task %llu %u %llu %zd %s",
-		      context, task_id, unique_id, context_index, name);
+        log_spy.print("Index Task %llu %u %llu %s",
+		      context, task_id, unique_id, name);
       }
 
       static inline void log_inline_task(UniqueID unique_id)
@@ -565,36 +563,29 @@ namespace Legion {
       }
 
       static inline void log_mapping_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Mapping Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Mapping Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_fill_operation(UniqueID context,
-                                            UniqueID unique_id,
-                                            size_t context_index)
+                                            UniqueID unique_id)
       {
-        log_spy.print("Fill Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Fill Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_discard_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Discard Operation %llu %llu %zd",
-                      context, unique_id, context_index);
+        log_spy.print("Discard Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index,
                                              bool is_intermediate_close_op)
       {
-        log_spy.print("Close Operation %llu %llu %zd %u",
-          context, unique_id, context_index, is_intermediate_close_op ? 1 : 0);
+        log_spy.print("Close Operation %llu %llu %u",
+          context, unique_id, is_intermediate_close_op ? 1 : 0);
       }
 
       static inline void log_refinement_operation(UniqueID context,
@@ -619,131 +610,100 @@ namespace Legion {
 
       static inline void log_fence_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index,
                                              bool execution)
       {
-        log_spy.print("Fence Operation %llu %llu %zd %d",
-		      context, unique_id, context_index, execution ? 1 : 0);
+        log_spy.print("Fence Operation %llu %llu %d",
+		      context, unique_id, execution ? 1 : 0);
       }
 
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id,
                                             unsigned copy_kind,
-                                            size_t context_index,
                                             bool couple_src_indirect,
                                             bool couple_dst_indirect)
       {
-        log_spy.print("Copy Operation %llu %llu %u %zd %d %d",
-		      context, unique_id, copy_kind, context_index,
+        log_spy.print("Copy Operation %llu %llu %u %d %d",
+		      context, unique_id, copy_kind,
                       couple_src_indirect ? 1 : 0,
                       couple_dst_indirect ? 1 : 0);
       }
 
       static inline void log_acquire_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Acquire Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Acquire Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_release_operation(UniqueID context,
-                                               UniqueID unique_id,
-                                               size_t context_index)
+                                               UniqueID unique_id)
       {
-        log_spy.print("Release Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Release Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_creation_operation(UniqueID context,
-                                                UniqueID creation,
-                                                size_t context_index)
+                                                UniqueID creation)
       {
-        log_spy.print("Creation Operation %llu %llu %zd",
-                      context, creation, context_index);
+        log_spy.print("Creation Operation %llu %llu", context, creation);
       }
 
       static inline void log_deletion_operation(UniqueID context,
                                                 UniqueID deletion,
-                                                size_t context_index,
                                                 bool unordered)
       {
-        log_spy.print("Deletion Operation %llu %llu %zd %u",
-		      context, deletion, context_index, unordered ? 1 : 0);
+        log_spy.print("Deletion Operation %llu %llu %u",
+		      context, deletion, unordered ? 1 : 0);
       }
 
       static inline void log_attach_operation(UniqueID context,
                                               UniqueID attach,
-                                              size_t context_index,
                                               bool restricted)
       {
-        log_spy.print("Attach Operation %llu %llu %zd %u", 
-                      context, attach, context_index, restricted ? 1 : 0);
+        log_spy.print("Attach Operation %llu %llu %u", 
+                      context, attach, restricted ? 1 : 0);
       }
 
       static inline void log_detach_operation(UniqueID context,
                                               UniqueID detach,
-                                              size_t context_index,
                                               bool unordered)
       {
-        log_spy.print("Detach Operation %llu %llu %zd %u",
-                      context, detach, context_index, unordered ? 1 : 0);
-      }
-
-      static inline void log_unordered_operation(UniqueID context,
-                                                 UniqueID opid,
-                                                 size_t context_index)
-      {
-        log_spy.print("Unordered Operation %llu %llu %zd",
-                      context, opid, context_index);
+        log_spy.print("Detach Operation %llu %llu %u",
+                      context, detach, unordered ? 1 : 0);
       }
 
       static inline void log_dynamic_collective(UniqueID context, 
-                                                UniqueID collective,
-                                                size_t context_index)
+                                                UniqueID collective)
       {
-        log_spy.print("Dynamic Collective %llu %llu %zd",
-                      context, collective, context_index);
+        log_spy.print("Dynamic Collective %llu %llu", context, collective);
       }
 
       static inline void log_timing_operation(UniqueID context,
-                                              UniqueID timing,
-                                              size_t context_index)
+                                              UniqueID timing)
       {
-        log_spy.print("Timing Operation %llu %llu %zd",
-                      context, timing, context_index);
+        log_spy.print("Timing Operation %llu %llu", context, timing);
       }
 
       static inline void log_tunable_operation(UniqueID context,
-                                               UniqueID timing,
-                                               size_t context_index)
+                                               UniqueID tunable)
       {
-        log_spy.print("Tunable Operation %llu %llu %zd",
-                      context, timing, context_index);
+        log_spy.print("Tunable Operation %llu %llu", context, tunable);
       }
 
       static inline void log_all_reduce_operation(UniqueID context, 
-                                                  UniqueID reduce,
-                                                  size_t context_index)
+                                                  UniqueID reduce)
       {
-        log_spy.print("All Reduce Operation %llu %llu %zd",
-                      context, reduce, context_index);
+        log_spy.print("All Reduce Operation %llu %llu", context, reduce);
       }
 
       static inline void log_predicate_operation(UniqueID context, 
-                                                 UniqueID pred_op,
-                                                 size_t context_index)
+                                                 UniqueID pred_op)
       {
-        log_spy.print("Predicate Operation %llu %llu %zd",
-                      context, pred_op, context_index);
+        log_spy.print("Predicate Operation %llu %llu", context, pred_op);
       }
 
       static inline void log_must_epoch_operation(UniqueID context,
-                                                  UniqueID must_op,
-                                                  size_t context_index)
+                                                  UniqueID must_op)
       {
-        log_spy.print("Must Epoch Operation %llu %llu %zd",
-                      context, must_op, context_index);
+        log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
       }
 
       static inline void log_summary_op_creator(UniqueID internal_op_id,
@@ -756,19 +716,17 @@ namespace Legion {
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
                                                            IDType pid,
-                                                           int kind,
-                                                           size_t context_index)
+                                                           int kind)
       {
-        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT
-                      " %d %zd", context, unique_id, pid, kind, context_index);
+        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT " %d",
+                      context, unique_id, pid, kind);
       }
 
       static inline void log_pending_partition_operation(UniqueID context,
-                                                         UniqueID unique_id,
-                                                         size_t context_index)
+                                                         UniqueID unique_id)
       {
-        log_spy.print("Pending Partition Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Pending Partition Operation %llu %llu",
+		      context, unique_id);
       }
 
       static inline void log_target_pending_partition(UniqueID unique_id,
@@ -1059,9 +1017,10 @@ namespace Legion {
       }
 
       static inline void log_child_operation_index(UniqueID parent_id, 
-                                       size_t index, UniqueID child_id)
+                                       uint64_t index, UniqueID child_id)
       {
-        log_spy.print("Operation Index %llu %zd %llu",parent_id,index,child_id);
+        log_spy.print("Operation Index %llu %lld %llu",
+            parent_id, index, child_id);
       }
 
       static inline void log_predicated_false_op(UniqueID unique_id)

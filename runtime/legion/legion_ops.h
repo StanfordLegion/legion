@@ -201,9 +201,9 @@ namespace Legion {
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
       // Delete this function once MustEpochOps are gone
-      void return_resources(ResourceTracker *target, size_t return_index,
+      void return_resources(ResourceTracker *target, uint64_t return_index,
                             std::set<RtEvent> &preconditions);
-      virtual void receive_resources(size_t return_index,
+      virtual void receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
               std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
@@ -216,8 +216,8 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions) = 0;
-      void pack_resources_return(Serializer &rez, size_t return_index);
-      static void pack_empty_resources(Serializer &rez, size_t return_index);
+      void pack_resources_return(Serializer &rez, uint64_t return_index);
+      static void pack_empty_resources(Serializer &rez, uint64_t return_index);
       static RtEvent unpack_resources_return(Deserializer &derez,
                                              ResourceTracker *target);
     protected:
@@ -422,12 +422,13 @@ namespace Legion {
       inline InnerContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
-      inline bool is_tracking_parent(void) const { return track_parent; } 
       inline LogicalTrace* get_trace(void) const { return trace; }
-      inline size_t get_ctx_index(void) const { return context_index; }
       inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
       inline Provenance* get_provenance(void) const 
         { return provenance; }
+    public:
+      uint64_t get_context_index(void) const;
+      void set_context_index(uint64_t index, bool track);
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -436,7 +437,6 @@ namespace Legion {
       // guaranteed to have a parent task.
       unsigned get_operation_depth(void) const; 
     public:
-      void set_tracking_parent(size_t index);
       void set_trace(LogicalTrace *trace,
                      const std::vector<StaticDependence> *dependences);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
@@ -462,10 +462,9 @@ namespace Legion {
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
-      void initialize_operation(InnerContext *ctx, bool track,
-                                unsigned num_regions = 0,
+      void initialize_operation(InnerContext *ctx,
                                 Provenance *provenance = NULL,
-          const std::vector<StaticDependence> *dependences = NULL);
+                                unsigned num_regions = 0);
       void set_provenance(Provenance *provenance);
     public:
       RtEvent execute_prepipeline_stage(GenerationID gen,
@@ -730,7 +729,8 @@ namespace Legion {
       GenerationID gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context
-      size_t context_index;
+      uint64_t context_index;
+    protected:
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -1078,7 +1078,7 @@ namespace Legion {
      */
     class ExternalMappable {
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       static void pack_mappable(const Mappable &mappable, Serializer &rez);
       static void pack_index_space_requirement(
@@ -1215,14 +1215,13 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
-      void initialize_predication(InnerContext *ctx,bool track,unsigned regions,
-          const std::vector<StaticDependence> *dependences, const Predicate &p,
-          Provenance *provenance);
+      void initialize_predication(InnerContext *ctx, unsigned regions,
+          const Predicate &p, Provenance *provenance);
       virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
       // its value.  Give it the current processor in case it
       // needs to wait for the value
-      bool get_predicate_value(void);
+      bool get_predicate_value(size_t index);
     public:
       // This method gets invoked if a predicate for a predicated
       // operation resolves to false before we try to map the operation 
@@ -1260,7 +1259,7 @@ namespace Legion {
     public:
       ExternalMapping(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_mapping(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_mapping(Deserializer &derez, Runtime *runtime);
@@ -1323,8 +1322,8 @@ namespace Legion {
                                        Reservation lock, bool exclusive);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -1379,7 +1378,7 @@ namespace Legion {
     public:
       ExternalCopy(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_copy(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_copy(Deserializer &derez, Runtime *runtime);
@@ -1503,8 +1502,8 @@ namespace Legion {
                                        Reservation lock, bool exclusive);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -1831,7 +1830,7 @@ namespace Legion {
       FenceOp& operator=(const FenceOp &rhs);
     public:
       Future initialize(InnerContext *ctx, FenceKind kind, bool need_future,
-                        Provenance *provenance, bool track = true);
+                        Provenance *provenance);
       inline void add_mapping_applied_condition(RtEvent precondition)
         { map_applied_conditions.insert(precondition); }
       inline void record_execution_precondition(ApEvent precondition)
@@ -2093,7 +2092,7 @@ namespace Legion {
     public:
       ExternalClose(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_close(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_close(Deserializer &derez, Runtime *runtime);
@@ -2118,16 +2117,15 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
       virtual Mappable* get_mappable(void);
     public:
       // This is for post and virtual close ops
-      void initialize_close(InnerContext *ctx,
-                            const RegionRequirement &req, bool track);
+      void initialize_close(InnerContext *ctx, const RegionRequirement &req);
       // These is for internal close ops
       void initialize_close(Operation *creator, unsigned idx,
                             unsigned parent_req_index,
@@ -2377,7 +2375,7 @@ namespace Legion {
     public:
       ExternalAcquire(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_acquire(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_acquire(Deserializer &derez, Runtime *runtime);
@@ -2423,8 +2421,8 @@ namespace Legion {
                    get_acquired_instances_ref(void);
     public: 
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -2487,7 +2485,7 @@ namespace Legion {
     public:
       ExternalRelease(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_release(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_release(Deserializer &derez, Runtime *runtime);
@@ -2537,8 +2535,8 @@ namespace Legion {
                    get_acquired_instances_ref(void);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -2846,7 +2844,7 @@ namespace Legion {
     public:
       // From MustEpoch
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
+      virtual uint64_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -2872,6 +2870,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
@@ -2898,7 +2898,7 @@ namespace Legion {
       virtual MapperManager* invoke_mapper(void);
     public:
       // From ResourceTracker
-      virtual void receive_resources(size_t return_index,
+      virtual void receive_resources(uint64_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
               std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
@@ -3330,7 +3330,7 @@ namespace Legion {
     public:
       ExternalPartition(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_partition(Serializer &rez,AddressSpaceID target) const;
       void unpack_external_partition(Deserializer &derez, Runtime *runtime);
@@ -3553,8 +3553,8 @@ namespace Legion {
     public:
       virtual PartitionKind get_partition_kind(void) const;
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -3692,7 +3692,7 @@ namespace Legion {
     public:
       ExternalFill(void);
     public:
-      virtual void set_context_index(size_t index) = 0;
+      virtual void set_context_index(uint64_t index) = 0;
     public:
       void pack_external_fill(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_fill(Deserializer &derez, Runtime *runtime);
@@ -3724,8 +3724,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual Mappable* get_mappable(void);
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4341,7 +4341,7 @@ namespace Legion {
       MappingTagID tag;
       void *arg;
       size_t argsize;
-      size_t tunable_index;
+      uint64_t tunable_index;
       size_t return_type_size;
       Future result;
       FutureInstance *instance;
@@ -4516,8 +4516,8 @@ namespace Legion {
       RemoteMapOp& operator=(const RemoteMapOp &rhs); 
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4548,8 +4548,8 @@ namespace Legion {
       RemoteCopyOp& operator=(const RemoteCopyOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4580,8 +4580,8 @@ namespace Legion {
       RemoteCloseOp& operator=(const RemoteCloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4612,8 +4612,8 @@ namespace Legion {
       RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4640,8 +4640,8 @@ namespace Legion {
       RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4672,8 +4672,8 @@ namespace Legion {
       RemoteFillOp& operator=(const RemoteFillOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4700,8 +4700,8 @@ namespace Legion {
       RemoteDiscardOp& operator=(const RemoteDiscardOp &rhs) = delete;
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -4726,8 +4726,8 @@ namespace Legion {
       RemotePartitionOp& operator=(const RemotePartitionOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const std::string& get_provenance_string(bool human = true) const;
@@ -4761,8 +4761,8 @@ namespace Legion {
       RemoteAttachOp& operator=(const RemoteAttachOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -4787,8 +4787,8 @@ namespace Legion {
       RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -4817,8 +4817,8 @@ namespace Legion {
       RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -4845,8 +4845,8 @@ namespace Legion {
       RemoteReplayOp& operator=(const RemoteReplayOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -4873,8 +4873,8 @@ namespace Legion {
       RemoteSummaryOp& operator=(const RemoteSummaryOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual size_t get_context_index(void) const;
-      virtual void set_context_index(size_t index);
+      virtual uint64_t get_context_index(void) const;
+      virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
