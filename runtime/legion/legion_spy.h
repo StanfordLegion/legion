@@ -1017,9 +1017,9 @@ namespace Legion {
       }
 
       static inline void log_child_operation_index(UniqueID parent_id, 
-                                       uint64_t index, UniqueID child_id)
+                                       size_t index, UniqueID child_id)
       {
-        log_spy.print("Operation Index %llu %ld %llu",
+        log_spy.print("Operation Index %llu %zd %llu",
             parent_id, index, child_id);
       }
 
