@@ -15471,7 +15471,7 @@ namespace Legion {
     bool IdentityProjectionFunctor::is_exclusive(void) const
     //--------------------------------------------------------------------------
     {
-      return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------
