@@ -41,8 +41,6 @@ namespace Realm {
 
   void SparsityMapRefCounter::add_references(int count)
   {
-    if(!get_runtime())
-      return;
     if(ID(*this).is_sparsity()) {
       NodeID owner = ID(*this).sparsity_creator_node();
       if(owner == Network::my_node_id) {
@@ -59,8 +57,6 @@ namespace Realm {
 
   void SparsityMapRefCounter::remove_references(int count)
   {
-    if(!get_runtime())
-      return;
     if(ID(*this).is_sparsity()) {
       NodeID owner = ID(*this).sparsity_creator_node();
       if(owner == Network::my_node_id) {
