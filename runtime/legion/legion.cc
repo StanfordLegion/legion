@@ -1998,7 +1998,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DiscardLauncher::DiscardLauncher(LogicalRegion h, LogicalRegion p)
-      : handle(h), parent(p)
+      : handle(h), parent(p), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
