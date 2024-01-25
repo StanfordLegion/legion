@@ -23,6 +23,7 @@
 #include "legion/suffix_tree.h"
 #include "legion/trie.h"
 
+#include <limits>
 #include <queue>
 
 template<>
@@ -192,7 +193,12 @@ namespace Legion {
       virtual TraceID get_fresh_trace_id() = 0;
       virtual void issue_begin_trace(TraceID id) = 0;
       virtual void issue_end_trace(TraceID id) = 0;
-      virtual bool issue_operation(Operation* op, bool unordered = false, bool outermost = true) = 0;
+      virtual bool issue_operation(
+        Operation* op,
+        const std::vector<StaticDependence>* dependences = NULL,
+        bool unordered = false,
+        bool outermost = true
+      ) = 0;
     };
 
     // TraceReplayer handles actually buffering and replaying committed traces.
@@ -202,7 +208,12 @@ namespace Legion {
         : executor(executor_), operation_start_idx(0) { }
 
       // Enqueue a new operation, which has the given hash.
-      void process(Operation* op, Murmur3Hasher::Hash hash, size_t opidx);
+      void process(
+        Operation* op,
+        const std::vector<StaticDependence>* dependences,
+        Murmur3Hasher::Hash hash,
+        size_t opidx
+      );
       void process_trace_noop(Operation* op);
       // Flush all pending operations out of the TraceReplayer. Accepts
       // the current opidx, used for scoring potentially replayed traces.
@@ -303,7 +314,13 @@ namespace Legion {
 
 
       // Fields for the management of pending operations.
-      std::queue<Operation*> operations;
+      struct PendingOperation {
+        PendingOperation(Operation* op, const std::vector<StaticDependence>* deps)
+          : operation(op), dependences(deps) { }
+        Operation* operation;
+        const std::vector<StaticDependence>* dependences;
+      };
+      std::queue<PendingOperation> operations;
       size_t operation_start_idx;
 
       // flush_buffer executes operations until opidx, or flushes
@@ -339,6 +356,7 @@ namespace Legion {
         }
     public:
       bool add_to_dependence_queue(Operation *op,
+                                   const std::vector<StaticDependence>* dependences = NULL,
                                    bool unordered = false,
                                    bool outermost = true) override;
       // get_new_unique_hash() generates a hash value that
@@ -349,13 +367,18 @@ namespace Legion {
       Murmur3Hasher::Hash get_new_unique_hash();
       // If the application performs a blocking operation, we need to know
       // about that, so override TaskContext::record_blocking_call().
-      void record_blocking_call(bool in_operation_stream) override;
+      void record_blocking_call(uint64_t future_coordinate) override;
     public:
       // Overrides for OperationExecutor.
       TraceID get_fresh_trace_id() override;
       void issue_begin_trace(TraceID id) override;
       void issue_end_trace(TraceID id) override;
-      bool issue_operation(Operation* op, bool unordered = false, bool outermost = false) override;
+      bool issue_operation(
+        Operation* op,
+        const std::vector<StaticDependence>* dependences = NULL,
+        bool unordered = false,
+        bool outermost = false
+      ) override;
     public:
       // Overrides for TraceJobProcessingExecutor.
       RtEvent enqueue_task(const InnerContext::AutoTraceProcessRepeatsArgs& args, size_t opidx, bool wait) override;
@@ -365,24 +388,6 @@ namespace Legion {
       BatchedTraceIdentifier identifier;
       TraceOccurrenceWatcher watcher;
       TraceReplayer replayer;
-      // Unfortunately, operation context indexes are assigned
-      // at issue time in the runtime, which unfortunately happens
-      // _before_ operations pass through add_to_dependence_queue, and
-      // these ID's are required to be monotonically increasing. This
-      // can become a problem for us as we are going to insert some
-      // begin and end trace operations out of order with respect to
-      // ID assignment in the runtime. So, what we're going to do is
-      // maintain our own context index for issued operations (separately
-      // from the existing operation index counter), and rewrite the
-      // indexes of issued operations on the fly with the new index
-      // we are maintaining here.
-      size_t rewritten_op_context_idx = 0;
-      // We need to maintain whether we are tracing separately from the
-      // inner context, as we'll need to manually attach traces to operations.
-      // Like above, the trace is set when the operation is created, rather
-      // than when it is added to the dependence queue. So we have to set
-      // this ourselves before sending into the internal dependence queue.
-      bool started_auto_trace = false;
       // unique_hash_idx_counter maintains a counter of non-traceable
       // operations seen so far, used to generate unique hashes for
       // those operations.
@@ -399,11 +404,16 @@ namespace Legion {
     // TODO (rohany): Can we move these declarations to another file?
 
     template <typename T>
-    bool AutomaticTracingContext<T>::add_to_dependence_queue(Operation* op, bool unordered, bool outermost) {
+    bool AutomaticTracingContext<T>::add_to_dependence_queue(
+      Operation* op,
+      const std::vector<StaticDependence>* dependences,
+      bool unordered,
+      bool outermost
+    ) {
       // If we have an unordered operation, just forward it directly without
       // getting it involved in the tracing infrastructure.
       if (unordered) {
-        return this->issue_operation(op, unordered, outermost);
+        return this->issue_operation(op, dependences, unordered, outermost);
       }
 
       // TODO (rohany): In the future, if we allow automatic and explicit tracing
@@ -425,10 +435,12 @@ namespace Legion {
         case Operation::OpKind::TRACE_BEGIN_OP_KIND: // Fallthrough.
         case Operation::OpKind::TRACE_REPLAY_OP_KIND: {
           assert(op->get_trace()->tid >= LEGION_MAX_APPLICATION_TRACE_ID && op->get_trace()->tid < LEGION_INITIAL_LIBRARY_ID_OFFSET);
+          assert(dependences == NULL);
           return this->issue_operation(op);
         }
         case Operation::OpKind::TRACE_CAPTURE_OP_KIND: // Fallthrough.
         case Operation::OpKind::TRACE_COMPLETE_OP_KIND: {
+          assert(dependences == NULL);
           return this->issue_operation(op);
         }
         default: {
@@ -445,7 +457,7 @@ namespace Legion {
         assert(!(hash.x == 0 && hash.y == 0));
         this->identifier.process(hash, this->opidx);
         this->watcher.process(hash, this->opidx);
-        this->replayer.process(op, hash, this->opidx);
+        this->replayer.process(op, dependences, hash, this->opidx);
         this->opidx++;
         return true;
       } else if (is_operation_ignorable_in_traces(op)) {
@@ -454,6 +466,7 @@ namespace Legion {
         // watches in the identifier and watcher. The idea here is to thread
         // these operations through the pipeline unless we are replaying a
         // trace, in which case they will be dropped.
+        assert(dependences == NULL);
         this->replayer.process_trace_noop(op);
         this->opidx++;
         return true;
@@ -475,7 +488,7 @@ namespace Legion {
         this->replayer.flush(this->opidx);
         log_auto_trace.debug() << "Encountered untraceable operation: "
                                << Operation::get_string_rep(op->get_operation_kind());
-        return this->issue_operation(op, unordered, outermost);
+        return this->issue_operation(op, dependences, unordered, outermost);
       }
     }
 
@@ -496,54 +509,40 @@ namespace Legion {
         nullptr /* provenance */,
         false /* from application */
       );
-      // Set started_auto_trace after issuing the begin trace, as it
-      // will set T::current_trace.
-      this->started_auto_trace = true;
     }
 
     template <typename T>
     void AutomaticTracingContext<T>::issue_end_trace(Legion::TraceID id) {
-      // Set started_auto_trace to be false before the operation, as the
-      // issuing of the end trace will set T::current_trace.
-      this->started_auto_trace = false;
       T::end_trace(id, false /* deprecated */, nullptr /* provenance */, false /* from application */);
     }
 
     template <typename T>
-    bool AutomaticTracingContext<T>::issue_operation(Legion::Internal::Operation *op, bool unordered, bool outermost) {
-      // Set and then update the separately maintained opidx counter.
-      if (!unordered) {
-        // If we're tracing and this operation is a trace no-op, then no-op.
-        if (this->started_auto_trace && is_operation_ignorable_in_traces(op)) {
-          this->rewritten_op_context_idx++;
-          return true;
-        }
-
-        op->set_ctx_index(this->rewritten_op_context_idx);
-        this->rewritten_op_context_idx++;
-        // TODO (rohany): This might not be needed once Mike refactors
-        //  context index assignment.
-        if (this->started_auto_trace) {
-          assert(this->current_trace != nullptr);
-          op->set_trace(this->current_trace, nullptr /* dependencies */);
-        }
-      }
-      return T::add_to_dependence_queue(op, unordered, outermost);
+    bool AutomaticTracingContext<T>::issue_operation(
+      Legion::Internal::Operation *op,
+      const std::vector<StaticDependence>* dependences,
+      bool unordered,
+      bool outermost
+    ) {
+      return T::add_to_dependence_queue(op, dependences, unordered, outermost);
     }
 
     template <typename T>
-    void AutomaticTracingContext<T>::record_blocking_call(bool in_operation_stream) {
-      if (in_operation_stream) {
+    void AutomaticTracingContext<T>::record_blocking_call(uint64_t future_coordinate) {
+      if (future_coordinate == std::numeric_limits<uint64_t>::max()) {
         // Handling waits from the application is very similar
         // to the case in add_to_dependence_queue when we encounter an
         // operation that is not traceable. We interrupt traces in
-        // the identifier, and flush the watcher and replayer.
+        // the identifier, and flush the watcher and replayer. We identify
+        // whether a wait is coming from the application by seeing if the
+        // future being waited on has a valid coordinate.
+        // TODO (rohany): I think that this is a little busted right now for
+        //  inline mappings.
         this->identifier.process(this->get_new_unique_hash(), this->opidx);
         this->watcher.clear();
         this->replayer.flush(this->opidx);
       }
       // Need to also do whatever the base context was going to do.
-      T::record_blocking_call(in_operation_stream);
+      T::record_blocking_call(future_coordinate);
     }
 
     template <typename T>

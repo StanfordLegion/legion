@@ -430,7 +430,8 @@ namespace Legion {
       size_t num_ops = this->operations.size();
       this->operation_start_idx += num_ops;
       while (!this->operations.empty()) {
-        this->executor->issue_operation(this->operations.front());
+        auto& pending = this->operations.front();
+        this->executor->issue_operation(pending.operation, pending.dependences);
         this->operations.pop();
       }
     }
@@ -443,7 +444,8 @@ namespace Legion {
       size_t difference = opidx - this->operation_start_idx;
       this->operation_start_idx += difference;
       for (size_t i = 0; i < difference; i++) {
-        this->executor->issue_operation(this->operations.front());
+        auto& pending = this->operations.front();
+        this->executor->issue_operation(pending.operation, pending.dependences);
         this->operations.pop();
       }
     }
@@ -464,7 +466,8 @@ namespace Legion {
       size_t difference = opidx - this->operation_start_idx;
       this->operation_start_idx += difference;
       for (size_t i = 0; i < difference; i++) {
-        this->executor->issue_operation(this->operations.front());
+        auto& pending = this->operations.front();
+        this->executor->issue_operation(pending.operation, pending.dependences);
         this->operations.pop();
       }
       this->executor->issue_end_trace(tid);
@@ -568,8 +571,13 @@ namespace Legion {
       this->flush_buffer();
     }
 
-    void TraceReplayer::process(Legion::Internal::Operation *op, Murmur3Hasher::Hash hash, size_t opidx) {
-      this->operations.push(op);
+    void TraceReplayer::process(
+      Legion::Internal::Operation *op,
+      const std::vector<StaticDependence>* dependence,
+      Murmur3Hasher::Hash hash,
+      size_t opidx
+    ) {
+      this->operations.emplace(op, dependence);
       // Update all watching pointers. This is very similar to the advancing
       // of pointers in the TraceOccurrenceWatcher.
       this->active_watching_pointers.emplace_back(this->trie.get_root(), opidx);
@@ -775,7 +783,7 @@ namespace Legion {
       // advance or are cancelled, but their depth increases to account
       // for the extra operation. Do a special advance on each active
       // commit pointer.
-      this->operations.push(op);
+      this->operations.emplace(op, nullptr);
       for (auto& pointer : this->active_commit_pointers) {
         pointer.advance_for_trace_noop();
       }
