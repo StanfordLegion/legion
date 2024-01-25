@@ -9028,11 +9028,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::distribute_explicit(SingleTask *task, VariantID variant,
-                                      std::vector<Processor> &target_processors)
+                                      std::vector<Processor> &target_processors,
+                                      std::vector<VariantID> &leaf_variants)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!local_shards.empty());
+      assert((variant == 0) == !leaf_variants.empty());
 #endif
       // Initialize the address spaces data structure
       set_shard_mapping(target_processors);
@@ -9049,6 +9051,9 @@ namespace Legion {
             pack_shard_manager(rez);
             rez.serialize<bool>(true/*explicit*/);
             rez.serialize(variant);
+            for (std::vector<VariantID>::const_iterator it =
+                  leaf_variants.begin(); it != leaf_variants.end(); it++)
+              rez.serialize(*it);
             task->get_context()->pack_inner_context(rez);
             task->pack_single_task(rez, *it);
           }
@@ -11307,6 +11312,9 @@ namespace Legion {
       {
         VariantID variant;
         derez.deserialize(variant);
+        std::vector<VariantID> leaf_variants((variant == 0) ? total_shards : 0);
+        for (unsigned idx = 0; idx < leaf_variants.size(); idx++)
+          derez.deserialize(leaf_variants[idx]);
         InnerContext *parent_ctx = 
           InnerContext::unpack_inner_context(derez, runtime);
         // Create the local shards
@@ -11317,12 +11325,15 @@ namespace Legion {
             continue;
           if (first_shard == NULL)
             first_shard = manager->create_shard(idx, target_processors[idx], 
-                variant, parent_ctx, derez);
+                leaf_variants.empty() ? variant : leaf_variants[idx],
+                parent_ctx, derez);
           else
-            manager->create_shard(idx, target_processors[idx], variant,
+            manager->create_shard(idx, target_processors[idx],
+                leaf_variants.empty() ? variant : leaf_variants[idx],
                 parent_ctx, first_shard);
         }
-        manager->distribute_explicit(first_shard, variant, target_processors);
+        manager->distribute_explicit(first_shard, variant,
+                                     target_processors, leaf_variants);
       }
       else
       {
