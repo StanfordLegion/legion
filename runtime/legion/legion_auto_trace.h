@@ -454,6 +454,7 @@ namespace Legion {
         // trace, in which case they will be dropped.
         this->replayer.process_trace_noop(op);
         this->opidx++;
+        return true;
       } else {
         // When encountering a non-traceable operation, insert a
         // dummy hash value into the trace identifier so that the
