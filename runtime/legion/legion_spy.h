@@ -1019,7 +1019,7 @@ namespace Legion {
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        uint64_t index, UniqueID child_id)
       {
-        log_spy.print("Operation Index %llu %lld %llu",
+        log_spy.print("Operation Index %llu %ld %llu",
             parent_id, index, child_id);
       }
 
