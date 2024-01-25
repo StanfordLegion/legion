@@ -29,6 +29,7 @@
 #include "realm/event_impl.h"
 #include "realm/profiling.h"
 #include "realm/mem_impl.h"
+#include <vector>
 
 namespace Realm {
 
@@ -89,7 +90,11 @@ namespace Realm {
 				   const ExternalInstanceResource *res,
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
-      
+
+      Event redistrict(std::vector<RegionInstance> &instance,
+                       std::vector<InstanceLayoutGeneric *> layouts,
+                       const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
+
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us

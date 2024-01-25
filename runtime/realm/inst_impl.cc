@@ -429,6 +429,24 @@ namespace Realm {
 	        Memory::NO_MEMORY);
     }
 
+    Event RegionInstance::redistrict(RegionInstance &instance,
+                                     InstanceLayoutGeneric *layout,
+                                     const ProfilingRequestSet &prs, Event wait_on)
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      std::vector<RegionInstance> insts{instance};
+      return inst_impl->redistrict(insts, {layout}, prs, wait_on);
+    }
+
+    Event RegionInstanceImpl::redistrict(std::vector<RegionInstance> &instance,
+                                         std::vector<InstanceLayoutGeneric *> layouts,
+                                         const ProfilingRequestSet &prs,
+                                         Event wait_on)
+    {
+      return Event::NO_EVENT;
+    }
+
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
 						     InstanceLayoutGeneric *ilg,

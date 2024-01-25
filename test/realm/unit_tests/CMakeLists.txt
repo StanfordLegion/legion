@@ -27,6 +27,7 @@ list(APPEND REALM_TESTS
   address_list_test.cc
   cmdline_parser_test.cc
   sequence_assembler_test.cc
+  instance_redistrict_test.cc
  )
 
 include(FetchContent)

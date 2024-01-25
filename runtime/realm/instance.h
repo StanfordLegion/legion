@@ -145,6 +145,9 @@ namespace Realm {
     template <typename T>
     T *pointer(size_t offset) const;
 
+    Event redistrict(RegionInstance &instance, InstanceLayoutGeneric *layot,
+                     const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
+
     /**
      * Create a new region instance. Calls to create_instance return immediately
      * with a handle, but also return an event that must be used as a
