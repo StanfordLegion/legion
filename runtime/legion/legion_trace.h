@@ -881,6 +881,7 @@ namespace Legion {
       inline const std::string& get_replayable_message(void) const
         { return replayable.message; }
       inline void record_no_consensus(void) { has_no_consensus = true; }
+      inline bool get_no_consensus(void) { return has_no_consensus; }
     public:
       virtual bool is_recording(void) const { return recording.load(); }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
