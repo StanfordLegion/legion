@@ -771,8 +771,8 @@ namespace Legion {
 #ifndef NDEBUG
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
-    assert(!CHECK ||
-        (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
+    constexpr uint64_t MAX = std::numeric_limits<coord_t>::max();
+    assert(!CHECK || (((uint64_t)value) <= MAX));
 #endif
 #endif
     return coord_t(value);
