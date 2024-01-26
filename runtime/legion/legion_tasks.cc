@@ -95,7 +95,7 @@ namespace Legion {
       // No need to pack remote, it will get set
       rez.serialize(speculated);
       // No need to pack local function, it's not if we're sending this remote
-      rez.serialize(get_context_index());
+      rez.serialize<uint64_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -5620,7 +5620,6 @@ namespace Legion {
         rez.serialize<bool>(deterministic_redop);
       else if (future_handles != NULL)
       {
-        rez.serialize(future_map_coordinate);
         // Only pack the IDs for our local points
         IndexSpaceNode *node = runtime->forest->get_node(internal_space);
         Domain local_domain;
@@ -5654,6 +5653,7 @@ namespace Legion {
             rez.serialize(it->second);
           }
         }
+        rez.serialize(future_map_coordinate);
       }
       else
         rez.serialize<size_t>(0);
@@ -5697,7 +5697,6 @@ namespace Legion {
       }
       else
       {
-        derez.deserialize(future_map_coordinate);
 #ifdef DEBUG_LEGION
         assert(future_handles == NULL);
 #endif
@@ -5715,6 +5714,7 @@ namespace Legion {
             derez.deserialize(point);
             derez.deserialize(handles[point]);
           }
+          derez.deserialize(future_map_coordinate);
         }
       }
       size_t num_globals;
