@@ -306,61 +306,61 @@ pub enum Record {
     #[serde(rename = "Top Task")]
     TopTask { tid: TaskID, ctx: ContextID, uid: UniqueID, name: String },
     #[serde(rename = "Individual Task")]
-    IndividualTask { ctx: ContextID, tid: TaskID, uid: UniqueID, index: u64, name: String },
+    IndividualTask { ctx: ContextID, tid: TaskID, uid: UniqueID, name: String },
     #[serde(rename = "Index Task")]
-    IndexTask { ctx: ContextID, tid: TaskID, uid: UniqueID, index: u64, name: String },
+    IndexTask { ctx: ContextID, tid: TaskID, uid: UniqueID, name: String },
     #[serde(rename = "Inline Task")]
     InlineTask { uid: UniqueID },
     #[serde(rename = "Mapping Operation")]
-    MappingOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    MappingOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Close Operation")]
-    CloseOperation { ctx: ContextID, uid: UniqueID, index: u64, is_inter: bool },
+    CloseOperation { ctx: ContextID, uid: UniqueID, is_inter: bool },
     #[serde(rename = "Refinement Operation")]
     RefinementOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Internal Operation Creator")]
     InternalCreator { uid: UniqueID, cuid: UniqueID, index: u64 },
     #[serde(rename = "Fence Operation")]
-    FenceOperation { ctx: ContextID, uid: UniqueID, index: u64, execution: bool },
+    FenceOperation { ctx: ContextID, uid: UniqueID, execution: bool },
     #[serde(rename = "Trace Operation")]
     TraceOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Copy Operation")]
-    CopyOperation { ctx: ContextID, uid: UniqueID, kind: u64, index: u64, src_indirect: bool, dst_indirect: bool },
+    CopyOperation { ctx: ContextID, uid: UniqueID, kind: u64, src_indirect: bool, dst_indirect: bool },
     #[serde(rename = "Fill Operation")]
-    FillOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    FillOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Acquire Operation")]
-    AcquireOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    AcquireOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Release Operation")]
-    ReleaseOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    ReleaseOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Creation Operation")]
-    CreationOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    CreationOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Deletion Operation")]
-    DeletionOperation { ctx: ContextID, uid: UniqueID, index: u64, unordered: bool },
+    DeletionOperation { ctx: ContextID, uid: UniqueID, unordered: bool },
     #[serde(rename = "Attach Operation")]
-    AttachOperation { ctx: ContextID, uid: UniqueID, index: u64, restricted: bool },
+    AttachOperation { ctx: ContextID, uid: UniqueID, restricted: bool },
     #[serde(rename = "Detach Operation")]
-    DetachOperation { ctx: ContextID, uid: UniqueID, index: u64, unordered: bool },
+    DetachOperation { ctx: ContextID, uid: UniqueID, unordered: bool },
     #[serde(rename = "Unordered Operation")]
-    UnorderedOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    UnorderedOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Dynamic Collective")]
-    DynamicCollective { ctx: ContextID, uid: UniqueID, index: u64 },
+    DynamicCollective { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Timing Operation")]
-    TimingOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    TimingOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Tunable Operation")]
-    TunableOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    TunableOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "All Reduce Operation")]
-    AllReduceOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    AllReduceOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Predicate Operation")]
-    PredicateOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    PredicateOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Must Epoch Operation")]
-    MustEpochOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    MustEpochOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Summary Operation Creator")]
     SummaryCreator { uid: UniqueID, cuid: UniqueID },
     #[serde(rename = "Summary Operation")]
     SummaryOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Dependent Partition Operation")]
-    DepPartOperation { ctx: ContextID, uid: UniqueID, pid: IpartID, kind: u64, index: u64 },
+    DepPartOperation { ctx: ContextID, uid: UniqueID, pid: IpartID, kind: u64 },
     #[serde(rename = "Pending Partition Operation")]
-    PendingPartOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    PendingPartOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Pending Partition Target")]
     PendingPartTarget { uid: UniqueID, pid: IpartID, kind: u64 },
     #[serde(rename = "Index Slice")]
