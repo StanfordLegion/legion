@@ -1132,12 +1132,6 @@ namespace Legion {
       lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
       lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
 #ifdef LEGION_USE_CUDA
-      /*char uuid_str[Realm::Cuda::UUID_SIZE];
-      for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
-        sprintf(&uuid_str[i], "%x", proc_desc.cuda_device_uuid[i] & 0xFF);
-      }
-
-      lp_fwrite(f, uuid_str, strlen(uuid_str) + 1);*/
       unsigned uuid_size = Realm::Cuda::UUID_SIZE;
       lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
       for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
@@ -1145,14 +1139,13 @@ namespace Legion {
             sizeof(char));
       }
 #else
-      /*char placeholder_str[10] = "NULL";
-      lp_fwrite(f, placeholder_str, strlen(placeholder_str) + 1);*/
-      unsigned uuid_size = Realm::Cuda::UUID_SIZE;
+      unsigned uuid_size = 16;
       lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
-      char uuid_str[Realm::Cuda::UUID_SIZE] = {0};
-      for (size_t i=0; i<Realm::Cuda::UUID_SIZE; i++) {
+      char uuid_str[uuid_size] = {0};
+      for (size_t i=0; i<uuid_size; i++) {
         lp_fwrite(f, (char*)&(uuid_str[i]),
             sizeof(char));
+      }
 #endif
     }
     //--------------------------------------------------------------------------
