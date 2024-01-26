@@ -9051,9 +9051,8 @@ namespace Legion {
             pack_shard_manager(rez);
             rez.serialize<bool>(true/*explicit*/);
             rez.serialize(variant);
-            for (std::vector<VariantID>::const_iterator it =
-                  leaf_variants.begin(); it != leaf_variants.end(); it++)
-              rez.serialize(*it);
+            for (unsigned idx = 0; idx < leaf_variants.size(); idx++)
+              rez.serialize(leaf_variants[idx]);
             task->get_context()->pack_inner_context(rez);
             task->pack_single_task(rez, *it);
           }
