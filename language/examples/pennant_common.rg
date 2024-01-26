@@ -23,7 +23,7 @@ local parallel = rawget(_G, "pennant_parallel") ~= false
 
 -- Compile and link pennant.cc
 local launcher = require("launcher")
-local cpennant = launcher.build_library("pennant")
+cpennant = launcher.build_library("pennant")
 
 -- Also copy input files into the destination directory.
 if os.getenv('STANDALONE') == '1' and os.getenv('OBJNAME') then
