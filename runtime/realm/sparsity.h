@@ -82,13 +82,13 @@ namespace Realm {
     /**
      * Add one reference to the sparsity map.
      */
-    void add_references(int count = 1);
+    void add_references(unsigned count = 1);
 
     /**
      * Remove references from the sparsity map.
      * @param count a number of references to remove
      */
-    void remove_references(int count = 1);
+    void remove_references(unsigned count = 1);
 
     /**
      * Lookup the public implementation object for this sparsity map.

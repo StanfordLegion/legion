@@ -39,7 +39,7 @@ namespace Realm {
     : id(_id)
   {}
 
-  void SparsityMapRefCounter::add_references(int count)
+  void SparsityMapRefCounter::add_references(unsigned count)
   {
     if(ID(*this).is_sparsity()) {
       NodeID owner = ID(*this).sparsity_creator_node();
@@ -55,7 +55,7 @@ namespace Realm {
     }
   }
 
-  void SparsityMapRefCounter::remove_references(int count)
+  void SparsityMapRefCounter::remove_references(unsigned count)
   {
     if(ID(*this).is_sparsity()) {
       NodeID owner = ID(*this).sparsity_creator_node();
@@ -124,13 +124,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::add_references(int count)
+  void SparsityMap<N, T>::add_references(unsigned count)
   {
     SparsityMapRefCounter(id).add_references(count);
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::remove_references(int count)
+  void SparsityMap<N, T>::remove_references(unsigned count)
   {
     SparsityMapRefCounter(id).remove_references(count);
   }
@@ -223,7 +223,7 @@ namespace Realm {
 
   void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
 
-  void SparsityMapImplWrapper::add_references(int count)
+  void SparsityMapImplWrapper::add_references(unsigned count)
   {
     AutoLock<> al(mutex);
     if(map_impl.load() != 0) {
@@ -231,7 +231,7 @@ namespace Realm {
     }
   }
 
-  void SparsityMapImplWrapper::remove_references(int count)
+  void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     AutoLock<> al(mutex);
     if(map_impl.load() == 0) {

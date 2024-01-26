@@ -45,13 +45,13 @@ namespace Realm {
     id_t id;
     SparsityMapRefCounter(::realm_id_t id);
 
-    void add_references(int count);
-    void remove_references(int count);
+    void add_references(unsigned count);
+    void remove_references(unsigned count);
 
     struct SparsityMapAddReferenceMessage {
       id_t id;
       Event wait_on;
-      int count;
+      unsigned count;
 
       static void handle_message(NodeID sender, const SparsityMapAddReferenceMessage &msg,
                                  const void *data, size_t datalen);
@@ -60,7 +60,7 @@ namespace Realm {
     struct SparsityMapRemoveReferencesMessage {
       id_t id;
       Event wait_on;
-      int count;
+      unsigned count;
 
       static void handle_message(NodeID sender,
                                  const SparsityMapRemoveReferencesMessage &msg,
@@ -201,15 +201,15 @@ namespace Realm {
     void init(ID _me, unsigned _init_owner);
     void destroy(void);
 
-    void add_references(int count);
-    void remove_references(int count);
+    void add_references(unsigned count);
+    void remove_references(unsigned count);
 
     ID me;
     unsigned owner;
     SparsityMapImplWrapper *next_free;
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
-    int references;
+    unsigned references;
 
     Mutex mutex;
 
