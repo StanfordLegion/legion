@@ -46,7 +46,6 @@ pub enum ValueFormat {
     U32,
     U64,
     I64,
-    I32,
     UniqueID,
     VariantID,
 }
@@ -159,7 +158,6 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
         "unsigned" => Some(ValueFormat::U32),
         "unsigned long long" => Some(ValueFormat::U64),
         "long long" => Some(ValueFormat::I64),
-        "int" => Some(ValueFormat::I32),
         "UniqueID" => Some(ValueFormat::UniqueID),
         "VariantID" => Some(ValueFormat::VariantID),
         _ => None,
