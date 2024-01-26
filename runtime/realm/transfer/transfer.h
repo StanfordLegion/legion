@@ -175,6 +175,7 @@ namespace Realm {
       int gather_control_input;
       int scatter_control_input;
       XferDesRedopInfo redop;
+      Channel *channel;
 
       enum IOType {
 	IO_INST,

@@ -2989,6 +2989,7 @@ namespace Realm {
       xdn.gather_control_input = -1;
       xdn.scatter_control_input = -1;
       xdn.target_node = info.xd_channels[i]->node;
+      xdn.channel = info.xd_channels[i];
       xdn.inputs.resize(1);
       xdn.inputs[0] = ((i == 0) ?
 		         start_edge :
@@ -3096,7 +3097,7 @@ namespace Realm {
 
       for(size_t i = 0; i < pathlen; i++) {
 	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
-
+        xdn.channel = path_infos[0].xd_channels[i];
 	xdn.target_node = path_infos[0].xd_channels[i]->node;
 	//xdn.kind = path_infos[0].xd_kinds[i];
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
@@ -3264,6 +3265,7 @@ namespace Realm {
 	    xdn.gather_control_input = -1;
 	    xdn.scatter_control_input = -1;
 	    xdn.target_node = mpi.xd_channels[j]->node;
+	    xdn.channel = mpi.xd_channels[j];
 	    if(j == 0) {
 	      xdn.inputs.resize(2);
 	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
@@ -3400,7 +3402,7 @@ namespace Realm {
 
       for(size_t i = 0; i < pathlen; i++) {
 	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
-
+        xdn.channel = path_infos[0].xd_channels[i];
 	xdn.target_node = path_infos[0].xd_channels[i]->node;
 	//xdn.kind = path_infos[0].xd_kinds[i];
 	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
@@ -3612,6 +3614,7 @@ namespace Realm {
 	    xdn.gather_control_input = -1;
 	    xdn.scatter_control_input = -1;
 	    xdn.target_node = mpi.xd_channels[j + 1]->node;
+            xdn.channel = mpi.xd_channels[j + 1];
 	    if(j < (hops - 1)) {
 	      xdn.inputs.resize(1);
 	      xdn.inputs[0] = ((j == 0) ?
@@ -4099,6 +4102,7 @@ namespace Realm {
           xdn.gather_control_input = -1;
           xdn.scatter_control_input = -1;
           xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.channel = path_info.xd_channels[j];
           if(j == (pathlen - 1))
             xdn.redop = XferDesRedopInfo(dsts[i].redop_id,
                                          dsts[i].red_fold,
@@ -4182,6 +4186,7 @@ namespace Realm {
 	  xdn.gather_control_input = -1;
 	  xdn.scatter_control_input = -1;
 	  xdn.target_node = path_info.xd_channels[j]->node;
+          xdn.channel = path_info.xd_channels[j];
 	  xdn.inputs.resize(1);
           xdn.inputs[0] = ((j == 0) ?
                              TransferGraph::XDTemplate::mk_fill(fill_ofs,
@@ -4322,6 +4327,7 @@ namespace Realm {
 	      xdn.gather_control_input = -1;
 	      xdn.scatter_control_input = -1;
 	      xdn.target_node = path_info.xd_channels[j]->node;
+              xdn.channel = path_info.xd_channels[j];
 	      xdn.inputs.resize(1);
 	      xdn.inputs[0] = ((j == 0) ?
 			         TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
@@ -4527,28 +4533,44 @@ namespace Realm {
 
     if(log_xplan.want_debug()) {
       log_xplan.debug() << "analysis: plan=" << (void *)this
-			<< " dim_order=" << PrettyVector<int>(dim_order)
-			<< " xds=" << graph.xd_nodes.size()
-			<< " ibs=" << graph.ib_edges.size();
-      for(size_t i = 0; i < graph.xd_nodes.size(); i++)
-        if(graph.xd_nodes[i].redop.id != 0)
-          log_xplan.debug() << "analysis: plan=" << (void *)this
-                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
-                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
-                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
-                            << " redop=(" << graph.xd_nodes[i].redop.id << "," << graph.xd_nodes[i].redop.is_fold << "," << graph.xd_nodes[i].redop.in_place << ")";
-        else
-          log_xplan.debug() << "analysis: plan=" << (void *)this
-                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
-                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
-                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs);
-      for(size_t i = 0; i < graph.ib_edges.size(); i++)
-	log_xplan.debug() << "analysis: plan=" << (void *)this
-			  << " ibs[" << i << "]: memory=" << graph.ib_edges[i].memory
-			  << " size=" << graph.ib_edges[i].size;
-      if(!graph.ib_edges.empty())
+                        << " dim_order=" << PrettyVector<int>(dim_order)
+                        << " xds=" << graph.xd_nodes.size()
+                        << " ibs=" << graph.ib_edges.size();
+
+      for(size_t i = 0; i < graph.xd_nodes.size(); i++) {
+        if(graph.xd_nodes[i].redop.id != 0) {
+          log_xplan.debug()
+              << "analysis: plan=" << (void *)this << " xds[" << i
+              << "]: target=" << graph.xd_nodes[i].target_node << " inputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+              << " outputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+              << " channel="
+              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : -1)
+              << " redop=(" << graph.xd_nodes[i].redop.id << ","
+              << graph.xd_nodes[i].redop.is_fold << ","
+              << graph.xd_nodes[i].redop.in_place << ")";
+        } else {
+          log_xplan.debug()
+              << "analysis: plan=" << (void *)this << " xds[" << i
+              << "]: target=" << graph.xd_nodes[i].target_node << " inputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+              << " outputs="
+              << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+              << " channel="
+              << ((graph.xd_nodes[i].channel) ? graph.xd_nodes[i].channel->kind : -1);
+        }
+      }
+
+      for(size_t i = 0; i < graph.ib_edges.size(); i++) {
+        log_xplan.debug() << "analysis: plan=" << (void *)this << " ibs[" << i
+                          << "]: memory=" << graph.ib_edges[i].memory
+                          << " size=" << graph.ib_edges[i].size;
+      }
+      if(!graph.ib_edges.empty()) {
         log_xplan.debug() << "analysis: plan=" << (void *)this
-			  << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
+                          << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
+      }
     }
 
     // mark that the analysis is complete and see if there are any pending
