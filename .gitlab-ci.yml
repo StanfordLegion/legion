@@ -289,7 +289,7 @@ before_script:
       wget -nv https://github.com/Kitware/CMake/releases/download/v3.20.6/cmake-3.20.6-Linux-x86_64.tar.gz
       echo "458777097903b0f35a0452266b923f0a2f5b62fe331e636e2dcc4b636b768e36  cmake-3.20.6-Linux-x86_64.tar.gz" | shasum --check
       tar -zxf cmake-3.20.6-Linux-x86_64.tar.gz
-      PATH=`pwd`/cmake-3.20.6-Linux-x86_64/bin:$PATH
+      PATH=`pwd`/cmake-3.20.6-linux-x86_64/bin:$PATH
     fi
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
