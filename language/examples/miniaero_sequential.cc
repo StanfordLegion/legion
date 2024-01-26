@@ -91,5 +91,5 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime,
 
 void register_mappers()
 {
-  HighLevelRuntime::set_registration_callback(create_mappers);
+  HighLevelRuntime::add_registration_callback(create_mappers);
 }
