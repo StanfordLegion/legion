@@ -10123,6 +10123,9 @@ namespace Legion {
         replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.store(replay->get_mapped_event().id);
+#ifdef LEGION_SPY
+        tracing_replay_event = replay->get_completion_event();
+#endif
         add_to_dependence_queue(replay);
       }
       // Now mark that we are starting a trace
@@ -10205,6 +10208,9 @@ namespace Legion {
         current_trace->fix_trace(provenance);
       }
       current_trace = NULL;
+#ifdef LEGION_SPY
+      tracing_replay_event = ApEvent::NO_AP_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20054,6 +20060,9 @@ namespace Legion {
         replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.store(replay->get_mapped_event().id);
+#ifdef LEGION_SPY
+        tracing_replay_event = replay->get_completion_event();
+#endif
         add_to_dependence_queue(replay);
       }
       // Now mark that we are starting a trace
@@ -20113,6 +20122,9 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+#ifdef LEGION_SPY
+      tracing_replay_event = ApEvent::NO_AP_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------

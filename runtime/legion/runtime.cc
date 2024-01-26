@@ -5058,6 +5058,33 @@ namespace Legion {
 #endif
       // trigger the termination event conditional upon the ready event
       Runtime::trigger_event(NULL, termination_event, ready_event);
+#ifdef LEGION_SPY
+      // This is a really mind-bending corner case so be prepared 
+      // If we're doing a trace replay and we actually end up replaying a 
+      // physical template, we need to make it look to Legion Spy like the
+      // fence at the beginning of the trace depends on any mapped physical 
+      // regions in the context that will be unmapped during the execution 
+      // of the trace otherwise Legion Spy will be unhappy with its validation.
+      // We can fake this because it is already safe by definition, but just
+      // in a way that Legion Spy can't actually see with its analysis. There
+      // are two different sceanrios in the case where unmapping of physical
+      // region occurs inside of the trace:
+      // 1. the application doesn't unmap before launching a task or other
+      //    operation that uses an interfering region requirement and the
+      //    runtime has to insert unmap/remap operations which by definition
+      //    will prevent a physical template from being captured because
+      //    inline mapping operations are not (and never will be) memoizable
+      //    so on all future traces we can only do logical analysis
+      // 2. the application does its own unmap before a conflicting use of 
+      //    the logical region which creates an implicit happens-before
+      //    relationship between the unmap and any uses by the template 
+      //    because operations can't be replayed before they are launched
+      // There we can see this is trivially safe, but we need to create this
+      // explicit event relationship for Legion Spy here to keep it happy
+      const ApEvent tracing_replay_event = context->get_tracing_replay_event();
+      if (tracing_replay_event.exists())
+        LegionSpy::log_event_dependence(termination_event,tracing_replay_event);
+#endif
 #ifdef DEBUG_LEGION
       termination_event = ApUserEvent::NO_AP_USER_EVENT;
 #endif
@@ -6503,8 +6530,6 @@ namespace Legion {
       return op->initialize_detach(ctx, parent, upper_bound, launch_bounds,
             this, privilege_fields, regions, flush, unordered, provenance);
     }
-
-    
 
     /////////////////////////////////////////////////////////////
     // Grant Impl 

@@ -1159,6 +1159,7 @@ namespace Legion {
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
       trace = tr;
+
     }
 
     //--------------------------------------------------------------------------
@@ -4290,8 +4291,7 @@ namespace Legion {
       assert(memoizable != NULL);
 #endif
       const TraceLocalID tid = memoizable->get_trace_local_id();
-      // Should be able to call back() without the lock even when
-      // operations are being removed from the front
+      AutoLock tpl_lock(template_lock);
       std::map<TraceLocalID,MemoizableOp*> &ops = operations.back();
 #ifdef DEBUG_LEGION
       assert(ops.find(tid) == ops.end());

@@ -8133,9 +8133,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
       template_completion = ApEvent::NO_AP_EVENT;
       has_blocking_call = has_block;
       // Get a collective ID to use for check all replayable
@@ -8188,6 +8185,9 @@ namespace Legion {
     void ReplTraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
       tracing = false;
       current_template = NULL;
       replayed = false;
