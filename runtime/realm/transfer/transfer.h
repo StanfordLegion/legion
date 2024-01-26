@@ -169,6 +169,7 @@ namespace Realm {
   //  intermediate buffers
   struct TransferGraph {
     struct XDTemplate {
+      // TODO(apryakhin@): Remove target_node
       NodeID target_node;
       //XferDesKind kind;
       XferDesFactory *factory;
