@@ -1169,8 +1169,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
-        outstanding_mapping_references(0), hardened(false), parent_ctx(NULL),
-        mapping_tracker(NULL), commit_tracker(NULL), provenance(NULL)
+        outstanding_mapping_references(0), hardened(false),
+        trigger_commit_invoked(false), early_commit_request(false),
+        track_parent(false), tracing(false), trace(NULL), trace_local_id(0),
+        parent_ctx(NULL), must_epoch(NULL), mapping_tracker(NULL),
+        commit_tracker(NULL), provenance(NULL)
     //--------------------------------------------------------------------------
     {
       if (!runtime->resilient_mode)

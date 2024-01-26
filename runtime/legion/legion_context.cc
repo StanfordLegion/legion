@@ -1083,8 +1083,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(),
-          std::numeric_limits<uint64_t>::max(), 
-          ApEvent::NO_AP_EVENT, provenance);
+          InnerContext::NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -7029,7 +7028,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-        std::numeric_limits<uint64_t>::max(), ApEvent::NO_AP_EVENT, provenance);
+        NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -8337,10 +8336,11 @@ namespace Legion {
         executing_children_count++;
         // Check to see if we need to perform a window wait
         // Only need to check if we are not tracing by frames
+        // and not inside of a trace that might be replayed
         if ((context_configuration.min_frames_to_schedule == 0) &&
             (context_configuration.max_window_size > 0) &&
               (executing_children_count > context_configuration.max_window_size)
-              && !is_replaying_physical_trace())
+              && ((current_trace == NULL) || !current_trace->is_fixed()))
         {
           // Since we're going to launch we're not technically an executing
           // child yet so we need to decrement the count here and then bump
@@ -10234,7 +10234,7 @@ namespace Legion {
       // we know those operations are not traceable so they had to be 
       // issued before we started capturing the trace
       if ((current_trace != NULL) && 
-          (future_coordinate < std::numeric_limits<uint64_t>::max()) &&
+          (future_coordinate != NO_FUTURE_COORDINATE) &&
           (current_trace_future_coordinate <= future_coordinate))
         current_trace->record_blocking_call();
     }
@@ -15768,8 +15768,8 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            std::numeric_limits<uint64_t>::max(), ApEvent::NO_AP_EVENT,
-            provenance, true/*reg now*/));
+                                 NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT,
+                                 provenance, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
       std::map<DomainPoint,Future> shard_futures;
@@ -18709,8 +18709,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              std::numeric_limits<uint64_t>::max(), ApEvent::NO_AP_EVENT,
-              provenance));
+              NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, provenance));
       }
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)

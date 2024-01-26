@@ -1878,6 +1878,8 @@ namespace Legion {
                                Provenance *provenance, 
                                bool silence_warnings, bool inlining_enabled);
     public:
+      static constexpr uint64_t NO_FUTURE_COORDINATE =
+        std::numeric_limits<uint64_t>::max();
       uint64_t get_next_future_coordinate(void);
     public:
       void clone_local_fields(

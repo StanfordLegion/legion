@@ -423,7 +423,7 @@ namespace Legion {
       ApEvent get_current_execution_fence_event(void) const
         { return execution_fence_event; }
     public:
-      PhysicalTemplate* start_new_template(TaskTreeCoordinates &&cordinates);
+      PhysicalTemplate* start_new_template(void);
       ApEvent record_replayable_capture(PhysicalTemplate *tpl,
                     std::set<RtEvent> &map_applied_conditions);
       void record_failed_capture(PhysicalTemplate *tpl);
@@ -773,8 +773,7 @@ namespace Legion {
         TransitiveReductionState *const state;
       };
     public:
-      PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
-                       TaskTreeCoordinates &&cordinates);
+      PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs) = delete;
       virtual ~PhysicalTemplate(void);
     public:
@@ -1085,7 +1084,6 @@ namespace Legion {
       inline ApEvent get_fence_completion(void) { return fence_completion; }
     public:
       PhysicalTrace * const trace;
-      const TaskTreeCoordinates coordinates;
     protected:
       std::atomic<bool> recording;
       // Count how many times we've been replayed so we know when we're going
@@ -1245,7 +1243,6 @@ namespace Legion {
       };
     public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
-                              TaskTreeCoordinates &&coordinates,
                               ReplicateContext *repl_ctx);
       ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs) = delete;
       virtual ~ShardedPhysicalTemplate(void);

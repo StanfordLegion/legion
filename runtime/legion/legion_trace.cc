@@ -1705,17 +1705,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(
-                                              TaskTreeCoordinates &&coordinates)
+    PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
     {
       // If we have a replicated context then we are making sharded templates
       if (repl_ctx != NULL)
-        current_template = new ShardedPhysicalTemplate(this, 
-            execution_fence_event, std::move(coordinates), repl_ctx);
+        current_template = 
+          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
       else
-        current_template = new PhysicalTemplate(this, execution_fence_event,
-                                                std::move(coordinates));
+        current_template = new PhysicalTemplate(this, execution_fence_event);
       return current_template;
     }
 
@@ -3976,10 +3974,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
-                                       TaskTreeCoordinates &&coords)
-      : trace(t), coordinates(std::move(coords)), total_replays(1),
-        replayable(false, "uninitialized"), fence_completion_id(0),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
+      : trace(t), total_replays(1), replayable(false, "uninitialized"),
+        fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
     //--------------------------------------------------------------------------
@@ -7441,8 +7438,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
-       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplicateContext *ctx)
-      : PhysicalTemplate(trace, fence_event, std::move(coords)), repl_ctx(ctx),
+                                    ApEvent fence_event, ReplicateContext *ctx)
+      : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),

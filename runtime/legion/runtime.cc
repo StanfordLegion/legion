@@ -465,8 +465,8 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-                      std::numeric_limits<uint64_t>::max(),
-                      ApEvent::NO_AP_EVENT, provenance, true/*reg now*/));
+              InnerContext::NO_FUTURE_COORDINATE, ApEvent::NO_AP_EVENT, 
+              provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -851,8 +851,8 @@ namespace Legion {
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
-        coordinate((o == NULL) ? 
-            ContextCoordinate(std::numeric_limits<uint64_t>::max()) :
+        coordinate((o == NULL) ?
+            ContextCoordinate(InnerContext::NO_FUTURE_COORDINATE) :
             ContextCoordinate(o->get_context()->get_next_future_coordinate())),
         provenance(prov), local_visible_memory(Memory::NO_MEMORY),
         metadata(NULL), metasize(0), future_size(0), upper_bound_size(SIZE_MAX),
@@ -2405,7 +2405,7 @@ namespace Legion {
       if (ctx != context)
         return false;
       // No coordinates if we are an application-generated future
-      if (coordinate.context_index == std::numeric_limits<uint64_t>::max())
+      if (coordinate.context_index == InnerContext::NO_FUTURE_COORDINATE)
         return false;
       coord = coordinate;
       return true;
@@ -4816,7 +4816,7 @@ namespace Legion {
       assert(implicit_context != NULL);
       assert(implicit_context == context);
 #endif
-      context->record_blocking_call(std::numeric_limits<uint64_t>::max());
+      context->record_blocking_call(InnerContext::NO_FUTURE_COORDINATE);
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
