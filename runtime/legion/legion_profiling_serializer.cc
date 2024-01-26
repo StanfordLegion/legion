@@ -1141,7 +1141,7 @@ namespace Legion {
 #else
       unsigned uuid_size = 16;
       lp_fwrite(f, (char*)&(uuid_size), sizeof(uuid_size));
-      char uuid_str[uuid_size] = {0};
+      char uuid_str[16] = {0};
       for (size_t i=0; i<uuid_size; i++) {
         lp_fwrite(f, (char*)&(uuid_str[i]),
             sizeof(char));
