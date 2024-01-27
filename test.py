@@ -927,6 +927,27 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
 
+def build_make(root_dir, tmp_dir, env, thread_count, test_legion_cxx,
+               test_perf, test_external1, test_external2, test_private):
+    build_dir = os.path.join(tmp_dir, 'build')
+    install_dir = os.path.join(tmp_dir, 'install')
+    os.mkdir(build_dir)
+    os.mkdir(install_dir)
+    makefile = os.path.join(build_dir, 'Makefile')
+    cmd(['cp', os.path.join(root_dir, 'apps', 'Makefile.template'), makefile])
+    # We'll just always for shared objects here for performance
+    env['SHARED_OBJECTS'] = '1'
+    env['PREFIX']=install_dir
+    cmd([make_exe, '-C', build_dir, 'install', '-j', str(thread_count)], env=env)
+    # Setup the LEGION_DIR for the Makefile to use that instead of building everything from source
+    env['LG_INSTALL_DIR'] = install_dir
+    if platform.system() == 'Darwin':
+        ld_path = env.get('DYLD_LIBRARY_PATH', '')
+        env['DYLD_LIBRARY_PATH'] = ld_path+':'+str(os.path.join(install_dir,'lib'))
+    else:
+        ld_path = env.get('LD_LIBRARY_PATH', '')
+        env['LD_LIBRARY_PATH'] = ld_path+':'+str(os.path.join(install_dir,'lib'))
+
 def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
     if envname is not None:
@@ -1219,6 +1240,11 @@ def run_tests(test_modules=None,
                     root_dir, env, thread_count, test_legion_cxx, test_perf,
                     # These configurations also need to be cleaned first.
                     test_external1, test_external2, test_private)
+                # Build just one copy of the runtime unless we're running regent tests
+                if not test_regent:
+                    build_make(
+                        root_dir, tmp_dir, env, thread_count, test_legion_cxx,
+                        test_perf, test_external1, test_external2, test_private)
                 bin_dir = None
                 python_dir = None
                 if use_python:

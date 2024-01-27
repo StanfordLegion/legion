@@ -85,18 +85,22 @@ else
 endif
 
 ifndef LG_RT_DIR
-$(error LG_RT_DIR variable is not defined, aborting build)
+ifndef LG_INSTALL_DIR
+$(error Neither LG_RT_DIR variable nor LG_INSTALL_DIR is not defined, at least one must be set, aborting build)
+endif
 endif
 
 # generate libraries for Legion and Realm
 SHARED_OBJECTS ?= 0
+ifdef LG_INSTALL_DIR
+SLIB_LEGION	:=
+SLIB_REALM	:=
+OUTFILE		?=
+else
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 SLIB_LEGION     := liblegion.a
 SLIB_REALM      := librealm.a
-OUTFILE		?= liblegion.a
-ifeq ($(strip $(OUTFILE)),)
-  OUTFILE	:= liblegion.a
-endif
+OUTFILE		?=
 else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
@@ -105,17 +109,11 @@ HIPCC_FLAGS     += -fPIC
 ifeq ($(shell uname -s),Darwin)
 SLIB_LEGION     := liblegion.dylib
 SLIB_REALM      := librealm.dylib
-OUTFILE		?= liblegion.dylib
-ifeq ($(strip $(OUTFILE)),)
-  OUTFILE	:= liblegion.dylib
-endif
+OUTFILE		?=
 else
 SLIB_LEGION     := liblegion.so
 SLIB_REALM      := librealm.so
-OUTFILE		?= liblegion.so
-ifeq ($(strip $(OUTFILE)),)
-  OUTFILE	:= liblegion.so
-endif
+OUTFILE		?=
 endif
 # shared libraries can link against other shared libraries
 SLIB_LEGION_DEPS = -L. -lrealm
@@ -127,7 +125,12 @@ else
 SO_FLAGS += -shared
 endif
 endif
+endif
+ifdef LG_INSTALL_DIR
+LEGION_LIBS     := -L$(LG_INSTALL_DIR)/lib -llegion -lrealm
+else
 LEGION_LIBS     := -L. -llegion -lrealm
+endif
 
 # if requested, realm hides internal classes/methods from shared library exports
 REALM_LIMIT_SYMBOL_VISIBILITY ?= 1
@@ -137,7 +140,11 @@ ifeq ($(strip $(REALM_LIMIT_SYMBOL_VISIBILITY)),1)
 endif
 
 # generate header files for public-facing defines
+ifdef LG_INSTALL_DIR
+DEFINE_HEADERS_DIR := $(LG_INSTALL_DIR)/include
+else
 DEFINE_HEADERS_DIR ?= .
+endif
 LEGION_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/legion_defines.h
 REALM_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/realm_defines.h
 
@@ -259,7 +266,11 @@ ifneq (${MARCH},)
   endif
 endif
 
+ifdef LG_INSTALL_DIR
+INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_INSTALL_DIR)/include -I$(LG_INSTALL_DIR)/include/mappers
+else
 INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
+endif
 # support libraries are OS specific unfortunately
 ifeq ($(shell uname -s),Linux)
 LEGION_LD_FLAGS	+= -lrt -lpthread -latomic
@@ -1100,8 +1111,10 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion_agency.h \
 		   legion/legion_agency.inl \
 		   legion/accessor.h \
+		   legion/legion_allocation.h \
 		   legion/arrays.h \
 		   legion/legion_c.h \
+		   legion/legion_c_util.h \
 		   legion/legion_config.h \
 		   legion/legion_constraint.h \
 		   legion/legion_domain.h \
@@ -1114,6 +1127,7 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion_stl.inl \
 		   legion/legion_template_help.h \
 		   legion/legion_types.h \
+		   legion/legion_utilities.h \
 		   mappers/debug_mapper.h \
 		   mappers/default_mapper.h \
 		   mappers/default_mapper.inl \
@@ -1127,6 +1141,8 @@ INSTALL_HEADERS += legion.h \
 		   mappers/logging_wrapper.h \
 		   realm/realm_config.h \
 		   realm/realm_c.h \
+		   realm/id.h \
+		   realm/id.inl \
 		   realm/profiling.h \
 		   realm/profiling.inl \
 		   realm/redop.h \
@@ -1137,6 +1153,12 @@ INSTALL_HEADERS += legion.h \
 		   realm/processor.h \
 		   realm/processor.inl \
 		   realm/memory.h \
+		   realm/mutex.h \
+		   realm/mutex.inl \
+		   realm/network.h \
+		   realm/network.inl \
+		   realm/nodeset.h \
+		   realm/nodeset.inl \
 		   realm/instance.h \
 		   realm/instance.inl \
 		   realm/inst_layout.h \
@@ -1151,6 +1173,8 @@ INSTALL_HEADERS += legion.h \
        realm/module_config.inl \
 		   realm/indexspace.h \
 		   realm/indexspace.inl \
+		   realm/cmdline.h \
+		   realm/cmdline.inl \
 		   realm/codedesc.h \
 		   realm/codedesc.inl \
 		   realm/compiler_support.h \
@@ -1194,7 +1218,8 @@ INSTALL_HEADERS += mathtypes/complex.h
 endif
 ifeq ($(strip $(USE_PYTHON)),1)
 INSTALL_HEADERS += realm/python/python_source.h \
-		   realm/python/python_source.inl
+		   realm/python/python_source.inl \
+		   realm/python/python_module.h
 endif
 ifeq ($(strip $(USE_LLVM)),1)
 INSTALL_HEADERS += realm/llvmjit/llvmjit.h \
@@ -1277,19 +1302,19 @@ ifndef NO_BUILD_RULES
 # Provide an all unless the user asks us not to
 ifndef NO_BUILD_ALL
 .PHONY: all
-all: $(OUTFILE) $(SLIB_REALM_CUHOOK)
+all: $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_REALM_CUHOOK)
 endif
 # Provide support for installing legion with the make build system
 .PHONY: install COPY_FILES_AFTER_BUILD
 ifdef PREFIX
 INSTALL_BIN_FILES += $(OUTFILE)
-INSTALL_INC_FILES += legion_defines.h realm_defines.h
+INSTALL_INC_FILES += $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION)
 TARGET_HEADERS := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_HEADERS))
 TARGET_BIN_FILES := $(addprefix $(strip $(PREFIX))/bin/,$(INSTALL_BIN_FILES))
 TARGET_INC_FILES := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_INC_FILES))
 TARGET_LIB_FILES := $(addprefix $(strip $(PREFIX))/lib/,$(INSTALL_LIB_FILES))
-install: $(OUTFILE)
+install: $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM)
 	$(MAKE) COPY_FILES_AFTER_BUILD
 COPY_FILES_AFTER_BUILD: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
 $(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/%
