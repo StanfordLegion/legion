@@ -126,10 +126,11 @@ SO_FLAGS += -shared
 endif
 endif
 endif
+LEGION_LIBS	:= -llegion -lrealm
 ifdef LG_INSTALL_DIR
-LEGION_LIBS     := -L$(LG_INSTALL_DIR)/lib -llegion -lrealm
+LD_FLAGS	+= -L$(LG_INSTALL_DIR)/lib
 else
-LEGION_LIBS     := -L. -llegion -lrealm
+LD_FLAGS	+= -L. 
 endif
 
 # if requested, realm hides internal classes/methods from shared library exports
@@ -1170,7 +1171,7 @@ INSTALL_HEADERS += legion.h \
 		   realm/runtime.h \
 		   realm/module.h \
 		   realm/module_config.h \
-       realm/module_config.inl \
+		   realm/module_config.inl \
 		   realm/indexspace.h \
 		   realm/indexspace.inl \
 		   realm/cmdline.h \
@@ -1196,11 +1197,19 @@ INSTALL_HEADERS += legion.h \
 		   realm/dynamic_templates.inl \
 		   realm/serialize.h \
 		   realm/serialize.inl \
+		   realm/threads.h \
+		   realm/threads.inl \
 		   realm/timers.h \
 		   realm/timers.inl \
 		   realm/utils.h \
 		   realm/utils.inl \
-                   realm/nvtx.h
+                   realm/nvtx.h \
+		   realm/deppart/inst_helper.h \
+		   realm/cuda/cuda_module.h \
+		   realm/cuda/cuda_module.inl \
+		   realm/hip/hip_module.h \
+		   realm/hip/hip_module.inl \
+		   realm/numa/numa_module.h
 
 ifeq ($(strip $(USE_CUDA)),1)
 INSTALL_HEADERS += realm/cuda/cuda_redop.h \
@@ -1308,25 +1317,30 @@ endif
 .PHONY: install COPY_FILES_AFTER_BUILD
 ifdef PREFIX
 INSTALL_BIN_FILES += $(OUTFILE)
-INSTALL_INC_FILES += $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION)
+INSTALL_INC_FILES += legion_defines.h realm_defines.h
+INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION) $(SLIB_REALM_CUHOOK)
+INSTALL_SHARE_FILES := runtime.mk
 TARGET_HEADERS := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_HEADERS))
 TARGET_BIN_FILES := $(addprefix $(strip $(PREFIX))/bin/,$(INSTALL_BIN_FILES))
 TARGET_INC_FILES := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_INC_FILES))
 TARGET_LIB_FILES := $(addprefix $(strip $(PREFIX))/lib/,$(INSTALL_LIB_FILES))
+TARGET_SHARE_FILES := $(addprefix $(strip $(PREFIX))/share/legion/,$(INSTALL_SHARE_FILES))
 install: $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM)
 	$(MAKE) COPY_FILES_AFTER_BUILD
-COPY_FILES_AFTER_BUILD: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
+COPY_FILES_AFTER_BUILD: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES) $(TARGET_SHARE_FILES)
 $(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/%
 	mkdir -p $(dir $@)
 	cp $< $@
 $(TARGET_BIN_FILES) : $(strip $(PREFIX))/bin/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : %
+$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : $(DEFINE_HEADERS_DIR)/%
 	mkdir -p $(dir $@)
 	cp $< $@
 $(TARGET_LIB_FILES) : $(strip $(PREFIX))/lib/% : %
+	mkdir -p $(dir $@)
+	cp $< $@
+$(TARGET_SHARE_FILES) : $(strip $(PREFIX))/share/legion/% : $(LG_RT_DIR)/%
 	mkdir -p $(dir $@)
 	cp $< $@
 else
@@ -1505,6 +1519,11 @@ endif # NO_BUILD_RULES
 
 # you get these build rules even with NO_BUILD_RULES=1
 
+ifdef LG_INSTALL_DIR
+# If we have an install directory the defines are already set and can't be changed
+LEGION_DEFINES_HEADER := $(LG_INSTALL_DIR)/include/legion_defines.h
+REALM_DEFINES_HEADER := $(LG_INSTALL_DIR)/include/realm_defines.h
+else
 # by default, we'll always check to see if the defines headers need to be
 #  overwritten due to changes in compile settings (from makefile or command line)
 # set CHECK_DEFINES_HEADER_CONTENT=0 if you want to only rebuild when makefiles
@@ -1521,6 +1540,7 @@ $(LEGION_DEFINES_HEADER) : $(DEFINES_HEADERS_DEPENDENCY)
 
 $(REALM_DEFINES_HEADER) : $(DEFINES_HEADERS_DEPENDENCY)
 	$(PYTHON) $(LG_RT_DIR)/../tools/generate_defines.py $(REALM_CC_FLAGS) $(GENERATE_DEFINES_FLAGS) -i $(LG_RT_DIR)/../cmake/realm_defines.h.in -o $@
+endif
 
 # build realm.fatbin
 ifeq ($(strip $(USE_CUDA)),1)
