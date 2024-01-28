@@ -489,7 +489,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
     run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit) 
 
-def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda):
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
@@ -554,6 +554,7 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         ('LEGION_DIR', root_dir),
         ('SOLEIL_DIR', soleil_dir),
         ('CC', 'gcc'),
+        ('USE_CUDA', '1' if use_cuda else '0'),
     ])
     cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
     # FIXME: Actually run it
@@ -944,6 +945,9 @@ def build_make(root_dir, tmp_dir, env, thread_count):
     # Setup the LEGION_DIR for the Makefile to use that instead of building everything from source
     env['LG_INSTALL_DIR'] = install_dir
     if platform.system() == 'Darwin':
+        # Be aware this doesn't really work on subprocessses on MacOS systems that have their system
+        # integrity protections enabled which will prevent this from having any effect
+        # https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
         ld_path = env.get('DYLD_LIBRARY_PATH', '')
         env['DYLD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
     else:
@@ -1288,7 +1292,7 @@ def run_tests(test_modules=None,
             with Stage('external2'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda)
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
