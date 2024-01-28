@@ -1026,17 +1026,14 @@ namespace Legion {
            bool check_extent, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      const RtEvent ready_event = subscribe();
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
+      // Wait to make sure that the future is complete first
+      wait(silence_warnings, warning_string);
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
            inst_ready);
-      // Wait to make sure that the future is complete first
-      wait(silence_warnings, warning_string);
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -1104,17 +1101,14 @@ namespace Legion {
         else
           memory = runtime->runtime_system_memory;
       }
-      const RtEvent ready_event = subscribe();
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
+      // Wait to make sure that the future is complete first
+      wait(silence_warnings, warning_string);
       ApEvent inst_ready;
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
            inst_ready);
-      // Wait to make sure that the future is complete first
-      wait(silence_warnings, warning_string); 
       if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
