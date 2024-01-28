@@ -8743,8 +8743,12 @@ namespace Legion {
       fence_kind = MAPPING_FENCE;
       context_index = invalidator->get_context_index();
       if (runtime->legion_spy_enabled)
+      {
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
             unique_op_id, false/*execution fence*/);
+        LegionSpy::log_child_operation_index(parent_ctx->get_unique_id(),
+            context_index, unique_op_id);
+      }
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
