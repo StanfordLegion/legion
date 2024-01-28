@@ -96,6 +96,11 @@ ifdef LG_INSTALL_DIR
 SLIB_LEGION	:=
 SLIB_REALM	:=
 OUTFILE		?=
+ifeq ($(strip $(DARWIN)),1)
+LD_FLAGS	+= -Wl,-rpath,$(LG_INSTALL_DIR)/lib
+else
+LD_FLAGS	+= -Wl,-rpath=$(LG_INSTALL_DIR)/lib
+endif
 else
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 SLIB_LEGION     := liblegion.a
@@ -121,6 +126,10 @@ SLIB_REALM_DEPS  =
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 LD_FLAGS += -Wl,-all_load
+ifdef PREFIX
+SLIB_LEGION_DEPS += -install_name $(PREFIX)/lib/liblegion.dylib
+SLIB_REALM_DEPS	+= -install_name $(PREFIX)/lib/librealm.dylib
+endif
 else
 SO_FLAGS += -shared
 endif

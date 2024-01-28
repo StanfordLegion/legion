@@ -149,27 +149,6 @@ TEST_OBJS := $(TESTS:%=%.o)
 
 run_all : $(TESTS:%=run_%) run_machine_config_args
 
-ifdef LG_INSTALL_DIR
-# You'll notice there is a very strange copy here of the Realm library 
-# to the local directory. In general this is not needed, but MacOS is
-# stupid and won't forward the DYLD_LIBRARY_PATH through the subprocess
-# invocation here when system integrity protections are in place, but
-# will happily let us use the dynamic library if it is in the local
-# directory so we do that to work around the issue. It's stupid but 
-# it works and causes minimal overhead, see this for more details:
-# https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
-run_% : %
-	@# this echos exactly once, even if -s was specified
-	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
-	@cp -n $(REALM_LIB) . || true
-	@$(LAUNCHER) ./$* $(TESTARGS_$*)
-
-run_machine_config_args : machine_config
-	@# this echos exactly once, even if -s was specified
-	@echo $(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
-	@cp -n $(REALM_LIB) . || true
-	@$(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
-else
 run_% : %
 	@# this echos exactly once, even if -s was specified
 	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
@@ -179,7 +158,6 @@ run_machine_config_args : machine_config
 	@# this echos exactly once, even if -s was specified
 	@echo $(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
 	@$(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
-endif
 
 build : $(TESTS)
 
