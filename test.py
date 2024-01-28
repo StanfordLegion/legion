@@ -930,7 +930,7 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
 
-def build_make(root_dir, tmp_dir, env, thread_count):
+def build_make(root_dir, tmp_dir, env, thread_count, networks):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -939,6 +939,9 @@ def build_make(root_dir, tmp_dir, env, thread_count):
     cmd(['cp', os.path.join(root_dir, 'apps', 'Makefile.template'), makefile])
     # We'll just always for shared objects here for performance
     env['SHARED_OBJECTS'] = '1'
+    # If we have networks always turn on the use of the network
+    if networks:
+        env['USE_NETWORK'] = '1'
     local_env = dict(list(env.items()) + [
         ('PREFIX', install_dir),
     ])
@@ -1249,7 +1252,7 @@ def run_tests(test_modules=None,
                     test_external1, test_external2, test_private)
                 # Build just one copy of the runtime unless we're running regent tests
                 if not test_regent and not test_external2:
-                    build_make(root_dir, tmp_dir, env, thread_count)
+                    build_make(root_dir, tmp_dir, env, thread_count, networks)
                 bin_dir = None
                 python_dir = None
                 if use_python:
