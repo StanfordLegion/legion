@@ -131,7 +131,11 @@ ifdef LG_INSTALL_DIR
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.a
 else
+ifeq ($(shell uname -s),Darwin)
+REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.dylib
+else
 REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.so
+endif
 endif
 else
 REALM_LIB := librealm.a
