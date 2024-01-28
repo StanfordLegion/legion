@@ -489,7 +489,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
     run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit) 
 
-def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda):
+def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
@@ -554,8 +554,9 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         ('LEGION_DIR', root_dir),
         ('SOLEIL_DIR', soleil_dir),
         ('CC', 'gcc'),
-        ('USE_CUDA', '1' if use_cuda else '0'),
     ])
+    # Since we're not actually running it disable CUDA
+    soleil_env['USE_CUDA'] = '0'
     cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
     # FIXME: Actually run it
 
@@ -1292,7 +1293,7 @@ def run_tests(test_modules=None,
             with Stage('external2'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda)
+                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
