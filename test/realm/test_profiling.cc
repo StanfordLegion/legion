@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
+#include <chrono>
 
 #include <time.h>
 
@@ -451,6 +452,13 @@ int main(int argc, char **argv)
 
   rt.init(&argc, &argv);
 
+  // get reference times using both C++'s steady_clock and realm timers - we'll
+  //  check their correlation at the end
+  std::chrono::time_point<std::chrono::steady_clock> t1_sys =
+      std::chrono::steady_clock::now();
+  long long t1_realm = Clock::current_time_in_nanoseconds();
+  long long init_err = Clock::get_calibration_error();
+
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(CHILD_TASK, child_task);
   rt.register_task(RESPONSE_TASK, response_task);
@@ -487,6 +495,22 @@ int main(int argc, char **argv)
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
+
+  std::cout << "init calibration error = " << init_err << "\n";
+
+  // get updated timer values and check for correlation
+  std::chrono::time_point<std::chrono::steady_clock> t2_sys =
+      std::chrono::steady_clock::now();
+  long long t2_realm = Clock::current_time_in_nanoseconds();
+
+  long long td_sys = std::chrono::nanoseconds(t2_sys - t1_sys).count();
+  long long td_realm = t2_realm - t1_realm;
+
+  // ask realm for its calibration error and correct accordingly
+  long long cal_error = Clock::get_calibration_error();
+  long long td_realm_corr = td_realm - (cal_error - init_err);
+  std::cout << "sys=" << td_sys << " realm=" << td_realm << " corr=" << td_realm_corr
+            << "\n";
 
 #ifdef TRACK_MACHINE_UPDATES
   // the machine is gone at this point, so no need to remove ourselves explicitly

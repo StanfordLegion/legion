@@ -8,6 +8,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
+#include <iomanip>
+
+#ifdef REALM_USE_CUDA
+#include <cuda.h>
+#endif
 
 #ifdef REALM_ON_WINDOWS
 #include <malloc.h>
@@ -62,6 +67,37 @@ namespace TestConfig {
   int num_python_cpus = 1;
   size_t py_stack_size = 4 * 1024 * 1024;
 };
+
+#ifdef REALM_USE_CUDA
+static std::string convert_uuid(char *cu_uuid)
+{
+  stringbuilder ss;
+  ss << "GPU-";
+  for(size_t i = 0; i < Cuda::UUID_SIZE; i++) {
+    switch(i) {
+    case 4:
+    case 6:
+    case 8:
+    case 10:
+      ss << '-';
+    }
+    ss << std::hex << std::setfill('0') << std::setw(2) << (0xFF & (int)cu_uuid[i]);
+  }
+  return ss;
+}
+
+static bool compare_uuid(char *expected, char *actual)
+{
+  for(size_t i = 0; i < Cuda::UUID_SIZE; i++) {
+    if(expected[i] != actual[i]) {
+      log_app.error("wrong at %zu", i);
+      assert(0);
+      return false;
+    }
+  }
+  return true;
+}
+#endif
 
 void top_level_task(const void *args, size_t arglen, 
 		                const void *userdata, size_t userlen, Processor p)
@@ -281,32 +317,51 @@ void top_level_task(const void *args, size_t arglen,
     int num_nodes = static_cast<int>(machine.get_address_space_count());
     // iterate all processors within the machine.
     for(Machine::ProcessorQuery::iterator it = Machine::ProcessorQuery(machine).begin(); it; ++it) {
-      Processor p = *it;
-      Processor::Kind kind = p.kind();
+      Processor proc = *it;
+      Processor::Kind kind = proc.kind();
       switch (kind)
       {
         case Processor::LOC_PROC:
         {
-          log_app.print("Rank %u, Processor ID " IDFMT " is CPU.", p.address_space(), p.id);
+          log_app.print("Rank %u, Processor ID " IDFMT " is CPU.", p.address_space(),
+                        proc.id);
           num_cpu_procs ++;
           break;
         }
         case Processor::UTIL_PROC:
         {
-          log_app.print("Rank %u, Processor ID " IDFMT " is utility.", p.address_space(), p.id);
+          log_app.print("Rank %u, Processor ID " IDFMT " is utility.", p.address_space(),
+                        proc.id);
           num_util_procs ++;
           break;
         }
         case Processor::IO_PROC:
         {
-          log_app.print("Rank %u, Processor ID " IDFMT " is I/O Proc.", p.address_space(), p.id);
+          log_app.print("Rank %u, Processor ID " IDFMT " is I/O Proc.", p.address_space(),
+                        proc.id);
           num_io_procs ++;
           break;
         }
 #if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
         case Processor::TOC_PROC:
         {
-          log_app.print("Rank %u, Processor ID " IDFMT " is GPU.", p.address_space(), p.id);
+          log_app.print("Rank %u, Processor ID " IDFMT " is GPU.", p.address_space(),
+                        proc.id);
+#ifdef REALM_USE_CUDA
+          Cuda::Uuid cuda_uuid;
+          ret_value = Cuda::get_cuda_device_uuid(proc, &cuda_uuid);
+          if(ret_value) {
+            int device_id;
+            assert(Cuda::get_cuda_device_id(proc, &device_id));
+            CUuuid expected_uuid;
+            cuDeviceGetUuid(&expected_uuid, device_id);
+            assert(
+                compare_uuid(reinterpret_cast<char *>(&expected_uuid), &(cuda_uuid[0])));
+            std::string uuid = convert_uuid(&(cuda_uuid[0]));
+            log_app.print("GPU Processor %llx, devide_id %d, uuid:%s", proc.id, device_id,
+                          uuid.c_str());
+          }
+#endif
           num_gpus ++;
           break;
         }
@@ -314,7 +369,8 @@ void top_level_task(const void *args, size_t arglen,
 #ifdef REALM_USE_OPENMP
         case Processor::OMP_PROC:
         {
-          log_app.print("Rank %u, Processor ID " IDFMT " is OMP.", p.address_space(), p.id);
+          log_app.print("Rank %u, Processor ID " IDFMT " is OMP.", p.address_space(),
+                        proc.id);
           num_openmp_cpus ++;
           break;
         }
@@ -322,7 +378,8 @@ void top_level_task(const void *args, size_t arglen,
 #ifdef REALM_USE_PYTHON
         case Processor::PY_PROC:
         {
-          log_app.print("Rank %u, Processor ID " IDFMT " is Python.", p.address_space(), p.id);
+          log_app.print("Rank %u, Processor ID " IDFMT " is Python.", p.address_space(),
+                        proc.id);
           num_python_cpus ++;
           break;
         }
@@ -413,13 +470,14 @@ void top_level_task(const void *args, size_t arglen,
     assert(sysmem_size == TestConfig::sysmem_size * num_nodes);
     assert(regmem_size == TestConfig::regmem_size * num_nodes);
 #if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
-    assert(fb_mem_size == TestConfig::fb_mem_size * num_nodes);
+    assert(fb_mem_size == TestConfig::fb_mem_size * TestConfig::num_gpus * num_nodes);
     assert(zc_mem_size == TestConfig::zc_mem_size * num_nodes);
 #ifdef REALM_USE_CUDA
     // uvm is only available in cuda
     assert(uvm_mem_size == TestConfig::uvm_mem_size * num_nodes);
 #endif
-    assert(dynfb_max_size == TestConfig::dynfb_max_size * num_nodes);
+    assert(dynfb_max_size ==
+           TestConfig::dynfb_max_size * TestConfig::num_gpus * num_nodes);
 #endif
   }
 }
@@ -594,6 +652,20 @@ int main(int argc, char **argv)
   rt.start();
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
+
+  Machine machine = Machine::get_machine();
+  // iterate all processors within the machine to print the process info.
+  for(Machine::ProcessorQuery::iterator it = Machine::ProcessorQuery(machine).begin(); it;
+      ++it) {
+    Processor proc = *it;
+    Machine::ProcessInfo process_info;
+    bool ret_value = machine.get_process_info(proc, &process_info);
+    if(ret_value) {
+      log_app.print() << "Process " << proc << ", process_id:" << process_info.processid
+                      << ", host_id:" << process_info.hostid
+                      << ", hostname:" << process_info.hostname;
+    }
+  }
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())

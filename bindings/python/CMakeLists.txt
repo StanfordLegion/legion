@@ -72,11 +72,15 @@ if (NOT DEFINED Legion_PYTHON_EXTRA_INSTALL_ARGS)
   set(Legion_PYTHON_EXTRA_INSTALL_ARGS "")
 endif()
 
-# Note: CMake 3.19 required for COMMAND_ERROR_IS_FATAL argument to execute_process()
-cmake_minimum_required(VERSION 3.19)
+# Note: COMMAND_ERROR_IS_FATAL requires CMake 3.19
+# Note: cmake_path requires CMake 3.20
+cmake_minimum_required(VERSION 3.20)
+
+cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH Legion_ROOT_PROJECT_DIR)
+cmake_path(GET Legion_ROOT_PROJECT_DIR PARENT_PATH Legion_ROOT_PROJECT_DIR)
 
 # Use setup.py script to install the Python bindings library
-install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E env CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR} CMAKE_BUILD_DIR=${Legion_BINARY_DIR}/runtime CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} ${Python3_EXECUTABLE} -m pip install --prefix \"\${CMAKE_INSTALL_PREFIX}\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT COMMAND_ERROR_IS_FATAL ANY)")
+install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E env CMAKE_SOURCE_DIR=${Legion_ROOT_PROJECT_DIR} CMAKE_BUILD_DIR=${Legion_BINARY_DIR}/runtime CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} ${Python3_EXECUTABLE} -m pip install --prefix \"\${CMAKE_INSTALL_PREFIX}\" --ignore-installed ${Legion_PYTHON_EXTRA_INSTALL_ARGS} . WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMMAND_ECHO STDOUT COMMAND_ERROR_IS_FATAL ANY)")
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/examples
