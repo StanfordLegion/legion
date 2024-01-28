@@ -197,7 +197,8 @@ endif
 # Backwards-compatibility for GASNet builds
 # GASNET_ROOT is a synonym for GASNET
 ifdef GASNET_ROOT
-  GASNET ?= $(GASNET_ROOT)
+  GASNET := $(GASNET_ROOT)
+  USE_NETWORK := 1
 endif
 # USE_GASNET=1 will set REALM_NETWORKS=gasnet1
 USE_GASNET ?= 0
@@ -277,7 +278,7 @@ ifneq (${MARCH},)
 endif
 
 ifdef LG_INSTALL_DIR
-INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_INSTALL_DIR)/include -I$(LG_INSTALL_DIR)/include/mappers
+INC_FLAGS	+= -I$(LG_INSTALL_DIR)/include -I$(LG_INSTALL_DIR)/include/mappers
 else
 INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
 endif
@@ -793,7 +794,6 @@ ifeq ($(strip $(USE_MPI)),1)
   endif
 endif
 
-
 # libz
 USE_ZLIB ?= 1
 ZLIB_LIBNAME ?= z
@@ -830,8 +830,8 @@ ifeq ($(strip $(REALM_BACKTRACE_USE_LIBDW)),1)
   REALM_CC_FLAGS += -DREALM_USE_LIBDW
   INC_FLAGS += -I$(LIBDW_PATH)/include
   LEGION_LD_FLAGS += -L$(LIBDW_LIBRARY_PATH) -ldw
+  SLIB_REALM_DEPS += -L$(LIBDW_LIBRARY_PATH) -ldw
 endif
-
 
 ifeq ($(strip $(DEBUG)),1)
   ifeq ($(strip $(DARWIN)),1)
@@ -1109,9 +1109,23 @@ LEGION_HIP_SRC   += $(LG_RT_DIR)/legion/legion_redop.cu
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
+USE_FORTRAN ?= 0
+LEGION_USE_FORTRAN ?= 0
+ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
+USE_FORTRAN := 1
+endif
+ifeq ($(strip $(USE_FORTRAN)),1)
+# For backwards compatibility
+GEN_FORTRAN_SRC ?=
+FORT_SRC	+= $(GEN_FORTRAN_SRC)
+ifndef LG_INSTALL_DIR
 LEGION_FORT_SRC  += $(LG_RT_DIR)/legion/legion_f_types.f90 \
 		    $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
 		    $(LG_RT_DIR)/legion/legion_f.f90
+endif
+FC_FLAGS 	+= -cpp
+LD_FLAGS 	+= -lgfortran
+endif
 
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
@@ -1247,6 +1261,11 @@ ifeq ($(strip $(USE_HDF)),1)
 INSTALL_HEADERS += realm/hdf5/hdf5_access.h \
 		   realm/hdf5/hdf5_access.inl
 endif
+ifeq ($(strip $(USE_FORTRAN)),1)
+INSTALL_HEADERS += legion_fortran_types.mod \
+		   legion_fortran_c_interface.mod \
+		   legion_fortran.mod
+endif
 
 # General shell commands
 SHELL	:= /bin/sh
@@ -1281,8 +1300,10 @@ LEGION_INST_OBJS := $(call f_expand1,f_replace1,$(LEGION_INST_SRC)) \
 APP_OBJS	:= $(CC_SRC:.c=.c.o)
 APP_OBJS	+= $(CXX_SRC:.cc=.cc.o)
 APP_OBJS	+= $(ASM_SRC:.S=.S.o)
+APP_OBJS	+= $(FORT_SRC:.f90=.f90.o)
 REALM_OBJS	:= $(REALM_SRC:.cc=.cc.o)
 LEGION_OBJS	:= $(LEGION_SRC:.cc=.cc.o)
+LEGION_OBJS 	+= $(LEGION_FORT_SRC:.f90=.f90.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
 # Only compile the gpu objects if we need to
 ifeq ($(strip $(USE_CUDA)),1)
@@ -1295,24 +1316,6 @@ endif
 ifeq ($(strip $(USE_HIP)),1)
 APP_OBJS	+= $(HIP_SRC:.cu=.cu.o)
 LEGION_OBJS     += $(LEGION_HIP_SRC:.cu=.cu.o)
-endif
-
-USE_FORTRAN ?= 0
-LEGION_USE_FORTRAN ?= 0
-# For backwards compatibility
-GEN_FORTRAN_SRC ?=
-FORT_SRC	+= $(GEN_FORTRAN_SRC)
-ifeq ($(strip $(USE_FORTRAN)),1)
-LEGION_OBJS 	+= $(LEGION_FORT_SRC:.f90=.f90.o)
-APP_OBJS 	+= $(FORT_SRC:.f90=.f90.o)
-FC_FLAGS 	+= -cpp
-LD_FLAGS 	+= -lgfortran
-else ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
-USE_FORTRAN	:= 1
-LEGION_OBJS 	+= $(LEGION_FORT_SRC:.f90=.f90.o)
-APP_OBJS	+= $(FORT_SRC:.f90=.f90.o)
-FC_FLAGS 	+= -cpp
-LD_FLAGS 	+= -lgfortran
 endif
 
 # Provide build rules unless the user asks us not to
@@ -1500,6 +1503,7 @@ endif
 
 # Special rules for building the legion fortran files because the fortran compiler is dumb
 ifeq ($(strip $(USE_FORTRAN)),1)
+ifndef LG_INSTALL_DIR
 $(LG_RT_DIR)/legion/legion_f_types.f90.o : $(LG_RT_DIR)/legion/legion_f_types.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 
@@ -1508,6 +1512,7 @@ $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o : $(LG_RT_DIR)/legion/legion_f_c_
 
 $(LG_RT_DIR)/legion/legion_f.f90.o : $(LG_RT_DIR)/legion/legion_f.f90 $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+endif
 
 $(filter %.f90.o,$(APP_OBJS)) : %.f90.o : %.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(filter %.f90.o,$(LEGION_OBJS))
 	$(FC) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
