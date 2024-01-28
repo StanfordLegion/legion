@@ -5192,6 +5192,7 @@ namespace Legion {
         ReplIndexTask *task = static_cast<ReplIndexTask*>(index_tasks[idx]);
         task->set_sharding_function(sharding_functor, sharding_function);
       }
+      MustEpochOp::trigger_prepipeline_stage();
     }
 
     //--------------------------------------------------------------------------
