@@ -161,11 +161,11 @@ namespace Legion {
                           const ReplicateTaskInput&   input,
                                 ReplicateTaskOutput&  output) override;
       LEGION_DEPRECATED("map_replicate_task is now deprecated, please switch to replicate_task")
-      void map_replicate_task(const MapperContext      ctx,
+      virtual void map_replicate_task(const MapperContext      ctx,
                               const Task&              task,
                               const MapTaskInput&      input,
                               const MapTaskOutput&     default_output,
-                              MapReplicateTaskOutput&  output) override;
+                              MapReplicateTaskOutput&  output);
       void select_task_variant(const MapperContext          ctx,
                                const Task&                  task,
                                const SelectVariantInput&    input,
@@ -216,10 +216,6 @@ namespace Legion {
                          const SelectShardingFunctorInput&  input,
                                SelectShardingFunctorOutput& output) override;
     public: // Close mapping calls
-      void map_close(const MapperContext       ctx,
-                     const Close&              close,
-                     const MapCloseInput&      input,
-                           MapCloseOutput&     output) override;
       void select_close_sources(const MapperContext         ctx,
                                 const Close&                close,
                                 const SelectCloseSrcInput&  input,

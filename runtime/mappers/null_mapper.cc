@@ -279,16 +279,6 @@ namespace Legion {
     {
       report_unimplemented(__func__, __LINE__);
     }
-    
-    //--------------------------------------------------------------------------
-    void NullMapper::map_close(const MapperContext       ctx,
-                               const Close&              close,
-                               const MapCloseInput&      input,
-                                     MapCloseOutput&     output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__); 
-    }
 
     //--------------------------------------------------------------------------
     void NullMapper::select_close_sources(const MapperContext        ctx,

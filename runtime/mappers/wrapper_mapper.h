@@ -171,10 +171,6 @@ namespace Legion {
 	    const Copy&              copy,
 	    const CopyProfilingInfo& input) override;
       public: // Close mapping calls
-	void map_close(const MapperContext       ctx,
-	    const Close&              close,
-	    const MapCloseInput&      input,
-	    MapCloseOutput&     output) override;
 	void select_close_sources(const MapperContext        ctx,
 	    const Close&               close,
 	    const SelectCloseSrcInput&  input,
