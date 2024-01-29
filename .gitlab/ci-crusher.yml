@@ -8,8 +8,8 @@ variables:
   GASNET_CONDUIT: "ofi-slingshot11"
   CONDUIT: "ofi"
 
-  CXXFLAGS: "-std=c++11"
-  CXX_STANDARD: "11"
+  CXXFLAGS: "-std=c++17"
+  CXX_STANDARD: "17"
 
   SCHEDULER_PARAMETERS: "-A CSC335_crusher -t 3:00:00 -N 2 -n 2 -c 56 -p batch"
   EXTERNAL_WORKDIR: /lustre/orion/proj-shared/csc335/ci/${CI_PIPELINE_ID}
@@ -27,7 +27,7 @@ variables:
   TEST_REALM: "0"
   TEST_FUZZER: "0"
   NO_PRETTY: "1"
-  CXXFLAGS: "-std=c++11 -D__HIP_PLATFORM_AMD__"
+  CXXFLAGS: "-std=c++17 -D__HIP_PLATFORM_AMD__"
 
 .cmake: &cmake
   USE_CMAKE: "1"

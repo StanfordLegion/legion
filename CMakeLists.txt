@@ -104,6 +104,20 @@ set(SOVERSION 1)
 set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
 
 #------------------------------------------------------------------------------#
+# C++ standard version
+#------------------------------------------------------------------------------#
+
+if(CMAKE_CXX_STANDARD)
+  # Legion requires a minimum of C++ 17
+  if(CMAKE_CXX_STANDARD LESS 17 OR CMAKE_CXX_STANDARD EQUAL 98)
+    message(FATAL_ERROR "Legion requires at least C++ 17")
+  endif()
+else()
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+#------------------------------------------------------------------------------#
 # Build type and shared vs static library
 #------------------------------------------------------------------------------#
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
@@ -462,7 +476,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     infer_cuda_standard(Legion_CUDA_STANDARD)
 
     set(Legion_CUDA_STANDARD "${Legion_CUDA_STANDARD}" CACHE STRING
-      "The CUDA C++ standard to use (14, 17, 20, etc.)"
+      "The CUDA C++ standard to use (17, 20, etc.)"
       FORCE)
 
     # Enable the CUDA language and find the CUDA toolkit
