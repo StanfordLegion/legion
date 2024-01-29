@@ -507,10 +507,10 @@ namespace Realm {
      * iterate over. Only points and subrectangles within this restriction will
      * be visited.
      */
-    template <typename LAMBDA> REALM_PUBLIC_API
-    void foreach_subrect(LAMBDA lambda);
-    template <typename LAMBDA> REALM_PUBLIC_API
-    void foreach_subrect(LAMBDA lambda, const Rect<N, T>& restriction);
+    template <typename LAMBDA>
+    REALM_PUBLIC_API void foreach_subrect(LAMBDA lambda);
+    template <typename LAMBDA>
+    REALM_PUBLIC_API void foreach_subrect(LAMBDA lambda, const Rect<N, T> &restriction);
     ///@}
 
     // instance creation
@@ -647,19 +647,17 @@ namespace Realm {
 
     // Field-based partitioning operations
 
-    template <typename FT> REALM_PUBLIC_API
-    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
-				   FT color,
-				   IndexSpace<N,T>& subspace,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    template <typename FT>
+    REALM_PUBLIC_API Event create_subspace_by_field(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, FT>> &field_data,
+        FT color, IndexSpace<N, T> &subspace, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
-    template <typename FT> REALM_PUBLIC_API
-    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
-				    const std::vector<FT>& colors,
-				    std::vector<IndexSpace<N,T> >& subspaces,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+    template <typename FT>
+    REALM_PUBLIC_API Event create_subspaces_by_field(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, FT>> &field_data,
+        const std::vector<FT> &colors, std::vector<IndexSpace<N, T>> &subspaces,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
     ///@{
     /**
@@ -676,22 +674,19 @@ namespace Realm {
      * \return an event that will trigger when the operation is
      * complete.
      */
-    template <typename FT, typename FT2> REALM_PUBLIC_API
-    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
-				   const CodeDescriptor& codedesc,
-				   FT2 color,
-				   IndexSpace<N,T>& subspace,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    template <typename FT, typename FT2>
+    REALM_PUBLIC_API Event create_subspace_by_field(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, FT>> &field_data,
+        const CodeDescriptor &codedesc, FT2 color, IndexSpace<N, T> &subspace,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
     ///@}
 
-    template <typename FT, typename FT2> REALM_PUBLIC_API
-    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
-				    const CodeDescriptor& codedesc,
-				    const std::vector<FT2>& colors,
-				    std::vector<IndexSpace<N,T> >& subspaces,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+    template <typename FT, typename FT2>
+    REALM_PUBLIC_API Event create_subspaces_by_field(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, FT>> &field_data,
+        const CodeDescriptor &codedesc, const std::vector<FT2> &colors,
+        std::vector<IndexSpace<N, T>> &subspaces, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
     ///@{
     /**
@@ -710,25 +705,23 @@ namespace Realm {
      *  \return an event that will trigger when the operation is
      *  complete
      */
-    template <int N2, typename T2, typename TRANSFORM> REALM_PUBLIC_API
-    Event create_subspace_by_image(const TRANSFORM& transform,
-                                   const IndexSpace<N2, T2>& source,
-                                   const IndexSpace<N, T>& image,
-                                   const ProfilingRequestSet& reqs,
-                                   Event wait_on = Event::NO_EVENT) const;
-
-    template <int N2, typename T2, typename TRANSFORM> REALM_PUBLIC_API
-    Event create_subspaces_by_image(
-        const TRANSFORM& transform,
-        const std::vector<IndexSpace<N2, T2>>& sources,
-        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+    template <int N2, typename T2, typename TRANSFORM>
+    REALM_PUBLIC_API Event create_subspace_by_image(
+        const TRANSFORM &transform, const IndexSpace<N2, T2> &source,
+        const IndexSpace<N, T> &image, const ProfilingRequestSet &reqs,
         Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_image(
-        const DomainTransform<N, T, N2, T2>& domain_transform,
-        const std::vector<IndexSpace<N2, T2>>& sources,
-        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+    template <int N2, typename T2, typename TRANSFORM>
+    REALM_PUBLIC_API Event create_subspaces_by_image(
+        const TRANSFORM &transform, const std::vector<IndexSpace<N2, T2>> &sources,
+        std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_image(
+        const DomainTransform<N, T, N2, T2> &domain_transform,
+        const std::vector<IndexSpace<N2, T2>> &sources,
+        std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
         Event wait_on = Event::NO_EVENT) const;
     ///@}
 
@@ -748,35 +741,36 @@ namespace Realm {
      *  \param wait_on event to wait on before starting.
      *  \return an event that will trigger when the operation is
      */
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
-				   const IndexSpace<N2,T2>& source,
-				   IndexSpace<N,T>& image,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspace_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>
+            &field_data,
+        const IndexSpace<N2, T2> &source, IndexSpace<N, T> &image,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_image(
-        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
-            field_data,
-        const std::vector<IndexSpace<N2, T2>>& sources,
-        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>
+            &field_data,
+        const std::vector<IndexSpace<N2, T2>> &sources,
+        std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
         Event wait_on = Event::NO_EVENT) const;
 
     // range versions
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
-				   const IndexSpace<N2,T2>& source,
-				   IndexSpace<N,T>& image,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspace_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
+            &field_data,
+        const IndexSpace<N2, T2> &source, IndexSpace<N, T> &image,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
-				    const std::vector<IndexSpace<N2,T2> >& sources,
-				    std::vector<IndexSpace<N,T> >& images,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
+            &field_data,
+        const std::vector<IndexSpace<N2, T2>> &sources,
+        std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
     ///@}
 
     ///@{
@@ -795,20 +789,21 @@ namespace Realm {
      *  \return an event that will trigger when the operation is
      *  complete.
      */
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
-				    const std::vector<IndexSpace<N2,T2> >& sources,
-				    const std::vector<IndexSpace<N,T> >& diff_rhs,
-				    std::vector<IndexSpace<N,T> >& images,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_image_with_difference(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>
+            &field_data,
+        const std::vector<IndexSpace<N2, T2>> &sources,
+        const std::vector<IndexSpace<N, T>> &diff_rhs,
+        std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_image_with_difference(
-        const DomainTransform<N, T, N2, T2>& domain_transform,
-        const std::vector<IndexSpace<N2, T2>>& sources,
-        const std::vector<IndexSpace<N, T>>& diff_rhs,
-        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_image_with_difference(
+        const DomainTransform<N, T, N2, T2> &domain_transform,
+        const std::vector<IndexSpace<N2, T2>> &sources,
+        const std::vector<IndexSpace<N, T>> &diff_rhs,
+        std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
         Event wait_on = Event::NO_EVENT) const;
     ///@}
 
@@ -828,26 +823,24 @@ namespace Realm {
      * \param wait_on event to wait on before starting.
      * \return an event that will trigger when the operation is
      */
-    template <int N2, typename T2, typename TRANSFORM> REALM_PUBLIC_API
-    Event create_subspace_by_preimage(const TRANSFORM& transform,
-                                      const IndexSpace<N2, T2>& target,
-                                      IndexSpace<N, T>& preimage,
-                                      const ProfilingRequestSet& reqs,
-                                      Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2, typename TRANSFORM>
+    REALM_PUBLIC_API Event create_subspace_by_preimage(
+        const TRANSFORM &transform, const IndexSpace<N2, T2> &target,
+        IndexSpace<N, T> &preimage, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2, typename TRANSFORM> REALM_PUBLIC_API
-    Event create_subspaces_by_preimage(
-        const TRANSFORM& transform,
-        const std::vector<IndexSpace<N2, T2>>& targets,
-        std::vector<IndexSpace<N, T>>& preimages,
-        const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2, typename TRANSFORM>
+    REALM_PUBLIC_API Event create_subspaces_by_preimage(
+        const TRANSFORM &transform, const std::vector<IndexSpace<N2, T2>> &targets,
+        std::vector<IndexSpace<N, T>> &preimages, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_preimage(
-        const DomainTransform<N2, T2, N, T>& domain_transform,
-        const std::vector<IndexSpace<N2, T2>>& targets,
-        std::vector<IndexSpace<N, T>>& preimages,
-        const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_preimage(
+        const DomainTransform<N2, T2, N, T> &domain_transform,
+        const std::vector<IndexSpace<N2, T2>> &targets,
+        std::vector<IndexSpace<N, T>> &preimages, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
     ///@}
 
     ///@{
@@ -865,37 +858,35 @@ namespace Realm {
      * \param wait_on event to wait on before starting.
      * \return an event that will trigger when the operation is
      */
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                        Point<N2,T2> > >& field_data,
-				      const IndexSpace<N2,T2>& target,
-				      IndexSpace<N,T>& preimage,
-				      const ProfilingRequestSet &reqs,
-				      Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspace_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Point<N2, T2>>>
+            &field_data,
+        const IndexSpace<N2, T2> &target, IndexSpace<N, T> &preimage,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                         Point<N2,T2> > >& field_data,
-				       const std::vector<IndexSpace<N2,T2> >& targets,
-				       std::vector<IndexSpace<N,T> >& preimages,
-				       const ProfilingRequestSet &reqs,
-				       Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Point<N2, T2>>>
+            &field_data,
+        const std::vector<IndexSpace<N2, T2>> &targets,
+        std::vector<IndexSpace<N, T>> &preimages, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
     // range versions
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                        Rect<N2,T2> > >& field_data,
-				      const IndexSpace<N2,T2>& target,
-				      IndexSpace<N,T>& preimage,
-				      const ProfilingRequestSet &reqs,
-				      Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspace_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Rect<N2, T2>>>
+            &field_data,
+        const IndexSpace<N2, T2> &target, IndexSpace<N, T> &preimage,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                         Rect<N2,T2> > >& field_data,
-				       const std::vector<IndexSpace<N2,T2> >& targets,
-				       std::vector<IndexSpace<N,T> >& preimages,
-				       const ProfilingRequestSet &reqs,
-				       Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_subspaces_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Rect<N2, T2>>>
+            &field_data,
+        const std::vector<IndexSpace<N2, T2>> &targets,
+        std::vector<IndexSpace<N, T>> &preimages, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
     ///@}
 
     ///@{
@@ -908,12 +899,12 @@ namespace Realm {
      * \param wait_on event to wait on before starting.
      * \return an event that will trigger when the operation is
      */
-    template <int N2, typename T2> REALM_PUBLIC_API
-    Event create_association(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-                                                      Point<N2,T2> > >& field_data,
-                             const IndexSpace<N2,T2> &range,
-                             const ProfilingRequestSet &reqs,
-                             Event wait_on = Event::NO_EVENT) const;
+    template <int N2, typename T2>
+    REALM_PUBLIC_API Event create_association(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Point<N2, T2>>>
+            &field_data,
+        const IndexSpace<N2, T2> &range, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
     ///@}
 
     // set operations
@@ -1049,7 +1040,7 @@ namespace Realm {
 			       IndexSpace<N,T>& result,
 			       const ProfilingRequestSet &reqs,
 			       Event wait_on = Event::NO_EVENT);
-				     
+
     REALM_PUBLIC_API
     static Event compute_intersection(const std::vector<IndexSpace<N,T> >& subspaces,
 				      IndexSpace<N,T>& result,
