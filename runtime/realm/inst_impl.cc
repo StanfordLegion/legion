@@ -435,15 +435,43 @@ namespace Realm {
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
-      std::vector<RegionInstance> insts{instance};
-      return inst_impl->redistrict(insts, {layout}, prs, wait_on);
+      return inst_impl->redistrict(&instance, &layout, 1, prs, wait_on);
     }
 
-    Event RegionInstanceImpl::redistrict(std::vector<RegionInstance> &instance,
-                                         std::vector<InstanceLayoutGeneric *> layouts,
+    Event RegionInstance::redistrict(RegionInstance *instances,
+                                     InstanceLayoutGeneric **layouts, size_t num_layouts,
+                                     const ProfilingRequestSet &prs, Event wait_on)
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
+    }
+
+    Event RegionInstanceImpl::redistrict(RegionInstance* instances,
+                                         InstanceLayoutGeneric** layouts,
+                                         size_t num_layouts,
                                          const ProfilingRequestSet &prs,
                                          Event wait_on)
     {
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+
+      size_t offset = 0;
+      for (size_t i = 0; i < num_layouts; i++) {
+        RegionInstanceImpl *impl = m_impl->new_instance();
+        impl->metadata.layout = layouts[i];
+        instances[i] = impl->me;
+        impl->metadata.layout->compile_lookup_program(impl->metadata.lookup_program);
+        impl->metadata.need_alloc_result = false;
+        impl->metadata.need_notify_dealloc = false;
+        impl->metadata.inst_offset = metadata.inst_offset + offset;
+        impl->metadata.ext_resource = 0;
+        NodeSet early_reqs;
+        impl->metadata.mark_valid(early_reqs);
+        if(!early_reqs.empty()) {
+          send_metadata(early_reqs);
+        }
+        offset += layouts[i]->bytes_used;
+      }
       return Event::NO_EVENT;
     }
 
@@ -530,11 +558,11 @@ namespace Realm {
 
       NodeID target_node = ID(target).proc_owner_node();
       if(target_node == Network::my_node_id) {
-	// local metadata request
-	return r_impl->request_metadata();
+        // local metadata request
+        return r_impl->request_metadata();
       } else {
-	// prefetch on other node's behalf
-	return r_impl->prefetch_metadata(target_node);
+        // prefetch on other node's behalf
+        return r_impl->prefetch_metadata(target_node);
       }
     }
 
@@ -943,6 +971,9 @@ namespace Realm {
 	// should not occur
 	assert(0);
       }
+
+      assert(impl->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
 
       if(res)
 	log_inst.info() << "instance created: inst=" << inst << " external=" << *res << " ready=" << ready_event;

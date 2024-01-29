@@ -91,8 +91,9 @@ namespace Realm {
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
 
-      Event redistrict(std::vector<RegionInstance> &instance,
-                       std::vector<InstanceLayoutGeneric *> layouts,
+      Event redistrict(RegionInstance* instances,
+                       InstanceLayoutGeneric** layouts,
+                       size_t num_layouts,
                        const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
 
       // the life cycle of an instance is defined in part by when the
