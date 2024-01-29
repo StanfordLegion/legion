@@ -246,6 +246,12 @@ ifeq ($(findstring nvc++,$(shell $(CXX) --version)),nvc++)
 endif
 endif
 
+# Need to statically link Intel libraries when using icpc
+ifeq ($(findstring icpc,$(shell $(CXX) --version)),icpc)
+  SLIB_REALM_DEPS += -static-intel
+  SLIB_LEGION_DEPS += -static-intel
+endif
+
 # machine architecture (generally "native" unless cross-compiling)
 MARCH ?= native
 
