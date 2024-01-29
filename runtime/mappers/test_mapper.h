@@ -46,67 +46,67 @@ namespace Legion {
     public:
       static const char* create_test_name(Processor p);
     public: // Task mapping calls
-      virtual void select_task_options(const MapperContext    ctx,
-                                       const Task&            task,
-                                             TaskOptions&     output);
-      virtual void slice_task(const MapperContext      ctx,
-                              const Task&              task, 
-                              const SliceTaskInput&    input,
-                                    SliceTaskOutput&   output);
-      virtual void map_task(const MapperContext      ctx,
-                            const Task&              task,
-                            const MapTaskInput&      input,
-                                  MapTaskOutput&     output);
-      virtual void select_task_variant(const MapperContext          ctx,
-                                       const Task&                  task,
-                                       const SelectVariantInput&    input,
-                                             SelectVariantOutput&   output);
-      virtual void select_task_sources(const MapperContext        ctx,
-                                       const Task&                task,
-                                       const SelectTaskSrcInput&  input,
-                                             SelectTaskSrcOutput& output);
+      void select_task_options(const MapperContext    ctx,
+                               const Task&            task,
+                                     TaskOptions&     output) override;
+      void slice_task(const MapperContext      ctx,
+                      const Task&              task, 
+                      const SliceTaskInput&    input,
+                            SliceTaskOutput&   output) override;
+      void map_task(const MapperContext      ctx,
+                    const Task&              task,
+                    const MapTaskInput&      input,
+                          MapTaskOutput&     output) override;
+      void select_task_variant(const MapperContext          ctx,
+                               const Task&                  task,
+                               const SelectVariantInput&    input,
+                                     SelectVariantOutput&   output) override;
+      void select_task_sources(const MapperContext        ctx,
+                               const Task&                task,
+                               const SelectTaskSrcInput&  input,
+                                     SelectTaskSrcOutput& output) override;
     public: // Inline mapping calls
-      virtual void map_inline(const MapperContext        ctx,
-                              const InlineMapping&       inline_op,
-                              const MapInlineInput&      input,
-                                    MapInlineOutput&     output);
-      virtual void select_inline_sources(const MapperContext        ctx,
-                                       const InlineMapping&         inline_op,
-                                       const SelectInlineSrcInput&  input,
-                                             SelectInlineSrcOutput& output);
+      void map_inline(const MapperContext        ctx,
+                      const InlineMapping&       inline_op,
+                      const MapInlineInput&      input,
+                            MapInlineOutput&     output) override;
+      void select_inline_sources(const MapperContext        ctx,
+                               const InlineMapping&         inline_op,
+                               const SelectInlineSrcInput&  input,
+                                     SelectInlineSrcOutput& output) override;
     public: // Copy mapping calls
-      virtual void map_copy(const MapperContext      ctx,
-                            const Copy&              copy,
-                            const MapCopyInput&      input,
-                                  MapCopyOutput&     output);
-      virtual void select_copy_sources(const MapperContext          ctx,
-                                       const Copy&                  copy,
-                                       const SelectCopySrcInput&    input,
-                                             SelectCopySrcOutput&   output);
+      void map_copy(const MapperContext      ctx,
+                    const Copy&              copy,
+                    const MapCopyInput&      input,
+                          MapCopyOutput&     output) override;
+      void select_copy_sources(const MapperContext          ctx,
+                               const Copy&                  copy,
+                               const SelectCopySrcInput&    input,
+                                     SelectCopySrcOutput&   output) override;
     public: // Close mapping calls
-      virtual void map_close(const MapperContext       ctx,
-                             const Close&              close,
-                             const MapCloseInput&      input,
-                                   MapCloseOutput&     output);
-      virtual void select_close_sources(const MapperContext        ctx,
-                                        const Close&               close,
-                                        const SelectCloseSrcInput&  input,
-                                              SelectCloseSrcOutput& output);
+      void map_close(const MapperContext       ctx,
+                     const Close&              close,
+                     const MapCloseInput&      input,
+                           MapCloseOutput&     output) override;
+      void select_close_sources(const MapperContext        ctx,
+                                const Close&               close,
+                                const SelectCloseSrcInput&  input,
+                                      SelectCloseSrcOutput& output) override;
     public: // Release mapping calls
-      virtual void select_release_sources(const MapperContext       ctx,
-                                     const Release&                 release,
-                                     const SelectReleaseSrcInput&   input,
-                                           SelectReleaseSrcOutput&  output);
+      void select_release_sources(const MapperContext       ctx,
+                             const Release&                 release,
+                             const SelectReleaseSrcInput&   input,
+                                   SelectReleaseSrcOutput&  output) override;
     public: // Mapping control and stealing
-      virtual void select_tasks_to_map(const MapperContext          ctx,
-                                       const SelectMappingInput&    input,
-                                             SelectMappingOutput&   output);
-      virtual void select_steal_targets(const MapperContext         ctx,
-                                        const SelectStealingInput&  input,
-                                              SelectStealingOutput& output);
-      virtual void permit_steal_request(const MapperContext         ctx,
-                                        const StealRequestInput&    intput,
-                                              StealRequestOutput&   output);
+      void select_tasks_to_map(const MapperContext          ctx,
+                               const SelectMappingInput&    input,
+                                     SelectMappingOutput&   output) override;
+      void select_steal_targets(const MapperContext         ctx,
+                                const SelectStealingInput&  input,
+                                      SelectStealingOutput& output) override;
+      void permit_steal_request(const MapperContext         ctx,
+                                const StealRequestInput&    intput,
+                                      StealRequestOutput&   output) override;
     protected:
       Processor select_random_processor(Processor::Kind kind);
       Processor::Kind select_random_processor_kind(MapperContext ctx, 
