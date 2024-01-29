@@ -26,14 +26,14 @@ public:
   TracingMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name);
 public:
-  virtual void slice_task(const MapperContext      ctx,
+  void slice_task(const MapperContext      ctx,
                           const Task&              task,
                           const SliceTaskInput&    input,
-                                SliceTaskOutput&   output);
-  virtual void map_task(const MapperContext ctx,
+                                SliceTaskOutput&   output) override;
+  void map_task(const MapperContext ctx,
                         const Task &task,
                         const MapTaskInput &input,
-                        MapTaskOutput &output);
+                        MapTaskOutput &output) override;
 private:
   typedef std::map<std::pair<LogicalRegion,FieldID>,PhysicalInstance> Mapping;
   Mapping inc_instances;
