@@ -144,6 +144,7 @@ namespace Realm {
     * @param precise if true, the sparsity map is computed precisely
     * @return an event that triggers when the sparsity map is valid
     */
+   REALM_PUBLIC_API
    Event make_valid(bool precise = true);
 
    /**
@@ -151,6 +152,7 @@ namespace Realm {
     * @param precise if true, the sparsity map is computed precisely
     * @return true if the sparsity map is valid, false otherwise
     */
+   REALM_PUBLIC_API
    bool is_valid(bool precise = true);
 
    /**
@@ -161,6 +163,7 @@ namespace Realm {
     * validity of each point in the rectangle.
     * @return the entries of this sparsity map
     */
+   REALM_PUBLIC_API
    const std::vector<SparsityMapEntry<N, T> >& get_entries(void);
 
    /**
@@ -170,6 +173,7 @@ namespace Realm {
     * entries.
     * @return the approximate rectangles of this sparsity map
     */
+   REALM_PUBLIC_API
    const std::vector<Rect<N, T> >& get_approx_rects(void);
 
    /**
@@ -182,6 +186,7 @@ namespace Realm {
     * @return true if this sparsity map overlaps the other sparsity map, false
     * otherwise
     */
+   REALM_PUBLIC_API
    bool overlaps(SparsityMapPublicImpl<N, T>* other, const Rect<N, T>& bounds,
                  bool approx);
 
@@ -194,6 +199,7 @@ namespace Realm {
     * @param covering Vector to fill in with covering rectangles.
     * @return true if the covering was computed, false otherwise
     */
+   REALM_PUBLIC_API
    bool compute_covering(const Rect<N, T>& bounds, size_t max_rects,
                          int max_overhead, std::vector<Rect<N, T> >& covering);
 
