@@ -477,7 +477,7 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     cmd([make_exe, '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
     # HACK: work around stencil mapper issue with -ll:ext_sysmem 0
-    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], timelimit=timelimit)
+    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], env=env, timelimit=timelimit)
 
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
@@ -487,21 +487,9 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
-    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit)
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit) 
 
-    # Soleil-X
-    # Contact: Manolis Papadakis <mpapadak@stanford.edu>
-    soleil_dir = os.path.join(tmp_dir, 'soleil-x')
-    clone_github('stanfordhpccenter', 'soleil-x', soleil_dir, tmp_dir)
-    soleil_env = dict(list(env.items()) + [
-        ('LEGION_DIR', root_dir),
-        ('SOLEIL_DIR', soleil_dir),
-        ('CC', 'gcc'),
-    ])
-    cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
-    # FIXME: Actually run it
-
-def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda):
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
@@ -558,6 +546,20 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
         env=env,
         timelimit=timelimit)
 
+    # Since we're not actually testing this, don't both building on GPUs currently
+    if not use_cuda:
+        # Soleil-X
+        # Contact: Manolis Papadakis <mpapadak@stanford.edu>
+        soleil_dir = os.path.join(tmp_dir, 'soleil-x')
+        clone_github('stanfordhpccenter', 'soleil-x', soleil_dir, tmp_dir)
+        soleil_env = dict(list(env.items()) + [
+            ('LEGION_DIR', root_dir),
+            ('SOLEIL_DIR', soleil_dir),
+            ('CC', 'gcc'),
+        ])
+        cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
+        # FIXME: Actually run it
+
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
 
@@ -597,6 +599,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
     pennant = os.path.join(pennant_dir, 'pennant')
     cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
+        env=env,
         cwd=pennant_dir,
         timelimit=timelimit)
 
@@ -927,6 +930,34 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
 
+def build_make(root_dir, tmp_dir, env, thread_count, networks):
+    build_dir = os.path.join(tmp_dir, 'build')
+    install_dir = os.path.join(tmp_dir, 'install')
+    os.mkdir(build_dir)
+    os.mkdir(install_dir)
+    makefile = os.path.join(build_dir, 'Makefile')
+    cmd(['cp', os.path.join(root_dir, 'apps', 'Makefile.template'), makefile])
+    # We'll just always for shared objects here for performance
+    env['SHARED_OBJECTS'] = '1'
+    # If we have networks always turn on the use of the network
+    if networks:
+        env['USE_NETWORK'] = '1'
+    local_env = dict(list(env.items()) + [
+        ('PREFIX', install_dir),
+    ])
+    cmd([make_exe, '-C', build_dir, 'install', '-j', str(thread_count)], env=local_env)
+    # Setup the LEGION_DIR for the Makefile to use that instead of building everything from source
+    env['LG_INSTALL_DIR'] = install_dir
+    if platform.system() == 'Darwin':
+        # Be aware this doesn't really work on subprocessses on MacOS systems that have their system
+        # integrity protections enabled which will prevent this from having any effect
+        # https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
+        ld_path = env.get('DYLD_LIBRARY_PATH', '')
+        env['DYLD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
+    else:
+        ld_path = env.get('LD_LIBRARY_PATH', '')
+        env['LD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
+
 def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
     if envname is not None:
@@ -1219,6 +1250,9 @@ def run_tests(test_modules=None,
                     root_dir, env, thread_count, test_legion_cxx, test_perf,
                     # These configurations also need to be cleaned first.
                     test_external1, test_external2, test_private)
+                # Build just one copy of the runtime unless we're running regent tests
+                if not test_regent and not test_external2:
+                    build_make(root_dir, tmp_dir, env, thread_count, networks)
                 bin_dir = None
                 python_dir = None
                 if use_python:
@@ -1257,14 +1291,12 @@ def run_tests(test_modules=None,
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external1:
             with Stage('external1'):
-                if not test_regent:
-                    build_regent(root_dir, env)
                 run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external2:
             with Stage('external2'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit, use_cuda)
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)

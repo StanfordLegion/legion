@@ -77,7 +77,7 @@ legion_info.py: legion_info_build.py
 
 # build the shared lib for canonical python
 $(LEGION_CANONICAL_PYTHON_LIB): canonical_python.cc $(SLIB_LEGION) $(SLIB_REALM)
-	$(CXX) $(CC_FLAGS) $(INC_FLAGS) -shared $< $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) -o $@
+	$(CXX) $(CC_FLAGS) -fPIC $(INC_FLAGS) -shared $< $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) -o $@
 
 clean::
 	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_CANONICAL_PYTHON_LIB) legion_defines.h realm_defines.h legion_builtin_cffi.py legion_canonical_cffi.py legion_info.py *.pyc
