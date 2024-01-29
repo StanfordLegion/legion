@@ -3968,8 +3968,8 @@ class State(object):
     # ProcDesc
     @typecheck
     def log_proc_desc(self, proc_id: int, kind: int,
-                      uuid_size: Optional[int] = None,
-                      cuda_device_uuid: Optional[List[int]] = None,
+                      uuid_size: int = 0,
+                      cuda_device_uuid: List[int] = [],
     ) -> None:
         assert kind in processor_kinds
         kind_str = processor_kinds[kind]
