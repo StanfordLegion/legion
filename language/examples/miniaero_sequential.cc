@@ -41,16 +41,16 @@ public:
   MiniAeroMapper(MapperRuntime *rt, Machine machine, Processor local,
                  const char *mapper_name);
 
-  virtual void default_policy_select_target_processors(
+  void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
-                                    std::vector<Processor> &target_procs);
-  virtual LogicalRegion default_policy_select_instance_region(
+                                    std::vector<Processor> &target_procs) override;
+  LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances,
-                                    bool meets_constraints);
+                                    bool meets_constraints) override;
 };
 
 MiniAeroMapper::MiniAeroMapper(MapperRuntime *rt, Machine machine, Processor local,

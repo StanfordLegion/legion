@@ -27,10 +27,10 @@ class Tester : public DefaultMapper
 public:
   Tester(MapperRuntime *rt, Machine machine, Processor local,
              const char *mapper_name);
-  virtual void map_task(const MapperContext ctx,
+  void map_task(const MapperContext ctx,
                         const Task &task,
                         const MapTaskInput &input,
-                        MapTaskOutput &output);
+                        MapTaskOutput &output) override;
 };
 
 Tester::Tester(MapperRuntime *rt, Machine machine, Processor local,
