@@ -11355,8 +11355,17 @@ namespace Legion {
       // need to defer this is at should always be here
       InnerContext *local_ctx = static_cast<InnerContext*>(
         runtime->find_distributed_collectable(context_did));
-      std::vector<EqSetTracker*> targets(1);
-      derez.deserialize(targets.back());
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      std::vector<EqSetTracker*> targets(num_targets);
+      std::vector<AddressSpaceID> target_spaces(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+      {
+        derez.deserialize(targets[idx]);
+        derez.deserialize(target_spaces[idx]);
+      }
+      AddressSpaceID creation_target_space;
+      derez.deserialize(creation_target_space);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
@@ -11365,10 +11374,9 @@ namespace Legion {
       derez.deserialize(req_index);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
-      std::vector<AddressSpaceID> target_spaces(1, source);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(req_index,
-          targets, target_spaces, source, expr, mask);
+          targets, target_spaces, creation_target_space, expr, mask);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -22897,11 +22905,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!top_level_context);
-      assert(targets.size() == 1);
       assert(targets.size() == target_spaces.size());
-      assert(creation_target_space == runtime->address_space);
-      // should always be local
-      assert(target_spaces.front() == runtime->address_space); 
 #endif
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       // Send off a request to the owner node to handle it
@@ -22909,7 +22913,13 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(targets.front());
+        rez.serialize<size_t>(targets.size());
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          rez.serialize(targets[idx]);
+          rez.serialize(target_spaces[idx]);
+        }
+        rez.serialize(creation_target_space);
         expr->pack_expression(rez, owner_space);
         rez.serialize(mask);
         rez.serialize(req_index);
