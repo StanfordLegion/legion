@@ -29,30 +29,62 @@ protected:
     assert(!memories.empty());
   }
 
+  InstanceLayoutGeneric *create_layout(IndexSpace<1> space)
+  {
+    std::map<FieldID, size_t> fields;
+    fields[0] = sizeof(int);
+    InstanceLayoutConstraints ilc(fields, 1);
+    int dim_order[1];
+    dim_order[0] = 0;
+    InstanceLayoutGeneric *ilg =
+        InstanceLayoutGeneric::choose_instance_layout<1, int>(space, ilc, dim_order);
+    return ilg;
+  }
+
   std::vector<Memory> memories;
   static Runtime *runtime_;
 };
 
 Runtime *InstanceRedistrictTest::runtime_ = nullptr;
 
-TEST_F(InstanceRedistrictTest, Dummy)
+TEST_F(InstanceRedistrictTest, EmptyLayouts)
 {
-  std::vector<Rect<1>> rects;
-  rects.push_back(Rect<1>(Point<1>(0), Point<1>(7)));
-  IndexSpace<1> space(rects);
-  typedef std::map<FieldID, size_t> FieldMap;
-  FieldMap fields;
-  fields[0] = sizeof(int);
-  InstanceLayoutConstraints ilc(fields, 1);
-  int dim_order[1];
-  dim_order[0] = 0;
+  IndexSpace<1> space(Rect<1>(Point<1>(0), Point<1>(7)));
   RegionInstance inst;
+  RegionInstance::create_instance(inst, memories[0], create_layout(space),
+                                  ProfilingRequestSet())
+      .wait();
+  std::vector<RegionInstance> insts(2);
+  Event e = inst.redistrict(nullptr, nullptr, 0, ProfilingRequestSet());
+  bool poisoned = false;
+  e.wait_faultaware(poisoned);
+  EXPECT_TRUE(poisoned);
+}
 
-  {
-    InstanceLayoutGeneric *ilg =
-        InstanceLayoutGeneric::choose_instance_layout<1, int>(space, ilc, dim_order);
-    RegionInstance::create_instance(inst, memories[0], ilg, ProfilingRequestSet()).wait();
-  }
+TEST_F(InstanceRedistrictTest, OutOfMemoryFailure)
+{
+  IndexSpace<1> space(Rect<1>(Point<1>(0), Point<1>(7)));
+  RegionInstance inst;
+  RegionInstance::create_instance(inst, memories[0], create_layout(space),
+                                  ProfilingRequestSet())
+      .wait();
+  std::vector<RegionInstance> insts(2);
+  InstanceLayoutGeneric *ilg_a = create_layout(space);
+  InstanceLayoutGeneric *ilg_b = create_layout(space);
+  std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
+  Event e = inst.redistrict(insts.data(), layouts.data(), 2, ProfilingRequestSet());
+  bool poisoned = false;
+  e.wait_faultaware(poisoned);
+  EXPECT_TRUE(poisoned);
+}
+
+TEST_F(InstanceRedistrictTest, RedistrictEvenlySameLayout)
+{
+  IndexSpace<1> space(Rect<1>(Point<1>(0), Point<1>(7)));
+  RegionInstance inst;
+  RegionInstance::create_instance(inst, memories[0], create_layout(space),
+                                  ProfilingRequestSet())
+      .wait();
 
   std::vector<int> data;
   {
@@ -73,18 +105,14 @@ TEST_F(InstanceRedistrictTest, Dummy)
   IndexSpace<1> child_space_a(Rect<1>(Point<1>(0), Point<1>(3)));
   IndexSpace<1> child_space_b(Rect<1>(Point<1>(0), Point<1>(3)));
 
-  RegionInstance child_inst_a;
-  RegionInstance child_inst_b;
-  std::vector<RegionInstance> insts{child_inst_a, child_inst_b};
-  {
-    InstanceLayoutGeneric *ilg_a =
-        InstanceLayoutGeneric::choose_instance_layout<1, int>(child_space_a, ilc, dim_order);
-    InstanceLayoutGeneric *ilg_b =
-        InstanceLayoutGeneric::choose_instance_layout<1, int>(child_space_b, ilc, dim_order);
-
-    std::vector<InstanceLayoutGeneric*> layouts{ilg_a, ilg_b};
-    inst.redistrict(insts.data(), layouts.data(), 2, ProfilingRequestSet());
-  }
+  std::vector<RegionInstance> insts(2);
+  InstanceLayoutGeneric *ilg_a = create_layout(child_space_a);
+  InstanceLayoutGeneric *ilg_b = create_layout(child_space_b);
+  std::vector<InstanceLayoutGeneric *> layouts{ilg_a, ilg_b};
+  Event e = inst.redistrict(insts.data(), layouts.data(), 2, ProfilingRequestSet());
+  bool poisoned = false;
+  e.wait_faultaware(poisoned);
+  EXPECT_FALSE(poisoned);
 
   int index = 0;
   for(size_t i = 0; i < insts.size(); i++) {

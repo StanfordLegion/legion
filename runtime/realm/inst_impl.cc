@@ -453,8 +453,21 @@ namespace Realm {
                                          const ProfilingRequestSet &prs,
                                          Event wait_on)
     {
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(num_layouts > 0 || (layouts == nullptr && instances == nullptr));
 
+      size_t bytes_needed = 0;
+      for(size_t i = 0; i < num_layouts; i++) {
+        bytes_needed += layouts[i]->bytes_used;
+      }
+
+      if(num_layouts == 0 || bytes_needed > metadata.layout->bytes_used) {
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        Event failure_event = ev->current_event();
+        GenEventImpl::trigger(failure_event, true /*poisoned*/);
+        return failure_event;
+      }
+
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
       size_t offset = 0;
       for (size_t i = 0; i < num_layouts; i++) {
         RegionInstanceImpl *impl = m_impl->new_instance();
