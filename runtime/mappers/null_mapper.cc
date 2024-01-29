@@ -159,17 +159,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::create_task_temporary_instance(
-                                    const MapperContext              ctx,
-                                    const Task&                      task,
-                                    const CreateTaskTemporaryInput&  input,
-                                          CreateTaskTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__); 
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::report_profiling(const MapperContext       ctx,
                                       const Task&               task,
                                       const TaskProfilingInfo&  input)
@@ -210,17 +199,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::create_inline_temporary_instance(
-                                  const MapperContext                ctx,
-                                  const InlineMapping&               inline_op,
-                                  const CreateInlineTemporaryInput&  input,
-                                        CreateInlineTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);  
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::report_profiling(const MapperContext         ctx,
                                       const InlineMapping&        inline_op,
                                       const InlineProfilingInfo&  input)
@@ -247,17 +225,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
-    void NullMapper::create_copy_temporary_instance(
-                                  const MapperContext              ctx,
-                                  const Copy&                      copy,
-                                  const CreateCopyTemporaryInput&  input,
-                                        CreateCopyTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -288,17 +255,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
-    void NullMapper::create_close_temporary_instance(
-                                  const MapperContext               ctx,
-                                  const Close&                      close,
-                                  const CreateCloseTemporaryInput&  input,
-                                        CreateCloseTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -372,17 +328,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::create_release_temporary_instance(
-                                   const MapperContext                 ctx,
-                                   const Release&                      release,
-                                   const CreateReleaseTemporaryInput&  input,
-                                         CreateReleaseTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::report_profiling(const MapperContext         ctx,
                                       const Release&              release,
                                       const ReleaseProfilingInfo& input)
@@ -428,17 +373,6 @@ namespace Legion {
                                      const Partition&                partition,
                                      const SelectPartitionSrcInput&  input,
                                            SelectPartitionSrcOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
-    void NullMapper::create_partition_temporary_instance(
-                            const MapperContext                   ctx,
-                            const Partition&                      partition,
-                            const CreatePartitionTemporaryInput&  input,
-                                  CreatePartitionTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);

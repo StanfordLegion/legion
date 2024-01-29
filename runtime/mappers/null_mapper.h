@@ -77,11 +77,6 @@ namespace Legion {
                                const Task&                task,
                                const SelectTaskSrcInput&  input,
                                      SelectTaskSrcOutput& output) override;
-      void create_task_temporary_instance(
-                            const MapperContext              ctx,
-                            const Task&                      task,
-                            const CreateTaskTemporaryInput&  input,
-                                  CreateTaskTemporaryOutput& output) override;
       void report_profiling(const MapperContext      ctx,
                             const Task&              task,
                             const TaskProfilingInfo& input) override;
@@ -99,11 +94,6 @@ namespace Legion {
                                const InlineMapping&         inline_op,
                                const SelectInlineSrcInput&  input,
                                      SelectInlineSrcOutput& output) override;
-      void create_inline_temporary_instance(
-                          const MapperContext                ctx,
-                          const InlineMapping&               inline_op,
-                          const CreateInlineTemporaryInput&  input,
-                                CreateInlineTemporaryOutput& output) override;
       void report_profiling(const MapperContext         ctx,
                             const InlineMapping&        inline_op,
                             const InlineProfilingInfo&  input) override;
@@ -116,11 +106,6 @@ namespace Legion {
                                const Copy&                  copy,
                                const SelectCopySrcInput&    input,
                                      SelectCopySrcOutput&   output) override;
-      void create_copy_temporary_instance(
-                          const MapperContext              ctx,
-                          const Copy&                      copy,
-                          const CreateCopyTemporaryInput&  input,
-                                CreateCopyTemporaryOutput& output) override;
       void report_profiling(const MapperContext      ctx,
                             const Copy&              copy,
                             const CopyProfilingInfo& input) override;
@@ -134,11 +119,6 @@ namespace Legion {
                                 const Close&               close,
                                 const SelectCloseSrcInput&  input,
                                       SelectCloseSrcOutput& output) override;
-      void create_close_temporary_instance(
-                          const MapperContext               ctx,
-                          const Close&                      close,
-                          const CreateCloseTemporaryInput&  input,
-                                CreateCloseTemporaryOutput& output) override;
       void report_profiling(const MapperContext       ctx,
                             const Close&              close,
                             const CloseProfilingInfo& input) override;
@@ -169,11 +149,6 @@ namespace Legion {
                              const Release&                 release,
                              const SelectReleaseSrcInput&   input,
                                    SelectReleaseSrcOutput&  output) override;
-      void create_release_temporary_instance(
-                           const MapperContext                 ctx,
-                           const Release&                      release,
-                           const CreateReleaseTemporaryInput&  input,
-                                 CreateReleaseTemporaryOutput& output) override;
       void report_profiling(const MapperContext         ctx,
                             const Release&              release,
                             const ReleaseProfilingInfo& input) override;
@@ -196,11 +171,6 @@ namespace Legion {
                            const Partition&                partition,
                            const SelectPartitionSrcInput&  input,
                                  SelectPartitionSrcOutput& output) override;
-      void create_partition_temporary_instance(
-                      const MapperContext                   ctx,
-                      const Partition&                      partition,
-                      const CreatePartitionTemporaryInput&  input,
-                            CreatePartitionTemporaryOutput& output) override;
       void report_profiling(const MapperContext              ctx,
                             const Partition&                 partition,
                             const PartitionProfilingInfo&    input) override;
