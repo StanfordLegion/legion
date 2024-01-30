@@ -985,6 +985,11 @@ namespace Legion {
       ProcDesc &info = proc_desc_infos.back();
       info.proc_id = p.id;
       info.kind = p.kind();
+#ifdef LEGION_USE_CUDA
+      if(!Realm::Cuda::get_cuda_device_uuid(p, &info.cuda_device_uuid)) {
+        info.cuda_device_uuid[0] = 0;
+      }
+#endif
       const size_t diff = sizeof(ProcDesc);
       owner->update_footprint(diff, this);
       process_proc_mem_aff_desc(p);
@@ -1744,6 +1749,7 @@ namespace Legion {
       // log machine info, this needs to be the first log
       LegionProfDesc::MachineDesc machine_desc;
 
+      machine.get_process_info(target, &machine_desc.process_info);
       machine_desc.node_id = static_cast<unsigned>(rt->address_space);
       machine_desc.num_nodes = static_cast<unsigned>(
         rt->total_address_spaces);
@@ -2526,6 +2532,9 @@ namespace Legion {
 #else
       decrement_total_outstanding_requests();
 #endif
+      LegionProfDesc::CalibrationErr calibration_err;
+      calibration_err.calibration_err = Realm::Clock::get_calibration_error();
+      serializer->serialize(calibration_err);
       if (!done_event.has_triggered())
         done_event.wait();
       for (std::vector<LegionProfInstance*>::const_iterator it = 
