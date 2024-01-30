@@ -1921,8 +1921,7 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<Domain>(const Domain &value,
-                                            const char *description)
+    inline void Murmur3Hasher::hash<Domain>(const Domain &value)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < 2*value.dim; i++)
@@ -1933,6 +1932,25 @@ namespace Legion {
         Internal::NT_TemplateHelper::demux<IndexSpaceHasher>(value.is_type,
                                                              &functor);
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value)
+    //-------------------------------------------------------------------------
+    {
+      for (int i = 0; i < value.dim; i++)
+        hash(value.point_data[i]);
+    }
+
+
+    //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<Domain>(const Domain &value,
+                                            const char *description)
+    //-------------------------------------------------------------------------
+    {
+      hash(value);
       if (verify_every_call)
         verify(description, true/*verify every call*/);
     }
@@ -1943,8 +1961,7 @@ namespace Legion {
                                                  const char *description)
     //-------------------------------------------------------------------------
     {
-      for (int i = 0; i < value.dim; i++)
-        hash(value.point_data[i]);
+      hash(value);
       if (verify_every_call)
         verify(description, true/*verify every call*/);
     }
